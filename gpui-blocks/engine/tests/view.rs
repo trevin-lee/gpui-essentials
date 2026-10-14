@@ -601,21 +601,6 @@ fn table_cells_click_type_tab_and_cell_selection(cx: &mut TestAppContext) {
         e.model().selection(),
         BlockSelection::Cells { .. }
     )));
-    eprintln!(
-        "LEAVES {:?} CELLS {:?}",
-        editor.read_with(cx, |e, _| e
-            .model()
-            .document()
-            .leaves()
-            .map(|b| b.id())
-            .collect::<Vec<_>>()),
-        editor.read_with(cx, |e, _| e.model().selected_cells())
-    );
-    eprintln!(
-        "SEL {:?} from {from:?} to {to:?} src {:?}",
-        editor.read_with(cx, |e, _| e.model().selection().clone()),
-        source(&editor, cx)
-    );
     assert_eq!(editor.update(cx, |e, _| e.selection_ranges().len()), 4);
     keys(cx, "M-c");
     let copied = cx.read_from_clipboard().and_then(|c| c.text()).unwrap();
@@ -624,7 +609,7 @@ fn table_cells_click_type_tab_and_cell_selection(cx: &mut TestAppContext) {
     keys(cx, "backspace");
     assert_eq!(
         source(&editor, cx),
-        "a\n\n|  |  |\n| :-- | :-- |\n|  |  |\n\nb"
+        "a\n\n|  |  |\n| --- | --- |\n|  |  |\n\nb"
     );
     keys(cx, "M-z");
     assert_eq!(source(&editor, cx), original);
@@ -885,7 +870,7 @@ fn copied_table_pastes_back_as_a_table(cx: &mut TestAppContext) {
     caret_at(&editor, cx, last, 1);
     keys(cx, "M-v");
     assert!(
-        source(&editor, cx).ends_with("\n\nb\n\n| x | y |\n| :-- | :-- |\n| 1 | 2 |"),
+        source(&editor, cx).ends_with("\n\nb\n\n| x | y |\n| --- | --- |\n| 1 | 2 |"),
         "{}",
         source(&editor, cx)
     );
@@ -1055,6 +1040,81 @@ fn code_fence_input_rule_and_code_editing(cx: &mut TestAppContext) {
         source(&editor, cx),
         "```rust\nfn a() {\n    x\n}\n```\n\nafter"
     );
+}
+
+#[gpui::test]
+fn exiting_code_block_then_typing_is_two_undo_steps(cx: &mut TestAppContext) {
+    for exit in ["enter enter", "down"] {
+        let (editor, cx) = open(cx, "```\ncode\n```");
+        let id = editor.read_with(cx, |e, _| {
+            e.model().document().leaves().next().unwrap().id()
+        });
+        editor.update(cx, |e, _| {
+            e.model
+                .set_selection(BlockSelection::caret(BlockPosition::new(id, 4)))
+                .unwrap()
+        });
+        keys(cx, exit);
+        type_text(cx, "after");
+        assert_eq!(source(&editor, cx), "```\ncode\n```\n\nafter", "{exit}");
+        keys(cx, "M-z");
+        assert!(
+            !source(&editor, cx).contains("after"),
+            "{exit}: typing undone first"
+        );
+        assert_eq!(
+            editor.read_with(cx, |e, _| e.model().document().leaves().count()),
+            2,
+            "{exit}"
+        );
+        keys(cx, "M-z");
+        assert_eq!(
+            editor.read_with(cx, |e, _| e.model().document().leaves().count()),
+            1,
+            "{exit}"
+        );
+    }
+}
+
+#[gpui::test]
+fn code_block_highlighter_is_applied(cx: &mut TestAppContext) {
+    use std::sync::{Arc, Mutex};
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let (editor, cx) = open(cx, "```rust\nfn a\n```");
+    let log = seen.clone();
+    cx.update(|_, cx| {
+        crate::TextViewDefaults::new()
+            .with_code_block_highlighter(move |block| {
+                log.lock().unwrap().push(block.code().to_string());
+                vec![(
+                    0..2,
+                    gpui::HighlightStyle {
+                        color: Some(gpui::red()),
+                        ..Default::default()
+                    },
+                )]
+            })
+            .install(cx)
+    });
+    editor.update(cx, |_, cx| cx.notify());
+    draw(cx);
+    assert!(
+        seen.lock().unwrap().iter().any(|c| c == "fn a"),
+        "the editor's code block is highlighted: {:?}",
+        seen.lock().unwrap()
+    );
+    // Editing re-highlights the new code.
+    let id = editor.read_with(cx, |e, _| {
+        e.model().document().leaves().next().unwrap().id()
+    });
+    editor.update(cx, |e, _| {
+        e.model
+            .set_selection(BlockSelection::caret(BlockPosition::new(id, 4)))
+            .unwrap()
+    });
+    type_text(cx, "()");
+    draw(cx);
+    assert!(seen.lock().unwrap().iter().any(|c| c == "fn a()"));
 }
 
 #[gpui::test]
@@ -1325,4 +1385,111 @@ fn accessibility_roles_and_cached_value(cx: &mut TestAppContext) {
     type_text(cx, "!");
     let edited = editor.read_with(cx, |e, _| e.accessible_value());
     assert!(edited.starts_with("Title!\n"));
+}
+
+fn leaf_text(editor: &Entity<BlockEditorState>, cx: &VisualTestContext, ix: usize) -> String {
+    editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().nth(ix).unwrap().id();
+        e.model.doc.leaf_text(id).unwrap_or_default().to_string()
+    })
+}
+
+fn type_chars(cx: &mut VisualTestContext, text: &str) {
+    for ch in text.chars() {
+        type_text(cx, &ch.to_string());
+    }
+}
+
+#[gpui::test]
+fn inline_mark_input_rules(cx: &mut TestAppContext) {
+    for (typed, expected) in [
+        ("a `x`", "a `x`"),
+        ("a **b**", "a **b**"),
+        ("a *i*", "a *i*"),
+        ("a ~~s~~", "a ~~s~~"),
+    ] {
+        let (editor, cx) = open(cx, "");
+        type_chars(cx, typed);
+        assert_eq!(source(&editor, cx), expected, "{typed}");
+        let marked = &expected[2..];
+        let plain = marked.trim_matches(['`', '*', '~']);
+        assert_eq!(
+            leaf_text(&editor, cx, 0),
+            format!("a {plain}"),
+            "delimiters dropped"
+        );
+        // Typing on is outside the span.
+        type_text(cx, "z");
+        assert_eq!(source(&editor, cx), format!("{expected}z"), "{typed}");
+        // Undo: first the "z", then the rule (literal delimiters come back).
+        keys(cx, "M-z");
+        assert_eq!(source(&editor, cx), expected);
+        keys(cx, "M-z");
+        assert_eq!(leaf_text(&editor, cx, 0), typed, "undo restores {typed}");
+    }
+}
+
+#[gpui::test]
+fn inline_mark_rules_do_not_fire_in_code_or_on_padding(cx: &mut TestAppContext) {
+    // Inside an inline code span: literal.
+    let (editor, cx) = open(cx, "`ab`");
+    caret_at(&editor, cx, 0, 1);
+    type_chars(cx, "*x*");
+    assert_eq!(source(&editor, cx), "`a*x*b`");
+    // Space-padded and half-bold: no rule.
+    let (editor, cx) = open(cx, "");
+    type_chars(cx, "2 * 3 *");
+    assert_eq!(leaf_text(&editor, cx, 0), "2 * 3 *");
+    let (editor, cx) = open(cx, "");
+    type_chars(cx, "**a*");
+    assert_eq!(leaf_text(&editor, cx, 0), "**a*");
+    type_text(cx, "*");
+    assert_eq!(source(&editor, cx), "**a**");
+}
+
+#[gpui::test]
+fn inline_code_shortcut_button_paste_and_marks(cx: &mut TestAppContext) {
+    // Cmd/Ctrl-E over a selection.
+    let (editor, cx) = open(cx, "a x b");
+    editor.update(cx, |e, cx| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.set_selection(
+            BlockSelection::Text {
+                anchor: BlockPosition::new(id, 2),
+                head: BlockPosition::new(id, 3),
+            },
+            cx,
+        )
+        .unwrap();
+    });
+    keys(cx, "M-e");
+    assert_eq!(source(&editor, cx), "a `x` b");
+    // The story toolbar button runs the same command.
+    editor.update(cx, |e, cx| {
+        e.run(
+            crate::text::block_editor::EditorCommand::ToggleMark(
+                crate::text::block_editor::MarkKind::Code,
+            ),
+            cx,
+        )
+        .unwrap();
+    });
+    assert_eq!(source(&editor, cx), "a x b");
+    // Bold over code leaves the code alone.
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), "a `x` b");
+    keys(cx, "M-a M-b");
+    assert_eq!(source(&editor, cx), "**a** `x` **b**");
+    // It renders through the inline-code pill path (flow fragments).
+    let pieces = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.frame.borrow().leaf(id).map(|l| l.pieces.len())
+    });
+    assert!(pieces.unwrap() > 1);
+    // Paste of `x` is code, and round-trips.
+    let (editor, cx) = open(cx, "");
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string("`x`".into()));
+    keys(cx, "M-v");
+    assert_eq!(source(&editor, cx), "`x`");
+    assert_eq!(leaf_text(&editor, cx, 0), "x");
 }

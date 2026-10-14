@@ -362,6 +362,31 @@ impl BlockEditorModel {
         if range.is_collapsed() && self.select_adjacent_table(range.start, forward)? {
             return Ok(());
         }
+        // Backspace at the start (Delete at the end) of a non-empty code
+        // block: never merge text into or out of code; step the caret to the
+        // neighbouring leaf instead.
+        if range.is_collapsed()
+            && let Some(code) = self.doc.plain(range.start.block)
+            && !code.is_empty()
+            && ((!forward && range.start.offset == 0)
+                || (forward && range.start.offset == code.len()))
+        {
+            let leaves = self.doc.walk_leaves();
+            let ix = leaves.iter().position(|id| *id == range.start.block);
+            let target = ix.and_then(|ix| {
+                if forward {
+                    leaves.get(ix + 1).map(|id| (*id, 0))
+                } else {
+                    ix.checked_sub(1)
+                        .and_then(|i| leaves.get(i))
+                        .map(|id| (*id, self.doc.leaf_len(*id).unwrap_or(0)))
+                }
+            });
+            if let Some((block, offset)) = target {
+                self.set_selection(BlockSelection::caret(BlockPosition::new(block, offset)))?;
+            }
+            return Ok(());
+        }
         let origin = if forward {
             EditOrigin::DeleteForward
         } else {
@@ -657,8 +682,12 @@ impl BlockEditorModel {
     /// the caller then inserts plain text).
     pub fn paste_blocks(&mut self, text: &str) -> Result<bool, CommandError> {
         // Single-line text is plain unless it holds an inline atom's
-        // Markdown (a copied image), which pastes back as the atom.
-        if !text.trim_end_matches('\n').contains('\n') && !text.contains("![") {
+        // Markdown (a copied image), which pastes back as the atom, or an
+        // inline code span (`x`), which pastes back as code.
+        if !text.trim_end_matches('\n').contains('\n')
+            && !text.contains("![")
+            && !text.contains('`')
+        {
             return Ok(false);
         }
         let mut cx = crate::text::node::NodeContext {
@@ -679,7 +708,9 @@ impl BlockEditorModel {
         let has_atoms = |block: &DetachedBlock| {
             matches!(
                 &block.content,
-                DetachedContent::Leaf(BlockContent::Inline(inline)) if inline.text().contains(super::inline::ATOM_CHAR)
+                DetachedContent::Leaf(BlockContent::Inline(inline))
+                    if inline.text().contains(super::inline::ATOM_CHAR)
+                        || inline.pieces().any(|(_, mark, _)| mark.code)
             )
         };
         if blocks.is_empty()
