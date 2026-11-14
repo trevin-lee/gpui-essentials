@@ -51,6 +51,19 @@ pub enum EditorCommand {
     /// or, when the caret is already in one, unwrap the nearest quote
     /// (its blocks move out in place; nothing is lost).
     ToggleBlockquote,
+    /// Wrap the caret's paragraph, heading or code block in a callout of
+    /// this name (ASCII lowercase, as `note`); in a callout already, rename
+    /// the nearest one.
+    SetCallout(SharedString),
+    /// Make the caret's paragraph or heading the summary of a new open
+    /// toggle, its body empty.
+    WrapInToggle,
+    /// Open or close a toggle. Closing it moves a caret inside its body to
+    /// the end of its summary.
+    SetToggleOpen { block: BlockId, open: bool },
+    /// Unwrap the nearest callout or toggle around the caret: its blocks
+    /// move out in place, a toggle's summary first.
+    Unwrap,
 }
 
 #[non_exhaustive]
@@ -185,7 +198,15 @@ fn delete_range(
     let start_inline = start_kept && start_code.is_none();
     // Leaves in between.
     for id in &leaves[si + 1..ei] {
-        if is_cell(tx.doc, *id) {
+        // A closed toggle whose summary is covered goes whole: its body,
+        // which holds no caret, isn't among the leaves.
+        let closed_toggle = tx.doc.index_in_parent(*id).and_then(|(parent, ix)| {
+            (ix == 0 && tx.doc.kind(parent) == Some(&BlockKindData::Toggle { open: false }))
+                .then_some(parent)
+        });
+        if let Some(toggle) = closed_toggle {
+            tx.remove_block(toggle)?;
+        } else if is_cell(tx.doc, *id) {
             let len = tx.doc.leaf_len(*id).unwrap_or(0);
             tx.replace_text(*id, 0..len, InlineText::new())?;
         } else if tx.doc.get(*id).is_some() {
@@ -423,7 +444,7 @@ impl BlockEditorModel {
             gpui_kit::base::text::editor_host::parse_markdown(core, self.doc.extensions.clone())
                 .ok()
                 .and_then(|parsed| {
-                    let mut defs = super::import::Defs::new();
+                    let mut defs = super::import::Defs::with_source(core);
                     super::import::collect_definitions(&parsed, &mut defs);
                     let mut blocks = Vec::new();
                     for node in parsed.iter() {
@@ -485,6 +506,13 @@ impl BlockEditorModel {
         }
         // Backspace at the start of a quote's first paragraph, or of a list
         // item's trailing empty paragraph: lift it (one undo step).
+        if !forward
+            && range.is_collapsed()
+            && range.start.offset == 0
+            && let Some(toggle) = self.toggle_of_summary(range.start.block)
+        {
+            return self.unwrap_container(toggle, Some(range.start)).map(|_| ());
+        }
         if !forward
             && range.is_collapsed()
             && range.start.offset == 0
@@ -639,6 +667,9 @@ impl BlockEditorModel {
             && self.doc.leaf_len(range.start.block) == Some(0)
         {
             return self.heading_to_paragraph(range.start.block, "heading_enter");
+        }
+        if range.is_collapsed() && self.toggle_enter(range.start)? {
+            return Ok(());
         }
         if range.is_collapsed() && self.exit_empty_item(range.start)? {
             return Ok(());
@@ -873,9 +904,9 @@ impl BlockEditorModel {
         let Some((quote, index)) = doc.index_in_parent(pos.block) else {
             return Ok(false);
         };
-        if doc.kind(quote) != Some(&BlockKindData::Blockquote) {
-            return Ok(false);
-        }
+        let Some(quote_kind) = doc.kind(quote).filter(|k| k.is_quote_like()).cloned() else {
+            return self.exit_toggle_body(pos);
+        };
         let Some((outer, quote_index)) = doc.index_in_parent(quote) else {
             return Ok(false);
         };
@@ -891,12 +922,180 @@ impl BlockEditorModel {
             }
             tx.insert(outer, at, vec![para])?;
             if !rest.is_empty() {
-                let tail = DetachedBlock::container(BlockKindData::Blockquote, rest);
+                let tail = DetachedBlock::container(quote_kind, rest);
                 tx.insert(outer, at + 1, vec![tail])?;
             }
             Ok(caret(BlockPosition::new(leaf, 0)))
         })?;
         Ok(true)
+    }
+
+    /// The toggle whose summary `block` is.
+    fn toggle_of_summary(&self, block: BlockId) -> Option<BlockId> {
+        let (toggle, index) = self.doc.index_in_parent(block)?;
+        (index == 0 && matches!(self.doc.kind(toggle), Some(BlockKindData::Toggle { .. })))
+            .then_some(toggle)
+    }
+
+    /// Enter in a toggle's summary. An empty summary unwraps the toggle, as
+    /// Enter in an empty list item leaves the list. In a closed toggle's
+    /// summary, the text after the caret starts a new closed toggle below
+    /// (its body is hidden, so it can't take a new line). In an open one,
+    /// the ordinary split puts that text first in the body.
+    fn toggle_enter(&mut self, pos: BlockPosition) -> Result<bool, CommandError> {
+        let Some(toggle) = self.toggle_of_summary(pos.block) else {
+            return Ok(false);
+        };
+        if self.doc.leaf_len(pos.block) == Some(0) {
+            return self.unwrap_container(toggle, Some(pos));
+        }
+        if self.doc.kind(toggle) != Some(&BlockKindData::Toggle { open: false }) {
+            return Ok(false);
+        }
+        let Some(inline) = self.doc.inline(pos.block) else {
+            return Ok(false);
+        };
+        let tail = inline.slice(pos.offset..inline.len());
+        let len = inline.len();
+        self.transact(EditOrigin::Command("split_block"), |tx| {
+            let (parent, index) = tx
+                .doc
+                .index_in_parent(toggle)
+                .ok_or(PositionError::UnknownBlock(toggle))?;
+            tx.replace_text(pos.block, pos.offset..len, InlineText::new())?;
+            let summary = DetachedBlock::paragraph(tail);
+            let at = BlockPosition::new(summary.id, 0);
+            let next = DetachedBlock::container(BlockKindData::Toggle { open: false }, vec![summary]);
+            tx.insert(parent, index + 1, vec![next])?;
+            Ok(caret(at))
+        })?;
+        Ok(true)
+    }
+
+    /// Enter on an empty last paragraph of a toggle's body: it moves out,
+    /// below the toggle.
+    fn exit_toggle_body(&mut self, pos: BlockPosition) -> Result<bool, CommandError> {
+        let doc = &self.doc;
+        let Some((toggle, index)) = doc.index_in_parent(pos.block) else {
+            return Ok(false);
+        };
+        if index == 0
+            || index + 1 != doc.children(toggle).len()
+            || !matches!(doc.kind(toggle), Some(BlockKindData::Toggle { .. }))
+        {
+            return Ok(false);
+        }
+        let Some((outer, toggle_index)) = doc.index_in_parent(toggle) else {
+            return Ok(false);
+        };
+        let leaf = pos.block;
+        self.transact(EditOrigin::Command("exit_toggle"), |tx| {
+            let para = tx.remove_block(leaf)?;
+            tx.insert(outer, toggle_index + 1, vec![para])?;
+            Ok(caret(BlockPosition::new(leaf, 0)))
+        })?;
+        Ok(true)
+    }
+
+    /// Replace `container` by its children, in place.
+    fn unwrap_container(
+        &mut self,
+        container: BlockId,
+        keep: Option<BlockPosition>,
+    ) -> Result<bool, CommandError> {
+        let (outer, index) = self
+            .doc
+            .index_in_parent(container)
+            .ok_or(PositionError::UnknownBlock(container))?;
+        let count = self.doc.children(container).len();
+        self.transact(EditOrigin::Command("unwrap"), |tx| {
+            let blocks = tx.remove(container, 0..count)?;
+            tx.remove(outer, index..index + 1)?;
+            tx.insert(outer, index, blocks)?;
+            Ok(keep.and_then(caret))
+        })
+    }
+
+    fn set_callout(&mut self, name: SharedString) -> Result<bool, CommandError> {
+        let name: SharedString = name.to_ascii_lowercase().into();
+        let resolved = self.caret_resolved()?;
+        if let Some(callout) =
+            resolved.nearest(&self.doc, |k| matches!(k, BlockKindData::Callout { .. }))
+        {
+            return self.transact(EditOrigin::Command("set_callout"), |tx| {
+                tx.set_kind(callout, BlockKindData::Callout { name })?;
+                Ok(None)
+            });
+        }
+        self.wrap_caret_block("callout", BlockKindData::Callout { name })
+    }
+
+    fn wrap_in_toggle(&mut self) -> Result<bool, CommandError> {
+        let pos = self.caret_resolved()?.pos;
+        if !matches!(
+            self.doc.kind(pos.block),
+            Some(BlockKindData::Paragraph | BlockKindData::Heading { .. })
+        ) {
+            return Err(CommandError::Unsupported("toggle here"));
+        }
+        self.wrap_caret_block("toggle", BlockKindData::Toggle { open: true })
+    }
+
+    /// Wrap the caret's paragraph, heading or code block in a new container.
+    fn wrap_caret_block(
+        &mut self,
+        name: &'static str,
+        kind: BlockKindData,
+    ) -> Result<bool, CommandError> {
+        let pos = self.caret_resolved()?.pos;
+        if !matches!(
+            self.doc.kind(pos.block),
+            Some(
+                BlockKindData::Paragraph
+                    | BlockKindData::Heading { .. }
+                    | BlockKindData::CodeBlock { .. }
+            )
+        ) {
+            return Err(CommandError::Unsupported("wrap here"));
+        }
+        self.transact(EditOrigin::Command(name), |tx| {
+            let (parent, index) = tx
+                .doc
+                .index_in_parent(pos.block)
+                .ok_or(StepError::UnknownBlock(pos.block))?;
+            let block = tx.remove_block(pos.block)?;
+            tx.insert(parent, index, vec![DetachedBlock::container(kind, vec![block])])?;
+            Ok(caret(pos))
+        })
+    }
+
+    fn set_toggle_open(&mut self, toggle: BlockId, open: bool) -> Result<bool, CommandError> {
+        if !matches!(self.doc.kind(toggle), Some(BlockKindData::Toggle { .. })) {
+            return Err(CommandError::Unsupported("not a toggle"));
+        }
+        if self.doc.kind(toggle) == Some(&BlockKindData::Toggle { open }) {
+            return Ok(false);
+        }
+        let summary = self.doc.children(toggle).first().copied();
+        let body: Vec<BlockId> = self.doc.children(toggle).iter().skip(1).copied().collect();
+        // A selection end inside the body would be hidden: move it to the
+        // end of the summary.
+        let inside = |doc: &EditorDocument, p: BlockPosition| {
+            doc.path(p.block).iter().any(|id| body.contains(id))
+        };
+        let moved = match (&self.selection, summary) {
+            (BlockSelection::Text { anchor, head }, Some(summary))
+                if !open && (inside(&self.doc, *anchor) || inside(&self.doc, *head)) =>
+            {
+                let end = self.doc.leaf_len(summary).unwrap_or(0);
+                Some(BlockPosition::new(summary, end))
+            }
+            _ => None,
+        };
+        self.transact(EditOrigin::Command("set_toggle_open"), |tx| {
+            tx.set_kind(toggle, BlockKindData::Toggle { open })?;
+            Ok(moved.and_then(caret))
+        })
     }
 
     /// Backspace at the start of a blockquote's first paragraph: move it
@@ -909,7 +1108,7 @@ impl BlockEditorModel {
         let Some((quote, 0)) = doc.index_in_parent(pos.block) else {
             return Ok(false);
         };
-        if doc.kind(quote) != Some(&BlockKindData::Blockquote) {
+        if !doc.kind(quote).is_some_and(|k| k.is_quote_like()) {
             return Ok(false);
         }
         let Some((outer, quote_index)) = doc.index_in_parent(quote) else {
@@ -1046,12 +1245,13 @@ impl BlockEditorModel {
         else {
             return Ok(false);
         };
-        let mut defs = super::import::Defs::new();
+        let mut defs = super::import::Defs::with_source(text);
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
         for node in parsed.iter() {
             super::import::import_block(node, &defs, &mut blocks);
         }
+        let blocks = super::import::group_toggles(blocks, &defs);
         // Nothing structural (one paragraph, soft line breaks only): plain
         // text, where each line becomes a block as typed.
         let has_atoms = |block: &DetachedBlock| {
@@ -1312,6 +1512,19 @@ impl BlockEditorModel {
             EditorCommand::Outdent => self.outdent(),
             EditorCommand::SetCodeBlock { lang } => self.set_code_block(lang),
             EditorCommand::ToggleBlockquote => self.toggle_blockquote(),
+            EditorCommand::SetCallout(name) => self.set_callout(name),
+            EditorCommand::WrapInToggle => self.wrap_in_toggle(),
+            EditorCommand::SetToggleOpen { block, open } => self.set_toggle_open(block, open),
+            EditorCommand::Unwrap => {
+                let resolved = self.caret_resolved()?;
+                let pos = resolved.pos;
+                let Some(container) = resolved.nearest(&self.doc, |k| {
+                    matches!(k, BlockKindData::Callout { .. } | BlockKindData::Toggle { .. })
+                }) else {
+                    return Ok(false);
+                };
+                self.unwrap_container(container, Some(pos))
+            }
             EditorCommand::MoveBlocks { down } => self.move_blocks(down),
             EditorCommand::InsertBlock(BlockKind::HorizontalRule) => {
                 let pos = self

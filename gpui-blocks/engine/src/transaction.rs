@@ -276,6 +276,17 @@ impl<'a> TransactionBuilder<'a> {
                 {
                     return Some(Fix::LeadingParagraph(id));
                 }
+                // A toggle's first child is its summary, a line of text.
+                if let BlockKindData::Toggle { .. } = entry.kind
+                    && !children.first().is_some_and(|c| {
+                        matches!(
+                            doc.kind(*c),
+                            Some(BlockKindData::Paragraph | BlockKindData::Heading { .. })
+                        )
+                    })
+                {
+                    return Some(Fix::LeadingParagraph(id));
+                }
                 for pair in children.windows(2) {
                     if let (
                         Some(BlockKindData::List { ordered: a, .. }),

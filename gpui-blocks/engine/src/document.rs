@@ -196,10 +196,19 @@ impl EditorDocument {
         let mut out = Vec::new();
         let mut stack = vec![self.root];
         while let Some(id) = stack.pop() {
-            match self.blocks.get(&id).map(|entry| &entry.content) {
-                Some(BlockContent::Children(children)) => stack.extend(children.iter().rev()),
-                Some(_) => out.push(id),
-                None => {}
+            let Some(entry) = self.blocks.get(&id) else {
+                continue;
+            };
+            match &entry.content {
+                // A closed toggle shows only its summary, so its body holds no
+                // caret: arrows, selection and the order index pass over it.
+                BlockContent::Children(children)
+                    if entry.kind == BlockKindData::Toggle { open: false } =>
+                {
+                    stack.extend(children.iter().take(1))
+                }
+                BlockContent::Children(children) => stack.extend(children.iter().rev()),
+                _ => out.push(id),
             }
         }
         out
