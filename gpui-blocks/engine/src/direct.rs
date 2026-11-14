@@ -166,6 +166,7 @@ impl NodeCache {
                 spread: *spread,
                 checked: *checked,
                 span: None,
+                task_marker: None,
             },
             BlockKindData::CodeBlock { lang, meta } => {
                 let code = match &entry.content {
