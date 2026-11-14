@@ -2797,6 +2797,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::SetToggleOpen { .. } => "set_toggle_open",
         EditorCommand::Unwrap => "unwrap",
         EditorCommand::InsertParagraphAfter(_) => "insert_paragraph",
+        EditorCommand::InsertMarkdown(_) => "insert_markdown",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",

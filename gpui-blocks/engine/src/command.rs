@@ -67,6 +67,11 @@ pub enum EditorCommand {
     /// Insert an empty paragraph after this top-level block and put the
     /// caret in it (a side menu's "+").
     InsertParagraphAfter(BlockId),
+    /// Insert Markdown at the caret as blocks. On an empty paragraph the
+    /// blocks replace it, and the caret goes to a paragraph after them (a
+    /// new one when they end with no text to type in), as a slash menu's
+    /// divider or widget does; elsewhere it's a paste.
+    InsertMarkdown(String),
 }
 
 #[non_exhaustive]
@@ -933,6 +938,53 @@ impl BlockEditorModel {
         Ok(true)
     }
 
+    fn insert_markdown(&mut self, markdown: &str) -> Result<bool, CommandError> {
+        let pos = self.caret_resolved()?.pos;
+        let empty_paragraph = self.doc.kind(pos.block) == Some(&BlockKindData::Paragraph)
+            && self.doc.leaf_len(pos.block) == Some(0);
+        if !empty_paragraph {
+            return self.paste_blocks_markdown(markdown);
+        }
+        let Ok(parsed) =
+            gpui_kit::base::text::editor_host::parse_markdown(markdown, self.doc.extensions.clone())
+        else {
+            return Ok(false);
+        };
+        let mut defs = super::import::Defs::with_source(markdown);
+        super::import::collect_definitions(&parsed, &mut defs);
+        let mut blocks = Vec::new();
+        for node in parsed.iter() {
+            super::import::import_block(node, &defs, &mut blocks);
+        }
+        let mut blocks = super::import::group_toggles(blocks, &defs);
+        if blocks.is_empty() {
+            return Ok(false);
+        }
+        let ends_in_text = matches!(blocks.last(), Some(b) if b.kind == BlockKindData::Paragraph);
+        let after = if ends_in_text {
+            None
+        } else {
+            let paragraph = DetachedBlock::paragraph(InlineText::new());
+            let id = paragraph.id;
+            blocks.push(paragraph);
+            Some(id)
+        };
+        let last = blocks.last().map(|b| b.id);
+        self.transact(EditOrigin::Command("insert_markdown"), |tx| {
+            let (parent, index) = tx
+                .doc
+                .index_in_parent(pos.block)
+                .ok_or(PositionError::UnknownBlock(pos.block))?;
+            tx.remove_block(pos.block)?;
+            tx.insert(parent, index, blocks)?;
+            let at = after.or(last).map(|id| {
+                let end = tx.doc.leaf_len(id).unwrap_or(0);
+                BlockPosition::new(id, end)
+            });
+            Ok(at.and_then(caret))
+        })
+    }
+
     /// The toggle whose summary `block` is.
     fn toggle_of_summary(&self, block: BlockId) -> Option<BlockId> {
         let (toggle, index) = self.doc.index_in_parent(block)?;
@@ -1517,6 +1569,7 @@ impl BlockEditorModel {
             EditorCommand::ToggleBlockquote => self.toggle_blockquote(),
             EditorCommand::SetCallout(name) => self.set_callout(name),
             EditorCommand::WrapInToggle => self.wrap_in_toggle(),
+            EditorCommand::InsertMarkdown(markdown) => self.insert_markdown(&markdown),
             EditorCommand::InsertParagraphAfter(block) => {
                 let root = self.doc.root;
                 let Some((parent, index)) = self.doc.index_in_parent(block) else {
