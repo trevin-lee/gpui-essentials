@@ -4384,3 +4384,105 @@ fn closing_first_rules_leave_literal_punctuation(cx: &mut TestAppContext) {
     type_chars(cx, "*");
     assert_eq!(source(&editor, cx), "`a *b*`", "inside inline code");
 }
+
+fn open_with_surfaces<'a>(
+    cx: &'a mut TestAppContext,
+    source: &str,
+) -> (Entity<BlockEditorState>, &'a mut VisualTestContext) {
+    cx.update(crate::init_for_tests);
+    let source = source.to_string();
+    let (root, cx) = cx.add_window_view(move |window, cx| {
+        Root(cx.new(|cx| {
+            BlockEditorState::new(window, cx)
+                .with_markdown_extensions(crate::surfaces::with_default_surfaces(
+                    Default::default(),
+                ))
+                .with_source(&source)
+        }))
+    });
+    let editor = root.read_with(cx, |root, _| root.0.clone());
+    cx.update(|window, cx| {
+        let focus = editor.read(cx).focus_handle.clone();
+        window.focus(&focus, cx);
+    });
+    draw(cx);
+    (editor, cx)
+}
+
+#[gpui::test]
+fn a_click_on_the_chevron_opens_and_closes_a_toggle(cx: &mut TestAppContext) {
+    let src = "<details>\n<summary>Title</summary>\n\nbody\n\n</details>\n\nafter";
+    let (editor, cx) = open_with_surfaces(cx, src);
+    let summary = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        let f = e.frame.borrow();
+        f.leaf(id).unwrap().bounds()
+    });
+    // The summary sits past the gutter, which holds the chevron.
+    assert!(summary.left() > px(12.));
+    let chevron = gpui::point(summary.left() - px(10.), summary.top() + px(4.));
+    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(chevron).is_some()));
+    cx.simulate_mouse_down(chevron, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert!(source(&editor, cx).starts_with("<details open>"));
+    assert_eq!(editor.read_with(cx, |e, _| e.model().document().leaves().count()), 3);
+    // Its body is drawn now, below the summary and level with it.
+    let body = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().nth(1).unwrap().id();
+        e.frame.borrow().leaf(id).unwrap().bounds()
+    });
+    assert!(body.top() > summary.bottom() - px(1.));
+    assert!((body.left() - summary.left()).abs() < px(1.));
+    cx.simulate_mouse_down(chevron, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), src);
+    keys(cx, "M-z");
+    assert!(source(&editor, cx).starts_with("<details open>"));
+}
+
+#[gpui::test]
+fn a_callout_is_drawn_in_its_surface(cx: &mut TestAppContext) {
+    let (editor, cx) = open_with_surfaces(cx, "plain\n\n> [!WARNING]\n> careful");
+    let (plain, inside) = editor.read_with(cx, |e, _| {
+        let f = e.frame.borrow();
+        let ids: Vec<_> = e.model().document().leaves().map(|l| l.id()).collect();
+        (f.leaf(ids[0]).unwrap().bounds(), f.leaf(ids[1]).unwrap().bounds())
+    });
+    // The callout's box pads its text in from the plain paragraph's edge.
+    assert!(inside.left() > plain.left() + px(8.));
+}
+
+#[gpui::test]
+fn a_host_handle_drags_any_top_level_block(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\n- third";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    assert_eq!(blocks.len(), 3);
+    let (list, list_bounds) = blocks[2];
+    let start = gpui::point(list_bounds.left() + px(2.), list_bounds.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(list, start));
+    let over = gpui::point(start.x, blocks[0].1.center().y - px(2.));
+    cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    assert_eq!(editor.read_with(cx, |e, _| e.block_drag.and_then(|d| d.drop)), Some(0));
+    cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), "- third\n\nfirst\n\nsecond");
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), src);
+}
+
+#[gpui::test]
+fn caret_bounds_follow_the_caret(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "abc\n\ndef");
+    caret_at(&editor, cx, 1, 0);
+    draw(cx);
+    let second = editor.read_with(cx, |e, _| e.caret_bounds()).unwrap();
+    caret_at(&editor, cx, 0, 3);
+    draw(cx);
+    let first = editor.read_with(cx, |e, _| e.caret_bounds()).unwrap();
+    assert!(first.top() < second.top());
+    assert!(first.left() > second.left());
+}

@@ -64,6 +64,9 @@ pub enum EditorCommand {
     /// Unwrap the nearest callout or toggle around the caret: its blocks
     /// move out in place, a toggle's summary first.
     Unwrap,
+    /// Insert an empty paragraph after this top-level block and put the
+    /// caret in it (a side menu's "+").
+    InsertParagraphAfter(BlockId),
 }
 
 #[non_exhaustive]
@@ -1514,6 +1517,21 @@ impl BlockEditorModel {
             EditorCommand::ToggleBlockquote => self.toggle_blockquote(),
             EditorCommand::SetCallout(name) => self.set_callout(name),
             EditorCommand::WrapInToggle => self.wrap_in_toggle(),
+            EditorCommand::InsertParagraphAfter(block) => {
+                let root = self.doc.root;
+                let Some((parent, index)) = self.doc.index_in_parent(block) else {
+                    return Err(CommandError::Position(PositionError::UnknownBlock(block)));
+                };
+                if parent != root {
+                    return Err(CommandError::Unsupported("insert after a nested block"));
+                }
+                self.transact(EditOrigin::Command("insert_paragraph"), |tx| {
+                    let paragraph = DetachedBlock::paragraph(InlineText::new());
+                    let at = BlockPosition::new(paragraph.id, 0);
+                    tx.insert(root, index + 1, vec![paragraph])?;
+                    Ok(caret(at))
+                })
+            }
             EditorCommand::SetToggleOpen { block, open } => self.set_toggle_open(block, open),
             EditorCommand::Unwrap => {
                 let resolved = self.caret_resolved()?;
@@ -1949,7 +1967,10 @@ impl BlockEditorModel {
     /// top-level blocks (0 = before the first, `len` = after the last),
     /// counted before the move (drag to reorder, D22). Nested blocks are
     /// refused with `Unsupported`; a move onto its own position is a no-op.
-    pub(crate) fn move_block_to(
+    /// Move a top-level block into the gap `to` between top-level blocks
+    /// (0 is before the first), as a drag drops it; one undo step, and the
+    /// block ends up selected.
+    pub fn move_block_to(
         &mut self,
         block: BlockId,
         to: usize,

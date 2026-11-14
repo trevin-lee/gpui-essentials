@@ -570,6 +570,19 @@ impl BlockEditorState {
             })
     }
 
+    /// Builder: the Markdown extensions the editor parses and draws with:
+    /// custom nodes, and the block surfaces callouts and toggles are drawn
+    /// in (see [`crate::surfaces`]). Set before `with_source`; the document
+    /// so far is parsed again with them.
+    pub fn with_markdown_extensions(mut self, extensions: MarkdownExtensions) -> Self {
+        let source = self.model.source();
+        if let Ok(model) = BlockEditorModel::from_markdown(&source, extensions) {
+            self.model = model;
+            self.projection.invalidate();
+        }
+        self
+    }
+
     /// Builder: initial Markdown.
     pub fn with_source(mut self, source: &str) -> Self {
         let _ = self.model.set_source(source);
@@ -1485,7 +1498,9 @@ impl BlockEditorState {
     pub(crate) fn hover_at(&mut self, at: Point<Pixels>, secondary: bool, cx: &mut Context<Self>) {
         self.hover_table(at, cx);
         let url = self.link_at(at).map(|(_, _, url)| url);
-        let hand = self.task_checkbox_at(at).is_some() || (secondary && url.is_some());
+        let hand = self.task_checkbox_at(at).is_some()
+            || self.toggle_chevron_at(at).is_some()
+            || (secondary && url.is_some());
         if hand != self.pointer_hand {
             self.pointer_hand = hand;
             cx.notify();
@@ -1597,6 +1612,82 @@ impl BlockEditorState {
             }
             _ => false,
         }
+    }
+
+    /// A click in a toggle's chevron gutter opens or closes it, without
+    /// moving the caret. Returns whether there was one.
+    pub(crate) fn click_toggle(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some((toggle, open)) = self.toggle_chevron_at(at) else {
+            return false;
+        };
+        self.end_composition();
+        self.dragging = false;
+        self.model.break_coalescing();
+        let _ = self.run(EditorCommand::SetToggleOpen { block: toggle, open: !open }, cx);
+        self.model.break_coalescing();
+        true
+    }
+
+    /// The toggle whose chevron gutter (left of its summary's first line) is
+    /// under `at`, and whether it's open.
+    pub(crate) fn toggle_chevron_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
+        use super::kind::BlockKindData;
+        let frame = self.frame.borrow();
+        frame.leaves.iter().find_map(|leaf| {
+            let b = leaf.bounds();
+            let gutter = leaf.line_height() * 1.5;
+            if !(at.y >= b.top()
+                && at.y < b.top() + leaf.line_height()
+                && at.x < b.left()
+                && at.x >= b.left() - gutter)
+            {
+                return None;
+            }
+            let (toggle, index) = self.model.doc.index_in_parent(leaf.info.block)?;
+            match self.model.doc.kind(toggle) {
+                Some(BlockKindData::Toggle { open }) if index == 0 => Some((toggle, *open)),
+                _ => None,
+            }
+        })
+    }
+
+    /// The caret's box in window coordinates, as last drawn (`None` before
+    /// the first frame or with whole blocks selected). For anchoring a
+    /// popup, such as a slash menu, at the caret.
+    pub fn caret_bounds(&self) -> Option<Bounds<Pixels>> {
+        let pos = self.model.caret()?;
+        self.frame
+            .borrow()
+            .caret_bounds(pos, self.style.caret_width())
+    }
+
+    /// Each top-level block drawn in the last frame, in document order, with
+    /// the union of its text's bounds in window coordinates. A side menu
+    /// places its handles from these. Blocks scrolled out of the laid-out
+    /// range, and blocks with no text (a rule), are left out.
+    pub fn top_level_blocks(&self) -> Vec<(BlockId, Bounds<Pixels>)> {
+        self.top_level_bounds()
+            .into_iter()
+            .map(|(_, id, bounds)| (id, bounds))
+            .collect()
+    }
+
+    /// Start dragging a top-level block from a handle the host draws, at the
+    /// pointer's window position. The editor follows the pointer from here
+    /// (a drop indicator in the gap, then one undoable move on release), as
+    /// for its own handles. Call it from the handle's mouse-down and stop
+    /// the event there.
+    pub fn begin_block_drag(&mut self, block: BlockId, at: Point<Pixels>) {
+        let doc = &self.model.doc;
+        if self.readonly || doc.parent(block) != Some(doc.root) {
+            return;
+        }
+        self.block_drag = Some(BlockDrag {
+            block,
+            start: at,
+            active: false,
+            drop: None,
+        });
     }
 
     pub(crate) fn task_checkbox_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
@@ -2705,6 +2796,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::WrapInToggle => "wrap_in_toggle",
         EditorCommand::SetToggleOpen { .. } => "set_toggle_open",
         EditorCommand::Unwrap => "unwrap",
+        EditorCommand::InsertParagraphAfter(_) => "insert_paragraph",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",
