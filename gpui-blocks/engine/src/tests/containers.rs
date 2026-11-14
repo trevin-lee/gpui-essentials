@@ -273,3 +273,16 @@ fn a_toggle_in_a_callout_round_trips() {
     assert_eq!(m.source(), source);
     assert_eq!(kinds(&m), vec![BlockKind::Callout]);
 }
+
+#[test]
+fn insert_markdown_replaces_an_empty_line_and_leaves_a_line_after() {
+    let mut m = model("a\n\n");
+    let last = m.document().leaves().count() - 1;
+    caret_in(&mut m, last, 0);
+    m.run(EditorCommand::InsertMarkdown("---".into())).unwrap();
+    m.insert_text("b", EditOrigin::Typing).unwrap();
+    assert_eq!(m.source(), "a\n\n---\n\nb");
+    assert!(m.undo());
+    assert!(m.undo());
+    assert_eq!(m.source(), "a\n\n");
+}
