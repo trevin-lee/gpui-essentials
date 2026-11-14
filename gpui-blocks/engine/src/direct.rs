@@ -16,6 +16,11 @@ use gpui_kit::base::text::editor_host::{
     BlockNode, BlockState, CodeBlock, InlineNode, Paragraph, Span, Table,
 };
 
+/// The surface an open toggle is drawn in; see [`crate::surfaces`].
+pub const TOGGLE_OPEN_SURFACE: &str = "editor-toggle-open";
+/// The surface a closed toggle is drawn in.
+pub const TOGGLE_CLOSED_SURFACE: &str = "editor-toggle-closed";
+
 /// A paragraph holding `inline`, keyed by `id`.
 pub(crate) fn paragraph(inline: &InlineText, id: BlockId, placeholders: bool) -> Paragraph {
     let mut paragraph = Paragraph::default();
@@ -153,6 +158,33 @@ impl NodeCache {
             },
             BlockKindData::Blockquote => BlockNode::Blockquote {
                 children: children(self),
+                span: None,
+            },
+            // Drawn in the container the host registers under the callout's
+            // name (`MarkdownExtensions::block_surface`); a name nothing
+            // registered is drawn as plain blocks.
+            BlockKindData::Callout { name } => BlockNode::Surface {
+                name: name.clone(),
+                children: children(self),
+                span: None,
+            },
+            // A closed toggle projects only its summary, so nothing of its body
+            // is laid out, measured or hit.
+            BlockKindData::Toggle { open } => BlockNode::Surface {
+                name: if *open {
+                    TOGGLE_OPEN_SURFACE.into()
+                } else {
+                    TOGGLE_CLOSED_SURFACE.into()
+                },
+                children: if *open {
+                    children(self)
+                } else {
+                    doc.children(id)
+                        .iter()
+                        .take(1)
+                        .filter_map(|child| self.node(doc, *child))
+                        .collect()
+                },
                 span: None,
             },
             BlockKindData::List { ordered, start } => BlockNode::List {

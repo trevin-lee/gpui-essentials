@@ -67,6 +67,42 @@ fn block(doc: &EditorDocument, id: BlockId) -> String {
             })
             .collect::<Vec<_>>()
             .join("\n"),
+        // GitHub's and Obsidian's callout: the marker alone on the first line.
+        (BlockKindData::Callout { name }, _) => {
+            let body = join_blocks(doc, children)
+                .lines()
+                .map(|line| {
+                    if line.is_empty() {
+                        ">".to_string()
+                    } else {
+                        format!("> {line}")
+                    }
+                })
+                .collect::<Vec<_>>();
+            let marker = format!("> [!{}]", name.to_ascii_uppercase());
+            std::iter::once(marker)
+                .chain(body)
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        // HTML's disclosure, which GitHub draws. The body is written at the
+        // toggle's own level between blank lines, so it is Markdown again
+        // (an HTML block ends at a blank line), and a nested toggle is a
+        // nested pair.
+        (BlockKindData::Toggle { open }, _) => {
+            let summary = children
+                .first()
+                .and_then(|id| doc.inline(*id))
+                .map(|inline| inline_markdown(inline).replace('\n', " "))
+                .unwrap_or_default();
+            let tag = if *open { "<details open>" } else { "<details>" };
+            let body = join_blocks(doc, children.get(1..).unwrap_or_default());
+            if body.is_empty() {
+                format!("{tag}\n<summary>{summary}</summary>\n\n</details>")
+            } else {
+                format!("{tag}\n<summary>{summary}</summary>\n\n{body}\n\n</details>")
+            }
+        }
         (BlockKindData::List { ordered, start }, _) => {
             let loose = children.iter().any(|item| {
                 matches!(

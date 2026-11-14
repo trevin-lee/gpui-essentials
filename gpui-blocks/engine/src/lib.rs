@@ -77,11 +77,13 @@ mod undo;
 mod tests;
 
 pub mod component;
+pub mod surfaces;
 mod toolbar;
 
 pub use command::{CommandError, EditorCommand};
 pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
+pub use direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
 pub use element::BlockEditor;
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;

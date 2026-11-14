@@ -11,6 +11,14 @@ pub enum BlockKind {
     // containers
     Root,
     Blockquote,
+    /// A blockquote with a callout marker (`> [!NOTE]`). Its name, in ASCII
+    /// lowercase, is read with `BlockEditorModel::callout_at_caret`.
+    Callout,
+    /// A block whose first child is its summary and the rest its body, shown
+    /// only while open (`<details><summary>`).
+    Toggle {
+        open: bool,
+    },
     List {
         ordered: bool,
     },
@@ -42,6 +50,12 @@ pub enum BlockKind {
 pub(crate) enum BlockKindData {
     Root,
     Blockquote,
+    Callout {
+        name: SharedString,
+    },
+    Toggle {
+        open: bool,
+    },
     List {
         ordered: bool,
         start: Option<u32>,
@@ -81,6 +95,8 @@ impl BlockKindData {
         match self {
             Self::Root => BlockKind::Root,
             Self::Blockquote => BlockKind::Blockquote,
+            Self::Callout { .. } => BlockKind::Callout,
+            Self::Toggle { open } => BlockKind::Toggle { open: *open },
             Self::List { ordered, .. } => BlockKind::List { ordered: *ordered },
             Self::ListItem { checked, .. } => BlockKind::ListItem { checked: *checked },
             Self::Table { .. } => BlockKind::Table,
@@ -103,6 +119,8 @@ impl BlockKindData {
             self,
             Self::Root
                 | Self::Blockquote
+                | Self::Callout { .. }
+                | Self::Toggle { .. }
                 | Self::List { .. }
                 | Self::ListItem { .. }
                 | Self::Table { .. }
@@ -116,5 +134,14 @@ impl BlockKindData {
             self,
             Self::Paragraph | Self::Heading { .. } | Self::TableCell
         )
+    }
+}
+
+impl BlockKindData {
+    /// Whether this kind holds blocks the way a blockquote does: Enter on an
+    /// empty last paragraph leaves it, and Backspace at the start of its first
+    /// paragraph lifts that paragraph out.
+    pub(crate) fn is_quote_like(&self) -> bool {
+        matches!(self, Self::Blockquote | Self::Callout { .. })
     }
 }

@@ -9,12 +9,12 @@ use super::{
     document::{AtomData, BlockContent, EditorDocument},
     inline::{InlineAtom, InlineText},
     kind::BlockKindData,
-    step::DetachedBlock,
+    step::{DetachedBlock, DetachedContent},
     transaction::TransactionBuilder,
 };
 use gpui_kit::base::text::{
     MarkdownExtensions,
-    editor_host::{BlockNode, InlineNode, LinkMark, Paragraph, TextMark, parse_markdown},
+    editor_host::{BlockNode, InlineNode, LinkMark, Paragraph, Span, TextMark, parse_markdown},
 };
 
 pub(crate) fn parse_document(
@@ -26,12 +26,13 @@ pub(crate) fn parse_document(
     let root = doc.root;
     // Drop the placeholder paragraph of the empty document.
     doc.detach(root, 0);
-    let mut defs = Defs::new();
+    let mut defs = Defs::with_source(source);
     collect_definitions(&parsed, &mut defs);
     let mut blocks = Vec::new();
     for node in parsed.iter() {
         import_block(node, &defs, &mut blocks);
     }
+    let blocks = group_toggles(blocks, &defs);
     for (ix, block) in blocks.into_iter().enumerate() {
         doc.attach(root, ix, block);
     }
@@ -109,6 +110,165 @@ fn import_children(nodes: &[BlockNode], defs: &Defs) -> Vec<DetachedBlock> {
     for node in nodes {
         import_block(node, defs, &mut out);
     }
+    group_toggles(out, defs)
+}
+
+/// A callout's children: never empty, since an empty container is pruned.
+fn callout(name: SharedString, mut children: Vec<DetachedBlock>) -> DetachedBlock {
+    if children.is_empty() {
+        children.push(DetachedBlock::paragraph(InlineText::new()));
+    }
+    DetachedBlock::container(BlockKindData::Callout { name }, children)
+}
+
+/// A callout marker's name (`[!NOTE]` gives `note`), or `None` when `text`
+/// isn't one.
+fn callout_name(text: &str) -> Option<SharedString> {
+    let name = text.strip_prefix("[!")?.strip_suffix(']')?;
+    let valid = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    valid.then(|| name.to_ascii_lowercase().into())
+}
+
+/// The callout name on a blockquote's first line, when the marker is alone
+/// there as GitHub and Obsidian write it. Read from the source, since the
+/// parsed text has lost the line ending (and an escaped `\[` reads the same).
+fn marker_on_first_line(source: Option<&str>, span: Option<Span>) -> Option<SharedString> {
+    let source = source?.get(span?.start..)?;
+    let line = source.split('\n').next()?.trim_end_matches('\r');
+    let line = line.trim_start().strip_prefix('>')?;
+    let line = line.strip_prefix(' ').unwrap_or(line);
+    callout_name(line.trim_end())
+}
+
+/// A blockquote whose first line is a callout marker becomes a callout, the
+/// marker dropped from its first paragraph. Callouts at the top level arrive
+/// as surfaces when the host registered their name; this catches the rest
+/// (nested ones, and names nothing registered).
+fn quote_or_callout(mut children: Vec<DetachedBlock>, marker: Option<SharedString>) -> DetachedBlock {
+    // The marker and the soft line break after it, which arrives as a space.
+    let marker = marker.and_then(|name| match children.first() {
+        Some(DetachedBlock {
+            kind: BlockKindData::Paragraph,
+            content: DetachedContent::Leaf(BlockContent::Inline(inline)),
+            ..
+        }) => {
+            let text = inline.text();
+            let len = text.find(']')? + 1;
+            let len = if text[len..].starts_with(' ') { len + 1 } else { len };
+            Some((name, len, inline.len()))
+        }
+        _ => None,
+    });
+    let Some((name, len, total)) = marker else {
+        return DetachedBlock::container(BlockKindData::Blockquote, children);
+    };
+    if len == total {
+        children.remove(0);
+    } else if let DetachedContent::Leaf(BlockContent::Inline(inline)) = &mut children[0].content {
+        *inline = inline.slice(len..total);
+    }
+    callout(name, children)
+}
+
+/// What a raw HTML block says about a toggle: `<details>` (with `open` or
+/// not) and its `<summary>`, or `</details>`.
+enum DetailsTag {
+    Open { open: bool, summary: String, closed: bool },
+    Close,
+}
+
+fn details_tag(block: &DetachedBlock) -> Option<DetailsTag> {
+    let DetachedContent::Leaf(BlockContent::Atom(AtomData::Custom(node))) = &block.content else {
+        return None;
+    };
+    if node.name() != "editor-source-block" {
+        return None;
+    }
+    let source = node.as_markdown().trim();
+    if source.eq_ignore_ascii_case("</details>") {
+        return Some(DetailsTag::Close);
+    }
+    let lower = source.to_ascii_lowercase();
+    let attrs = lower.strip_prefix("<details")?;
+    if !attrs.starts_with(['>', ' ', '\t', '\n']) {
+        return None;
+    }
+    let tag_end = attrs.find('>')?;
+    let open = attrs[..tag_end].split_ascii_whitespace().any(|a| a == "open");
+    let after_tag = source.len() - attrs.len() + tag_end + 1;
+    let rest = source[after_tag..].trim_start();
+    let inner = rest
+        .get(..9)
+        .filter(|s| s.eq_ignore_ascii_case("<summary>"))
+        .map(|_| &rest[9..])?;
+    let close = inner.to_ascii_lowercase().find("</summary>")?;
+    let summary = inner[..close].trim().to_string();
+    let after = inner[close + 10..].trim();
+    let closed = after.eq_ignore_ascii_case("</details>");
+    (after.is_empty() || closed).then_some(DetailsTag::Open {
+        open,
+        summary,
+        closed,
+    })
+}
+
+/// The summary's inline Markdown, as a paragraph's.
+fn summary_inline(summary: &str, defs: &Defs) -> InlineText {
+    parse_markdown(summary, Arc::new(MarkdownExtensions::default()))
+        .ok()
+        .and_then(|nodes| {
+            nodes.into_iter().find_map(|node| match node {
+                BlockNode::Paragraph(paragraph) => Some(import_inline(&paragraph, defs)),
+                _ => None,
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// Pair `<details>` and `</details>` blocks among siblings into toggles,
+/// the blocks between them the body. A toggle's body is written at its own
+/// level, so a nested toggle is a pair inside the pair; a stack matches them.
+/// A tag without its partner stays the raw HTML it was.
+pub(crate) fn group_toggles(blocks: Vec<DetachedBlock>, defs: &Defs) -> Vec<DetachedBlock> {
+    if !blocks.iter().any(|b| matches!(details_tag(b), Some(DetailsTag::Open { .. }))) {
+        return blocks;
+    }
+    let toggle = |open: bool, summary: &str, body: Vec<DetachedBlock>| {
+        let mut children = vec![DetachedBlock::paragraph(summary_inline(summary, defs))];
+        children.extend(body);
+        DetachedBlock::container(BlockKindData::Toggle { open }, children)
+    };
+    // Each frame: the opening tag's block and what it holds so far.
+    let mut stack: Vec<(DetachedBlock, bool, String, Vec<DetachedBlock>)> = Vec::new();
+    let mut out = Vec::new();
+    for block in blocks {
+        match details_tag(&block) {
+            Some(DetailsTag::Open {
+                open,
+                summary,
+                closed: true,
+            }) => {
+                let t = toggle(open, &summary, Vec::new());
+                stack.last_mut().map_or(&mut out, |f| &mut f.3).push(t);
+            }
+            Some(DetailsTag::Open { open, summary, .. }) => {
+                stack.push((block, open, summary, Vec::new()))
+            }
+            Some(DetailsTag::Close) if !stack.is_empty() => {
+                let (_, open, summary, body) = stack.pop().unwrap();
+                let t = toggle(open, &summary, body);
+                stack.last_mut().map_or(&mut out, |f| &mut f.3).push(t);
+            }
+            _ => stack.last_mut().map_or(&mut out, |f| &mut f.3).push(block),
+        }
+    }
+    // Unclosed: the opening tag and its blocks go back as they were.
+    while let Some((tag, _, _, body)) = stack.pop() {
+        let target = stack.last_mut().map_or(&mut out, |f| &mut f.3);
+        target.push(tag);
+        target.extend(body);
+    }
     out
 }
 
@@ -131,8 +291,12 @@ pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<Detached
             BlockKindData::Heading { level: *level },
             BlockContent::Inline(import_inline(children, defs)),
         ),
-        BlockNode::Blockquote { children, .. } => {
-            DetachedBlock::container(BlockKindData::Blockquote, import_children(children, defs))
+        BlockNode::Blockquote { children, span } => quote_or_callout(
+            import_children(children, defs),
+            marker_on_first_line(defs.source, *span),
+        ),
+        BlockNode::Surface { name, children, .. } => {
+            callout(name.clone(), import_children(children, defs))
         }
         BlockNode::List {
             children,
@@ -264,7 +428,40 @@ pub(crate) fn import_inline(paragraph: &Paragraph, defs: &Defs) -> InlineText {
     out
 }
 
-pub(crate) type Defs = HashMap<SharedString, (SharedString, Option<SharedString>)>;
+/// What importing needs besides the parsed tree: link reference definitions,
+/// and the source when there is one, to tell what the tree no longer shows
+/// (a soft line break arrives as a space).
+#[derive(Default)]
+pub(crate) struct Defs<'a> {
+    map: HashMap<SharedString, (SharedString, Option<SharedString>)>,
+    source: Option<&'a str>,
+}
+
+impl<'a> Defs<'a> {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn with_source(source: &'a str) -> Self {
+        Self {
+            map: HashMap::new(),
+            source: Some(source),
+        }
+    }
+}
+
+impl std::ops::Deref for Defs<'_> {
+    type Target = HashMap<SharedString, (SharedString, Option<SharedString>)>;
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+
+impl std::ops::DerefMut for Defs<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.map
+    }
+}
 
 pub(crate) fn collect_definitions(nodes: &[BlockNode], defs: &mut Defs) {
     for node in nodes {
@@ -282,6 +479,7 @@ pub(crate) fn collect_definitions(nodes: &[BlockNode], defs: &mut Defs) {
             }
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
+            | BlockNode::Surface { children, .. }
             | BlockNode::List { children, .. }
             | BlockNode::ListItem { children, .. } => collect_definitions(children, defs),
             _ => {}
