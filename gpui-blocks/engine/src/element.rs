@@ -787,10 +787,12 @@ impl Element for EditorRoot {
                 cx.stop_propagation();
                 return;
             }
-            // A task checkbox toggles without moving the caret or starting
-            // a drag; nothing else handles this mouse-down.
+            // A task checkbox or a toggle's chevron flips without moving the
+            // caret or starting a drag; nothing else handles this mouse-down.
             if !event.modifiers.shift
-                && entity.update(cx, |state, cx| state.click_checkbox(event.position, cx))
+                && entity.update(cx, |state, cx| {
+                    state.click_checkbox(event.position, cx) || state.click_toggle(event.position, cx)
+                })
             {
                 cx.stop_propagation();
                 return;
