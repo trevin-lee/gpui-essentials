@@ -124,6 +124,8 @@ pub(crate) struct Shared {
     /// What had the focus when the mouse button last went down, before anything handled the
     /// press: a node's child that takes the focus for that press owns it.
     pub press_focus: RefCell<Option<Option<FocusHandle>>>,
+    /// The canvas transform last handed to the host's listener.
+    pub transform: Cell<Option<crate::flow::CanvasTransform>>,
     /// Whether the last frame drew an animated edge, and whether the one before did.
     pub animating: Cell<bool>,
     pub was_animating: Cell<bool>,
@@ -223,11 +225,21 @@ impl NodeContext {
                     .cursor(CursorStyle::ResizeUpLeftDownRight),
             };
             placed.on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                cx.stop_propagation();
-                flow.update(cx, |flow, cx| {
-                    flow.resize_mouse_down(&id, corner, (min_width, min_height), event, window, cx)
-                })
-                .ok();
+                let took = flow
+                    .update(cx, |flow, cx| {
+                        flow.resize_mouse_down(
+                            &id,
+                            corner,
+                            (min_width, min_height),
+                            event,
+                            window,
+                            cx,
+                        )
+                    })
+                    .unwrap_or(false);
+                if took {
+                    cx.stop_propagation();
+                }
             })
         };
         div()
@@ -363,11 +375,14 @@ impl RenderOnce for Handle {
                 d.cursor(CursorStyle::Crosshair).on_mouse_down(
                     MouseButton::Left,
                     move |event, window, cx| {
-                        cx.stop_propagation();
-                        flow.update(cx, |flow, cx| {
-                            flow.handle_mouse_down(&node, id.clone(), kind, event, window, cx)
-                        })
-                        .ok();
+                        let took = flow
+                            .update(cx, |flow, cx| {
+                                flow.handle_mouse_down(&node, id.clone(), kind, event, window, cx)
+                            })
+                            .unwrap_or(false);
+                        if took {
+                            cx.stop_propagation();
+                        }
                     },
                 )
             })

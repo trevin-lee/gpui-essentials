@@ -131,6 +131,9 @@ pub struct FlowOptions {
     pub only_render_visible: bool,
     /// Below this zoom, nodes are drawn as plain boxes of their size and colors; 0 never does.
     pub simplify_below_zoom: f32,
+    /// What presses, scrolling and pinches on the canvas do: edit it, only move about it, or
+    /// nothing, leaving them to a view laid over it.
+    pub pointer_mode: PointerMode,
     /// How far (in points on screen) a pressed node must move before it counts as a drag.
     pub node_drag_threshold: f32,
     /// How long the viewport takes to get where the controls, a fit or a double click send it.
@@ -166,10 +169,66 @@ impl Default for FlowOptions {
             elevate_edges_on_select: false,
             only_render_visible: true,
             simplify_below_zoom: 0.3,
+            pointer_mode: PointerMode::Edit,
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
             fit_padding: 0.1,
         }
+    }
+}
+
+/// What pointer input on the canvas does. A host that lays a view of its own over the canvas (a
+/// PencilKit canvas to draw on, say) switches between them as the person switches between
+/// drawing and editing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PointerMode {
+    /// Presses select, drag, resize and connect; dragging the pane pans; scrolling and
+    /// pinching zoom.
+    #[default]
+    Edit,
+    /// Only moving about: a drag anywhere pans, even one that starts on a node, a handle or an
+    /// edge; scrolling, pinching and double clicks zoom. Nothing is selected, moved or
+    /// connected. For drawing with a pen on a view over the canvas while fingers move it.
+    Navigate,
+    /// Nothing: the canvas takes no presses, scrolling or pinches, and lets them go on to
+    /// whatever is under or around it. The viewport moves only when the host moves it.
+    Off,
+}
+
+/// Where the canvas is in the window and how the flow is scaled in it: what a view laid over
+/// the canvas needs to line up with the flow. A flow point `p` is at
+/// `pane.origin + p * viewport.zoom + (viewport.x, viewport.y)` in the window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CanvasTransform {
+    /// The pane's bounds in the window.
+    pub pane: Bounds<Pixels>,
+    pub viewport: Viewport,
+}
+
+impl CanvasTransform {
+    /// A flow point as a point in the window.
+    pub fn flow_to_window(&self, p: XY) -> Point<Pixels> {
+        let at = self.viewport.to_pane(p);
+        point(self.pane.origin.x + px(at.x), self.pane.origin.y + px(at.y))
+    }
+
+    /// A point in the window as a flow point.
+    pub fn window_to_flow(&self, p: Point<Pixels>) -> XY {
+        self.viewport.to_flow(xy(
+            f32::from(p.x - self.pane.origin.x),
+            f32::from(p.y - self.pane.origin.y),
+        ))
+    }
+
+    /// The scale from flow units to window points.
+    pub fn scale(&self) -> f32 {
+        self.viewport.zoom
+    }
+
+    /// Where the flow's origin is in the window: with [`CanvasTransform::scale`], the affine
+    /// transform from flow to window coordinates (scale first, then this translation).
+    pub fn translation(&self) -> Point<Pixels> {
+        self.flow_to_window(xy(0., 0.))
     }
 }
 
@@ -254,6 +313,7 @@ pub enum PanelPosition {
 type PanelRenderer = Rc<dyn Fn(&Flow, &mut Window, &mut App) -> AnyElement>;
 type ConnectionCheck = Rc<dyn Fn(&Connection, &Flow) -> bool>;
 type DeleteCheck = Rc<dyn Fn(&[Node], &[Edge], &Flow) -> bool>;
+pub(crate) type TransformListener = Rc<dyn Fn(CanvasTransform, &mut Window, &mut App)>;
 
 /// The handle a connection drag is over.
 #[derive(Clone, Debug)]
@@ -341,6 +401,7 @@ pub struct Flow {
     panels: Vec<(PanelPosition, PanelRenderer)>,
     valid_connection: Option<ConnectionCheck>,
     delete_check: Option<DeleteCheck>,
+    transform_listener: Option<TransformListener>,
     /// Where each node is in `nodes`, built on the first lookup after the list changes: a
     /// frame looks nodes up by id several times each.
     index: RefCell<Option<HashMap<NodeId, usize>>>,
@@ -439,6 +500,7 @@ impl Flow {
             panels: Vec::new(),
             valid_connection: None,
             delete_check: None,
+            transform_listener: None,
             index: RefCell::new(None),
             shared: Rc::default(),
             focus: cx.focus_handle(),
@@ -554,6 +616,37 @@ impl Flow {
     ) -> Self {
         self.delete_check = Some(Rc::new(check));
         self
+    }
+
+    /// Calls `listener` with the canvas's [`CanvasTransform`] on the first frame and on every
+    /// frame it changes after that: a pan, a zoom (each step of an animated one), or the pane
+    /// moving or changing size in the window. It's called while that frame is drawn, so a native
+    /// view kept in line from it moves in the same frame as the canvas. It mustn't change the
+    /// flow.
+    pub fn with_transform_listener(
+        mut self,
+        listener: impl Fn(CanvasTransform, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.transform_listener = Some(Rc::new(listener));
+        self
+    }
+
+    /// The canvas's transform as of the last frame drawn.
+    pub fn canvas_transform(&self) -> CanvasTransform {
+        CanvasTransform {
+            pane: self.shared.pane.get(),
+            viewport: self.viewport,
+        }
+    }
+
+    /// Changes what pointer input on the canvas does. A drag under way when it changes is
+    /// dropped, as escape drops it.
+    pub fn set_pointer_mode(&mut self, mode: PointerMode, cx: &mut Context<Self>) {
+        if self.options.pointer_mode != mode {
+            self.cancel_drag(cx);
+            self.options.pointer_mode = mode;
+            cx.notify();
+        }
     }
 
     /// Adds or replaces a node kind after the flow is made.
@@ -1295,19 +1388,47 @@ impl Flow {
         now.is_some() && now != before && now.as_ref() != Some(&self.focus)
     }
 
+    /// Whether a press on a node, a handle or a resizer is the flow's at all: not when pointer
+    /// input is off, so it goes on to what's under the canvas. When it's only for moving
+    /// about, the press starts a pan.
+    fn press_on_content(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        match self.options.pointer_mode {
+            PointerMode::Off => Some(false),
+            PointerMode::Navigate => {
+                if self.drag.is_none() {
+                    window.focus(&self.focus, cx);
+                    self.transition = None;
+                    let pane = self.shared.pane_point(event.position);
+                    self.start_pan(pane, event, cx);
+                }
+                Some(true)
+            }
+            PointerMode::Edit => None,
+        }
+    }
+
     /// Selects one node or adds it to the selection, and gets ready to drag what's selected.
+    /// Says whether the press was the flow's.
     pub(crate) fn node_mouse_down(
         &mut self,
         id: &NodeId,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
+        if let Some(took) = self.press_on_content(event, window, cx) {
+            return took;
+        }
         if self.drag.is_some() || self.child_took_focus(window, cx) {
-            return;
+            return true;
         }
         let Some(node) = self.node(id) else {
-            return;
+            return true;
         };
         let (selectable, draggable, was_selected) =
             (self.selectable(node), self.draggable(node), node.selected);
@@ -1318,12 +1439,12 @@ impl Flow {
         // An edge drawn over the node takes the press.
         if let Some(edge) = above {
             self.edge_press(edge, event, cx);
-            return;
+            return true;
         }
         // With shift held, a press anywhere begins a selection rectangle.
         if event.modifiers.shift && self.options.elements_selectable {
             self.start_select(pane, event, cx);
-            return;
+            return true;
         }
         // As in React Flow: ⌘ adds or takes away; a plain press on a node that's already
         // selected keeps the whole selection, so it can all be dragged by any member.
@@ -1361,9 +1482,10 @@ impl Flow {
             clicks: event.click_count,
         });
         cx.notify();
+        true
     }
 
-    /// Starts dragging a connection out of a handle.
+    /// Starts dragging a connection out of a handle. Says whether the press was the flow's.
     pub(crate) fn handle_mouse_down(
         &mut self,
         node: &NodeId,
@@ -1372,20 +1494,23 @@ impl Flow {
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
+        if let Some(took) = self.press_on_content(event, window, cx) {
+            return took;
+        }
         if self.drag.is_some() {
-            return;
+            return true;
         }
         window.focus(&self.focus, cx);
         self.transition = None;
         let Some(n) = self.node(node) else {
-            return;
+            return true;
         };
         if !self.connectable(n) {
-            return;
+            return true;
         }
         let Some(at) = self.absolute_position(node) else {
-            return;
+            return true;
         };
         let found = {
             let measured = self.shared.measured.borrow();
@@ -1397,7 +1522,7 @@ impl Flow {
             })
         };
         let Some((from, position)) = found else {
-            return;
+            return true;
         };
         let pointer = self.screen_to_flow(event.position);
         self.drag_button = event.button;
@@ -1414,9 +1539,11 @@ impl Flow {
             started: false,
         });
         cx.notify();
+        true
     }
 
-    /// Starts resizing a node by one of its resizer's corners.
+    /// Starts resizing a node by one of its resizer's corners. Says whether the press was the
+    /// flow's.
     pub(crate) fn resize_mouse_down(
         &mut self,
         node: &NodeId,
@@ -1425,13 +1552,16 @@ impl Flow {
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
+        if let Some(took) = self.press_on_content(event, window, cx) {
+            return took;
+        }
         if self.drag.is_some() {
-            return;
+            return true;
         }
         window.focus(&self.focus, cx);
         let (Some(n), Some(size)) = (self.node(node), self.node_size(node)) else {
-            return;
+            return true;
         };
         let drag = Drag::Resize {
             node: node.clone(),
@@ -1446,6 +1576,7 @@ impl Flow {
         self.drag_button = event.button;
         self.drag = Some(drag);
         cx.notify();
+        true
     }
 
     /// The topmost edge whose line passes near this point of the pane: of all of them, or of
@@ -1533,11 +1664,13 @@ impl Flow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.drag.is_some() {
+        let mode = self.options.pointer_mode;
+        if self.drag.is_some() || mode == PointerMode::Off {
             return;
         }
         let pane = self.shared.pane_point(event.position);
-        if event.button == MouseButton::Left
+        if mode == PointerMode::Edit
+            && event.button == MouseButton::Left
             && let Some(id) = self.simple_node_at(pane)
         {
             self.node_mouse_down(&id, event, window, cx);
@@ -1545,7 +1678,7 @@ impl Flow {
         }
         window.focus(&self.focus, cx);
         self.transition = None;
-        if event.button == MouseButton::Left {
+        if mode == PointerMode::Edit && event.button == MouseButton::Left {
             if let Some(id) = self.edge_at(pane, None) {
                 self.edge_press(id, event, cx);
                 return;
@@ -1557,6 +1690,11 @@ impl Flow {
                 return;
             }
         }
+        self.start_pan(pane, event, cx);
+    }
+
+    /// Begins panning from this point of the pane.
+    fn start_pan(&mut self, pane: XY, event: &MouseDownEvent, cx: &mut Context<Self>) {
         self.drag_button = event.button;
         self.drag = Some(Drag::Pan {
             start: pane,
@@ -1967,7 +2105,7 @@ impl Flow {
                     if clicks >= 2 && self.options.zoom_on_double_click {
                         let zoom = self.clamp_zoom(self.viewport.zoom * 2.);
                         self.go_to(self.viewport.zoomed_about(start, zoom), cx);
-                    } else {
+                    } else if self.options.pointer_mode == PointerMode::Edit {
                         self.deselect_all(cx);
                         cx.emit(FlowEvent::PaneClick(at));
                     }
@@ -2029,6 +2167,9 @@ impl Flow {
     }
 
     fn scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
+        if self.options.pointer_mode == PointerMode::Off {
+            return;
+        }
         cx.stop_propagation();
         self.transition = None;
         let pane = self.shared.pane_point(event.position);
@@ -2053,7 +2194,7 @@ impl Flow {
     }
 
     fn pinch(&mut self, event: &PinchEvent, cx: &mut Context<Self>) {
-        if !self.options.zoom_on_pinch {
+        if !self.options.zoom_on_pinch || self.options.pointer_mode == PointerMode::Off {
             return;
         }
         cx.stop_propagation();
@@ -2106,6 +2247,19 @@ impl Flow {
     /// Escape: drops what's being dragged, putting back what it changed, or else the
     /// selection. Says whether there was anything to do.
     fn cancel(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.cancel_drag(cx) {
+            return true;
+        }
+        if self.nodes.iter().all(|n| !n.selected) && self.edges.iter().all(|e| !e.selected) {
+            return false;
+        }
+        self.deselect_all(cx);
+        cx.notify();
+        true
+    }
+
+    /// Drops what's being dragged, putting back what it changed. Says whether anything was.
+    fn cancel_drag(&mut self, cx: &mut Context<Self>) -> bool {
         match self.drag.take() {
             Some(Drag::Nodes { origins, moved, .. }) => {
                 for (id, origin) in &origins {
@@ -2165,13 +2319,7 @@ impl Flow {
                 }
             }
             Some(Drag::Minimap) => {}
-            None => {
-                if self.nodes.iter().all(|n| !n.selected) && self.edges.iter().all(|e| !e.selected)
-                {
-                    return false;
-                }
-                self.deselect_all(cx);
-            }
+            None => return false,
         }
         cx.notify();
         true
@@ -2291,6 +2439,7 @@ impl Flow {
             .cloned();
         let content = renderer.map(|render| render(node, &ctx, self, window, cx));
         let dragging = matches!(&self.drag, Some(Drag::Nodes { moved: true, .. }));
+        let editing = self.options.pointer_mode == PointerMode::Edit;
         let id = node.id.clone();
         let flow = this.clone();
         let wrapper = div()
@@ -2302,7 +2451,7 @@ impl Flow {
             .when_some(node.width, |d, w| d.w(units(w)))
             .when_some(node.height, |d, h| d.h(units(h)))
             .when(!self.ready, |d| d.opacity(0.))
-            .when(self.draggable(node), |d| {
+            .when(editing && self.draggable(node), |d| {
                 d.cursor(if dragging {
                     CursorStyle::ClosedHand
                 } else {
@@ -2310,9 +2459,12 @@ impl Flow {
                 })
             })
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                cx.stop_propagation();
-                flow.update(cx, |flow, cx| flow.node_mouse_down(&id, event, window, cx))
-                    .ok();
+                let took = flow
+                    .update(cx, |flow, cx| flow.node_mouse_down(&id, event, window, cx))
+                    .unwrap_or(false);
+                if took {
+                    cx.stop_propagation();
+                }
             })
             .child(measure_node(
                 self.shared.clone(),
@@ -2701,12 +2853,23 @@ impl Render for Flow {
             let shared = shared.clone();
             let background = self.background;
             let (move_flow, up_flow) = (this.clone(), this.clone());
+            let listener = self.transform_listener.clone();
             canvas(
                 move |bounds, window, cx| {
                     if shared.pane.replace(bounds).size != bounds.size {
                         // A pending fit and what's on screen depend on the pane's size.
                         cx.notify(flow_id);
                         window.request_animation_frame();
+                    }
+                    // In the frame it changes, so a native view kept in line moves with it.
+                    let transform = CanvasTransform {
+                        pane: bounds,
+                        viewport,
+                    };
+                    if let Some(listener) = &listener
+                        && shared.transform.replace(Some(transform)) != Some(transform)
+                    {
+                        listener(transform, window, cx);
                     }
                     shared
                 },
