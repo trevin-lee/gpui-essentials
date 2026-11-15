@@ -93,8 +93,8 @@ impl Reorder {
     /// are the blocks' middles as drawn (in content y, which scrolling leaves alone), which the
     /// pointer passes to move them.
     pub(crate) fn begin_drag(&mut self, mut middles: HashMap<BlockId, f32>) {
-        // A block with no text to measure (a rule, a widget) gets a middle from its slot, moved
-        // by how far the measured ones are from theirs.
+        // A block that wasn't drawn (outside the laid-out range) gets a middle from its slot,
+        // moved by how far the measured ones are from theirs.
         let centre = |s: &Slot| s.top + s.pitch / 2.;
         let shifts: Vec<f32> = self
             .last

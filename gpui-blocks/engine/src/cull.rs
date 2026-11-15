@@ -164,6 +164,9 @@ pub(crate) struct CullState {
     pub(crate) visible: Option<(Pixels, Pixels)>,
     /// Blocks measured in the current frame: (id, index, top, bottom).
     pub(crate) measured: Vec<(BlockId, usize, Pixels, Pixels)>,
+    /// Each unit laid out in the current frame and the bounds it was drawn
+    /// in, window coordinates; the frame keeps them (`FrameLayout::units`).
+    pub(crate) drawn: Vec<(BlockId, Bounds<Pixels>)>,
     /// Editor-local y span that the current frame actually laid out.
     pub(crate) rendered_span: Option<(Pixels, Pixels)>,
     /// Number of top-level blocks laid out in the last render (perf tests).
@@ -300,10 +303,12 @@ impl Element for Measured {
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.state
-            .borrow_mut()
+        let mut state = self.state.borrow_mut();
+        state
             .measured
             .push((self.id, self.index, bounds.top(), bounds.bottom()));
+        state.drawn.push((self.id, bounds));
+        drop(state);
         child.prepaint(window, cx);
     }
 

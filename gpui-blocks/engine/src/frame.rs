@@ -152,6 +152,10 @@ pub(crate) struct FrameLayout {
     /// The rem size the editor was drawn at, for widths given in rems (a
     /// toggle's gutter).
     pub(crate) rem_size: Pixels,
+    /// Each laid-out cull unit (a top-level block, or a chunk of a long
+    /// list) and the bounds it was drawn in: where a block with no text,
+    /// such as a rule or a widget, is.
+    pub(crate) units: Vec<(BlockId, Bounds<Pixels>)>,
 }
 
 impl FrameLayout {
