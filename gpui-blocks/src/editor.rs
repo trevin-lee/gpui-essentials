@@ -2,71 +2,96 @@
 //! the side menu beside the block under the pointer.
 //!
 //! The document itself is gpui-kit-markdown-editor's (`BlockEditorState`): its model, input,
-//! selection, undo and drawing. This view adds what a Notion-like editor has on top, through
-//! the editor's public API: the caret's and blocks' bounds to place the menus, `capture_suffix`
-//! and `replace_captured` to take back the typed `/…`, `run` for every change, and
-//! `begin_block_drag` for the side menu's handle. Nothing here draws on a timer: the menus
-//! change on input and pointer moves only.
+//! selection, undo and drawing. This view adds the menus on top, through the editor's public
+//! API: the caret's and blocks' bounds to place them, `capture_suffix` and `replace_captured`
+//! to take back the typed `/…`, `run` for every change, and `begin_block_drag` for the side
+//! menu's handle. Nothing here draws on a timer: the menus change on input and pointer moves
+//! only.
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use markdown_editor::{
-    BlockEditor, BlockEditorEvent, BlockEditorState, BlockId, BlockKind, EditOrigin,
-    EditorCommand, surfaces::with_default_surfaces,
+    BlockEditor, BlockEditorEvent, BlockEditorState, BlockId, BlockKind, BlockPosition,
+    BlockSelection, EditOrigin, EditorCommand, surfaces::with_default_surfaces,
 };
 
+use std::path::Path;
 use std::sync::Arc;
 
+use crate::actions::*;
 use crate::slash::{self, SlashAction, SlashItem};
 use crate::widget::{Widget, WidgetPlugin};
 
-actions!(
-    gpui_blocks,
-    [SlashUp, SlashDown, SlashPick, SlashClose, MoveBlockUp, MoveBlockDown]
-);
+/// The key context of the whole view.
+const CONTEXT: &str = "BlocksEditor";
+/// The key contexts while the slash menu is open; the menu's keys outrank the editor's then.
+const CONTEXT_WITH_MENU: &str = "BlocksEditor BlocksSlashMenu";
 
-/// The key context the view adds while the slash menu is open; its keys outrank the editor's.
-const SLASH_CONTEXT: &str = "BlocksSlashMenu";
-
-/// The text column's width, as Notion's default page.
+/// The text column's width.
 const COLUMN: f32 = 720.;
 /// Room left of the column for the side menu.
 const GUTTER: f32 = 64.;
 
-/// Binds the slash menu's keys. They match only inside the editor while the menu is open, and
-/// are bound after the editor's own, so ↑, ↓, Enter, Tab and Esc go to the menu then.
-pub fn bind_keys(cx: &mut App) {
-    let ctx = Some("BlocksSlashMenu > BlockEditor");
+/// Binds the slash menu's keys and the keys that move blocks. They match only inside this view
+/// (key context `BlocksEditor`, or `BlocksSlashMenu` while the menu is open), and are bound
+/// after the editor's own, so ↑, ↓, Enter, Tab and Esc go to the menu while it's open. An app
+/// can bind the actions in [`crate::actions`] to other keys after [`crate::init`].
+pub(crate) fn bind_keys(cx: &mut App) {
+    let menu = Some("BlocksSlashMenu > BlockEditor");
+    let editor = Some("BlocksEditor > BlockEditor");
     cx.bind_keys([
-        KeyBinding::new("up", SlashUp, ctx),
-        KeyBinding::new("down", SlashDown, ctx),
-        KeyBinding::new("ctrl-p", SlashUp, ctx),
-        KeyBinding::new("ctrl-n", SlashDown, ctx),
-        KeyBinding::new("enter", SlashPick, ctx),
-        KeyBinding::new("tab", SlashPick, ctx),
-        KeyBinding::new("escape", SlashClose, ctx),
-        // Notion's keys for moving the caret's block (a list item within its list). They were
-        // the editor's for selecting to the document's start and end, which ⌘⇧Home and End
-        // still do.
-        KeyBinding::new("cmd-shift-up", MoveBlockUp, Some("BlockEditor")),
-        KeyBinding::new("cmd-shift-down", MoveBlockDown, Some("BlockEditor")),
+        KeyBinding::new("up", SlashUp, menu),
+        KeyBinding::new("down", SlashDown, menu),
+        KeyBinding::new("ctrl-p", SlashUp, menu),
+        KeyBinding::new("ctrl-n", SlashDown, menu),
+        KeyBinding::new("enter", SlashPick, menu),
+        KeyBinding::new("tab", SlashPick, menu),
+        KeyBinding::new("escape", SlashClose, menu),
+        // ⌘⇧↑ and ↓ (Ctrl on Linux and Windows) move the caret's block: a list item within its
+        // list, anything else among the top-level blocks. Inside this view they replace the
+        // editor's select to start and end, which ⌘⇧Home and End still do.
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-shift-up"
+            } else {
+                "ctrl-shift-up"
+            },
+            MoveBlockUp,
+            editor,
+        ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-shift-down"
+            } else {
+                "ctrl-shift-down"
+            },
+            MoveBlockDown,
+            editor,
+        ),
     ]);
 }
 
 /// The Markdown extensions the editor parses and draws with: the toggles' and callouts'
 /// containers, and the widgets.
 pub fn extensions(widgets: &[Arc<dyn Widget>]) -> gpui_kit::base::text::MarkdownExtensions {
-    widgets.iter().fold(with_default_surfaces(Default::default()), |ext, widget| {
-        ext.plugin(WidgetPlugin(widget.clone()))
-    })
+    widgets
+        .iter()
+        .fold(with_default_surfaces(Default::default()), |ext, widget| {
+            ext.plugin(WidgetPlugin(widget.clone()))
+        })
 }
+
+/// Turns a picture picked from the slash menu's Image item into the Markdown destination to
+/// write, or `None` to insert nothing.
+type ImageLink = Arc<dyn Fn(&Path) -> Option<String>>;
 
 /// What an editor is made with beyond its document: the app's widgets and slash menu items.
 #[derive(Clone)]
 pub struct Options {
     widgets: Vec<Arc<dyn Widget>>,
     items: Vec<SlashItem>,
+    image_link: Option<ImageLink>,
 }
 
 impl Default for Options {
@@ -74,14 +99,47 @@ impl Default for Options {
         Self {
             widgets: Vec::new(),
             items: slash::default_items(),
+            image_link: None,
         }
     }
 }
 
+impl std::fmt::Debug for Options {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Options")
+            .field(
+                "widgets",
+                &self
+                    .widgets
+                    .iter()
+                    .map(|w| w.name().to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .field("items", &self.items)
+            .field("image_link", &self.image_link.is_some())
+            .finish()
+    }
+}
+
 impl Options {
-    /// Draw fenced blocks with this widget's name with it (see [`crate::widget`]).
+    /// Draw fenced blocks with this widget's name with it (see [`crate::widget`]). A widget
+    /// named after a language, such as `rust`, takes every code block in that language.
     pub fn widget(mut self, widget: impl Widget) -> Self {
+        debug_assert!(
+            self.widgets.iter().all(|w| w.name() != widget.name()),
+            "two widgets are named {:?}",
+            widget.name()
+        );
         self.widgets.push(Arc::new(widget));
+        self
+    }
+
+    /// How the slash menu's Image item writes the picture picked from this computer: `link`
+    /// returns the link to write (a path relative to the document, or a URL after the app has
+    /// copied or uploaded the file), or `None` to insert nothing. Without it the picture's
+    /// absolute path is written, which only works on this computer.
+    pub fn image_link(mut self, link: impl Fn(&Path) -> Option<String> + 'static) -> Self {
+        self.image_link = Some(Arc::new(link));
         self
     }
 
@@ -99,10 +157,41 @@ impl Options {
 }
 
 /// What the view tells its owner.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum EditorEvent {
-    /// The document changed (once per undoable step, undo and redo included).
+    /// The document changed: once per edit, undo and redo included.
     Changed,
+    /// ⌘K (Ctrl+K on Linux and Windows): the app shows a field for the link on the selection or
+    /// at the caret, then calls `set_link` on [`Editor::state`]. `url` is the link there now.
+    EditLinkRequested { url: Option<SharedString> },
+    /// ⌘-click (Ctrl-click) on a link. The editor never opens links itself.
+    LinkClicked { url: SharedString },
+}
+
+/// Splits YAML front matter (between `---` lines at the very top) from the document, so the
+/// editor never parses it and [`Editor::markdown`] writes it back as it was.
+fn split_front_matter(markdown: &str) -> (String, &str) {
+    let Some(rest) = markdown
+        .strip_prefix("---\n")
+        .or_else(|| markdown.strip_prefix("---\r\n"))
+    else {
+        return (String::new(), markdown);
+    };
+    let mut at = markdown.len() - rest.len();
+    for line in rest.split_inclusive('\n') {
+        at += line.len();
+        if matches!(line.trim_end_matches(['\r', '\n']), "---" | "...") {
+            let front = markdown[..at].replace("\r\n", "\n");
+            let front = if front.ends_with('\n') {
+                front
+            } else {
+                front + "\n"
+            };
+            return (front, markdown[at..].trim_start_matches(['\r', '\n']));
+        }
+    }
+    (String::new(), markdown)
 }
 
 /// An open slash menu.
@@ -121,9 +210,15 @@ pub struct Editor {
     scroll: ScrollHandle,
     menu_scroll: ScrollHandle,
     items: Vec<SlashItem>,
+    image_link: Option<ImageLink>,
+    /// The document's front matter, kept aside (see [`split_front_matter`]).
+    front_matter: String,
     slash: Option<Slash>,
     /// The `/` closed with Esc. It stays closed until the caret leaves it.
     dismissed: Option<(BlockId, usize)>,
+    /// The next change may open the slash menu even though it wasn't typed (the side menu's
+    /// "+" puts a `/` on a new line).
+    open_on_next_change: bool,
     /// The top-level block the side menu is beside.
     hovered: Option<BlockId>,
     _subscriptions: Vec<Subscription>,
@@ -146,25 +241,34 @@ impl Editor {
     ) -> Self {
         let scroll = ScrollHandle::new();
         let widgets = options.widgets.clone();
+        let (front_matter, body) = split_front_matter(markdown);
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
                 .with_markdown_extensions(extensions(&widgets))
-                .with_source(markdown);
+                .with_source(body);
             state.set_scroll_handle(scroll.clone());
             state
         });
         let subscription = cx.subscribe(&state, |this, _, event: &BlockEditorEvent, cx| {
             match event {
                 BlockEditorEvent::Changed { origin, .. } => {
-                    // Typing hides the side menu until the pointer moves again, as Notion's.
+                    // Typing hides the side menu until the pointer moves again.
                     if matches!(origin, EditOrigin::Typing) && this.hovered.take().is_some() {
                         cx.notify();
                     }
-                    this.refresh_slash(cx);
+                    let typed = matches!(origin, EditOrigin::Typing | EditOrigin::Backspace);
+                    let open = std::mem::take(&mut this.open_on_next_change) || typed;
+                    this.refresh_slash(open, cx);
                     cx.emit(EditorEvent::Changed);
                 }
-                BlockEditorEvent::SelectionChanged => this.refresh_slash(cx),
+                BlockEditorEvent::SelectionChanged => this.refresh_slash(false, cx),
                 BlockEditorEvent::Blur => this.close_slash(cx),
+                BlockEditorEvent::EditLinkRequested { url } => {
+                    cx.emit(EditorEvent::EditLinkRequested { url: url.clone() })
+                }
+                BlockEditorEvent::LinkClicked { url } => {
+                    cx.emit(EditorEvent::LinkClicked { url: url.clone() })
+                }
                 _ => {}
             }
         });
@@ -173,23 +277,63 @@ impl Editor {
             scroll,
             menu_scroll: ScrollHandle::new(),
             items: options.items,
+            image_link: options.image_link,
+            front_matter,
             slash: None,
             dismissed: None,
+            open_on_next_change: false,
             hovered: None,
             _subscriptions: vec![subscription],
         }
     }
 
-    /// The editor underneath, for what this view doesn't wrap.
+    /// The editor underneath, for what this view doesn't wrap. Its API is
+    /// gpui-kit-markdown-editor's and can change with it.
     pub fn state(&self) -> &Entity<BlockEditorState> {
         &self.state
     }
 
-    /// The document as Markdown.
+    /// The document as Markdown, its front matter included.
     pub fn markdown(&self, cx: &App) -> String {
-        self.state.read(cx).source()
+        let body = self.state.read(cx).source();
+        if self.front_matter.is_empty() {
+            body
+        } else if body.is_empty() {
+            self.front_matter.clone()
+        } else {
+            format!("{}\n{body}", self.front_matter)
+        }
     }
 
+    /// Replaces the document. Undo history starts over, and no [`EditorEvent::Changed`] is sent.
+    pub fn set_markdown(&mut self, markdown: &str, cx: &mut Context<Self>) {
+        let (front_matter, body) = split_front_matter(markdown);
+        self.front_matter = front_matter;
+        let _ = self
+            .state
+            .update(cx, |state, cx| state.set_source(body, cx));
+        self.slash = None;
+        self.dismissed = None;
+        self.hovered = None;
+        cx.notify();
+    }
+
+    /// Whether the document can be edited.
+    pub fn is_readonly(&self, cx: &App) -> bool {
+        self.state.read(cx).is_readonly()
+    }
+
+    /// Blocks or allows edits. A read-only document can still be selected and copied, and shows
+    /// no side menu.
+    pub fn set_readonly(&mut self, readonly: bool, cx: &mut Context<Self>) {
+        self.state
+            .update(cx, |state, cx| state.set_readonly(readonly, cx));
+        self.slash = None;
+        self.hovered = None;
+        cx.notify();
+    }
+
+    /// Gives the editor the keyboard.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         let focus = self.state.read(cx).focus_handle(cx);
         window.focus(&focus, cx);
@@ -200,20 +344,33 @@ impl Editor {
         &self.scroll
     }
 
-    /// Opens, narrows or closes the slash menu from the caret's line.
-    fn refresh_slash(&mut self, cx: &mut Context<Self>) {
+    /// Opens, narrows or closes the slash menu from the caret's line. Only typing (or the side
+    /// menu's "+") opens it: moving the caret next to a `/` already in the text doesn't.
+    fn refresh_slash(&mut self, may_open: bool, cx: &mut Context<Self>) {
         let next = {
             let state = self.state.read(cx);
             let model = state.model();
-            let caret = model.caret();
+            let caret = model.caret().filter(|_| model.selection().is_collapsed());
             let in_text = matches!(
                 model.block_kind_at_caret(),
                 Some(BlockKind::Paragraph | BlockKind::Heading { .. })
             );
-            match (caret, in_text, state.caret_prefix().and_then(slash::query_at)) {
+            match (
+                caret,
+                in_text,
+                state.caret_prefix().and_then(slash::query_at),
+            ) {
                 (Some(caret), true, Some((at, query))) => {
                     let matches = slash::filter(&self.items, query);
-                    if self.dismissed == Some((caret.block, at)) || matches.is_empty() {
+                    let open = self
+                        .slash
+                        .as_ref()
+                        .is_some_and(|s| s.block == caret.block && s.at == at);
+                    if !(may_open || open)
+                        || self.dismissed == Some((caret.block, at))
+                        || matches.is_empty()
+                        || state.is_readonly()
+                    {
                         None
                     } else {
                         let selected = match &self.slash {
@@ -235,7 +392,9 @@ impl Editor {
             }
         };
         if next.is_none() {
-            self.dismissed = self.dismissed.filter(|_| self.state_has_slash_at_dismissed(cx));
+            self.dismissed = self
+                .dismissed
+                .filter(|_| self.state_has_slash_at_dismissed(cx));
         }
         if next != self.slash {
             self.slash = next;
@@ -280,9 +439,13 @@ impl Editor {
     }
 
     fn slash_pick(&mut self, _: &SlashPick, window: &mut Window, cx: &mut Context<Self>) {
-        match self.slash.as_ref().map(|s| s.matches[s.selected]) {
-            Some(ix) => self.pick(ix, window, cx),
-            None => cx.propagate(),
+        let picked = self
+            .slash
+            .as_ref()
+            .and_then(|s| s.matches.get(s.selected).copied())
+            .is_some_and(|ix| self.pick(ix, window, cx));
+        if !picked {
+            cx.propagate();
         }
     }
 
@@ -290,6 +453,20 @@ impl Editor {
         self.state.update(cx, |state, cx| {
             let _ = state.run(EditorCommand::MoveBlocks { down }, cx);
         });
+    }
+
+    /// Whether the open menu still matches the document: the caret is at the end of the `/…` it
+    /// was opened for, with nothing selected and no IME composition in progress. The document
+    /// can change under the menu without a `Changed` event (`set_source` sends none).
+    fn slash_is_current(&self, slash: &Slash, cx: &App) -> bool {
+        let state = self.state.read(cx);
+        let model = state.model();
+        !state.is_composing()
+            && !state.is_readonly()
+            && model.selection().is_collapsed()
+            && model.caret().is_some_and(|c| c.block == slash.block)
+            && state.caret_prefix().and_then(slash::query_at)
+                == Some((slash.at, slash.query.as_str()))
     }
 
     fn slash_close(&mut self, _: &SlashClose, _: &mut Window, cx: &mut Context<Self>) {
@@ -302,36 +479,54 @@ impl Editor {
         }
     }
 
-    /// Runs an item: the typed `/…` goes, then the line becomes the block.
-    fn pick(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Runs an item: the typed `/…` goes, then the line becomes the block, as one undo step.
+    /// Returns false, and changes nothing, when the menu no longer matches the document.
+    fn pick(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(slash) = self.slash.take() else {
-            return;
+            return false;
         };
-        let action = self.items[ix].action.clone();
+        cx.notify();
+        let current = slash.matches.contains(&ix) && self.slash_is_current(&slash, cx);
+        let Some(action) = self
+            .items
+            .get(ix)
+            .map(|i| i.action.clone())
+            .filter(|_| current)
+        else {
+            return false;
+        };
         let typed = slash.query.len() + 1;
-        self.state.update(cx, |state, cx| {
-            if let Ok(mut range) = state.capture_suffix(typed) {
-                let _ = state.replace_captured(&mut range, "", cx);
-            }
-            match &action {
-                SlashAction::Command(command) => {
-                    let _ = state.run(command.clone(), cx);
+        let image_at = self.state.update(cx, |state, cx| {
+            let Ok(mut range) = state.capture_suffix(typed) else {
+                return None;
+            };
+            state.group_edits(cx, |state, cx| {
+                state.replace_captured(&mut range, "", cx).ok()?;
+                match &action {
+                    // A list item picking its own kind of list stays as it is, rather than
+                    // toggling the list off.
+                    SlashAction::Command(EditorCommand::ToggleList { ordered })
+                        if list_at_caret(state) == Some(*ordered) => {}
+                    SlashAction::Command(command) => {
+                        let _ = state.run(command.clone(), cx);
+                    }
+                    SlashAction::Markdown(markdown) => {
+                        let _ = state.run(EditorCommand::InsertMarkdown(markdown.to_string()), cx);
+                    }
+                    SlashAction::Image => return state.model().caret(),
                 }
-                SlashAction::Markdown(markdown) => {
-                    let _ = state.run(EditorCommand::InsertMarkdown(markdown.to_string()), cx);
-                }
-                SlashAction::Image => {}
-            }
+                None
+            })
         });
-        if action == SlashAction::Image {
-            self.insert_image(window, cx);
+        if let Some(at) = image_at {
+            self.insert_image(at, window, cx);
         }
         self.focus(window, cx);
-        cx.notify();
+        true
     }
 
-    /// Asks for a picture from this Mac and inserts it as `![name](path)`.
-    fn insert_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Asks for a picture from this computer and inserts it at `at` as `![name](link)`.
+    fn insert_image(&mut self, at: BlockPosition, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -339,6 +534,7 @@ impl Editor {
             prompt: Some("Insert".into()),
         });
         let state = self.state.clone();
+        let image_link = self.image_link.clone();
         cx.spawn_in(window, async move |_, cx| {
             let Ok(Ok(Some(paths))) = paths.await else {
                 return;
@@ -346,12 +542,16 @@ impl Editor {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().replace(['[', ']'], ""))
-                .unwrap_or_default();
-            let markdown = format!("![{name}](<{}>)", path.display());
-            let _ = state.update(cx, |state, cx| {
+            let link = match &image_link {
+                Some(link) => link(&path),
+                None => Some(path.display().to_string()),
+            };
+            let Some(markdown) = link.and_then(|link| image_markdown(&path, &link)) else {
+                return;
+            };
+            state.update(cx, |state, cx| {
+                // Where the item was picked, if that line is still there.
+                let _ = state.set_selection(BlockSelection::caret(at), cx);
                 let _ = state.run(EditorCommand::InsertMarkdown(markdown), cx);
             });
         })
@@ -360,7 +560,7 @@ impl Editor {
 
     /// The pointer moved: the side menu goes beside the top-level block level with it.
     fn hover(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if event.pressed_button.is_some() {
+        if event.pressed_button.is_some() || self.state.read(cx).is_readonly() {
             return;
         }
         let y = event.position.y;
@@ -386,22 +586,31 @@ impl Editor {
                 .is_some_and(|b| b.kind() == BlockKind::Paragraph && b.text() == Some(""));
             if empty {
                 let _ = state.set_selection(
-                    markdown_editor::BlockSelection::caret(markdown_editor::BlockPosition::new(block, 0)),
+                    markdown_editor::BlockSelection::caret(markdown_editor::BlockPosition::new(
+                        block, 0,
+                    )),
                     cx,
                 );
-            } else if state.run(EditorCommand::InsertParagraphAfter(block), cx).is_err() {
+            } else if state
+                .run(EditorCommand::InsertParagraphAfter(block), cx)
+                .is_err()
+            {
                 return;
             }
             if let Ok(mut range) = state.capture_caret() {
                 let _ = state.replace_captured(&mut range, "/", cx);
             }
         });
+        self.open_on_next_change = true;
         self.focus(window, cx);
     }
 
     fn side_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
         let block = self.hovered?;
         let state = self.state.read(cx);
+        if state.is_readonly() {
+            return None;
+        }
         let blocks = state.top_level_blocks();
         let (_, bounds) = blocks.iter().find(|(id, _)| *id == block)?;
         // The column's left edge: where top-level text starts.
@@ -444,7 +653,8 @@ impl Editor {
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                     cx.stop_propagation();
-                                    let _ = this.update(cx, |this, cx| this.add_below(block, window, cx));
+                                    let _ = this
+                                        .update(cx, |this, cx| this.add_below(block, window, cx));
                                 }),
                         )
                         .child(
@@ -454,7 +664,9 @@ impl Editor {
                                     // The editor follows the pointer from here and drops the
                                     // block where it's let go, as one undoable move.
                                     cx.stop_propagation();
-                                    state.update(cx, |s, _| s.begin_block_drag(block, event.position));
+                                    state.update(cx, |s, _| {
+                                        s.begin_block_drag(block, event.position)
+                                    });
                                     let _ = this_drag.update(cx, |this, cx| {
                                         this.hovered = None;
                                         cx.notify();
@@ -502,8 +714,11 @@ impl Editor {
                     .gap_2()
                     .when(selected, |d| d.bg(theme.accent))
                     .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, _, cx| {
+                        // Listeners come from the last frame drawn, and typing can narrow the
+                        // list before the next one: row `n` may be gone, or hold another item.
                         if let Some(s) = &mut this.slash
                             && s.selected != n
+                            && s.matches.get(n) == Some(&ix)
                         {
                             s.selected = n;
                             cx.notify();
@@ -574,6 +789,44 @@ impl Editor {
     }
 }
 
+/// `Some(ordered)` when the caret's line is a plain (not to-do) list item's first line.
+fn list_at_caret(state: &BlockEditorState) -> Option<bool> {
+    let model = state.model();
+    let line = model.document().block(model.caret()?.block)?;
+    let item = line.parent()?;
+    if item.kind() != (BlockKind::ListItem { checked: None })
+        || item.children().next()?.id() != line.id()
+    {
+        return None;
+    }
+    match item.parent()?.kind() {
+        BlockKind::List { ordered } => Some(ordered),
+        _ => None,
+    }
+}
+
+/// `![name](<link>)`: the file's name as the picture's text, its Markdown characters escaped,
+/// and the link in angle brackets so spaces are allowed. `None` for a link with a line break,
+/// which Markdown can't hold.
+fn image_markdown(path: &Path, link: &str) -> Option<String> {
+    if link.contains(['\n', '\r']) {
+        return None;
+    }
+    let name = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut alt = String::new();
+    for c in name.chars() {
+        if "\\`*_[]<>!".contains(c) {
+            alt.push('\\');
+        }
+        alt.push(c);
+    }
+    let link = link.replace('<', "\\<").replace('>', "\\>");
+    Some(format!("![{alt}](<{link}>)"))
+}
+
 impl Focusable for Editor {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.state.read(cx).focus_handle(cx)
@@ -587,7 +840,11 @@ impl Render for Editor {
         div()
             .id("gpui-blocks")
             .size_full()
-            .when(self.slash.is_some(), |d| d.key_context(SLASH_CONTEXT))
+            .key_context(if self.slash.is_some() {
+                CONTEXT_WITH_MENU
+            } else {
+                CONTEXT
+            })
             .on_action(cx.listener(Self::slash_up))
             .on_action(cx.listener(Self::slash_down))
             .on_action(cx.listener(Self::slash_pick))
@@ -595,19 +852,31 @@ impl Render for Editor {
             .on_action(cx.listener(|this, _: &MoveBlockUp, _, cx| this.move_block(false, cx)))
             .on_action(cx.listener(|this, _: &MoveBlockDown, _, cx| this.move_block(true, cx)))
             .on_mouse_move(cx.listener(Self::hover))
+            // The side menu was placed for the block under the pointer before the scroll; it
+            // comes back on the next pointer move.
+            .on_scroll(cx.listener(|this, _: &ScrollEvent, _, cx| {
+                if this.hovered.take().is_some() {
+                    cx.notify();
+                }
+            }))
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
             .child(
-                div().w(px(COLUMN + GUTTER * 2.)).max_w_full().mx_auto().min_h_full().child(
-                    // Padding on the editor itself, so the whole column takes clicks, and the
-                    // gutter on its left holds the side menu.
-                    BlockEditor::new(&self.state)
-                        .w_full()
-                        .min_h_full()
-                        .px(px(GUTTER))
-                        .pt(px(72.))
-                        .pb(px(240.)),
-                ),
+                div()
+                    .w(px(COLUMN + GUTTER * 2.))
+                    .max_w_full()
+                    .mx_auto()
+                    .min_h_full()
+                    .child(
+                        // Padding on the editor itself, so the whole column takes clicks, and the
+                        // gutter on its left holds the side menu.
+                        BlockEditor::new(&self.state)
+                            .w_full()
+                            .min_h_full()
+                            .px(px(GUTTER))
+                            .pt(px(72.))
+                            .pb(px(240.)),
+                    ),
             )
             .children(side_menu)
             .children(slash_menu)
@@ -619,8 +888,12 @@ mod tests {
     use super::Editor;
     use gpui_kit::{Entity, TestAppContext, VisualTestContext};
     use markdown_editor::{BlockKind, BlockPosition, BlockSelection};
+    use std::prelude::rust_2024::test;
 
-    fn open<'a>(cx: &'a mut TestAppContext, source: &str) -> (Entity<Editor>, &'a mut VisualTestContext) {
+    fn open<'a>(
+        cx: &'a mut TestAppContext,
+        source: &str,
+    ) -> (Entity<Editor>, &'a mut VisualTestContext) {
         cx.update(|cx| {
             gpui_kit::init(cx);
             crate::init(cx);
@@ -657,9 +930,12 @@ mod tests {
 
     fn menu(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> Option<Vec<String>> {
         editor.update(cx, |e, _| {
-            e.slash
-                .as_ref()
-                .map(|s| s.matches.iter().map(|ix| e.items[*ix].title.to_string()).collect())
+            e.slash.as_ref().map(|s| {
+                s.matches
+                    .iter()
+                    .map(|ix| e.items[*ix].title.to_string())
+                    .collect()
+            })
         })
     }
 
@@ -670,10 +946,16 @@ mod tests {
         cx.simulate_keystrokes("enter");
         cx.simulate_input("/");
         draw(cx);
-        assert_eq!(menu(&editor, cx).map(|m| m.len()), Some(crate::slash::default_items().len()));
+        assert_eq!(
+            menu(&editor, cx).map(|m| m.len()),
+            Some(crate::slash::default_items().len())
+        );
         cx.simulate_input("head");
         draw(cx);
-        assert_eq!(menu(&editor, cx).unwrap(), ["Heading 1", "Heading 2", "Heading 3"]);
+        assert_eq!(
+            menu(&editor, cx).unwrap(),
+            ["Heading 1", "Heading 2", "Heading 3"]
+        );
         // ↓ and Enter are the menu's while it's open, not the editor's.
         cx.simulate_keystrokes("down enter");
         draw(cx);
@@ -749,10 +1031,155 @@ mod tests {
     }
 
     #[gpui_kit::test]
+    fn a_stale_selection_in_the_menu_never_panics(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("/");
+        draw(cx);
+        // As a pointer move from the frame before the list narrowed could leave it.
+        cx.simulate_input("h1");
+        editor.update(cx, |e, _| e.slash.as_mut().unwrap().selected = 9);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(menu(&editor, cx), None);
+    }
+
+    #[gpui_kit::test]
+    fn moving_the_caret_next_to_a_slash_doesnt_open_the_menu(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "read / write\n\nnext");
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let id = s.model().document().leaves().next().unwrap().id();
+                s.set_selection(BlockSelection::caret(BlockPosition::new(id, 6)), cx)
+                    .unwrap();
+            })
+        });
+        draw(cx);
+        assert_eq!(menu(&editor, cx), None);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "read /\n\n write\n\nnext");
+    }
+
+    #[gpui_kit::test]
+    fn a_menu_left_over_from_a_replaced_document_does_nothing(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("/h");
+        draw(cx);
+        assert!(menu(&editor, cx).is_some());
+        editor.update(cx, |e, cx| {
+            e.state()
+                .update(cx, |s, cx| s.set_source("Hello world", cx).unwrap())
+        });
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(!markdown(&editor, cx).starts_with('#'));
+    }
+
+    #[gpui_kit::test]
+    fn a_pick_undoes_in_one_step(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("/head");
+        draw(cx);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "# ");
+        cx.simulate_keystrokes("cmd-z");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "/head");
+    }
+
+    #[gpui_kit::test]
+    fn picking_a_lists_own_kind_keeps_the_item(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "- item");
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_input(" /bullet");
+        draw(cx);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "- item ");
+    }
+
+    #[gpui_kit::test]
+    fn front_matter_is_kept_aside_and_written_back(cx: &mut TestAppContext) {
+        let source = "---\ntitle: Notes\ntags: [a]\n---\n\n# Notes";
+        let (editor, cx) = open(cx, source);
+        assert_eq!(markdown(&editor, cx), source);
+        let shown = editor.update(cx, |e, cx| e.state().read(cx).source());
+        assert_eq!(shown, "# Notes");
+        editor.update(cx, |e, cx| e.set_markdown("---\na: 1\n---\nBody", cx));
+        assert_eq!(markdown(&editor, cx), "---\na: 1\n---\n\nBody");
+    }
+
+    #[test]
+    fn front_matter_needs_its_closing_line() {
+        assert_eq!(
+            super::split_front_matter("---\nnot closed"),
+            (String::new(), "---\nnot closed")
+        );
+        assert_eq!(
+            super::split_front_matter("# Title\n---\n"),
+            (String::new(), "# Title\n---\n")
+        );
+        assert_eq!(
+            super::split_front_matter("---\r\na: 1\r\n---\r\n\r\nBody"),
+            ("---\na: 1\n---\n".to_string(), "Body")
+        );
+    }
+
+    #[test]
+    fn a_pictures_name_and_link_are_escaped() {
+        let path = std::path::Path::new("/tmp/my_*pic*.png");
+        assert_eq!(
+            super::image_markdown(path, "/tmp/a <b>.png").unwrap(),
+            "![my\\_\\*pic\\*](</tmp/a \\<b\\>.png>)"
+        );
+        assert_eq!(super::image_markdown(path, "a\nb"), None);
+    }
+
+    #[gpui_kit::test]
+    fn dividers_and_widgets_get_a_side_menu_too(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "a\n\n---\n\nb");
+        let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks().len());
+        assert_eq!(blocks, 3);
+    }
+
+    #[gpui_kit::test]
+    fn cmd_shift_arrows_in_a_toggles_body_keep_its_summary(cx: &mut TestAppContext) {
+        let (editor, cx) = open(
+            cx,
+            "<details open>\n<summary>Title</summary>\n\nBody\n\n</details>",
+        );
+        caret_at_end(&editor, cx, 1);
+        cx.simulate_keystrokes("cmd-shift-up");
+        draw(cx);
+        assert!(markdown(&editor, cx).contains("<summary>Title</summary>"));
+    }
+
+    #[gpui_kit::test]
+    fn cmd_shift_arrows_in_a_table_keep_its_columns(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "| h1 | h2 |\n| --- | --- |\n| a | b |");
+        caret_at_end(&editor, cx, 3);
+        cx.simulate_keystrokes("cmd-shift-up");
+        draw(cx);
+        assert_eq!(
+            markdown(&editor, cx),
+            "| h1 | h2 |\n| --- | --- |\n| a | b |"
+        );
+    }
+
+    #[gpui_kit::test]
     fn the_side_menus_plus_adds_a_line_with_the_menu_open(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "# Title\n\nText");
         let first = editor.update(cx, |e, cx| {
-            e.state().read(cx).model().document().root().children().next().unwrap().id()
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .next()
+                .unwrap()
+                .id()
         });
         cx.update(|window, cx| editor.update(cx, |e, cx| e.add_below(first, window, cx)));
         draw(cx);
@@ -763,7 +1190,14 @@ mod tests {
         draw(cx);
         assert_eq!(markdown(&editor, cx), "# Title\n\n> Said\n\nText");
         let kinds: Vec<BlockKind> = editor.update(cx, |e, cx| {
-            e.state().read(cx).model().document().root().children().map(|b| b.kind()).collect()
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .map(|b| b.kind())
+                .collect()
         });
         assert_eq!(kinds[1], BlockKind::Blockquote);
     }

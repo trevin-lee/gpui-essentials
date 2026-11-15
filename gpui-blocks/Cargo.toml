@@ -1,13 +1,16 @@
 [package]
 name = "gpui-blocks"
 version = "0.1.0"
-description = "A Notion-like block editor for GPUI: Markdown documents with a slash menu, drag handles, callouts, toggles and widget blocks"
+description = "A block editor for GPUI Kit apps: Markdown documents with a slash menu, drag handles, callouts, toggles and widget blocks"
 edition = "2024"
+# GPUI Kit 0.9 needs it.
+rust-version = "1.100"
 license = "Apache-2.0"
 repository = "https://github.com/trevin-lee/gpui-blocks"
 readme = "README.md"
-keywords = ["gpui", "editor", "markdown", "notion", "wysiwyg"]
+keywords = ["gpui", "editor", "markdown", "block-editor", "wysiwyg"]
 categories = ["gui", "text-editors"]
+include = ["/src", "/examples", "/README.md", "/LICENSE", "/NOTICE"]
 
 [lib]
 name = "gpui_blocks"
@@ -17,10 +20,10 @@ gpui-kit = "0.9.1"
 # The document model, input, selection, undo and drawing: gpui-kit-markdown-editor, through a fork
 # that adds callouts, toggles, block motion and the hooks this crate draws its menus with. Pinned
 # to a commit until those changes are published.
-markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "4b7776ffba4a30706cc34fca3dda24961c48edb7" }
+markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "0ce34f876112b5d5ac03a3e0c46e60a5f1f8af6c" }
 # The parser's syntax tree, for widget blocks: the version gpui-kit parses with.
 markdown = "1.0.0"
-# Only for the shots feature: GPUI with its test support (offscreen rendering) on, and GPUI's
+# Only for the shots feature, which only the example uses: GPUI with its test support (offscreen rendering) on, and GPUI's
 # version of the image crate to save the picture.
 gpui-pre = { version = "0.3.12", features = ["test-support"], optional = true }
 gpui-pre-macos = { version = "0.3.12", features = ["test-support"], optional = true }
@@ -37,6 +40,8 @@ name = "editor"
 futures = "0.3"
 gpui-kit = { version = "0.9.1", features = ["test-support"] }
 
+# For this repository's own builds (the example and its measurements). Cargo ignores a
+# dependency's profiles, so apps using the crate build with their own.
 [profile.release]
 codegen-units = 1
 lto = "thin"
