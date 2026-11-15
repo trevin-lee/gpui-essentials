@@ -1,3 +1,4 @@
+# Changed in Trevin Lee's fork (2026): gpui-kit 0.9.1, Rust 1.100, the fork's repository.
 [package]
 name = "gpui-kit-markdown-editor"
 version = "0.2.0"
@@ -5,7 +6,7 @@ edition = "2024"
 rust-version = "1.100"
 description = "A block-based WYSIWYG Markdown editor for GPUI, built on gpui-kit's editor host API."
 license = "Apache-2.0"
-repository = "https://github.com/wabzqem/gpui-kit-markdown-editor"
+repository = "https://github.com/trevin-lee/gpui-kit-markdown-editor"
 readme = "README.md"
 keywords = ["gpui", "markdown", "editor", "wysiwyg"]
 categories = ["gui", "text-editors"]

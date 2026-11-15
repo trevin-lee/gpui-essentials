@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): a toggle's summary is normalized to come first.
 use std::ops::Range;
 
 use super::{

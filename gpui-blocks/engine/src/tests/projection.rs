@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): the import context is built with Default.
 //! The direct projection (`direct.rs`) against `parse(serialize(doc))`.
 
 use super::props::{Rng, document};

@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): each laid-out unit's drawn bounds are recorded.
 //! Off-screen culling of top-level blocks (light virtualization).
 //!
 //! Each frame, rendered top-level blocks are wrapped in a pass-through

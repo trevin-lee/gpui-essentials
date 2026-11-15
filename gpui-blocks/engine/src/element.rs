@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): block motion, the dragged copy, toggle chevron clicks.
 //! `BlockEditor` view (design §7).
 //!
 //! `render` takes the cached projection and renders it with gpui-kit's own

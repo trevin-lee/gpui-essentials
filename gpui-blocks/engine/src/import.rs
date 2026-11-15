@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): callouts and toggles imported.
 //! `markdown::parse` output (`BlockNode`) into the editor model.
 
 use std::collections::HashMap;

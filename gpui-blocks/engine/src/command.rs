@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): callout, toggle and host commands, safer moves.
 use super::{
     document::{BlockContent, EditorDocument},
     editor::BlockEditorModel,

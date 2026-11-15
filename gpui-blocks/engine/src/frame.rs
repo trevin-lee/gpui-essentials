@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): it records the rem size and each unit's bounds.
 //! Per-frame geometry, collected through gpui-kit's editor host API.
 //!
 //! During the editor's prepaint every keyed text leaf reports a

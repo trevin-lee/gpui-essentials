@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): callouts and toggles written.
 //! `EditorDocument` to canonical Markdown. Blocks are written here; inline
 //! content goes through main's `MarkdownSource` with the editor's options
 //! (`<mark>`, whitespace hoisting, escaping). Table cells use the same inline

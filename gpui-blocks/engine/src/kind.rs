@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): callout and toggle kinds.
 use gpui::SharedString;
 
 use gpui_kit::base::text::editor_host::ColumnAlign;

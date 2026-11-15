@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): a closed toggle under a selection is copied whole.
 //! Copy of a selection that spans several blocks, as Markdown.
 //!
 //! The selected part of the tree is cut into detached blocks: containers keep
