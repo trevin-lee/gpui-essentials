@@ -270,6 +270,18 @@ impl Draw<'_, '_> {
             .child(s.into())
     }
 
+    /// One line at body leading (1.5 by default), as the web's table cells set their text.
+    pub fn body_line(
+        &self,
+        s: impl Into<SharedString>,
+        size: f32,
+        color: Hsla,
+        weight: f32,
+    ) -> Div {
+        self.line(s, size, color, weight)
+            .line_height(self.px(size * self.t.text.body_leading))
+    }
+
     /// Up to `n` lines, then an ellipsis.
     pub fn clamp(
         &self,

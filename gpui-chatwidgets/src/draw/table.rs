@@ -69,7 +69,7 @@ impl Draw<'_, '_> {
                 .flex_shrink_0()
                 .min_w(d.px(widths[c]))
                 .px(d.px(pad))
-                .py(d.px(10.))
+                .py(d.px(pad))
                 .flex()
                 .flex_row()
                 .items_center()
@@ -84,7 +84,7 @@ impl Draw<'_, '_> {
                 d.border_b_1().border_color(t.colors.line)
             });
         for (c, col) in table.columns.iter().enumerate() {
-            head = head.child(cell(self, c).child(self.line(
+            head = head.child(cell(self, c).child(self.body_line(
                 col.label.clone(),
                 font,
                 t.colors.text_muted,
@@ -228,8 +228,8 @@ impl Draw<'_, '_> {
             head = head.child(
                 cell(self, c)
                     .px(self.px(pad))
-                    .py(self.px(10.))
-                    .child(self.line(label, font, t.colors.text_muted, self.regular())),
+                    .py(self.px(pad))
+                    .child(self.body_line(label, font, t.colors.text_muted, self.regular())),
             );
         }
         let mut body = div().w_full().flex().flex_col().child(head);
@@ -294,13 +294,13 @@ impl Draw<'_, '_> {
                             .min_w_0()
                             .justify_start()
                             .px(self.px(pad))
-                            .py(self.px(10.))
+                            .py(self.px(pad))
                             .hover(|s| s.bg(t.colors.highlight))
                             .debug_selector({
                                 let sel = self.selector(&format!("cell:{r}:{c}"));
                                 move || sel
                             })
-                            .child(self.line(
+                            .child(self.body_line(
                                 shown,
                                 font,
                                 if text.is_empty() {
