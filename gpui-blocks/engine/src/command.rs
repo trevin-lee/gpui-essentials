@@ -58,8 +58,9 @@ pub enum EditorCommand {
     /// Make the caret's paragraph or heading the summary of a new open
     /// toggle, its body empty.
     WrapInToggle,
-    /// Open or close a toggle. Closing it moves a caret inside its body to
-    /// the end of its summary.
+    /// Open or close a toggle. Closing it turns a selection with an end
+    /// inside its body (text, blocks or cells) into a caret at the end of
+    /// its summary.
     SetToggleOpen { block: BlockId, open: bool },
     /// Unwrap the nearest callout or toggle around the caret: its blocks
     /// move out in place, a toggle's summary first.
@@ -1133,15 +1134,18 @@ impl BlockEditorModel {
         }
         let summary = self.doc.children(toggle).first().copied();
         let body: Vec<BlockId> = self.doc.children(toggle).iter().skip(1).copied().collect();
-        // A selection end inside the body would be hidden: move it to the
-        // end of the summary.
-        let inside = |doc: &EditorDocument, p: BlockPosition| {
-            doc.path(p.block).iter().any(|id| body.contains(id))
+        // A selection end inside the body would be hidden, and an edit
+        // would change blocks nobody can see: the selection becomes a caret
+        // at the end of the summary, whatever kind it was.
+        let inside = |block: BlockId| self.doc.path(block).iter().any(|id| body.contains(id));
+        let ends = match &self.selection {
+            BlockSelection::Text { anchor, head } => [anchor.block, head.block],
+            BlockSelection::Blocks { anchor, head } | BlockSelection::Cells { anchor, head } => {
+                [*anchor, *head]
+            }
         };
-        let moved = match (&self.selection, summary) {
-            (BlockSelection::Text { anchor, head }, Some(summary))
-                if !open && (inside(&self.doc, *anchor) || inside(&self.doc, *head)) =>
-            {
+        let moved = match summary {
+            Some(summary) if !open && ends.into_iter().any(inside) => {
                 let end = self.doc.leaf_len(summary).unwrap_or(0);
                 Some(BlockPosition::new(summary, end))
             }

@@ -349,3 +349,33 @@ fn a_dropped_closed_toggle_is_a_selection_that_resolves() {
     assert_eq!(range.start, BlockPosition::new(summary, 0));
     assert_eq!(range.end, BlockPosition::new(summary, 1));
 }
+
+#[test]
+fn closing_a_toggle_moves_a_block_selection_out_of_its_body() {
+    let mut m = model("<details open>\n<summary>T</summary>\n\nhidden\n\n</details>\n\nz");
+    let toggle = m.document().root().children().next().unwrap().id();
+    let body = m.document().leaves().nth(1).unwrap().id();
+    m.set_selection(BlockSelection::Blocks { anchor: body, head: body }).unwrap();
+    m.run(EditorCommand::SetToggleOpen { block: toggle, open: false }).unwrap();
+    let summary = m.document().leaves().next().unwrap().id();
+    assert_eq!(m.selection(), &BlockSelection::caret(BlockPosition::new(summary, 1)));
+    // Backspace now edits the summary, not the hidden body.
+    m.delete(false).unwrap();
+    assert_eq!(
+        m.source(),
+        "<details>\n<summary></summary>\n\nhidden\n\n</details>\n\nz"
+    );
+}
+
+#[test]
+fn closing_a_toggle_moves_a_cell_selection_out_of_its_body() {
+    let mut m = model(
+        "<details open>\n<summary>T</summary>\n\n| a | b |\n| - | - |\n| c | d |\n\n</details>",
+    );
+    let toggle = m.document().root().children().next().unwrap().id();
+    let cells: Vec<_> = m.document().leaves().skip(1).map(|l| l.id()).collect();
+    m.set_selection(BlockSelection::Cells { anchor: cells[0], head: cells[3] }).unwrap();
+    m.run(EditorCommand::SetToggleOpen { block: toggle, open: false }).unwrap();
+    let summary = m.document().leaves().next().unwrap().id();
+    assert_eq!(m.selection(), &BlockSelection::caret(BlockPosition::new(summary, 1)));
+}
