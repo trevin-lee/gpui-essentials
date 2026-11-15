@@ -507,3 +507,41 @@ fn set_callout_refuses_names_that_dont_round_trip() {
     caret_in(&mut m, 0, 1);
     assert!(m.run(EditorCommand::SetCallout("note".into())).is_err());
 }
+
+#[test]
+fn move_blocks_never_moves_a_toggle_summary_alone() {
+    let toggle = "<details open>\n<summary>T</summary>\n\nb1\n\nb2\n\n</details>";
+    // From the summary the whole toggle moves: the summary moving alone
+    // would rename the toggle.
+    let mut m = model(&format!("a\n\n{toggle}"));
+    caret_in(&mut m, 1, 0);
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), format!("{toggle}\n\na"));
+    assert_invariants(&m);
+    // Down from the summary too, not into the body.
+    caret_in(&mut m, 0, 0);
+    assert!(m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    assert_eq!(m.source(), format!("a\n\n{toggle}"));
+    // A body block moves among the body's blocks, but never into the
+    // summary's place.
+    let mut m = model(toggle);
+    caret_in(&mut m, 2, 0);
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), toggle.replace("b1\n\nb2", "b2\n\nb1"));
+    assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), toggle.replace("b1\n\nb2", "b2\n\nb1"));
+    let body = m.document().leaves().nth(1).unwrap().id();
+    m.set_selection(BlockSelection::Blocks { anchor: body, head: body }).unwrap();
+    assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_invariants(&m);
+}
+
+#[test]
+fn move_blocks_from_a_table_cell_moves_the_whole_table() {
+    let table = "| a | b |\n| --- | --- |\n| c | d |";
+    let mut m = model(&format!("x\n\n{table}"));
+    caret_in(&mut m, 4, 0);
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), format!("{table}\n\nx"));
+    assert_invariants(&m);
+}

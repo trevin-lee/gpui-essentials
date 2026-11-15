@@ -28,6 +28,10 @@ pub enum EditorCommand {
     SetTaskChecked(bool),
     Indent,
     Outdent,
+    /// Move the selected block, else the caret's list item, else the
+    /// caret's block, one place up or down among its siblings. A table's
+    /// cell moves its table and a toggle's summary its toggle, and no block
+    /// takes a summary's place.
     MoveBlocks {
         down: bool,
     },
@@ -2121,27 +2125,42 @@ impl BlockEditorModel {
     }
 
     fn move_blocks(&mut self, down: bool) -> Result<bool, CommandError> {
-        let target = match self.selected_blocks() {
-            Some((parent, range)) if range.len() == 1 => self.doc.children(parent)[range.start],
+        let doc = &self.doc;
+        let mut target = match self.selected_blocks() {
+            Some((parent, range)) if range.len() == 1 => doc.children(parent)[range.start],
             Some(_) => return Err(CommandError::Unsupported("move several blocks")),
+            // The nearest list item, else the caret's block among its
+            // siblings (in a quote, a callout or a toggle's body too).
             None => {
                 let resolved = self.caret_resolved()?;
                 resolved
-                    .nearest(&self.doc, is_list_item)
+                    .nearest(doc, is_list_item)
                     .unwrap_or(resolved.pos.block)
             }
         };
-        let Some((parent, index)) = self.doc.index_in_parent(target) else {
+        // A table's cell or row, or a toggle's summary, never moves on its
+        // own: the table or toggle moves instead.
+        while let Some((parent, index)) = doc.index_in_parent(target)
+            && (matches!(
+                doc.kind(target),
+                Some(BlockKindData::TableCell | BlockKindData::TableRow)
+            ) || (index == 0 && matches!(doc.kind(parent), Some(BlockKindData::Toggle { .. }))))
+        {
+            target = parent;
+        }
+        let Some((parent, index)) = doc.index_in_parent(target) else {
             return Ok(false);
         };
-        let len = self.doc.children(parent).len();
+        let len = doc.children(parent).len();
+        // In a toggle, nothing takes the summary's place at index 0.
+        let first = usize::from(matches!(doc.kind(parent), Some(BlockKindData::Toggle { .. })));
         let new_index = if down {
             if index + 1 >= len {
                 return Ok(false);
             }
             index + 1
         } else {
-            if index == 0 {
+            if index <= first {
                 return Ok(false);
             }
             index - 1
