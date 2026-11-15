@@ -826,6 +826,20 @@ impl BlockEditorState {
         Ok(changed)
     }
 
+    /// Run `f`, and keep every edit it makes as one undo step: a host's change made of several
+    /// calls (taking back a typed `/…`, then running a command) undoes in one go. Each edit
+    /// still sends its own `Changed`.
+    pub fn group_edits<R>(
+        &mut self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
+    ) -> R {
+        self.model.history.begin_transaction();
+        let out = f(self, cx);
+        self.model.history.commit_transaction();
+        out
+    }
+
     /// Undo the last transaction (or IME composition) group.
     pub fn undo(&mut self, cx: &mut Context<Self>) {
         if self.readonly {
