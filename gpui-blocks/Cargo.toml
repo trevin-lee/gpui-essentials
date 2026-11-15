@@ -1,0 +1,44 @@
+[package]
+name = "gpui-blocks"
+version = "0.1.0"
+description = "A Notion-like block editor for GPUI: Markdown documents with a slash menu, drag handles, callouts, toggles and widget blocks"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/trevin-lee/gpui-blocks"
+readme = "README.md"
+keywords = ["gpui", "editor", "markdown", "notion", "wysiwyg"]
+categories = ["gui", "text-editors"]
+
+[lib]
+name = "gpui_blocks"
+
+[dependencies]
+gpui-kit = "0.9.1"
+# The document model, input, selection, undo and drawing: gpui-kit-markdown-editor, through a fork
+# that adds callouts, toggles, block motion and the hooks this crate draws its menus with. Pinned
+# to a commit until those changes are published.
+markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "34b0c76cea71a38d659dbc10890bbe891083ad80" }
+# The parser's syntax tree, for widget blocks: the version gpui-kit parses with.
+markdown = "1.0.0"
+# Only for the shots feature: GPUI with its test support (offscreen rendering) on, and GPUI's
+# version of the image crate to save the picture.
+gpui-pre = { version = "0.3.12", features = ["test-support"], optional = true }
+gpui-pre-macos = { version = "0.3.12", features = ["test-support"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+[features]
+# Pictures of the example's window rendered offscreen (`--shot`).
+shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
+
+[[example]]
+name = "editor"
+
+[dev-dependencies]
+futures = "0.3"
+gpui-kit = { version = "0.9.1", features = ["test-support"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = true
