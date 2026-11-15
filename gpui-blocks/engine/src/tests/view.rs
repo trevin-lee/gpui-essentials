@@ -4231,7 +4231,9 @@ fn dragging_a_code_block_by_its_handle_opens_a_gap_and_drops_there(cx: &mut Test
     cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
     draw(cx);
     // The blocks around the gap make room for it; nothing else marks it.
-    let drop = editor.read_with(cx, |e, _| e.block_drag.filter(|d| d.active).and_then(|d| d.drop));
+    let drop = editor.read_with(cx, |e, _| {
+        e.block_drag.filter(|d| d.active).and_then(|d| d.drop)
+    });
     assert_eq!(drop, Some(1));
     cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
     draw(cx);
@@ -4392,9 +4394,9 @@ fn open_with_surfaces<'a>(
     let (root, cx) = cx.add_window_view(move |window, cx| {
         Root(cx.new(|cx| {
             BlockEditorState::new(window, cx)
-                .with_markdown_extensions(crate::surfaces::with_default_surfaces(
-                    Default::default(),
-                ))
+                .with_markdown_extensions(
+                    crate::surfaces::with_default_surfaces(Default::default()),
+                )
                 .with_source(&source)
         }))
     });
@@ -4424,7 +4426,10 @@ fn a_click_on_the_chevron_opens_and_closes_a_toggle(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
     draw(cx);
     assert!(source(&editor, cx).starts_with("<details open>"));
-    assert_eq!(editor.read_with(cx, |e, _| e.model().document().leaves().count()), 3);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.model().document().leaves().count()),
+        3
+    );
     // Its body is drawn now, below the summary and level with it.
     let body = editor.read_with(cx, |e, _| {
         let id = e.model().document().leaves().nth(1).unwrap().id();
@@ -4446,7 +4451,10 @@ fn a_callout_is_drawn_in_its_surface(cx: &mut TestAppContext) {
     let (plain, inside) = editor.read_with(cx, |e, _| {
         let f = e.frame.borrow();
         let ids: Vec<_> = e.model().document().leaves().map(|l| l.id()).collect();
-        (f.leaf(ids[0]).unwrap().bounds(), f.leaf(ids[1]).unwrap().bounds())
+        (
+            f.leaf(ids[0]).unwrap().bounds(),
+            f.leaf(ids[1]).unwrap().bounds(),
+        )
     });
     // The callout's box pads its text in from the plain paragraph's edge.
     assert!(inside.left() > plain.left() + px(8.));
@@ -4464,7 +4472,10 @@ fn a_host_handle_drags_any_top_level_block(cx: &mut TestAppContext) {
     let over = gpui::point(start.x, blocks[0].1.center().y - px(2.));
     cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
     draw(cx);
-    assert_eq!(editor.read_with(cx, |e, _| e.block_drag.and_then(|d| d.drop)), Some(0));
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.block_drag.and_then(|d| d.drop)),
+        Some(0)
+    );
     cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
     draw(cx);
     assert_eq!(source(&editor, cx), "- third\n\nfirst\n\nsecond");
@@ -4493,23 +4504,35 @@ fn an_emptied_callout_stays_until_one_more_backspace(cx: &mut TestAppContext) {
     draw(cx);
     let kinds = |editor: &Entity<BlockEditorState>, cx: &mut VisualTestContext| {
         editor.read_with(cx, |e, _| {
-            e.model().document().root().children().map(|b| b.kind()).collect::<Vec<_>>()
+            e.model()
+                .document()
+                .root()
+                .children()
+                .map(|b| b.kind())
+                .collect::<Vec<_>>()
         })
     };
-    assert_eq!(kinds(&editor, cx), [BlockKind::Callout, BlockKind::Paragraph]);
+    assert_eq!(
+        kinds(&editor, cx),
+        [BlockKind::Callout, BlockKind::Paragraph]
+    );
     // Still drawn: its box, and the caret on its empty line.
     let caret = editor.read_with(cx, |e, _| e.caret_bounds());
     assert!(caret.is_some(), "the caret is on the callout's empty line");
     assert_eq!(source(&editor, cx), "> [!NOTE]\n\nafter");
     keys(cx, "backspace");
     draw(cx);
-    assert_eq!(kinds(&editor, cx), [BlockKind::Paragraph, BlockKind::Paragraph]);
+    assert_eq!(
+        kinds(&editor, cx),
+        [BlockKind::Paragraph, BlockKind::Paragraph]
+    );
     assert_eq!(source(&editor, cx), "\n\nafter");
 }
 
 #[gpui::test]
 fn an_emptied_toggle_summary_stays_drawn(cx: &mut TestAppContext) {
-    let (editor, cx) = open_with_surfaces(cx, "<details>\n<summary>a</summary>\n\nbody\n\n</details>");
+    let (editor, cx) =
+        open_with_surfaces(cx, "<details>\n<summary>a</summary>\n\nbody\n\n</details>");
     caret_at(&editor, cx, 0, 1);
     keys(cx, "backspace");
     draw(cx);
@@ -4534,7 +4557,9 @@ fn arrows_leave_a_selected_closed_toggle(cx: &mut TestAppContext) {
     });
     keys(cx, "right");
     let caret = editor.read_with(cx, |e, _| e.model().caret());
-    let summary = editor.read_with(cx, |e, _| e.model().document().leaves().nth(1).unwrap().id());
+    let summary = editor.read_with(cx, |e, _| {
+        e.model().document().leaves().nth(1).unwrap().id()
+    });
     assert_eq!(caret, Some(BlockPosition::new(summary, 5)));
 }
 
@@ -4553,7 +4578,10 @@ fn a_read_only_toggle_still_opens_and_closes(cx: &mut TestAppContext) {
     cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
     draw(cx);
     assert!(source(&editor, cx).starts_with("<details open>"));
-    assert_eq!(editor.read_with(cx, |e, _| e.model().document().leaves().count()), 3);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.model().document().leaves().count()),
+        3
+    );
     // View state: nothing to undo, and the host is not told of an edit.
     assert!(!editor.read_with(cx, |e, _| e.model().can_undo()));
     assert_eq!(*changed.borrow(), 0);
@@ -4566,7 +4594,11 @@ fn a_read_only_toggle_still_opens_and_closes(cx: &mut TestAppContext) {
 fn open_scrolled<'a>(
     cx: &'a mut TestAppContext,
     source: &str,
-) -> (Entity<BlockEditorState>, gpui::ScrollHandle, &'a mut VisualTestContext) {
+) -> (
+    Entity<BlockEditorState>,
+    gpui::ScrollHandle,
+    &'a mut VisualTestContext,
+) {
     cx.update(crate::init_for_tests);
     let source = source.to_string();
     let handle = gpui::ScrollHandle::new();
@@ -4649,7 +4681,11 @@ fn a_callout_holding_only_spaces_stays_drawn(cx: &mut TestAppContext) {
     // accessible value and a copy never see it.
     assert_eq!(leaf_text(&editor, cx, 0), "  ");
     assert!(!source(&editor, cx).contains('\u{200B}'));
-    assert!(!editor.read_with(cx, |e, _| e.accessible_value()).contains('\u{200B}'));
+    assert!(
+        !editor
+            .read_with(cx, |e, _| e.accessible_value())
+            .contains('\u{200B}')
+    );
     keys(cx, "M-a M-c");
     let copied = cx.read_from_clipboard().and_then(|c| c.text()).unwrap();
     assert!(!copied.contains('\u{200B}'), "{copied:?}");
@@ -4683,7 +4719,12 @@ fn blocks_with_no_text_report_where_they_were_drawn(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, "first\n\n---\n\n<div>widget</div>\n\nlast");
     let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
     let ids: Vec<_> = editor.read_with(cx, |e, _| {
-        e.model().document().root().children().map(|b| b.id()).collect()
+        e.model()
+            .document()
+            .root()
+            .children()
+            .map(|b| b.id())
+            .collect()
     });
     assert_eq!(blocks.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ids);
     // In document order down the page, each with some height.
@@ -4700,5 +4741,8 @@ fn blocks_with_no_text_report_where_they_were_drawn(cx: &mut TestAppContext) {
     draw(cx);
     cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
     draw(cx);
-    assert_eq!(source(&editor, cx), "first\n\n<div>widget</div>\n\nlast\n\n---");
+    assert_eq!(
+        source(&editor, cx),
+        "first\n\n<div>widget</div>\n\nlast\n\n---"
+    );
 }

@@ -70,7 +70,9 @@ fn image_placeholder(image: &gpui_kit::base::text::editor_host::ImageNode) -> In
 fn draws_nothing(doc: &EditorDocument, block: BlockId) -> bool {
     match doc.kind(block) {
         Some(BlockKindData::Paragraph) => {}
-        Some(BlockKindData::Definition { .. } | BlockKindData::Break { .. } | BlockKindData::Unknown) => {
+        Some(
+            BlockKindData::Definition { .. } | BlockKindData::Break { .. } | BlockKindData::Unknown,
+        ) => {
             return true;
         }
         _ => return false,
@@ -159,7 +161,12 @@ impl NodeCache {
     /// nothing, is drawn with a zero-width space after its text. Only the drawing has it: the
     /// model's line keeps its text, its caret offsets map to the same rendered ones (the space
     /// comes after them all), and copies and saved Markdown come from the model.
-    fn drawable(&self, doc: &EditorDocument, id: BlockId, mut nodes: Vec<BlockNode>) -> Vec<BlockNode> {
+    fn drawable(
+        &self,
+        doc: &EditorDocument,
+        id: BlockId,
+        mut nodes: Vec<BlockNode>,
+    ) -> Vec<BlockNode> {
         let ids = doc.children(id);
         let blank = !ids.is_empty()
             && ids

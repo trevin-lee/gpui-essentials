@@ -32,21 +32,18 @@ pub fn toggle_container(open: bool, window: &mut Window, cx: &mut App) -> Div {
     let line = window.line_height();
     let icon = rems(1.).to_pixels(window.rem_size());
     let top = ((line - icon) / 2.).max(px(0.));
-    div()
-        .relative()
-        .pl(rems(TOGGLE_GUTTER_REMS))
-        .child(
-            div().absolute().left(px(0.)).top(top).child(
-                Icon::default()
-                    .data(if open {
-                        ICON_CHEVRON_DOWN
-                    } else {
-                        ICON_CHEVRON_RIGHT
-                    })
-                    .size(icon)
-                    .text_color(cx.theme().muted_foreground),
-            ),
-        )
+    div().relative().pl(rems(TOGGLE_GUTTER_REMS)).child(
+        div().absolute().left(px(0.)).top(top).child(
+            Icon::default()
+                .data(if open {
+                    ICON_CHEVRON_DOWN
+                } else {
+                    ICON_CHEVRON_RIGHT
+                })
+                .size(icon)
+                .text_color(cx.theme().muted_foreground),
+        ),
+    )
 }
 
 /// A callout's container: a tinted box with a bar in the alert's colour.

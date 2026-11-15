@@ -1697,7 +1697,13 @@ impl BlockEditorState {
         self.end_composition();
         self.dragging = false;
         self.model.break_coalescing();
-        let _ = self.run(EditorCommand::SetToggleOpen { block: toggle, open: !open }, cx);
+        let _ = self.run(
+            EditorCommand::SetToggleOpen {
+                block: toggle,
+                open: !open,
+            },
+            cx,
+        );
         self.model.break_coalescing();
         true
     }
@@ -1975,7 +1981,11 @@ impl BlockEditorState {
         let dt = now.duration_since(drag.moved).as_secs_f32();
         if dt > 0.0005 {
             let speed = f32::from(at.y - drag.at.y) / dt;
-            drag.velocity = if dt > 0.1 { speed } else { 0.6 * speed + 0.4 * drag.velocity };
+            drag.velocity = if dt > 0.1 {
+                speed
+            } else {
+                0.6 * speed + 0.4 * drag.velocity
+            };
         }
         drag.at = at;
         drag.moved = now;
