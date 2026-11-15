@@ -322,3 +322,30 @@ fn copying_a_closed_toggle_at_the_document_start_keeps_its_body() {
     let copied = crate::slice::selection_markdown(m.doc(), range).unwrap();
     assert_eq!(copied, source);
 }
+
+const CLOSED: &str = "<details>\n<summary>T</summary>\n\nhidden\n\n</details>";
+
+#[test]
+fn deleting_the_block_after_a_closed_toggle_puts_the_caret_on_its_summary() {
+    let mut m = model(&format!("a\n\n{CLOSED}\n\nz"));
+    let z = m.document().root().children().last().unwrap().id();
+    m.set_selection(BlockSelection::Blocks { anchor: z, head: z }).unwrap();
+    m.delete(false).unwrap();
+    m.insert_text("x", EditOrigin::Typing).unwrap();
+    assert_eq!(
+        m.source(),
+        "a\n\n<details>\n<summary>Tx</summary>\n\nhidden\n\n</details>"
+    );
+    assert_invariants(&m);
+}
+
+#[test]
+fn a_dropped_closed_toggle_is_a_selection_that_resolves() {
+    let mut m = model(&format!("a\n\n{CLOSED}\n\nz"));
+    let toggle = m.document().root().children().nth(1).unwrap().id();
+    assert!(m.move_block_to(toggle, 0).unwrap());
+    let range = m.doc().resolve_selection(m.selection()).unwrap();
+    let summary = m.document().leaves().next().unwrap().id();
+    assert_eq!(range.start, BlockPosition::new(summary, 0));
+    assert_eq!(range.end, BlockPosition::new(summary, 1));
+}

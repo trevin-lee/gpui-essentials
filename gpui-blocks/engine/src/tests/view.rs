@@ -4515,3 +4515,24 @@ fn an_emptied_toggle_summary_stays_drawn(cx: &mut TestAppContext) {
     assert!(editor.read_with(cx, |e, _| e.caret_bounds()).is_some());
     assert!(source(&editor, cx).starts_with("<details>\n<summary></summary>"));
 }
+
+#[gpui::test]
+fn arrows_leave_a_selected_closed_toggle(cx: &mut TestAppContext) {
+    let src = "a\n\n<details>\n<summary>Title</summary>\n\nhidden\n\n</details>\n\nz";
+    let (editor, cx) = open_with_surfaces(cx, src);
+    editor.update(cx, |e, cx| {
+        let toggle = e.model().document().root().children().nth(1).unwrap().id();
+        e.set_selection(
+            BlockSelection::Blocks {
+                anchor: toggle,
+                head: toggle,
+            },
+            cx,
+        )
+        .unwrap();
+    });
+    keys(cx, "right");
+    let caret = editor.read_with(cx, |e, _| e.model().caret());
+    let summary = editor.read_with(cx, |e, _| e.model().document().leaves().nth(1).unwrap().id());
+    assert_eq!(caret, Some(BlockPosition::new(summary, 5)));
+}

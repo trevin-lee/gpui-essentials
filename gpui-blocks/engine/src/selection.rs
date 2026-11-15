@@ -1,6 +1,7 @@
 use super::{
     document::EditorDocument,
     id::BlockId,
+    kind::BlockKindData,
     position::{BlockPosition, PositionError},
 };
 
@@ -122,6 +123,7 @@ impl EditorDocument {
         }
     }
 
+    /// The first caret position in `id`'s subtree.
     pub(crate) fn first_leaf_in(&self, id: BlockId) -> BlockPosition {
         let mut current = id;
         while let Some(first) = self.children(current).first() {
@@ -130,10 +132,21 @@ impl EditorDocument {
         BlockPosition::new(current, 0)
     }
 
+    /// The last caret position in `id`'s subtree. A closed toggle's body
+    /// holds no caret, so the walk stops at its summary.
     pub(crate) fn last_leaf_in(&self, id: BlockId) -> BlockPosition {
         let mut current = id;
-        while let Some(last) = self.children(current).last() {
-            current = *last;
+        loop {
+            let children = self.children(current);
+            let next = if self.kind(current) == Some(&BlockKindData::Toggle { open: false }) {
+                children.first()
+            } else {
+                children.last()
+            };
+            match next {
+                Some(next) => current = *next,
+                None => break,
+            }
         }
         BlockPosition::new(current, self.leaf_len(current).unwrap_or(0))
     }
