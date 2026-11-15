@@ -24,7 +24,7 @@ fn shape(block: &DetachedBlock, out: &mut String) {
 }
 
 fn shapes(nodes: &[BlockNode]) -> String {
-    let mut defs = Defs::new();
+    let mut defs = Defs::default();
     collect_definitions(nodes, &mut defs);
     let mut blocks = Vec::new();
     for node in nodes {
