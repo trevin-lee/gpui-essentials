@@ -434,3 +434,12 @@ fn deleting_a_selection_into_a_summary_keeps_the_summary() {
     );
     assert_invariants(&m);
 }
+
+#[test]
+fn a_marker_made_a_link_by_a_definition_keeps_the_quote_and_its_text() {
+    let m = model("> [!note]\n> Hello [x] world\n\n[!note]: https://example.com");
+    assert_eq!(kinds(&m)[0], BlockKind::Blockquote);
+    let text = m.document().leaves().next().unwrap().text().unwrap().to_string();
+    assert_eq!(text, "!note Hello [x] world");
+}
+

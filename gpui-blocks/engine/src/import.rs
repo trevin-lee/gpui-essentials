@@ -153,8 +153,18 @@ fn quote_or_callout(mut children: Vec<DetachedBlock>, marker: Option<SharedStrin
             content: DetachedContent::Leaf(BlockContent::Inline(inline)),
             ..
         }) => {
+            // The text must start with the marker as written. When it doesn't
+            // (a `[!note]: url` definition made the marker a link), the
+            // quote stays a quote rather than losing text.
             let text = inline.text();
-            let len = text.find(']')? + 1;
+            let len = "[!]".len() + name.len();
+            let written = text.get(..len)?;
+            if !written.starts_with("[!")
+                || !written.ends_with(']')
+                || !written[2..len - 1].eq_ignore_ascii_case(&name)
+            {
+                return None;
+            }
             let len = if text[len..].starts_with(' ') { len + 1 } else { len };
             Some((name, len, inline.len()))
         }
