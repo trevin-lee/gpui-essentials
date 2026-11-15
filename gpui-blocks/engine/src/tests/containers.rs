@@ -379,3 +379,28 @@ fn closing_a_toggle_moves_a_cell_selection_out_of_its_body() {
     let summary = m.document().leaves().next().unwrap().id();
     assert_eq!(m.selection(), &BlockSelection::caret(BlockPosition::new(summary, 1)));
 }
+
+fn summary_text(m: &BlockEditorModel) -> String {
+    m.document().leaves().next().unwrap().text().unwrap().to_string()
+}
+
+#[test]
+fn a_summary_that_isnt_one_paragraph_is_kept_as_text() {
+    for summary in ["1. one", "# h", "- x", "> q"] {
+        let source = format!("<details>\n<summary>{summary}</summary>\n\nbody\n\n</details>");
+        let m = model(&source);
+        assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: false }], "{summary}");
+        assert_eq!(summary_text(&m), summary);
+        // Written back escaped, it reads the same again.
+        assert_eq!(summary_text(&model(&m.source())), summary, "{}", m.source());
+    }
+}
+
+#[test]
+fn a_summary_keeps_reference_links_and_inline_html() {
+    let m = model(
+        "<details>\n<summary>see [the docs][d] <kbd>K</kbd></summary>\n\nbody\n\n</details>\n\n[d]: https://example.com",
+    );
+    let src = m.source();
+    assert!(src.contains("<summary>see [the docs](https://example.com) <kbd>K</kbd></summary>"), "{src}");
+}

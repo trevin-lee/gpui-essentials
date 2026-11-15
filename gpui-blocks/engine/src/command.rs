@@ -453,7 +453,8 @@ impl BlockEditorModel {
             gpui_kit::base::text::editor_host::parse_markdown(core, self.doc.extensions.clone())
                 .ok()
                 .and_then(|parsed| {
-                    let mut defs = super::import::Defs::with_source(core);
+                    let mut defs = super::import::Defs::with_source(core)
+                        .with_extensions(self.doc.extensions.clone());
                     super::import::collect_definitions(&parsed, &mut defs);
                     let mut blocks = Vec::new();
                     for node in parsed.iter() {
@@ -951,7 +952,8 @@ impl BlockEditorModel {
         else {
             return Ok(false);
         };
-        let mut defs = super::import::Defs::with_source(markdown);
+        let mut defs = super::import::Defs::with_source(markdown)
+            .with_extensions(self.doc.extensions.clone());
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
         for node in parsed.iter() {
@@ -1304,7 +1306,8 @@ impl BlockEditorModel {
         else {
             return Ok(false);
         };
-        let mut defs = super::import::Defs::with_source(text);
+        let mut defs = super::import::Defs::with_source(text)
+            .with_extensions(self.doc.extensions.clone());
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
         for node in parsed.iter() {

@@ -22,11 +22,11 @@ pub(crate) fn parse_document(
     extensions: Arc<MarkdownExtensions>,
 ) -> Result<EditorDocument, SharedString> {
     let parsed = parse_markdown(source, extensions.clone())?;
-    let mut doc = EditorDocument::empty(extensions);
+    let mut doc = EditorDocument::empty(extensions.clone());
     let root = doc.root;
     // Drop the placeholder paragraph of the empty document.
     doc.detach(root, 0);
-    let mut defs = Defs::with_source(source);
+    let mut defs = Defs::with_source(source).with_extensions(extensions.clone());
     collect_definitions(&parsed, &mut defs);
     let mut blocks = Vec::new();
     for node in parsed.iter() {
@@ -213,17 +213,35 @@ fn details_tag(block: &DetachedBlock) -> Option<DetailsTag> {
     })
 }
 
-/// The summary's inline Markdown, as a paragraph's.
+/// The summary's inline Markdown, as a paragraph's, parsed with the
+/// document's extensions. The document's link reference definitions are
+/// written after it, so a reference link in it resolves as it would in a
+/// paragraph. A summary that isn't one paragraph of Markdown (`1. one`,
+/// `# h`) is kept as the literal text it is.
 fn summary_inline(summary: &str, defs: &Defs) -> InlineText {
-    parse_markdown(summary, Arc::new(MarkdownExtensions::default()))
-        .ok()
-        .and_then(|nodes| {
-            nodes.into_iter().find_map(|node| match node {
-                BlockNode::Paragraph(paragraph) => Some(import_inline(&paragraph, defs)),
-                _ => None,
-            })
-        })
-        .unwrap_or_default()
+    let literal = || InlineText::plain(summary, TextMark::default());
+    if summary.is_empty() {
+        return InlineText::default();
+    }
+    let mut source = summary.to_string();
+    if summary.contains('[') {
+        let bad = |s: &str| s.contains(['[', ']', '<', '>', '\n', '\r']);
+        for (label, (url, _)) in defs.iter() {
+            if !bad(label) && !bad(url) {
+                source.push_str(&format!("\n\n[{label}]: <{url}>"));
+            }
+        }
+    }
+    let Ok(nodes) = parse_markdown(&source, defs.extensions.clone()) else {
+        return literal();
+    };
+    let mut paragraphs = nodes
+        .iter()
+        .filter(|node| !matches!(node, BlockNode::Definition { .. }));
+    match (paragraphs.next(), paragraphs.next()) {
+        (Some(BlockNode::Paragraph(paragraph)), None) => import_inline(paragraph, defs),
+        _ => literal(),
+    }
 }
 
 /// Pair `<details>` and `</details>` blocks among siblings into toggles,
@@ -435,6 +453,9 @@ pub(crate) fn import_inline(paragraph: &Paragraph, defs: &Defs) -> InlineText {
 pub(crate) struct Defs<'a> {
     map: HashMap<SharedString, (SharedString, Option<SharedString>)>,
     source: Option<&'a str>,
+    /// The document's extensions, for what is parsed again on its own (a
+    /// toggle's summary) and for the callout names it registers.
+    extensions: Arc<MarkdownExtensions>,
 }
 
 impl<'a> Defs<'a> {
@@ -442,7 +463,13 @@ impl<'a> Defs<'a> {
         Self {
             map: HashMap::new(),
             source: Some(source),
+            extensions: Default::default(),
         }
+    }
+
+    pub(crate) fn with_extensions(mut self, extensions: Arc<MarkdownExtensions>) -> Self {
+        self.extensions = extensions;
+        self
     }
 }
 
