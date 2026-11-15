@@ -4561,3 +4561,70 @@ fn a_read_only_toggle_still_opens_and_closes(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(source(&editor, cx), src);
 }
+
+fn open_scrolled<'a>(
+    cx: &'a mut TestAppContext,
+    source: &str,
+) -> (Entity<BlockEditorState>, gpui::ScrollHandle, &'a mut VisualTestContext) {
+    cx.update(crate::init_for_tests);
+    let source = source.to_string();
+    let handle = gpui::ScrollHandle::new();
+    let scroll = handle.clone();
+    let (root, cx) = cx.add_window_view(move |window, cx| {
+        let editor = cx.new(|cx| {
+            let mut state = BlockEditorState::new(window, cx).with_source(&source);
+            state.set_scroll_handle(scroll.clone());
+            state
+        });
+        Scrolled(editor, scroll)
+    });
+    let editor = root.read_with(cx, |root, _| root.0.clone());
+    draw(cx);
+    draw(cx);
+    (editor, handle, cx)
+}
+
+#[gpui::test]
+fn scrolling_during_a_drag_drops_where_the_pointer_is_in_the_document(cx: &mut TestAppContext) {
+    let src: Vec<String> = (0..30).map(|i| format!("p{i}")).collect();
+    let (editor, handle, cx) = open_scrolled(cx, &src.join("\n\n"));
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let pitch = blocks[1].1.top() - blocks[0].1.top();
+    let (block, bounds) = blocks[2];
+    let start = gpui::point(bounds.left() + px(2.), bounds.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(block, start));
+    let held = gpui::point(start.x, start.y + px(5.));
+    cx.simulate_mouse_move(held, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    // Ten blocks scroll by under a pointer held still.
+    handle.set_offset(gpui::point(px(0.), -pitch * 10.));
+    draw(cx);
+    draw(cx);
+    cx.simulate_mouse_up(held, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    let mut want = src.clone();
+    let moved = want.remove(2);
+    want.insert(12, moved);
+    assert_eq!(source(&editor, cx), want.join("\n\n"));
+}
+
+#[gpui::test]
+fn an_edit_during_a_drag_cancels_it(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\nthird";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (block, bounds) = blocks[2];
+    let start = gpui::point(bounds.left() + px(2.), bounds.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(block, start));
+    let over = gpui::point(start.x, blocks[0].1.center().y - px(2.));
+    cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    editor.update(cx, |e, cx| {
+        let _ = e.set_source("one\n\ntwo\n\nthree", cx);
+    });
+    draw(cx);
+    assert!(editor.read_with(cx, |e, _| e.block_drag.is_none()));
+    cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), "one\n\ntwo\n\nthree");
+}

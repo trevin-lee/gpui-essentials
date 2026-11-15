@@ -235,10 +235,11 @@ impl RenderOnce for BlockEditor {
             }
             let reduce_motion = cx.reduce_motion();
             let (offsets, moving, dragged_block) = self.state.update(cx, |state, _| {
-                let dragged = state.block_drag.filter(|d| d.active);
+                let top = state.content_top();
+                let dragged = state.live_block_drag().filter(|d| d.active);
                 let (offsets, moving) = state.reorder.frame(
                     slots,
-                    dragged.map(|d| d.dragged()),
+                    dragged.map(|d| d.dragged(top)),
                     std::time::Instant::now(),
                     reduce_motion,
                 );
@@ -631,7 +632,19 @@ impl Element for EditorRoot {
                 let right = frame.content.map(|c| c.right());
                 frame.layout_tables(&shapes, pad, right);
             }
+            // Scrolled during a drag: the dragged block follows the pointer in content y, so
+            // draw again with the content's new top.
+            let moved_top = {
+                let state = self.state.read(cx);
+                let before = state.frame.borrow().content.map(|c| c.top());
+                state.block_drag.is_some_and(|d| d.active)
+                    && before.is_some_and(|top| Some(top) != frame.content.map(|c| c.top()))
+            };
             *self.state.read(cx).frame.borrow_mut() = frame;
+            if moved_top {
+                let state = self.state.clone();
+                window.on_next_frame(move |_, cx| state.update(cx, |_, cx| cx.notify()));
+            }
             let mask = window.content_mask().bounds;
             let content = self.content_bounds.get();
             let cull = self.state.read(cx).cull.clone();

@@ -65,7 +65,7 @@ pub(crate) struct Dragged {
     pub(crate) block: BlockId,
     /// How far the pointer has moved since the drag began, in points.
     pub(crate) dy: f32,
-    /// Where the pointer is, in window y: the slot is the one it's over.
+    /// Where the pointer is, in content y: the slot is the one it's over.
     pub(crate) pointer: f32,
     /// The pointer's speed, in points a second.
     pub(crate) velocity: f32,
@@ -78,7 +78,7 @@ pub(crate) struct Reorder {
     last: Vec<(BlockId, Slot)>,
     /// The slots when the current drag began.
     drag_slots: Option<Vec<(BlockId, Slot)>>,
-    /// The middle of each block as drawn when the drag began, in window y.
+    /// The middle of each block as drawn when the drag began, in content y.
     middles: HashMap<BlockId, f32>,
     /// The drag just let go of, for the frame that follows.
     released: Option<Dragged>,
@@ -87,10 +87,11 @@ pub(crate) struct Reorder {
 
 impl Reorder {
     /// A drag became active: the slots it measures against are this layout's, and `middles`
-    /// are the blocks' middles as drawn (in window y), which the pointer passes to move them.
+    /// are the blocks' middles as drawn (in content y, which scrolling leaves alone), which the
+    /// pointer passes to move them.
     pub(crate) fn begin_drag(&mut self, mut middles: HashMap<BlockId, f32>) {
         // A block with no text to measure (a rule, a widget) gets a middle from its slot, moved
-        // into window y by how far the measured ones are from theirs.
+        // by how far the measured ones are from theirs.
         let centre = |s: &Slot| s.top + s.pitch / 2.;
         let shifts: Vec<f32> = self
             .last
@@ -103,6 +104,13 @@ impl Reorder {
         }
         self.drag_slots = Some(self.last.clone());
         self.middles = middles;
+        self.released = None;
+    }
+
+    /// The drag was abandoned without a drop (the document changed under it): every block,
+    /// the dragged one too, springs back to its place.
+    pub(crate) fn cancel_drag(&mut self) {
+        self.drag_slots = None;
         self.released = None;
     }
 
