@@ -4628,3 +4628,32 @@ fn an_edit_during_a_drag_cancels_it(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(source(&editor, cx), "one\n\ntwo\n\nthree");
 }
+
+#[gpui::test]
+fn a_callout_holding_only_spaces_stays_drawn(cx: &mut TestAppContext) {
+    let (editor, cx) = open_with_surfaces(cx, "> [!NOTE]\n> a\n\nafter");
+    caret_at(&editor, cx, 0, 1);
+    keys(cx, "backspace");
+    type_text(cx, "  ");
+    draw(cx);
+    // gpui-kit draws nothing for a line of spaces, so the editor draws one more,
+    // zero-width, character after them.
+    let drawn = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.frame.borrow().leaf(id).is_some()
+    });
+    assert!(drawn, "the callout's line is laid out");
+    assert!(editor.read_with(cx, |e, _| e.caret_bounds()).is_some());
+    // That character is only drawn: the model, the saved Markdown, the
+    // accessible value and a copy never see it.
+    assert_eq!(leaf_text(&editor, cx, 0), "  ");
+    assert!(!source(&editor, cx).contains('\u{200B}'));
+    assert!(!editor.read_with(cx, |e, _| e.accessible_value()).contains('\u{200B}'));
+    keys(cx, "M-a M-c");
+    let copied = cx.read_from_clipboard().and_then(|c| c.text()).unwrap();
+    assert!(!copied.contains('\u{200B}'), "{copied:?}");
+    // Typing goes on after the spaces, where the caret is drawn.
+    caret_at(&editor, cx, 0, 2);
+    type_text(cx, "x");
+    assert!(source(&editor, cx).starts_with("> [!NOTE]\n>   x"));
+}

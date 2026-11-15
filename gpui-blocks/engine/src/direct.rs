@@ -62,6 +62,25 @@ fn image_placeholder(image: &gpui_kit::base::text::editor_host::ImageNode) -> In
     )
 }
 
+/// Whether gpui-kit draws `block` as nothing in a surface: a paragraph with no inline atom
+/// (an image or a custom node) and only whitespace for text, or a link definition, a break or
+/// an unknown block (gpui-base's `BlockNode::draws_nothing`). Other blocks, an empty heading
+/// too, draw something.
+fn draws_nothing(doc: &EditorDocument, block: BlockId) -> bool {
+    match doc.kind(block) {
+        Some(BlockKindData::Paragraph) => {}
+        Some(BlockKindData::Definition { .. } | BlockKindData::Break { .. } | BlockKindData::Unknown) => {
+            return true;
+        }
+        _ => return false,
+    }
+    doc.inline(block).is_some_and(|inline| {
+        inline
+            .pieces()
+            .all(|(range, _, atom)| atom.is_none() && inline.text()[range].trim().is_empty())
+    })
+}
+
 /// Project one block (and its subtree), uncached.
 #[cfg(test)]
 pub(crate) fn project_block(doc: &EditorDocument, id: BlockId) -> Option<BlockNode> {
@@ -134,22 +153,25 @@ impl NodeCache {
     }
 
     /// A surface's children as drawn. gpui-kit draws no container at all when every line in it
-    /// is empty (a stream that has only sent a callout's marker), which would make an emptied
-    /// callout or toggle vanish with its caret. So its first line, when all are empty, is drawn
-    /// holding a zero-width space: the model's line stays empty, and the caret, clicks and
-    /// selection map to its offset 0 as for any empty line.
+    /// draws nothing (a stream that has only sent a callout's marker), which would make an
+    /// emptied callout or toggle vanish with its caret. So its first line, when all of them draw
+    /// nothing, is drawn with a zero-width space after its text. Only the drawing has it: the
+    /// model's line keeps its text, its caret offsets map to the same rendered ones (the space
+    /// comes after them all), and copies and saved Markdown come from the model.
     fn drawable(&self, doc: &EditorDocument, id: BlockId, mut nodes: Vec<BlockNode>) -> Vec<BlockNode> {
         let ids = doc.children(id);
-        let all_empty = !ids.is_empty()
-            && ids.iter().take(nodes.len()).all(|child| {
-                doc.inline(*child).is_some_and(InlineText::is_empty)
-            });
-        if all_empty && let Some(first) = ids.first() {
-            nodes[0] = BlockNode::Paragraph(paragraph(
-                &InlineText::plain("\u{200B}", Default::default()),
-                *first,
-                self.placeholders,
-            ));
+        let blank = !ids.is_empty()
+            && ids
+                .iter()
+                .take(nodes.len())
+                .all(|child| draws_nothing(doc, *child));
+        if blank
+            && let Some(first) = ids.first()
+            && let Some(inline) = doc.inline(*first)
+        {
+            let mut shown = inline.clone();
+            shown.push(InlineText::plain("\u{200B}", Default::default()));
+            nodes[0] = BlockNode::Paragraph(paragraph(&shown, *first, self.placeholders));
         }
         nodes
     }
