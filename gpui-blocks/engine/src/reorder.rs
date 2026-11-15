@@ -11,7 +11,7 @@
 //! top, in editor-local y), not what was drawn, so the slot under the pointer can't feed back
 //! on the motion. Nothing here asks for a frame once everything has settled.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use super::id::BlockId;
@@ -144,7 +144,12 @@ impl Reorder {
             .min(1. / 30.);
         self.last_step = Some(now);
 
-        // The order changed: each block starts from where it was drawn.
+        // A block that left the layout (merged into another by a drop, or deleted) has nothing
+        // left to move.
+        let present: HashSet<BlockId> = slots.iter().map(|(id, _)| *id).collect();
+        self.springs.retain(|id, _| present.contains(id));
+        // The order changed: each block that is still there starts from where it was drawn,
+        // even when the drop merged or split blocks around it.
         if reordered(&self.last, &slots) {
             let before: HashMap<BlockId, f32> = self.last.iter().map(|(id, s)| (*id, s.top)).collect();
             for (id, slot) in &slots {
@@ -216,16 +221,15 @@ impl Reorder {
     }
 }
 
-/// The same blocks in a different order.
+/// Whether the blocks in both layouts come in a different order. Blocks in only one of them
+/// (merged, split, added or deleted) don't count: an edit that keeps the order of the rest
+/// moves nothing.
 fn reordered(before: &[(BlockId, Slot)], after: &[(BlockId, Slot)]) -> bool {
-    if before.len() != after.len() || before.iter().zip(after).all(|(a, b)| a.0 == b.0) {
-        return false;
-    }
-    let mut a: Vec<_> = before.iter().map(|(id, _)| *id).collect();
-    let mut b: Vec<_> = after.iter().map(|(id, _)| *id).collect();
-    a.sort_unstable();
-    b.sort_unstable();
-    a == b
+    let in_before: HashSet<BlockId> = before.iter().map(|(id, _)| *id).collect();
+    let in_after: HashSet<BlockId> = after.iter().map(|(id, _)| *id).collect();
+    let a = before.iter().map(|(id, _)| *id).filter(|id| in_after.contains(id));
+    let b = after.iter().map(|(id, _)| *id).filter(|id| in_before.contains(id));
+    !a.eq(b)
 }
 
 /// The dragged block's index in `slots`, and its index once dropped where the pointer is: after
@@ -401,6 +405,37 @@ mod tests {
         assert_eq!(o[&b[0]], 50.);
         assert_eq!(o[&b[1]], -40.);
         assert!(!moving);
+    }
+
+    #[test]
+    fn a_drop_that_merges_blocks_still_springs_the_rest_from_where_they_were() {
+        // Moving the paragraph between two lists to the end merges the lists: the second list's
+        // id is gone, and the blocks that stay start from where they were drawn.
+        let b = ids(4);
+        let mut r = Reorder::default();
+        let t = Instant::now();
+        r.frame(slots(&b), None, t, false);
+        let (list, para, gone, last) = (b[0], b[1], b[2], b[3]);
+        let mut after = slots(&[list, last, para]);
+        after[0].1.pitch = 80.;
+        after[1].1.top = 80.;
+        after[2].1.top = 120.;
+        let (o, moving) = r.frame(after, None, t, false);
+        assert!(moving);
+        assert_eq!(o[&para], 40. - 120., "the paragraph starts where it was drawn");
+        assert_eq!(o[&last], 120. - 80., "so does the block it passed");
+        assert!(!o.contains_key(&list) && !o.contains_key(&gone));
+    }
+
+    #[test]
+    fn a_spring_of_a_block_that_left_is_dropped() {
+        let b = ids(3);
+        let mut r = Reorder::default();
+        let t = Instant::now();
+        r.frame(slots(&b), None, t, false);
+        r.frame(slots(&[b[1], b[0], b[2]]), None, t, false);
+        let (o, _) = r.frame(slots(&[b[1], b[2]]), None, t + Duration::from_millis(8), false);
+        assert!(!o.contains_key(&b[0]));
     }
 
     #[test]
