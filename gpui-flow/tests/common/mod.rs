@@ -5,11 +5,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui_flow::*;
-use gpui_kit::{
+use gpui::{
     Entity, Focusable as _, Modifiers, MouseButton, Pixels, Point, ScrollDelta, ScrollEvent,
     TestAppContext, VisualTestContext, point, px,
 };
+use gpui_flow::*;
 
 pub type Events = Rc<RefCell<Vec<FlowEvent>>>;
 
@@ -18,7 +18,7 @@ pub fn open(
     build: impl FnOnce(Flow) -> Flow + 'static,
 ) -> (Entity<Flow>, Events, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        gpui_core::init(cx);
         gpui_flow::init(cx);
     });
     let (flow, cx) = cx.add_window_view(move |_, cx| build(Flow::new(cx)));
