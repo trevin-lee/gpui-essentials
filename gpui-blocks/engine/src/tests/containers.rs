@@ -487,3 +487,23 @@ fn only_registered_names_become_callouts() {
     let item = m.document().root().children().next().unwrap().children().next().unwrap();
     assert!(item.children().any(|b| b.kind() == BlockKind::Callout));
 }
+
+#[test]
+fn set_callout_refuses_names_that_dont_round_trip() {
+    let mut m = surfaced("a");
+    caret_in(&mut m, 0, 1);
+    for name in ["", "two words", "a]b", "1st", "custom", "editor-toggle-open"] {
+        assert!(
+            matches!(
+                m.run(EditorCommand::SetCallout(name.into())),
+                Err(CommandError::Unsupported(_))
+            ),
+            "{name:?}"
+        );
+        assert_eq!(m.source(), "a");
+    }
+    // Nothing registered: not even GitHub's names.
+    let mut m = model("a");
+    caret_in(&mut m, 0, 1);
+    assert!(m.run(EditorCommand::SetCallout("note".into())).is_err());
+}
