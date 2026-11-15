@@ -438,10 +438,6 @@ pub(crate) struct Defs<'a> {
 }
 
 impl<'a> Defs<'a> {
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn with_source(source: &'a str) -> Self {
         Self {
             map: HashMap::new(),
