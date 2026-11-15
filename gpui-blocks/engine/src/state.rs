@@ -1003,10 +1003,13 @@ impl BlockEditorState {
         ) {
             return false;
         }
-        if let Ok(range) = self.model.doc.resolve_selection(self.model.selection()) {
-            let target = if forward { range.end } else { range.start };
-            self.move_to(target, false, cx);
-        }
+        // A selection that can't be resolved collapses nowhere: the key
+        // falls through to its ordinary handling instead of doing nothing.
+        let Ok(range) = self.model.doc.resolve_selection(self.model.selection()) else {
+            return false;
+        };
+        let target = if forward { range.end } else { range.start };
+        self.move_to(target, false, cx);
         true
     }
 
