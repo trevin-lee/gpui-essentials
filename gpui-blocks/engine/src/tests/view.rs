@@ -4536,3 +4536,28 @@ fn arrows_leave_a_selected_closed_toggle(cx: &mut TestAppContext) {
     let summary = editor.read_with(cx, |e, _| e.model().document().leaves().nth(1).unwrap().id());
     assert_eq!(caret, Some(BlockPosition::new(summary, 5)));
 }
+
+#[gpui::test]
+fn a_read_only_toggle_still_opens_and_closes(cx: &mut TestAppContext) {
+    let src = "<details>\n<summary>Title</summary>\n\nbody\n\n</details>\n\nafter";
+    let (editor, cx) = open_with_surfaces(cx, src);
+    editor.update(cx, |e, cx| e.set_readonly(true, cx));
+    let changed = events(&editor, cx);
+    let summary = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.frame.borrow().leaf(id).unwrap().bounds()
+    });
+    let chevron = gpui::point(summary.left() - px(10.), summary.top() + px(4.));
+    cx.simulate_mouse_down(chevron, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert!(source(&editor, cx).starts_with("<details open>"));
+    assert_eq!(editor.read_with(cx, |e, _| e.model().document().leaves().count()), 3);
+    // View state: nothing to undo, and the host is not told of an edit.
+    assert!(!editor.read_with(cx, |e, _| e.model().can_undo()));
+    assert_eq!(*changed.borrow(), 0);
+    cx.simulate_mouse_down(chevron, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), src);
+}
