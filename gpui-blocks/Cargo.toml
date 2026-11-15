@@ -17,7 +17,7 @@ gpui-kit = "0.9.1"
 # The document model, input, selection, undo and drawing: gpui-kit-markdown-editor, through a fork
 # that adds callouts, toggles, block motion and the hooks this crate draws its menus with. Pinned
 # to a commit until those changes are published.
-markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "34b0c76cea71a38d659dbc10890bbe891083ad80" }
+markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "4b7776ffba4a30706cc34fca3dda24961c48edb7" }
 # The parser's syntax tree, for widget blocks: the version gpui-kit parses with.
 markdown = "1.0.0"
 # Only for the shots feature: GPUI with its test support (offscreen rendering) on, and GPUI's
