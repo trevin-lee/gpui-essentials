@@ -16,7 +16,8 @@ use gpui::{
     ElementInputHandler, Entity, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ParentElement, Pixels, Refineable, RenderOnce, Role, StatefulInteractiveElement,
-    Style, StyleRefinement, Styled, TextStyle, Window, canvas, div, fill, point, px, size,
+    Style, StyleRefinement, Styled, TextStyle, Window, canvas, deferred, div, fill, point, px,
+    size,
 };
 
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
@@ -221,6 +222,32 @@ impl RenderOnce for BlockEditor {
             let count = cull_state.node_count;
             let index = &cull_state.index;
             let n = units.len();
+            // Where each top-level block lays out (a long list's chunks are one block), and how
+            // the blocks changing places move from there (`reorder`).
+            let mut slots: Vec<(BlockId, super::reorder::Slot)> = Vec::with_capacity(n);
+            for (ix, unit) in units.iter().enumerate() {
+                let id = snapshot.blocks[unit.block].id;
+                let (top, height) = (f32::from(index.prefix(ix)), f32::from(index.height(ix)));
+                match slots.last_mut() {
+                    Some((last, slot)) if *last == id => slot.pitch += height,
+                    _ => slots.push((id, super::reorder::Slot { top, pitch: height })),
+                }
+            }
+            let reduce_motion = cx.reduce_motion();
+            let (offsets, moving, dragged_block) = self.state.update(cx, |state, _| {
+                let dragged = state.block_drag.filter(|d| d.active);
+                let (offsets, moving) = state.reorder.frame(
+                    slots,
+                    dragged.map(|d| d.dragged()),
+                    std::time::Instant::now(),
+                    reduce_motion,
+                );
+                (offsets, moving, dragged.map(|d| d.block))
+            });
+            if moving {
+                window.request_animation_frame();
+            }
+            let mut ghost_drawn = false;
             // Units to lay out: the visible range (binary search over the
             // prefix sums) plus pinned units (selection ends, IME).
             let (first, last) = match window_span {
@@ -298,6 +325,49 @@ impl RenderOnce for BlockEditor {
                         .child(element)
                         .into_any_element(),
                     None => element,
+                };
+                let block_id = snapshot.blocks[unit.block].id;
+                let offset = offsets.get(&block_id).copied().unwrap_or(0.);
+                let element = if dragged_block == Some(block_id) {
+                    // Under the pointer: a copy drawn over every other block, while the block
+                    // itself keeps its place and its geometry, unseen. The copy is painted
+                    // after the editor's own geometry is collected, so it reports none.
+                    let ghost = (!ghost_drawn).then(|| {
+                        ghost_drawn = true;
+                        let copy = node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx);
+                        use gpui_kit::component::ActiveTheme as _;
+                        let theme = cx.theme();
+                        deferred(
+                            div()
+                                .id(("dragged-block", block_id.as_u64() as usize))
+                                .absolute()
+                                .top(px(offset))
+                                .left(px(-10.))
+                                .right(px(-10.))
+                                .px(px(10.))
+                                .rounded(px(8.))
+                                .bg(theme.background)
+                                .border_1()
+                                .border_color(theme.border)
+                                .shadow_lg()
+                                .opacity(0.97)
+                                .child(copy),
+                        )
+                        .with_priority(1)
+                    });
+                    div()
+                        .relative()
+                        .child(div().opacity(0.).child(element))
+                        .children(ghost)
+                        .into_any_element()
+                } else if offset != 0. {
+                    div()
+                        .relative()
+                        .top(px(offset))
+                        .child(element)
+                        .into_any_element()
+                } else {
+                    element
                 };
                 children.push(
                     Measured {
@@ -733,10 +803,6 @@ impl Element for EditorRoot {
                 style.caret(),
                 gpui::BorderStyle::Solid,
             ));
-        }
-        // D22: where a dragged block would drop.
-        if let Some(line) = self.state.read(cx).drop_indicator() {
-            window.paint_quad(fill(line, style.caret()).corner_radii(px(1.)));
         }
         if let Some((block, range)) = marked
             && let Some(leaf) = frame.leaf(block)

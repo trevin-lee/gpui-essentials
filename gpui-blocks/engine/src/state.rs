@@ -352,6 +352,35 @@ pub(crate) struct BlockDrag {
     pub(crate) active: bool,
     /// The gap between top-level blocks the block would drop into.
     pub(crate) drop: Option<usize>,
+    /// The pointer now, and when it got there.
+    pub(crate) at: Point<Pixels>,
+    pub(crate) moved: std::time::Instant,
+    /// The pointer's vertical speed, in points a second, smoothed over the last few moves.
+    pub(crate) velocity: f32,
+}
+
+impl BlockDrag {
+    pub(crate) fn new(block: BlockId, at: Point<Pixels>) -> Self {
+        Self {
+            block,
+            start: at,
+            active: false,
+            drop: None,
+            at,
+            moved: std::time::Instant::now(),
+            velocity: 0.,
+        }
+    }
+
+    /// The block's motion as `Reorder` takes it.
+    pub(crate) fn dragged(&self) -> super::reorder::Dragged {
+        super::reorder::Dragged {
+            block: self.block,
+            dy: f32::from(self.at.y - self.start.y),
+            pointer: f32::from(self.at.y),
+            velocity: self.velocity,
+        }
+    }
 }
 
 /// IME composition in progress: the marked byte range in one leaf.
@@ -386,6 +415,8 @@ pub struct BlockEditorState {
     pub(crate) dragging: bool,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
+    /// The motion of top-level blocks changing places (see `reorder`).
+    pub(crate) reorder: super::reorder::Reorder,
     readonly: bool,
     image_policy: super::ImagePolicy,
     submit_policy: SubmitPolicy,
@@ -456,6 +487,7 @@ impl BlockEditorState {
             goal_x: None,
             dragging: false,
             block_drag: None,
+            reorder: Default::default(),
             readonly: false,
             toolbar_hidden: false,
             image_policy: super::ImagePolicy::default(),
@@ -1682,12 +1714,7 @@ impl BlockEditorState {
         if self.readonly || doc.parent(block) != Some(doc.root) {
             return;
         }
-        self.block_drag = Some(BlockDrag {
-            block,
-            start: at,
-            active: false,
-            drop: None,
-        });
+        self.block_drag = Some(BlockDrag::new(block, at));
     }
 
     pub(crate) fn task_checkbox_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
@@ -1814,33 +1841,10 @@ impl BlockEditorState {
         (top == block).then_some(block)
     }
 
-    /// D22: the gap between top-level blocks nearest the pointer's `y`.
-    fn drop_gap_at(&self, y: Pixels) -> Option<usize> {
-        let blocks = self.top_level_bounds();
-        let len = self.model.doc.children(self.model.doc.root).len();
-        if blocks.is_empty() {
-            return None;
-        }
-        Some(
-            blocks
-                .iter()
-                .find(|(_, _, b)| y < b.center().y)
-                .map_or_else(
-                    || blocks.last().map_or(len, |(ix, _, _)| ix + 1),
-                    |(ix, _, _)| *ix,
-                ),
-        )
-    }
-
     /// D22: mouse-down on a handle arms a drag (the click itself is handled
     /// as before).
     pub(crate) fn arm_block_drag(&mut self, at: Point<Pixels>) {
-        self.block_drag = self.drag_handle_at(at).map(|block| BlockDrag {
-            block,
-            start: at,
-            active: false,
-            drop: None,
-        });
+        self.block_drag = self.drag_handle_at(at).map(|block| BlockDrag::new(block, at));
     }
 
     /// D22: pointer moved with the button down. Returns whether a block
@@ -1863,8 +1867,24 @@ impl BlockEditorState {
                 head: drag.block,
             });
             self.selection_changed(cx);
+            // The middles of the blocks' text as drawn now: the pointer passing one moves it.
+            let middles = self
+                .top_level_bounds()
+                .into_iter()
+                .map(|(_, id, b)| (id, f32::from(b.center().y)))
+                .collect();
+            self.reorder.begin_drag(middles);
         }
-        drag.drop = self.drop_gap_at(at.y);
+        // The pointer's speed, weighted toward the latest move, for the drop to start at.
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(drag.moved).as_secs_f32();
+        if dt > 0.0005 {
+            let speed = f32::from(at.y - drag.at.y) / dt;
+            drag.velocity = if dt > 0.1 { speed } else { 0.6 * speed + 0.4 * drag.velocity };
+        }
+        drag.at = at;
+        drag.moved = now;
+        drag.drop = self.reorder.drop_gap(&drag.dragged());
         self.block_drag = Some(drag);
         cx.notify();
         true
@@ -1872,10 +1892,15 @@ impl BlockEditorState {
 
     /// D22: button released. Drops an active drag (one undo step).
     pub(crate) fn finish_block_drag(&mut self, cx: &mut Context<Self>) {
-        let Some(drag) = self.block_drag.take() else {
+        let Some(mut drag) = self.block_drag.take() else {
             return;
         };
         if drag.active {
+            // Held still before letting go: nothing was thrown.
+            if drag.moved.elapsed().as_secs_f32() > 0.1 {
+                drag.velocity = 0.;
+            }
+            self.reorder.release(drag.dragged());
             if let Some(to) = drag.drop {
                 self.model.break_coalescing();
                 self.edit(
@@ -1887,35 +1912,6 @@ impl BlockEditorState {
             }
             cx.notify();
         }
-    }
-
-    /// D22: where to paint the drop indicator of an active drag: a line in
-    /// the gap, spanning the blocks' width.
-    pub(crate) fn drop_indicator(&self) -> Option<Bounds<Pixels>> {
-        use gpui::{point, px, size};
-        let drag = self.block_drag.filter(|d| d.active)?;
-        let to = drag.drop?;
-        let blocks = self.top_level_bounds();
-        let left = blocks
-            .iter()
-            .map(|(_, _, b)| b.left())
-            .reduce(Pixels::min)?;
-        let right = blocks
-            .iter()
-            .map(|(_, _, b)| b.right())
-            .reduce(Pixels::max)?;
-        let prev = blocks.iter().rev().find(|(ix, _, _)| *ix < to);
-        let next = blocks.iter().find(|(ix, _, _)| *ix >= to);
-        let y = match (prev, next) {
-            (Some((_, _, a)), Some((_, _, b))) => (a.bottom() + b.top()) / 2.,
-            (None, Some((_, _, b))) => b.top() - px(3.),
-            (Some((_, _, a)), None) => a.bottom() + px(3.),
-            (None, None) => return None,
-        };
-        Some(gpui::Bounds::new(
-            point(left - px(8.), y - px(1.)),
-            size(right - left + px(8.), px(2.)),
-        ))
     }
 
     /// Whole-table handles: a square straddling each table frame's outer

@@ -4213,7 +4213,7 @@ fn top_bounds(
 /// edge shows the open hand, a drag shows the drop line, a drop is one undo
 /// step.
 #[gpui::test]
-fn dragging_a_code_block_by_its_handle_with_a_drop_indicator(cx: &mut TestAppContext) {
+fn dragging_a_code_block_by_its_handle_opens_a_gap_and_drops_there(cx: &mut TestAppContext) {
     let src = "first\n\n## second\n\n```\ncode\n```\n\nfourth";
     let (editor, cx) = open(cx, src);
     let b = top_bounds(&editor, cx);
@@ -4229,12 +4229,9 @@ fn dragging_a_code_block_by_its_handle_with_a_drop_indicator(cx: &mut TestAppCon
     let over = gpui::point(start.x, b[0].center().y + px(2.));
     cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
     draw(cx);
-    let (indicator, drop) = editor.read_with(cx, |e, _| {
-        (e.drop_indicator(), e.block_drag.and_then(|d| d.drop))
-    });
+    // The blocks around the gap make room for it; nothing else marks it.
+    let drop = editor.read_with(cx, |e, _| e.block_drag.filter(|d| d.active).and_then(|d| d.drop));
     assert_eq!(drop, Some(1));
-    let line = indicator.expect("a drop indicator while dragging");
-    assert!(line.top() > b[0].bottom() - px(1.) && line.bottom() < b[1].top() + px(1.));
     cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
     draw(cx);
     assert_eq!(

@@ -61,6 +61,7 @@ mod marks;
 mod order;
 mod position;
 mod projection;
+mod reorder;
 mod selection;
 mod serialize;
 mod slice;
