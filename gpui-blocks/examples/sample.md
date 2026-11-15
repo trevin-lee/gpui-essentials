@@ -1,6 +1,6 @@
 # Weekly review
 
-Type `/` on an empty line for blocks, or start a line with `# `, `- `, `1. `, `[] `, `> ` or three backticks. Hover a block for its handle: drag it to move it, or press **+** to add one below. The card near the end is a widget, a block the example app draws itself.
+Type `/` at the start of a line or after a space for blocks, or start a line with `# `, `- `, `1. `, `[ ] ` or `> `. Hover a block for its handle: drag it to move it, or press **+** to add one below. The card near the end is a widget, a block the example app draws itself.
 
 ## This week
 
@@ -40,9 +40,9 @@ What's inside isn't drawn until it opens.
 
 | Category | October | September |
 | :--- | ---: | ---: |
-| Groceries | $412.80 | $388.10 |
-| Transit | $96.00 | $104.50 |
-| Eating out | $151.25 | $203.40 |
+| Groceries | \$412.80 | \$388.10 |
+| Transit | \$96.00 | \$104.50 |
+| Eating out | \$151.25 | \$203.40 |
 
 ```answer
 from: Finances
