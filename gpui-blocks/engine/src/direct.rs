@@ -133,6 +133,27 @@ impl NodeCache {
         }
     }
 
+    /// A surface's children as drawn. gpui-kit draws no container at all when every line in it
+    /// is empty (a stream that has only sent a callout's marker), which would make an emptied
+    /// callout or toggle vanish with its caret. So its first line, when all are empty, is drawn
+    /// holding a zero-width space: the model's line stays empty, and the caret, clicks and
+    /// selection map to its offset 0 as for any empty line.
+    fn drawable(&self, doc: &EditorDocument, id: BlockId, mut nodes: Vec<BlockNode>) -> Vec<BlockNode> {
+        let ids = doc.children(id);
+        let all_empty = !ids.is_empty()
+            && ids.iter().take(nodes.len()).all(|child| {
+                doc.inline(*child).is_some_and(InlineText::is_empty)
+            });
+        if all_empty && let Some(first) = ids.first() {
+            nodes[0] = BlockNode::Paragraph(paragraph(
+                &InlineText::plain("\u{200B}", Default::default()),
+                *first,
+                self.placeholders,
+            ));
+        }
+        nodes
+    }
+
     fn build(&mut self, doc: &EditorDocument, id: BlockId) -> Option<BlockNode> {
         let entry = doc.get(id)?;
         let children = |this: &mut Self| -> Vec<BlockNode> {
@@ -163,11 +184,14 @@ impl NodeCache {
             // Drawn in the container the host registers under the callout's
             // name (`MarkdownExtensions::block_surface`); a name nothing
             // registered is drawn as plain blocks.
-            BlockKindData::Callout { name } => BlockNode::Surface {
-                name: name.clone(),
-                children: children(self),
-                span: None,
-            },
+            BlockKindData::Callout { name } => {
+                let all = children(self);
+                BlockNode::Surface {
+                    name: name.clone(),
+                    children: self.drawable(doc, id, all),
+                    span: None,
+                }
+            }
             // A closed toggle projects only its summary, so nothing of its body
             // is laid out, measured or hit.
             BlockKindData::Toggle { open } => BlockNode::Surface {
@@ -177,13 +201,16 @@ impl NodeCache {
                     TOGGLE_CLOSED_SURFACE.into()
                 },
                 children: if *open {
-                    children(self)
+                    let all = children(self);
+                    self.drawable(doc, id, all)
                 } else {
-                    doc.children(id)
+                    let summary = doc
+                        .children(id)
                         .iter()
                         .take(1)
                         .filter_map(|child| self.node(doc, *child))
-                        .collect()
+                        .collect();
+                    self.drawable(doc, id, summary)
                 },
                 span: None,
             },

@@ -4483,3 +4483,35 @@ fn caret_bounds_follow_the_caret(cx: &mut TestAppContext) {
     assert!(first.top() < second.top());
     assert!(first.left() > second.left());
 }
+
+#[gpui::test]
+fn an_emptied_callout_stays_until_one_more_backspace(cx: &mut TestAppContext) {
+    let (editor, cx) = open_with_surfaces(cx, "> [!NOTE]\n> a\n\nafter");
+    caret_at(&editor, cx, 0, 1);
+    keys(cx, "backspace");
+    draw(cx);
+    let kinds = |editor: &Entity<BlockEditorState>, cx: &mut VisualTestContext| {
+        editor.read_with(cx, |e, _| {
+            e.model().document().root().children().map(|b| b.kind()).collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(kinds(&editor, cx), [BlockKind::Callout, BlockKind::Paragraph]);
+    // Still drawn: its box, and the caret on its empty line.
+    let caret = editor.read_with(cx, |e, _| e.caret_bounds());
+    assert!(caret.is_some(), "the caret is on the callout's empty line");
+    assert_eq!(source(&editor, cx), "> [!NOTE]\n\nafter");
+    keys(cx, "backspace");
+    draw(cx);
+    assert_eq!(kinds(&editor, cx), [BlockKind::Paragraph, BlockKind::Paragraph]);
+    assert_eq!(source(&editor, cx), "\n\nafter");
+}
+
+#[gpui::test]
+fn an_emptied_toggle_summary_stays_drawn(cx: &mut TestAppContext) {
+    let (editor, cx) = open_with_surfaces(cx, "<details>\n<summary>a</summary>\n\nbody\n\n</details>");
+    caret_at(&editor, cx, 0, 1);
+    keys(cx, "backspace");
+    draw(cx);
+    assert!(editor.read_with(cx, |e, _| e.caret_bounds()).is_some());
+    assert!(source(&editor, cx).starts_with("<details>\n<summary></summary>"));
+}
