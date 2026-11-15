@@ -1706,9 +1706,10 @@ impl BlockEditorState {
     pub(crate) fn toggle_chevron_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
         use super::kind::BlockKindData;
         let frame = self.frame.borrow();
+        // As wide as the gutter `surfaces::toggle_container` draws.
+        let gutter = frame.rem_size * super::surfaces::TOGGLE_GUTTER_REMS;
         frame.leaves.iter().find_map(|leaf| {
             let b = leaf.bounds();
-            let gutter = leaf.line_height() * 1.5;
             if !(at.y >= b.top()
                 && at.y < b.top() + leaf.line_height()
                 && at.x < b.left()

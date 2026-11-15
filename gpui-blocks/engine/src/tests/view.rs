@@ -4657,3 +4657,22 @@ fn a_callout_holding_only_spaces_stays_drawn(cx: &mut TestAppContext) {
     type_text(cx, "x");
     assert!(source(&editor, cx).starts_with("> [!NOTE]\n>   x"));
 }
+
+#[gpui::test]
+fn the_chevron_takes_clicks_only_in_the_gutter_it_draws(cx: &mut TestAppContext) {
+    let src = "<details>\n<summary>Title</summary>\n\nbody\n\n</details>";
+    let (editor, cx) = open_with_surfaces(cx, src);
+    let (summary, gutter) = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        let f = e.frame.borrow();
+        (
+            f.leaf(id).unwrap().bounds(),
+            f.rem_size * crate::surfaces::TOGGLE_GUTTER_REMS,
+        )
+    });
+    let y = summary.top() + px(4.);
+    let inside = gpui::point(summary.left() - gutter + px(2.), y);
+    let outside = gpui::point(summary.left() - gutter - px(2.), y);
+    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(inside).is_some()));
+    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(outside).is_none()));
+}
