@@ -149,6 +149,9 @@ pub(crate) struct FrameLayout {
     /// The editor's content area: tables span its width, while their cells'
     /// text bounds only cover the text.
     pub(crate) content: Option<Bounds<Pixels>>,
+    /// The rem size the editor was drawn at, for widths given in rems (a
+    /// toggle's gutter).
+    pub(crate) rem_size: Pixels,
 }
 
 impl FrameLayout {
