@@ -2373,6 +2373,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-core"
+version = "0.1.0"
+dependencies = [
+ "gpui-pre",
+ "gpui-pre-apple",
+]
+
+[[package]]
 name = "gpui-fast"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"

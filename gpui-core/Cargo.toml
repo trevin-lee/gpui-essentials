@@ -1,0 +1,32 @@
+[package]
+name = "gpui-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Components for GPUI apps on macOS and iOS, drawn in the host's theme."
+keywords = ["gpui", "ui", "components", "theme", "gui"]
+categories = ["gui"]
+
+[lib]
+name = "gpui_core"
+
+[dependencies]
+# GPUI itself, under its own name, so its macros' `gpui::` paths resolve in this crate and in
+# every crate using it. Pinned exactly in the workspace: one GPUI for everything that links it.
+gpui = { workspace = true }
+
+[features]
+# GPUI's test support (a headless window, simulated input), for hosts' tests.
+test-support = ["gpui/test-support"]
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+# The overflow test lays text out with Core Text, as on screen, and reads the drawn scene.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { workspace = true, features = ["test-support", "bench-support"] }
+# runtime_shaders: no Metal toolchain needed to build (Xcode 26 ships it separately); tests
+# never draw with Metal.
+gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }
