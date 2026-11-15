@@ -83,6 +83,9 @@ pub(crate) struct Reorder {
     /// The drag just let go of, for the frame that follows.
     released: Option<Dragged>,
     last_step: Option<Instant>,
+    /// Whether anything was moving after the last frame. Frames are drawn while nothing moves
+    /// too (a caret blink), so the time since the last one is no step for a motion just begun.
+    moving: bool,
 }
 
 impl Reorder {
@@ -138,10 +141,11 @@ impl Reorder {
         now: Instant,
         reduce_motion: bool,
     ) -> (HashMap<BlockId, f32>, bool) {
-        let dt = self
-            .last_step
-            .map_or(0., |t| now.duration_since(t).as_secs_f32())
-            .min(1. / 30.);
+        // A motion's first frame draws where it starts; it steps from the next one on.
+        let dt = match self.last_step {
+            Some(t) if self.moving => now.duration_since(t).as_secs_f32().min(1. / 30.),
+            _ => 0.,
+        };
         self.last_step = Some(now);
 
         // A block that left the layout (merged into another by a drop, or deleted) has nothing
@@ -211,6 +215,7 @@ impl Reorder {
             true
         });
         self.last = slots;
+        self.moving = moving;
         let offsets = self
             .springs
             .iter()
@@ -335,11 +340,13 @@ mod tests {
         let (offsets, moving) = r.frame(layout.clone(), Some(d), t + Duration::from_millis(8), false);
         assert!(moving);
         assert_eq!(offsets[&b[0]], 75., "the dragged block is exactly under the pointer");
+        assert!(!offsets.contains_key(&b[1]), "the block passed starts where it is");
+        let (offsets, _) = r.frame(layout.clone(), Some(d), t + Duration::from_millis(16), false);
         assert!(offsets[&b[1]] < 0., "the block passed is moving up");
         assert!(!offsets.contains_key(&b[2]), "the block not passed stays");
         // Held there, block 1 ends a whole slot up and stops asking for frames.
         let mut moving = true;
-        let mut n = 2;
+        let mut n = 3;
         while moving && n < 100 {
             let (o, m) = r.frame(layout.clone(), Some(d), t + Duration::from_millis(8 * n), false);
             moving = m;
@@ -436,6 +443,23 @@ mod tests {
         r.frame(slots(&[b[1], b[0], b[2]]), None, t, false);
         let (o, _) = r.frame(slots(&[b[1], b[2]]), None, t + Duration::from_millis(8), false);
         assert!(!o.contains_key(&b[0]));
+    }
+
+    #[test]
+    fn a_motion_after_idle_frames_starts_where_the_blocks_were() {
+        let b = ids(2);
+        let mut r = Reorder::default();
+        let t = Instant::now();
+        // Frames while nothing moves, as a caret blink draws them.
+        r.frame(slots(&b), None, t, false);
+        r.frame(slots(&b), None, t + Duration::from_millis(500), false);
+        let after = slots(&[b[1], b[0]]);
+        let (o, moving) = r.frame(after.clone(), None, t + Duration::from_millis(1000), false);
+        assert!(moving);
+        assert_eq!(o[&b[0]], -40., "no travel skipped on the first frame");
+        let (o, _) = r.frame(after, None, t + Duration::from_millis(1008), false);
+        let x = o[&b[0]];
+        assert!(x > -40. && x < -30., "one 8 ms step: {x}");
     }
 
     #[test]
