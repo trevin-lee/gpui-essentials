@@ -52,8 +52,10 @@ pub enum EditorCommand {
     /// (its blocks move out in place; nothing is lost).
     ToggleBlockquote,
     /// Wrap the caret's paragraph, heading or code block in a callout of
-    /// this name (ASCII lowercase, as `note`); in a callout already, rename
-    /// the nearest one.
+    /// this name (ASCII case ignored, as `note`); in a callout already,
+    /// rename the nearest one. A name a marker can't hold (empty, with
+    /// spaces or `]`, not starting with a letter) or with no block surface
+    /// registered on the editor's extensions is `Unsupported`.
     SetCallout(SharedString),
     /// Make the caret's paragraph or heading the summary of a new open
     /// toggle, its body empty.
@@ -1101,6 +1103,11 @@ impl BlockEditorModel {
     }
 
     fn set_callout(&mut self, name: SharedString) -> Result<bool, CommandError> {
+        // Only a name the importer reads back as this callout: one a marker
+        // can hold, with a surface the document registers to draw it.
+        if !super::import::is_registered_callout(&self.doc.extensions, &name) {
+            return Err(CommandError::Unsupported("callout name"));
+        }
         let name: SharedString = name.to_ascii_lowercase().into();
         let resolved = self.caret_resolved()?;
         if let Some(callout) =
