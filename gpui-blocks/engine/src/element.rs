@@ -334,7 +334,8 @@ impl RenderOnce for BlockEditor {
                     // after the editor's own geometry is collected, so it reports none.
                     let ghost = (!ghost_drawn).then(|| {
                         ghost_drawn = true;
-                        let copy = node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx);
+                        // Without the margins it has among other blocks.
+                        let copy = node.render(node_ix, flow.first(true).last(true), &node_cx, window, cx);
                         use gpui_kit::component::ActiveTheme as _;
                         let theme = cx.theme();
                         deferred(
@@ -342,15 +343,15 @@ impl RenderOnce for BlockEditor {
                                 .id(("dragged-block", block_id.as_u64() as usize))
                                 .absolute()
                                 .top(px(offset))
-                                .left(px(-10.))
-                                .right(px(-10.))
-                                .px(px(10.))
+                                .left(px(-12.))
+                                .right(px(-12.))
+                                .px(px(12.))
+                                .py(px(6.))
                                 .rounded(px(8.))
                                 .bg(theme.background)
                                 .border_1()
                                 .border_color(theme.border)
                                 .shadow_lg()
-                                .opacity(0.97)
                                 .child(copy),
                         )
                         .with_priority(1)
@@ -717,7 +718,10 @@ impl Element for EditorRoot {
                 .collect()
         };
         // Node selection (a table, code block, …): the blocks' laid-out area.
-        let selected_area = state.model.selected_blocks().and_then(|(parent, range)| {
+        // A dragged block's selection box would mark the place it left, which other blocks
+        // slide over; the copy under the pointer shows it instead.
+        let dragging = state.block_drag.is_some_and(|d| d.active);
+        let selected_area = state.model.selected_blocks().filter(|_| !dragging).and_then(|(parent, range)| {
             let doc = &state.model.doc;
             let ids = doc.children(parent).get(range)?.to_vec();
             let frame = frame.borrow();
