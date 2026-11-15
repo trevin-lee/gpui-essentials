@@ -125,26 +125,50 @@ fn callout(name: SharedString, mut children: Vec<DetachedBlock>) -> DetachedBloc
 /// isn't one.
 fn callout_name(text: &str) -> Option<SharedString> {
     let name = text.strip_prefix("[!")?.strip_suffix(']')?;
-    let valid = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    valid.then(|| name.to_ascii_lowercase().into())
+    is_callout_name(name).then(|| name.to_ascii_lowercase().into())
+}
+
+/// Whether `name` can be written in a callout marker and read back: an ASCII
+/// letter, then ASCII letters, digits, `-` and `_`.
+pub(crate) fn is_callout_name(name: &str) -> bool {
+    name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Whether `extensions` register a block surface named `name` (ASCII case
+/// ignored) that can draw a callout. A name nothing registered would draw as
+/// plain blocks with its marker hidden, so it stays a blockquote. The
+/// toggles' own surfaces are not callouts. gpui-kit answers this only
+/// through its parser, so a one-line callout is parsed to ask.
+pub(crate) fn is_registered_callout(extensions: &Arc<MarkdownExtensions>, name: &str) -> bool {
+    use crate::direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
+    if !is_callout_name(name)
+        || name.eq_ignore_ascii_case(TOGGLE_OPEN_SURFACE)
+        || name.eq_ignore_ascii_case(TOGGLE_CLOSED_SURFACE)
+    {
+        return false;
+    }
+    parse_markdown(&format!("> [!{name}]\n> x"), extensions.clone()).is_ok_and(|nodes| {
+        matches!(nodes.first(), Some(BlockNode::Surface { .. }))
+    })
 }
 
 /// The callout name on a blockquote's first line, when the marker is alone
-/// there as GitHub and Obsidian write it. Read from the source, since the
-/// parsed text has lost the line ending (and an escaped `\[` reads the same).
-fn marker_on_first_line(source: Option<&str>, span: Option<Span>) -> Option<SharedString> {
-    let source = source?.get(span?.start..)?;
+/// there as GitHub and Obsidian write it and the name is registered. Read
+/// from the source, since the parsed text has lost the line ending (and an
+/// escaped `\[` reads the same).
+fn marker_on_first_line(defs: &Defs, span: Option<Span>) -> Option<SharedString> {
+    let source = defs.source?.get(span?.start..)?;
     let line = source.split('\n').next()?.trim_end_matches('\r');
     let line = line.trim_start().strip_prefix('>')?;
     let line = line.strip_prefix(' ').unwrap_or(line);
-    callout_name(line.trim_end())
+    callout_name(line.trim_end()).filter(|name| is_registered_callout(&defs.extensions, name))
 }
 
 /// A blockquote whose first line is a callout marker becomes a callout, the
 /// marker dropped from its first paragraph. Callouts at the top level arrive
-/// as surfaces when the host registered their name; this catches the rest
-/// (nested ones, and names nothing registered).
+/// as surfaces when the host registered their name; this catches the nested
+/// ones, which gpui-kit leaves as blockquotes.
 fn quote_or_callout(mut children: Vec<DetachedBlock>, marker: Option<SharedString>) -> DetachedBlock {
     // The marker and the soft line break after it, which arrives as a space.
     let marker = marker.and_then(|name| match children.first() {
@@ -366,8 +390,16 @@ pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<Detached
         ),
         BlockNode::Blockquote { children, span } => quote_or_callout(
             import_children(children, defs),
-            marker_on_first_line(defs.source, *span),
+            marker_on_first_line(defs, *span),
         ),
+        // A toggle's surface written as a callout marker is no callout: a
+        // quote that keeps its marker as text.
+        BlockNode::Surface { name, children, .. } if !is_registered_callout(&defs.extensions, name) => {
+            let marker = InlineText::plain(&format!("[!{name}]"), TextMark::default());
+            let mut quoted = vec![DetachedBlock::paragraph(marker)];
+            quoted.extend(import_children(children, defs));
+            DetachedBlock::container(BlockKindData::Blockquote, quoted)
+        }
         BlockNode::Surface { name, children, .. } => {
             callout(name.clone(), import_children(children, defs))
         }

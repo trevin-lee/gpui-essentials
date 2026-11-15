@@ -11,6 +11,12 @@ fn kinds(m: &BlockEditorModel) -> Vec<BlockKind> {
         .collect()
 }
 
+/// A model whose extensions register the default callout and toggle
+/// surfaces, as a host's do: only registered names are callouts.
+fn surfaced(source: &str) -> BlockEditorModel {
+    BlockEditorModel::from_markdown(source, with_default_surfaces(Default::default())).unwrap()
+}
+
 fn leaf_count(m: &BlockEditorModel) -> usize {
     m.document().leaves().count()
 }
@@ -23,7 +29,7 @@ fn callout_round_trips() {
         "> [!TIP]\n> - a\n> - b",
         "before\n\n> [!CAUTION]\n> careful\n\nafter",
     ] {
-        let m = model(source);
+        let m = surfaced(source);
         assert_eq!(m.source(), source);
         assert!(kinds(&m).contains(&BlockKind::Callout), "{source}");
         assert_invariants(&m);
@@ -44,7 +50,7 @@ fn callout_from_a_registered_surface_round_trips() {
 #[test]
 fn a_quote_starting_with_an_escaped_marker_stays_a_quote() {
     // The soft line break is written as a space, as every paragraph's is.
-    let m = model("> \\[!NOTE]\n> Hello");
+    let m = surfaced("> \\[!NOTE]\n> Hello");
     assert_eq!(kinds(&m), vec![BlockKind::Blockquote]);
     assert_eq!(m.source(), "> \\[!NOTE\\] Hello");
     assert_eq!(model(&m.source()).source(), m.source());
@@ -52,7 +58,7 @@ fn a_quote_starting_with_an_escaped_marker_stays_a_quote() {
 
 #[test]
 fn callout_name_survives_and_a_marker_alone_has_an_empty_body() {
-    let m = model("> [!note]");
+    let m = surfaced("> [!note]");
     assert_eq!(kinds(&m), vec![BlockKind::Callout]);
     assert_eq!(leaf_count(&m), 1);
     assert!(m.source().starts_with("> [!NOTE]"));
@@ -60,7 +66,7 @@ fn callout_name_survives_and_a_marker_alone_has_an_empty_body() {
 
 #[test]
 fn enter_on_an_empty_last_line_leaves_the_callout() {
-    let mut m = model("> [!NOTE]\n> a");
+    let mut m = surfaced("> [!NOTE]\n> a");
     caret_at_end(&mut m, 0);
     m.split_block().unwrap();
     m.split_block().unwrap();
@@ -71,7 +77,7 @@ fn enter_on_an_empty_last_line_leaves_the_callout() {
 
 #[test]
 fn backspace_at_the_start_of_a_callout_lifts_its_first_line() {
-    let mut m = model("> [!NOTE]\n> a");
+    let mut m = surfaced("> [!NOTE]\n> a");
     caret_in(&mut m, 0, 0);
     m.delete(false).unwrap();
     assert_eq!(m.source(), "a");
@@ -81,7 +87,7 @@ fn backspace_at_the_start_of_a_callout_lifts_its_first_line() {
 
 #[test]
 fn set_callout_wraps_then_renames() {
-    let mut m = model("a");
+    let mut m = surfaced("a");
     caret_in(&mut m, 0, 1);
     m.run(EditorCommand::SetCallout("Tip".into())).unwrap();
     assert_eq!(m.source(), "> [!TIP]\n> a");
@@ -269,7 +275,7 @@ fn deleting_across_a_closed_toggle_takes_its_body_too() {
 #[test]
 fn a_toggle_in_a_callout_round_trips() {
     let source = "> [!NOTE]\n> <details open>\n> <summary>T</summary>\n>\n> x\n>\n> </details>";
-    let m = model(source);
+    let m = surfaced(source);
     assert_eq!(m.source(), source);
     assert_eq!(kinds(&m), vec![BlockKind::Callout]);
 }
@@ -437,7 +443,7 @@ fn deleting_a_selection_into_a_summary_keeps_the_summary() {
 
 #[test]
 fn a_marker_made_a_link_by_a_definition_keeps_the_quote_and_its_text() {
-    let m = model("> [!note]\n> Hello [x] world\n\n[!note]: https://example.com");
+    let m = surfaced("> [!note]\n> Hello [x] world\n\n[!note]: https://example.com");
     assert_eq!(kinds(&m)[0], BlockKind::Blockquote);
     let text = m.document().leaves().next().unwrap().text().unwrap().to_string();
     assert_eq!(text, "!note Hello [x] world");
@@ -461,4 +467,23 @@ fn details_open_with_a_value_is_open() {
         let m = model(&format!("{tag}\n<summary>T</summary>\n\nbody\n\n</details>"));
         assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: false }], "{tag}");
     }
+}
+
+#[test]
+fn only_registered_names_become_callouts() {
+    // Nothing registered: GitHub's names stay quotes too.
+    let m = model("> [!NOTE]\n> a");
+    assert_eq!(kinds(&m), vec![BlockKind::Blockquote]);
+    // A name with no surface stays a quote, its marker kept as text.
+    let m = surfaced("> [!custom]\n> a");
+    assert_eq!(kinds(&m), vec![BlockKind::Blockquote]);
+    assert_eq!(m.document().leaves().next().unwrap().text(), Some("[!custom] a"));
+    // So does a toggle's own surface written as a marker.
+    let m = surfaced("> [!editor-toggle-open]\n> a");
+    assert_eq!(kinds(&m), vec![BlockKind::Blockquote]);
+    assert!(m.source().contains("editor-toggle-open"));
+    // A registered name nested in a list, which gpui-kit leaves a quote, is one.
+    let m = surfaced("- item\n\n  > [!TIP]\n  > a");
+    let item = m.document().root().children().next().unwrap().children().next().unwrap();
+    assert!(item.children().any(|b| b.kind() == BlockKind::Callout));
 }

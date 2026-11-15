@@ -204,8 +204,8 @@ impl NodeCache {
                 span: None,
             },
             // Drawn in the container the host registers under the callout's
-            // name (`MarkdownExtensions::block_surface`); a name nothing
-            // registered is drawn as plain blocks.
+            // name (`MarkdownExtensions::block_surface`). The importer and
+            // `SetCallout` make callouts only of registered names.
             BlockKindData::Callout { name } => {
                 let all = children(self);
                 BlockNode::Surface {
