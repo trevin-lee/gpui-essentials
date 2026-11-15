@@ -357,10 +357,17 @@ pub(crate) struct BlockDrag {
     pub(crate) moved: std::time::Instant,
     /// The pointer's vertical speed, in points a second, smoothed over the last few moves.
     pub(crate) velocity: f32,
+    /// The top of the editor's content in window y at the press. Scrolling
+    /// moves it, so the drag measures in content y, which scrolling leaves
+    /// alone.
+    pub(crate) start_top: Pixels,
+    /// The document revision at the press. An edit that lands mid-drag
+    /// makes the measured blocks stale, and cancels the drag.
+    pub(crate) revision: u64,
 }
 
 impl BlockDrag {
-    pub(crate) fn new(block: BlockId, at: Point<Pixels>) -> Self {
+    pub(crate) fn new(block: BlockId, at: Point<Pixels>, top: Pixels, revision: u64) -> Self {
         Self {
             block,
             start: at,
@@ -369,15 +376,19 @@ impl BlockDrag {
             at,
             moved: std::time::Instant::now(),
             velocity: 0.,
+            start_top: top,
+            revision,
         }
     }
 
-    /// The block's motion as `Reorder` takes it.
-    pub(crate) fn dragged(&self) -> super::reorder::Dragged {
+    /// The block's motion as `Reorder` takes it, in content y, where `top`
+    /// is the content's top in window y now.
+    pub(crate) fn dragged(&self, top: Pixels) -> super::reorder::Dragged {
+        let pointer = self.at.y - top;
         super::reorder::Dragged {
             block: self.block,
-            dy: f32::from(self.at.y - self.start.y),
-            pointer: f32::from(self.at.y),
+            dy: f32::from(pointer - (self.start.y - self.start_top)),
+            pointer: f32::from(pointer),
             velocity: self.velocity,
         }
     }
@@ -1744,7 +1755,33 @@ impl BlockEditorState {
         if self.readonly || doc.parent(block) != Some(doc.root) {
             return;
         }
-        self.block_drag = Some(BlockDrag::new(block, at));
+        self.block_drag = Some(BlockDrag::new(
+            block,
+            at,
+            self.content_top(),
+            self.model.revision(),
+        ));
+    }
+
+    /// The top of the editor's content in window y, as last drawn: content
+    /// y is window y less this.
+    pub(crate) fn content_top(&self) -> Pixels {
+        self.frame
+            .borrow()
+            .content
+            .map_or(Pixels::ZERO, |content| content.top())
+    }
+
+    /// The active block drag, after cancelling it if the document changed
+    /// since it began: the blocks it measured may have moved or gone.
+    pub(crate) fn live_block_drag(&mut self) -> Option<BlockDrag> {
+        let drag = self.block_drag?;
+        if drag.revision != self.model.revision() {
+            self.block_drag = None;
+            self.reorder.cancel_drag();
+            return None;
+        }
+        Some(drag)
     }
 
     pub(crate) fn task_checkbox_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
@@ -1874,14 +1911,17 @@ impl BlockEditorState {
     /// D22: mouse-down on a handle arms a drag (the click itself is handled
     /// as before).
     pub(crate) fn arm_block_drag(&mut self, at: Point<Pixels>) {
-        self.block_drag = self.drag_handle_at(at).map(|block| BlockDrag::new(block, at));
+        let (top, revision) = (self.content_top(), self.model.revision());
+        self.block_drag = self
+            .drag_handle_at(at)
+            .map(|block| BlockDrag::new(block, at, top, revision));
     }
 
     /// D22: pointer moved with the button down. Returns whether a block
     /// drag owns the move (no text selection then).
     pub(crate) fn block_drag_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
         use gpui::px;
-        let Some(mut drag) = self.block_drag else {
+        let Some(mut drag) = self.live_block_drag() else {
             return false;
         };
         if !drag.active {
@@ -1897,11 +1937,13 @@ impl BlockEditorState {
                 head: drag.block,
             });
             self.selection_changed(cx);
-            // The middles of the blocks' text as drawn now: the pointer passing one moves it.
+            // The middles of the blocks' text as drawn now, in content y: the pointer passing
+            // one moves it.
+            let top = self.content_top();
             let middles = self
                 .top_level_bounds()
                 .into_iter()
-                .map(|(_, id, b)| (id, f32::from(b.center().y)))
+                .map(|(_, id, b)| (id, f32::from(b.center().y - top)))
                 .collect();
             self.reorder.begin_drag(middles);
         }
@@ -1914,7 +1956,7 @@ impl BlockEditorState {
         }
         drag.at = at;
         drag.moved = now;
-        drag.drop = self.reorder.drop_gap(&drag.dragged());
+        drag.drop = self.reorder.drop_gap(&drag.dragged(self.content_top()));
         self.block_drag = Some(drag);
         cx.notify();
         true
@@ -1922,15 +1964,19 @@ impl BlockEditorState {
 
     /// D22: button released. Drops an active drag (one undo step).
     pub(crate) fn finish_block_drag(&mut self, cx: &mut Context<Self>) {
-        let Some(mut drag) = self.block_drag.take() else {
+        let Some(mut drag) = self.live_block_drag() else {
             return;
         };
+        self.block_drag = None;
         if drag.active {
             // Held still before letting go: nothing was thrown.
             if drag.moved.elapsed().as_secs_f32() > 0.1 {
                 drag.velocity = 0.;
             }
-            self.reorder.release(drag.dragged());
+            // Scrolled since the last move: the gap is where the pointer is now.
+            let dragged = drag.dragged(self.content_top());
+            drag.drop = self.reorder.drop_gap(&dragged);
+            self.reorder.release(dragged);
             if let Some(to) = drag.drop {
                 self.model.break_coalescing();
                 self.edit(
