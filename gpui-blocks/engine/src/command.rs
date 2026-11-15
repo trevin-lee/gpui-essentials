@@ -2084,13 +2084,12 @@ impl BlockEditorModel {
         })
     }
 
-    /// Move the top-level `block` to the gap `to` between the document's
-    /// top-level blocks (0 = before the first, `len` = after the last),
-    /// counted before the move (drag to reorder, D22). Nested blocks are
-    /// refused with `Unsupported`; a move onto its own position is a no-op.
-    /// Move a top-level block into the gap `to` between top-level blocks
-    /// (0 is before the first), as a drag drops it; one undo step, and the
-    /// block ends up selected.
+    /// Move the top-level `block` into the gap `to` between the document's
+    /// top-level blocks (0 is before the first, `len` after the last),
+    /// counted before the move, as a drag drops it (D22). The move is one
+    /// undo step, and the block ends up selected. Nested blocks are refused
+    /// with `Unsupported`; a move onto its own position is a no-op that
+    /// returns `false`.
     pub fn move_block_to(
         &mut self,
         block: BlockId,
