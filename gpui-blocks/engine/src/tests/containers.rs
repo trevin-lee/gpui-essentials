@@ -404,3 +404,33 @@ fn a_summary_keeps_reference_links_and_inline_html() {
     let src = m.source();
     assert!(src.contains("<summary>see [the docs](https://example.com) <kbd>K</kbd></summary>"), "{src}");
 }
+
+#[test]
+fn delete_before_a_toggle_unwraps_it_as_backspace_in_its_summary_does() {
+    let source = format!("a\n\n{CLOSED}");
+    let mut m = model(&source);
+    caret_at_end(&mut m, 0);
+    m.delete(true).unwrap();
+    assert_eq!(m.source(), "a\n\nT\n\nhidden");
+    assert_invariants(&m);
+    assert!(m.undo());
+    assert_eq!(m.source(), source);
+}
+
+#[test]
+fn deleting_a_selection_into_a_summary_keeps_the_summary() {
+    let mut m = model(&format!("ab\n\n{CLOSED}"));
+    let first = m.document().leaves().next().unwrap().id();
+    let summary = m.document().leaves().nth(1).unwrap().id();
+    m.set_selection(BlockSelection::Text {
+        anchor: BlockPosition::new(first, 1),
+        head: BlockPosition::new(summary, 0),
+    })
+    .unwrap();
+    m.delete(false).unwrap();
+    assert_eq!(
+        m.source(),
+        "a\n\n<details>\n<summary>T</summary>\n\nhidden\n\n</details>"
+    );
+    assert_invariants(&m);
+}

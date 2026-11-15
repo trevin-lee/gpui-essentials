@@ -222,10 +222,19 @@ fn delete_range(
             tx.remove_block(*id)?;
         }
     }
-    // End leaf.
+    // End leaf. A toggle's summary is never joined away: the first block
+    // of its body would take its place.
+    let is_summary = |doc: &EditorDocument, id: BlockId| {
+        doc.index_in_parent(id).is_some_and(|(parent, ix)| {
+            ix == 0 && matches!(doc.kind(parent), Some(BlockKindData::Toggle { .. }))
+        })
+    };
     if let Some(inline) = tx.doc.inline(end.block) {
         let tail = inline.slice(end.offset..inline.len());
-        let joinable = start_inline && !is_cell(tx.doc, end.block) && !is_cell(tx.doc, start.block);
+        let joinable = start_inline
+            && !is_cell(tx.doc, end.block)
+            && !is_cell(tx.doc, start.block)
+            && !is_summary(tx.doc, end.block);
         if joinable {
             tx.remove_block(end.block)?;
             tx.replace_text(start.block, start.offset..start.offset, tail)?;
@@ -520,6 +529,22 @@ impl BlockEditorModel {
             && range.is_collapsed()
             && range.start.offset == 0
             && let Some(toggle) = self.toggle_of_summary(range.start.block)
+        {
+            return self.unwrap_container(toggle, Some(range.start)).map(|_| ());
+        }
+        // Delete at the end of the leaf before a toggle's summary does the
+        // same: a join would take the summary away, and the first block of
+        // the body would become the summary.
+        if forward
+            && range.is_collapsed()
+            && self.doc.inline(range.start.block).map(InlineText::len) == Some(range.start.offset)
+            && self.doc.kind(range.start.block) != Some(&BlockKindData::TableCell)
+            && let Some(toggle) = self
+                .doc
+                .order
+                .rank(range.start.block)
+                .and_then(|rank| self.doc.leaves().get(rank as usize + 1).copied())
+                .and_then(|next| self.toggle_of_summary(next))
         {
             return self.unwrap_container(toggle, Some(range.start)).map(|_| ());
         }
