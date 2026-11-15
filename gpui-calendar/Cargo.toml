@@ -1,0 +1,47 @@
+[package]
+name = "gpui-calendar"
+version = "0.1.0"
+description = "Day, week and month calendar views with a time grid, in GPUI"
+edition = "2024"
+# GPUI Kit 0.9 needs it.
+rust-version = "1.100"
+license = "Apache-2.0"
+repository = "https://github.com/trevin-lee/gpui-calendar"
+readme = "README.md"
+keywords = ["gpui", "calendar", "scheduler", "time-grid", "gui"]
+categories = ["gui", "date-and-time"]
+include = ["/src", "/examples", "/README.md", "/LICENSE", "/NOTICE"]
+
+[lib]
+name = "gpui_calendar"
+
+[dependencies]
+# Pinned exactly: GPUI comes as GPUI Kit, which pins a snapshot of Zed's GPUI (gpui-pre 0.3.12).
+gpui-kit = "=0.9.1"
+# Dates and times. chrono is the version GPUI Kit's own date picker already uses; chrono-tz
+# carries the IANA database, so the display zone and its DST days don't depend on the machine's.
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
+# Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
+# GPUI's version of the image crate to save the picture.
+gpui-pre = { version = "=0.3.12", features = ["test-support"], optional = true }
+gpui-pre-macos = { version = "=0.3.12", features = ["test-support"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+[features]
+# Pictures of the example's window rendered offscreen (`--shot`).
+shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
+
+[[example]]
+name = "calendar"
+
+[dev-dependencies]
+gpui-kit = { version = "=0.9.1", features = ["test-support"] }
+
+# For this repository's own builds (the example and its measurements). Cargo ignores a
+# dependency's profiles, so apps using the crate build with their own.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = true
