@@ -2693,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-markdown-editor"
 version = "0.2.0"
-source = "git+https://github.com/trevin-lee/gpui-kit-markdown-editor?rev=4b7776ffba4a30706cc34fca3dda24961c48edb7#4b7776ffba4a30706cc34fca3dda24961c48edb7"
+source = "git+https://github.com/trevin-lee/gpui-kit-markdown-editor?rev=0ce34f876112b5d5ac03a3e0c46e60a5f1f8af6c#0ce34f876112b5d5ac03a3e0c46e60a5f1f8af6c"
 dependencies = [
  "gpui-kit",
  "markdown",

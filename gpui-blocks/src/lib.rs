@@ -1,8 +1,8 @@
-//! A Notion-like block editor for [GPUI](https://www.gpui.rs).
+//! A block editor for [GPUI](https://www.gpui.rs) apps built with GPUI Kit.
 //!
 //! A document is blocks (paragraphs, headings, nested bullet, numbered and to-do lists, quotes,
 //! callouts, toggles, code with its language, dividers, tables, pictures) and widgets, blocks an
-//! app draws itself. It's edited as Notion's documents are, and kept as Markdown:
+//! app draws itself. It's edited the way block editors such as Notion work, and kept as Markdown:
 //!
 //! - **Slash menu** ([`slash`]): `/` lists the blocks the line can become, narrowed by what's
 //!   typed after it.
@@ -18,12 +18,16 @@
 //! (Apache-2.0), through a fork that adds callouts, toggles, block motion and the hooks this
 //! crate draws its menus with. It's re-exported as [`markdown_editor`].
 //!
-//! ```ignore
+//! ```no_run
+//! use gpui_kit::*;
+//!
 //! gpui_kit::application().run(|cx| {
 //!     gpui_kit::init(cx);
 //!     gpui_blocks::init(cx);
 //!     gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
-//!         cx.new(|cx| gpui_blocks::Editor::new("# Hello\n\nType `/`.", window, cx))
+//!         let editor = cx.new(|cx| gpui_blocks::Editor::new("# Hello\n\nType `/`.", window, cx));
+//!         editor.update(cx, |editor, cx| editor.focus(window, cx));
+//!         editor
 //!     })
 //!     .unwrap();
 //! });
@@ -33,14 +37,48 @@ mod editor;
 pub mod slash;
 pub mod widget;
 
-pub use editor::{Editor, EditorEvent, Options, bind_keys, extensions};
+pub use editor::{Editor, EditorEvent, Options, extensions};
 pub use markdown_editor;
 pub use widget::Widget;
 
-/// Sets the editor up: its key bindings and the menus'. Call once, after `gpui_kit::init`.
+// The README's examples, compiled as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
+/// The view's actions, to bind to other keys after [`init`]: `gpui_blocks::MoveBlockUp` and so
+/// on in a keymap.
+pub mod actions {
+    gpui_kit::actions!(
+        gpui_blocks,
+        [
+            /// The slash menu's previous item.
+            SlashUp,
+            /// The slash menu's next item.
+            SlashDown,
+            /// Runs the slash menu's selected item.
+            SlashPick,
+            /// Closes the slash menu and leaves what was typed.
+            SlashClose,
+            /// Moves the caret's block up.
+            MoveBlockUp,
+            /// Moves the caret's block down.
+            MoveBlockDown
+        ]
+    );
+}
+
+/// Sets the editor up: its key bindings and the menus'. Call after `gpui_kit::init`; calling it
+/// again does nothing.
 pub fn init(cx: &mut gpui_kit::App) {
+    struct Initialized;
+    impl gpui_kit::Global for Initialized {}
+    if cx.has_global::<Initialized>() {
+        return;
+    }
+    cx.set_global(Initialized);
     markdown_editor::init(cx);
-    bind_keys(cx);
+    editor::bind_keys(cx);
 }
 
 #[cfg(test)]
@@ -48,7 +86,9 @@ mod tests {
     use std::sync::Arc;
 
     use gpui_kit::{AnyElement, App, IntoElement, ParentElement as _, Window, div};
-    use markdown_editor::{BlockEditorModel, BlockKind, BlockPosition, BlockSelection, EditorCommand};
+    use markdown_editor::{
+        BlockEditorModel, BlockKind, BlockPosition, BlockSelection, EditorCommand,
+    };
 
     use crate::widget::{Widget, fenced};
 
@@ -79,9 +119,27 @@ mod tests {
         let m = model(source);
         assert_eq!(
             kinds(&m),
-            [BlockKind::Paragraph, BlockKind::Custom, BlockKind::Paragraph]
+            [
+                BlockKind::Paragraph,
+                BlockKind::Custom,
+                BlockKind::Paragraph
+            ]
         );
         assert_eq!(m.source(), source);
+    }
+
+    #[test]
+    fn a_widget_inside_a_container_round_trips() {
+        for source in [
+            "> ```chart\n> a: 1\n> b: 2\n> ```",
+            "> [!NOTE]\n> ```chart\n> a: 1\n> ```",
+            "- item\n\n  ```chart\n  a: 1\n  ```",
+            "```chart title=x\na: 1\n```",
+        ] {
+            let once = model(source).source();
+            assert_eq!(once, source);
+            assert_eq!(model(&once).source(), source, "stable after a second save");
+        }
     }
 
     #[test]
@@ -101,16 +159,23 @@ mod tests {
             .unwrap();
         assert_eq!(
             kinds(&m),
-            [BlockKind::Paragraph, BlockKind::Custom, BlockKind::Paragraph]
+            [
+                BlockKind::Paragraph,
+                BlockKind::Custom,
+                BlockKind::Paragraph
+            ]
         );
         assert!(m.source().contains("```chart\nkind: pie\n```"));
     }
 
     #[test]
-    fn every_block_of_the_sample_round_trips() {
-        let source = include_str!("../examples/sample.md");
-        let m = model(source);
-        let again = model(&m.source());
-        assert_eq!(again.source(), m.source(), "stable after one save");
+    fn the_sample_reads_back_as_written() {
+        // The sample is in the editor's own form, so saving it changes nothing.
+        let source = include_str!("../examples/sample.md").trim_end();
+        let saved = model(source).source();
+        if saved != source {
+            std::fs::write(std::env::temp_dir().join("gpui-blocks-sample.md"), &saved).unwrap();
+        }
+        assert_eq!(saved, source);
     }
 }

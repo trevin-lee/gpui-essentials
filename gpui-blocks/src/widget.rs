@@ -11,8 +11,9 @@
 //!
 //! Every Markdown tool keeps a fenced block as it is, and shows it as a code block, so a document
 //! with widgets stays readable anywhere. In the editor a widget is one unit, like a picture: it's
-//! selected, moved and deleted whole, and written back exactly as it was read. What the body
-//! means is the widget's business; the editor only hands it over.
+//! selected, moved and deleted whole, and written back with its name, the rest of its info
+//! string and its body as they were read. What the body means is the widget's business; the
+//! editor only hands it over.
 //!
 //! Register widgets with [`Options::widget`](crate::Options::widget), and give each a slash menu
 //! item that inserts it (a [`SlashAction::Markdown`](crate::slash::SlashAction::Markdown) of
@@ -42,10 +43,19 @@ pub trait Widget: Send + Sync + 'static {
 /// The Markdown of a widget block: `body` fenced with the widget's name, the fence longer than
 /// any run of backticks in the body so the body can't close it.
 pub fn fenced(name: &str, body: &str) -> String {
+    fenced_with_info(name, body)
+}
+
+/// `fenced` with a whole info string: the name and anything written after it.
+fn fenced_with_info(info: &str, body: &str) -> String {
     let longest = body.split(|c| c != '`').map(str::len).max().unwrap_or(0);
     let fence = "`".repeat(longest.max(2) + 1);
     let body = body.strip_suffix('\n').unwrap_or(body);
-    format!("{fence}{name}\n{body}\n{fence}")
+    if body.is_empty() {
+        format!("{fence}{info}\n{fence}")
+    } else {
+        format!("{fence}{info}\n{body}\n{fence}")
+    }
 }
 
 /// A widget as a Markdown plugin: it takes the fenced blocks with its name.
@@ -60,19 +70,25 @@ impl MarkdownPlugin for WidgetPlugin {
         self.0.name()
     }
 
-    fn parse(&self, node: &Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
         let Node::Code(code) = node else {
             return None;
         };
         if code.lang.as_deref() != Some(self.0.name()) {
             return None;
         }
-        // The source as written, so the editor writes it back unchanged. The span can take the
-        // line ending after the fence, which the document's own separators replace.
-        let source = cx.node_source(node)?.trim_end_matches(['\r', '\n']).to_string();
-        let label = self.0.label(&code.value);
+        // Written back from its parts rather than its source span: inside a quote, a callout or
+        // a list the span holds the container's `> ` or indent on each line, which the
+        // container adds again when the document is written.
+        let body = code.value.replace("\r\n", "\n");
+        let info = match code.meta.as_deref().map(str::trim) {
+            Some(meta) if !meta.is_empty() => format!("{} {meta}", self.0.name()),
+            _ => self.0.name().to_string(),
+        };
+        let source = fenced_with_info(&info, &body);
+        let label = self.0.label(&body);
         Some(
-            MarkdownNode::new(self.0.name().to_string(), code.value.clone())
+            MarkdownNode::new(self.0.name().to_string(), body)
                 .text(label.clone())
                 .accessibility_label(label)
                 .markdown(source),
@@ -80,7 +96,10 @@ impl MarkdownPlugin for WidgetPlugin {
     }
 
     fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let body = node.data::<String>().map(String::as_str).unwrap_or_default();
+        let body = node
+            .data::<String>()
+            .map(String::as_str)
+            .unwrap_or_default();
         self.0.render(body, window, cx)
     }
 }
@@ -92,6 +111,7 @@ mod tests {
     #[test]
     fn fenced_blocks_outrun_the_bodys_own_fences() {
         assert_eq!(fenced("chart", "a: 1\n"), "```chart\na: 1\n```");
+        assert_eq!(fenced("chart", ""), "```chart\n```");
         assert_eq!(
             fenced("note", "```rust\nfn main() {}\n```"),
             "````note\n```rust\nfn main() {}\n```\n````"
