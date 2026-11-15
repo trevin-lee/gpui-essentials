@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): the last-leaf walk stops at a closed toggle's summary.
 use super::{
     document::EditorDocument,
     id::BlockId,

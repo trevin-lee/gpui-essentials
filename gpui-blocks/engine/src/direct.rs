@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): callouts and toggles projected as block surfaces.
 //! Direct projection of the editing model into the shared renderer's
 //! `BlockNode`s (design §7.3): no Markdown round trip, so no render-mode
 //! placeholders and no re-parse of a whole list for an edit inside it.

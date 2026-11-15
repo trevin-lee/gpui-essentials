@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): the reorder and surfaces modules, toggle surface names.
 //! A block-based WYSIWYG Markdown editor for GPUI, built on gpui-kit's
 //! public editor host API (`gpui_kit::base::text::editor_host`).
 //!

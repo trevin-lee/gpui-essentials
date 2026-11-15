@@ -11,12 +11,37 @@ and culling of off-screen blocks.
 <img width="880" height="846" alt="image" src="https://github.com/user-attachments/assets/6ad93024-a81e-4df3-b2b4-df141f915dca" />
 
 
+## Changes in this fork
+
+This is Trevin Lee's fork of
+[wabzqem/gpui-kit-markdown-editor](https://github.com/wabzqem/gpui-kit-markdown-editor).
+It adds:
+
+- Callouts (`> [!NOTE]`), drawn in a block surface the host registers under
+  the callout's name. `surfaces::with_default_surfaces` registers GitHub's
+  five alert names. Only registered names become callouts; any other name
+  stays a block quote.
+- Toggles (`<details><summary>`): the summary is a line of text and the body
+  holds blocks, shown only while open. A click on the chevron opens or closes
+  one, in a read-only editor too.
+- Commands: `SetCallout`, `WrapInToggle`, `SetToggleOpen`, `Unwrap`,
+  `InsertParagraphAfter` and `InsertMarkdown`.
+- Host hooks on `BlockEditorState`: `with_markdown_extensions`,
+  `caret_bounds`, `top_level_blocks`, `begin_block_drag` and `group_edits`,
+  and `BlockEditorModel::move_block_to` is public, so a host can draw its own
+  side menu and slash menu.
+- Block motion: while a block is dragged the blocks it passes slide out of
+  the way, and blocks that change places spring to their new places.
+
+It needs gpui-kit 0.9.1 and Rust 1.100. Files changed from upstream say so
+in their first line, as the Apache License asks.
+
 ## Usage
 
 ```toml
 [dependencies]
-gpui-kit = "0.9"
-gpui-kit-markdown-editor = { git = "https://github.com/wabzqem/gpui-kit-markdown-editor" }
+gpui-kit = "0.9.1"
+gpui-kit-markdown-editor = { git = "https://github.com/trevin-lee/gpui-kit-markdown-editor" }
 ```
 
 The library is imported as `markdown_editor`. The editor uses GPUI through
@@ -141,9 +166,10 @@ opens a browser.
 
 Drag to reorder (D22): drag a table by the small square handle at its
 top-left corner, or a code block by the strip left of it (the pointer becomes
-an open hand), and a line shows where it
-will drop between top-level blocks. One undo step. Other blocks are not
-draggable.
+an open hand), and the blocks it passes slide out of the way to open the gap
+it will drop into between top-level blocks. One undo step. The editor draws
+no handle for other blocks; a host can drag any top-level block with
+`BlockEditorState::begin_block_drag`.
 
 Text-editing keys (D21). Word deletes: Option+Backspace / Option+Delete on
 macOS, Ctrl+Backspace / Ctrl+Delete elsewhere (word motion is Option+arrows /

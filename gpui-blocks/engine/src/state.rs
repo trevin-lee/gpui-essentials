@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): host hooks, the toggle chevron, block motion.
 //! `BlockEditorState`: the entity around [`BlockEditorModel`] (design §6).
 
 use super::input_rule::RuleKind;

@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): a closed toggle's body is left out of the caret order.
 use std::collections::HashMap;
 use std::sync::Arc;
 

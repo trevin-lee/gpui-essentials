@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): tests of callouts, toggles, host hooks and motion.
 //! UI-slice tests: the entity, key bindings, frame seam, IME and perf
 //! counters, driven through a real window in `TestAppContext`.
 
