@@ -1,0 +1,86 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "ScatterChart",
+     "props": {
+      "datasets": [
+       {
+        "type": "element",
+        "typeName": "ScatterSeries",
+        "props": {
+         "name": "Class A",
+         "points": [
+          {
+           "type": "element",
+           "typeName": "Point",
+           "props": {
+            "x": 1,
+            "y": 60
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Point",
+           "props": {
+            "x": 2,
+            "y": 70,
+            "z": 5
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Point",
+           "props": {
+            "x": 3.5,
+            "y": 82
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "ScatterSeries",
+        "props": {
+         "name": "Class B",
+         "points": [
+          {
+           "type": "element",
+           "typeName": "Point",
+           "props": {
+            "x": 1,
+            "y": 55
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Point",
+           "props": {
+            "x": 4,
+            "y": 90
+           }
+          }
+         ]
+        }
+       }
+      ],
+      "xLabel": "Hours studied",
+      "yLabel": "Score"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 4,
+ "state": {}
+}

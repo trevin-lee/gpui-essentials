@@ -1,0 +1,11 @@
+root = Stack([tableHeader, editTable])
+tableHeader = InlineHeader("Team Roster", "Click a cell to edit")
+editTable = EditableTable("roster", [colName, colRole, colStart, colSite], [row1, row2])
+colName = { type: "text", key: "name", header: "Name" }
+colRole = { type: "select", key: "role", header: "Role", options: [roleEng, roleDesign] }
+roleEng = { value: "eng", label: "Engineering" }
+roleDesign = { value: "design", label: "Design" }
+colStart = { type: "date-single", key: "start", header: "Start Date", width: 140 }
+colSite = { type: "url" }
+row1 = { id: "1", values: ["Alex Kim", "eng", "2024-01-15", "https://example.com"] }
+row2 = { id: "2", values: ["Jamie Lee", "design", "2024-03-02", 7] }

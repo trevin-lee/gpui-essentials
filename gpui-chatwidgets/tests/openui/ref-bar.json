@@ -1,0 +1,63 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Q4 Revenue",
+      "size": "large-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "BarChart",
+     "props": {
+      "labels": [
+       "Oct",
+       "Nov",
+       "Dec"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product A",
+         "values": [
+          120,
+          150,
+          180
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product B",
+         "values": [
+          90,
+          110,
+          140
+         ]
+        }
+       }
+      ],
+      "variant": "grouped"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 6,
+ "state": {}
+}

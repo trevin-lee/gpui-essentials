@@ -1,0 +1,174 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Too many",
+      "size": "small"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Bad size"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Still here"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Card",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "TextContent",
+        "props": {
+         "text": "kept"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "EntityList",
+     "props": {
+      "rows": [
+       {
+        "left": "ok",
+        "right": "1",
+        "rightVariant": "text"
+       }
+      ],
+      "size": "default"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [
+  {
+   "code": "excess-args",
+   "component": "TextContent",
+   "path": "",
+   "statementId": "extra"
+  },
+  {
+   "code": "missing-required",
+   "component": "Callout",
+   "path": "/title",
+   "statementId": "missing"
+  },
+  {
+   "code": "missing-required",
+   "component": "Callout",
+   "path": "/description",
+   "statementId": "missing"
+  },
+  {
+   "code": "null-required",
+   "component": "TextContent",
+   "path": "/text",
+   "statementId": "nullReq"
+  },
+  {
+   "code": "type-mismatch",
+   "component": "TextContent",
+   "path": "/text",
+   "statementId": "wrongType"
+  },
+  {
+   "code": "type-mismatch",
+   "component": "TextContent",
+   "path": "/size",
+   "statementId": "wrongEnum"
+  },
+  {
+   "code": "unknown-component",
+   "component": "FancyWidget",
+   "path": "",
+   "statementId": "unknown"
+  },
+  {
+   "code": "unknown-function",
+   "component": "Shout",
+   "path": "",
+   "statementId": "fn"
+  },
+  {
+   "code": "null-required",
+   "component": "TextContent",
+   "path": "/text",
+   "statementId": "fn"
+  },
+  {
+   "code": "inline-reserved",
+   "component": "Query",
+   "path": "",
+   "statementId": "inline"
+  },
+  {
+   "code": "null-required",
+   "component": "TextContent",
+   "path": "/text",
+   "statementId": "inline"
+  },
+  {
+   "code": "type-mismatch",
+   "component": "Stack",
+   "path": "/justify",
+   "statementId": "colon"
+  },
+  {
+   "code": "null-required",
+   "component": "Stack",
+   "path": "/children",
+   "statementId": "colon"
+  },
+  {
+   "code": "type-mismatch",
+   "component": "Card",
+   "path": "/children/0",
+   "statementId": "wrongChild"
+  },
+  {
+   "code": "missing-required",
+   "component": "EntityList",
+   "path": "/rows/1/right",
+   "statementId": "badRows"
+  },
+  {
+   "code": "type-mismatch",
+   "component": "EntityList",
+   "path": "/rows/2",
+   "statementId": "badRows"
+  },
+  {
+   "code": "missing-required",
+   "component": "EntityList",
+   "path": "/header/right",
+   "statementId": "badRows"
+  }
+ ],
+ "unresolved": [
+  "children",
+  "direction"
+ ],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 13,
+ "state": {}
+}

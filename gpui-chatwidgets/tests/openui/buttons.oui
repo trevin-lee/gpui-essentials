@@ -1,0 +1,13 @@
+root = Stack([group, column, icons, legacy])
+group = Buttons([b1, b2, b3, b4, b5, b6])
+b1 = Button("Tell me more")
+b2 = Button("Ask", @ToAssistant("Explain the second chart", {chart: 2, tags: ["a", "b"], nested: {ok: true, n: null}}), "secondary", "normal", "small")
+b3 = Button("Open docs", @OpenUrl("https://example.com/docs?x=1#top"), "tertiary", "normal", "large")
+b4 = Button("Read and summarize", Action([@OpenUrl("https://example.com"), @ToAssistant("Summarize this page")]), "primary", "destructive", "extra-small")
+b5 = Button("Reset", Action([@Reset($a, $b), @Set($a, $a + 1)]), "ghost")
+b6 = Button(42)
+$a = 1
+$b = "x"
+column = Buttons([Button("Up"), Button("Down")], "column")
+icons = Stack([IconButton("Refresh", Icon("refresh-cw", "arrows"), @ToAssistant("Refresh it"), "primary", "small", "circle"), IconButton("Settings", Icon("settings"))], "row")
+legacy = Buttons([Button("Legacy open", {type: "open_url", url: "https://example.com/legacy"}), Button("Legacy say", {type: "continue_conversation", context: "ctx"}), Button("Odd", "not an action")])

@@ -1,0 +1,23 @@
+root = Stack([t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, list])
+$n = 7
+$name = "Ann"
+$on = true
+$empty = ""
+items = [{name: "b", qty: 3, tag: {kind: "x"}}, {name: "A", qty: "10", tag: {kind: "y"}}, {name: "c", qty: 1}, {name: "a", qty: null}]
+t1 = TextContent("" + ($n + 3) * 2 + " " + $n / 2 + " " + $n % 4 + " " + $n / 0 + " " + $n % 0 + " " + -$n)
+t2 = TextContent("" + ($n > 5) + ($n >= 7) + ($n < 7) + ($n <= 6) + ($n == "7") + ($n != 7) + ("a" + 1 + 2) + (1 + 2 + "a"))
+t3 = TextContent($on && $name || "nobody")
+t4 = TextContent($empty || "fallback")
+t5 = TextContent(!$on ? "off" : $n > 10
+  ? "big"
+  : "small")
+t6 = TextContent("" + items.name + " | " + items.length + " | " + items[1].name + " | " + items[9] + " | " + items.tag.kind)
+t7 = TextContent("Count " + @Count(items) + " sum " + @Sum(items.qty) + " avg " + @Avg([1, 2, 4]) + " min " + @Min([3, "1", 2]) + " max " + @Max([3, "x", 2]))
+t8 = TextContent("first " + @First(items).name + " last " + @Last(items).name + " none " + @First([]))
+t9 = TextContent("round " + @Round(3.14159, 2) + " " + @Round(-2.5) + " " + @Round([1.25, 2.75], 1) + " abs " + @Abs(-4) + " floor " + @Floor(2.7) + " ceil " + @Ceil(2.1))
+t10 = TextContent("sorted " + @Sort(items, "qty").name + " desc " + @Sort(items, "name", "desc").name + " nested " + @Sort(items, "tag.kind").name)
+t11 = TextContent("filtered " + @Filter(items, "qty", ">", 2).name + " contains " + @Filter(items, "name", "contains", "a").name + " eq " + @Filter(items, "qty", "==", "3").name)
+t12 = TextContent($name == "Ann" ? "Hi " + $name : "Who?")
+t13 = TextContent("str index " + $name[0] + " len " + $name.length + " missing " + $undeclared)
+t14 = TextContent("" + [1, [2, 3], null] + " " + {a: 1})
+list = Stack(@Each(items, "it", TextContent(it.name + ": " + it.qty)))

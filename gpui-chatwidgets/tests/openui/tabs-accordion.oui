@@ -1,0 +1,5 @@
+root = Stack([tabs, acc])
+tabs = Tabs([tabA, tabB])
+tabA = TabItem("summary", "Summary", [TextContent("Everything is on track."), Callout("success", "Good", "No blockers.")])
+tabB = TabItem("details", "Details", [Table([Col("Item", ["Rent", "Food"]), Col("Cost", [1200, 340.5], "number")])])
+acc = Accordion([AccordionItem("q1", "What is due?", [TextContent("The essay, Friday.")]), AccordionItem("q2", "What is next?", [Separator()])])

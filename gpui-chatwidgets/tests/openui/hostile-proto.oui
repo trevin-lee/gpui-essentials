@@ -1,0 +1,5 @@
+root = Stack([t1, t2, tbl])
+data = {__proto__: {polluted: true}, constructor: "c", toString: "s", ok: "fine"}
+t1 = TextContent(data.ok)
+t2 = TextContent("" + data.constructor + data.toString)
+tbl = Table([Col("Proto", [data])])

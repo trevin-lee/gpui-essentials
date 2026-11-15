@@ -1,0 +1,60 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "CardHeader",
+     "props": {
+      "title": "Later definition wins",
+      "subtitle": "second"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Card",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "TextContent",
+        "props": {
+         "text": "Hello"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Card",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "Stack",
+        "props": {
+         "children": []
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [
+  "missing",
+  "loop1"
+ ],
+ "orphaned": [
+  "unused"
+ ],
+ "incomplete": false,
+ "statementCount": 7,
+ "state": {}
+}

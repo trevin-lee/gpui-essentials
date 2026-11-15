@@ -1,0 +1,75 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Top Languages",
+      "size": "large-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Table",
+     "props": {
+      "columns": [
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Language",
+         "data": [
+          "Python",
+          "JavaScript",
+          "Java",
+          "TypeScript",
+          "Go"
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Users (M)",
+         "data": [
+          15.7,
+          14.2,
+          12.1,
+          8.5,
+          5.2
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Year",
+         "data": [
+          1991,
+          1995,
+          1995,
+          2012,
+          2009
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 6,
+ "state": {}
+}

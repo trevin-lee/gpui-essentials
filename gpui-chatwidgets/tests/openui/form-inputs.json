@@ -1,0 +1,452 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Form",
+     "props": {
+      "name": "prefs",
+      "buttons": {
+       "type": "element",
+       "typeName": "Buttons",
+       "props": {
+        "buttons": [
+         {
+          "type": "element",
+          "typeName": "Button",
+          "props": {
+           "label": "Save"
+          }
+         }
+        ]
+       }
+      },
+      "fields": [
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Website",
+         "input": {
+          "type": "element",
+          "typeName": "Input",
+          "props": {
+           "name": "site",
+           "placeholder": "https://",
+           "type": "url",
+           "rules": {
+            "url": true
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Age",
+         "input": {
+          "type": "element",
+          "typeName": "Input",
+          "props": {
+           "name": "age",
+           "placeholder": "",
+           "type": "number",
+           "rules": {
+            "numeric": true,
+            "min": 13,
+            "max": 120
+           }
+          }
+         },
+         "hint": "Your age in years"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Code",
+         "input": {
+          "type": "element",
+          "typeName": "Input",
+          "props": {
+           "name": "code",
+           "placeholder": "",
+           "type": "password"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Notes",
+         "input": {
+          "type": "element",
+          "typeName": "TextArea",
+          "props": {
+           "name": "notes",
+           "placeholder": "Anything else",
+           "rows": 3,
+           "rules": {
+            "maxLength": 200,
+            "pattern": "^[^<>]*$"
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Size",
+         "input": {
+          "type": "element",
+          "typeName": "Select",
+          "props": {
+           "name": "size",
+           "items": [
+            {
+             "type": "element",
+             "typeName": "SelectItem",
+             "props": {
+              "value": "s",
+              "label": "Small"
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "SelectItem",
+             "props": {
+              "value": "m",
+              "label": "Medium"
+             }
+            }
+           ],
+           "placeholder": "Pick one",
+           "rules": {
+            "required": true
+           },
+           "value": {
+            "__reactive": "assign",
+            "target": "$size",
+            "expr": {
+             "k": "StateRef",
+             "n": "$value"
+            }
+           },
+           "size": "small"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "When",
+         "input": {
+          "type": "element",
+          "typeName": "DatePicker",
+          "props": {
+           "name": "when",
+           "mode": "range",
+           "rules": {
+            "required": true
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Budget",
+         "input": {
+          "type": "element",
+          "typeName": "Slider",
+          "props": {
+           "name": "budget",
+           "variant": "discrete",
+           "min": 0,
+           "max": 500,
+           "step": 50,
+           "defaultValue": [
+            100
+           ],
+           "label": "Dollars"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Topics",
+         "input": {
+          "type": "element",
+          "typeName": "CheckBoxGroup",
+          "props": {
+           "name": "topics",
+           "items": [
+            {
+             "type": "element",
+             "typeName": "CheckBoxItem",
+             "props": {
+              "label": "Rust",
+              "description": "Systems",
+              "name": "rust",
+              "defaultChecked": true
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "CheckBoxItem",
+             "props": {
+              "label": "Go",
+              "description": "Servers",
+              "name": "go"
+             }
+            }
+           ],
+           "rules": {
+            "required": true
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Plan",
+         "input": {
+          "type": "element",
+          "typeName": "RadioGroup",
+          "props": {
+           "name": "plan",
+           "items": [
+            {
+             "type": "element",
+             "typeName": "RadioItem",
+             "props": {
+              "label": "Free",
+              "description": "No cost",
+              "value": "free"
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "RadioItem",
+             "props": {
+              "label": "Pro",
+              "description": "Paid",
+              "value": "pro"
+             }
+            }
+           ],
+           "defaultValue": "free"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Tools",
+         "input": {
+          "type": "element",
+          "typeName": "Chips",
+          "props": {
+           "name": "tools",
+           "type": "multiple",
+           "items": [
+            {
+             "type": "element",
+             "typeName": "ChipItem",
+             "props": {
+              "value": "figma",
+              "label": "Figma",
+              "icon": {
+               "type": "element",
+               "typeName": "Icon",
+               "props": {
+                "name": "figma",
+                "category": "design"
+               }
+              }
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "ChipItem",
+             "props": {
+              "value": "slack",
+              "label": "Slack",
+              "icon": null,
+              "disabled": true
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "ChipItem",
+             "props": {
+              "value": "",
+              "label": "Blank"
+             }
+            }
+           ],
+           "rules": null,
+           "defaultValue": [
+            "figma"
+           ]
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Style",
+         "input": {
+          "type": "element",
+          "typeName": "OptionCards",
+          "props": {
+           "name": "style",
+           "type": "single",
+           "items": [
+            {
+             "type": "element",
+             "typeName": "OptionCard",
+             "props": {
+              "value": "focused",
+              "title": "Deep Focus",
+              "subtitle": "Long blocks",
+              "topContent": {
+               "type": "element",
+               "typeName": "Icon",
+               "props": {
+                "name": "target",
+                "category": "tools"
+               }
+              }
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "OptionCard",
+             "props": {
+              "value": "collab",
+              "title": "Collaborative",
+              "subtitle": null,
+              "topContent": {
+               "type": "element",
+               "typeName": "Image",
+               "props": {
+                "alt": "Team",
+                "src": "/api/files/content?path=team.png"
+               }
+              }
+             }
+            }
+           ],
+           "rules": null,
+           "defaultValue": "collab"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Odd",
+         "input": {
+          "type": "element",
+          "typeName": "Label",
+          "props": {
+           "text": "Not an input"
+          }
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "Label",
+        "props": {
+         "text": "Alerts"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "SwitchGroup",
+        "props": {
+         "name": "alerts",
+         "items": [
+          {
+           "type": "element",
+           "typeName": "SwitchItem",
+           "props": {
+            "label": "Email",
+            "description": "Daily digest",
+            "name": "email",
+            "defaultChecked": true
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "SwitchItem",
+           "props": {
+            "label": null,
+            "description": null,
+            "name": "sms"
+           }
+          }
+         ],
+         "variant": "card"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Input",
+        "props": {
+         "name": "q",
+         "placeholder": "Search"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 16,
+ "state": {
+  "$size": "m"
+ }
+}

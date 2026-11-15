@@ -1,0 +1,10 @@
+Here is the card you asked for:
+
+```openui
+# The shell first
+root = Stack([title, note]) // trailing comment
+title = TextContent("Title # not a comment // nor this")
+note = TextContent('single # quoted // text')
+```
+
+Let me know if you want changes.

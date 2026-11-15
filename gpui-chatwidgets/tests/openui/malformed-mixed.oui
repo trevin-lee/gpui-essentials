@@ -1,0 +1,4 @@
+root = Stack([a, b, c])
+a = TextContent("first")
+b = TextContent("second"
+c = TextContent("third")

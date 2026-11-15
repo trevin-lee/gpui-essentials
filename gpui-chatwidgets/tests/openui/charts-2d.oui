@@ -1,0 +1,12 @@
+root = Stack([bar, stacked, line, area, radar, hbar, rows])
+labels = ["Oct", "Nov", "Dec"]
+s1 = Series("Product A", [120, 150, 180])
+s2 = Series("Product B", [90, -10, 140.5])
+bar = BarChart(labels, [s1, s2], "grouped", "Month", "Revenue", 240)
+stacked = BarChart(labels, [s1, s2], "stacked")
+line = LineChart(labels, [Series("Views", [1, 2])], "natural", "Month")
+area = AreaChart(labels, [s1], "step")
+radar = RadarChart(["Speed", "Power", "Range"], [Series("Car", [3, 4, 5]), Series("Bike", [2, 1, 3])])
+hbar = HorizontalBarChart(["A long category name", "Another one"], [Series("Votes", [10, 20])], "stacked", "Votes", "Option")
+rows = LineChart(labels, [$weeks])
+$weeks = null

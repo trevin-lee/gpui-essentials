@@ -1,0 +1,5 @@
+root = Stack([title, tbl, empty])
+title = TextContent("Open tasks", "large-heavy")
+tbl = Table([Col("Task", rows.title), Col("Hours", rows.hours, "number"), Col("Status", @Each(rows, "r", Tag(r.status, null, "sm", r.status == "open" ? "success" : "danger"))), Col("Actions", @Each(rows, "t", Button("Close", Action([@ToAssistant("Close task", {id: t.id})]))), "action"), Col("Short", ["only one"])])
+rows = [{id: 1, title: "Essay", hours: 3, status: "open"}, {id: 2, title: "Lab report", hours: 1.5, status: "late"}, {id: 3, title: "Reading", hours: null, status: "open"}]
+empty = @Count(rows) > 5 ? Table([Col("Never", [])]) : TextContent("No more data")
