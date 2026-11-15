@@ -55,6 +55,11 @@ Pin a commit: until it's on crates.io, any commit can change the API. The crate 
 `gpui-kit = "=0.9.1"` (which pins `gpui-pre` 0.3.12), so your app must use the same, or two GPUIs
 would be linked.
 
+The parser turns on `serde_json`'s `preserve_order` feature, so a program's properties keep
+the order they were written in. Cargo unifies features across a build, so every crate in your
+app that uses `serde_json` gets ordered maps too (an `IndexMap` in place of a `BTreeMap`).
+Nothing should depend on the old sorted order, but if something does, that's why it changed.
+
 ### Only the parser
 
 A crate that reads cards but doesn't draw them (a server, or the part of an app that isn't UI)
