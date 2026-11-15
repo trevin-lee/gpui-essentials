@@ -2,28 +2,31 @@
 //!
 //! ```sh
 //! cargo run --release --example editor                # the sample document, not saved
-//! cargo run --release --example editor -- notes.md    # a file, saved as you type
+//! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
+//!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
 //! cargo run --release --features shots --example editor -- --shot out.png [--scene slash]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
-//! end, and prints how long each keystroke took to reach a painted frame, the frame times while
+//! end, and prints how long each keystroke took until the frame showing it was painted (before
+//! the display presents it), the frame times while
 //! scrolling, the memory in use, and what the window drew while nothing changed. `--shot` takes
 //! a picture of the window without showing it: `doc` (the sample), `slash` (the slash menu
 //! open), `hover` (the side menu beside a block), `drag` (a block carried mid-drag) or `end`
 //! (the sample's end).
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::{ActiveTheme as _, Theme, ThemeMode};
-use gpui_kit::*;
 use gpui_blocks::slash::{SlashAction, SlashItem};
 use gpui_blocks::widget::{Widget, fenced};
 use gpui_blocks::{Editor, EditorEvent, Options};
+use gpui_kit::component::{ActiveTheme as _, Theme, ThemeMode};
+use gpui_kit::*;
 
 const SAMPLE: &str = include_str!("sample.md");
 
@@ -45,12 +48,47 @@ fn args() -> Args {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--bench" => out.bench = true,
-            "--shot" => out.shot = it.next().map(PathBuf::from),
+            "--shot" => match it.next() {
+                Some(path) if !path.starts_with("--") => out.shot = Some(PathBuf::from(path)),
+                _ => exit("--shot needs the picture's path"),
+            },
             "--scene" => out.scene = it.next().unwrap_or_default(),
+            flag if flag.starts_with("--") => exit(&format!("unknown option {flag}")),
             _ => out.file = Some(PathBuf::from(arg)),
         }
     }
+    if out.shot.is_some() && !cfg!(feature = "shots") {
+        exit("--shot needs the shots feature: cargo run --features shots --example editor");
+    }
+    // A measurement or a picture changes the document; it never writes to a file.
+    if (out.bench || out.shot.is_some()) && out.file.take().is_some() {
+        eprintln!("the file isn't opened for --bench or --shot");
+    }
     out
+}
+
+fn exit(message: &str) -> ! {
+    eprintln!("{message}");
+    std::process::exit(2);
+}
+
+/// Writes the document to `path`: to a file beside it first, then moved over it, so a crash or
+/// a full disk mid-write leaves the old file whole.
+fn save(path: &Path, markdown: &str) {
+    // A file ends with one line ending; the editor keeps a trailing empty line.
+    let text = format!("{}\n", markdown.trim_end());
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    let partial = path.with_file_name(format!(".{name}.saving"));
+    let written = std::fs::File::create(&partial)
+        .and_then(|mut f| f.write_all(text.as_bytes()).and_then(|_| f.sync_all()))
+        .and_then(|_| std::fs::rename(&partial, path));
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&partial);
+        eprintln!("{} wasn't saved: {e}", path.display());
+    }
 }
 
 /// A charcoal dark theme.
@@ -85,6 +123,17 @@ fn apply_theme(cx: &mut App) {
 struct Probe {
     started: Cell<Option<Instant>>,
     frames: RefCell<Vec<(Instant, Instant)>>,
+    /// Hears when the next frame has been painted.
+    painted: RefCell<Option<futures::channel::oneshot::Sender<Instant>>>,
+}
+
+impl Probe {
+    /// A receiver for the end of the next frame's painting.
+    fn next_paint(&self) -> futures::channel::oneshot::Receiver<Instant> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        *self.painted.borrow_mut() = Some(tx);
+        rx
+    }
 }
 
 struct Root {
@@ -99,13 +148,22 @@ struct Root {
 }
 
 impl Root {
-    fn new(source: &str, file: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        source: &str,
+        file: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // The example's own widget, and a slash menu item that inserts one.
         let options = Options::default().widget(Answer).slash_item(
             SlashItem::new(
                 "Answer",
                 SlashAction::Markdown(
-                    fenced("answer", "from: Assistant\nasked: What should I look at first today?\n---\n").into(),
+                    fenced(
+                        "answer",
+                        "from: Assistant\nasked: What should I look at first today?\n---\n",
+                    )
+                    .into(),
                 ),
             )
             .hint("A question and its answer, as a card")
@@ -119,19 +177,26 @@ impl Root {
                 return;
             };
             let editor = editor.downgrade();
-            this.save = Some(cx.spawn(async move |_, cx| {
+            this.save = Some(cx.spawn(async move |this, cx| {
                 cx.background_executor()
                     .timer(Duration::from_millis(400))
                     .await;
                 let Ok(markdown) = editor.read_with(cx, |e, cx| e.markdown(cx)) else {
                     return;
                 };
-                // A file ends with one line ending; the editor keeps a trailing empty line.
-                let text = format!("{}\n", markdown.trim_end());
-                if let Err(e) = std::fs::write(&path, text) {
-                    eprintln!("{} wasn't saved: {e}", path.display());
-                }
+                save(&path, &markdown);
+                let _ = this.update(cx, |this, _| this.save = None);
             }));
+        });
+        // Quitting or closing the window saves what's waiting rather than dropping it.
+        cx.on_app_quit(|this, cx| {
+            this.save_now(cx);
+            async {}
+        })
+        .detach();
+        window.on_window_should_close(cx, |_, cx| {
+            cx.quit();
+            true
         });
         editor.update(cx, |e, cx| e.focus(window, cx));
         Self {
@@ -141,6 +206,17 @@ impl Root {
             probe: Rc::default(),
             scrolling: None,
             _subscription: subscription,
+        }
+    }
+}
+
+impl Root {
+    /// Saves a change still waiting out its 400 ms, now.
+    fn save_now(&mut self, cx: &App) {
+        if self.save.take().is_some()
+            && let Some(path) = &self.file
+        {
+            save(path, &self.editor.read(cx).markdown(cx));
         }
     }
 }
@@ -174,8 +250,12 @@ impl Render for Root {
                 canvas(
                     |_, _, _| {},
                     move |_, _, _, _| {
+                        let now = Instant::now();
                         if let Some(start) = probe.started.take() {
-                            probe.frames.borrow_mut().push((start, Instant::now()));
+                            probe.frames.borrow_mut().push((start, now));
+                        }
+                        if let Some(tx) = probe.painted.borrow_mut().take() {
+                            let _ = tx.send(now);
                         }
                     },
                 )
@@ -188,9 +268,13 @@ impl Render for Root {
 fn main() {
     let args = args();
     let source = match &args.file {
-        Some(path) => std::fs::read_to_string(path)
-            .map(|s| s.trim_end_matches(['\r', '\n']).to_string())
-            .unwrap_or_default(),
+        // A new file starts empty. A file that can't be read isn't opened: saving over it would
+        // lose it.
+        Some(path) => match std::fs::read_to_string(path) {
+            Ok(text) => text.trim_end_matches(['\r', '\n']).to_string(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => exit(&format!("{} can't be opened: {e}", path.display())),
+        },
         None => SAMPLE.trim_end().to_string(),
     };
     let quiet = args.bench || args.shot.is_some();
@@ -225,7 +309,6 @@ fn main() {
         let (window, root) = gpui_kit::open_window(options, cx, move |window, cx| {
             cx.new(|cx| Root::new(&source, file, window, cx))
         })
-        .map(|(window, root)| (window, root))
         .expect("the window");
         if !quiet {
             cx.activate(true);
@@ -243,7 +326,7 @@ fn main() {
 
 actions!(editor_example, [Quit]);
 
-/// Waits for the next frame to finish and returns when it did.
+/// Asks for a frame and returns when it starts.
 async fn next_frame(window: AnyWindowHandle, cx: &mut AsyncApp) -> Instant {
     let (tx, rx) = futures::channel::oneshot::channel();
     let _ = cx.update_window(window, |_, window, _| {
@@ -266,7 +349,7 @@ fn long_document(lines: usize) -> String {
     let mut out = String::new();
     let mut n = 0;
     let mut section = 0;
-    while out.lines().count() < lines {
+    while out.lines().count() + 1 < lines {
         section += 1;
         out.push_str(&format!("## Section {section}\n\n"));
         for p in 0..6 {
@@ -276,11 +359,15 @@ fn long_document(lines: usize) -> String {
                  runs long enough to wrap once or twice at the column's width, as notes do. ({p})\n\n"
             ));
         }
-        out.push_str("- [x] A task that's done\n- [ ] A task to do\n  - [ ] Nested under it\n- A bullet\n\n");
+        out.push_str(
+            "- [x] A task that's done\n- [ ] A task to do\n  - [ ] Nested under it\n- A bullet\n\n",
+        );
         out.push_str("> [!NOTE]\n> A callout with a [link](https://example.com).\n\n");
         out.push_str("| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n\n");
         out.push_str("```rust\nfn section() -> usize {\n    42\n}\n```\n\n");
-        out.push_str("<details>\n<summary>A closed toggle</summary>\n\nHidden text.\n\n</details>\n\n");
+        out.push_str(
+            "<details>\n<summary>A closed toggle</summary>\n\nHidden text.\n\n</details>\n\n",
+        );
     }
     out.trim_end().to_string()
 }
@@ -305,7 +392,14 @@ fn summary(label: &str, mut v: Vec<f64>) {
 /// from `top`.
 fn footprint_mb() -> f64 {
     let out = std::process::Command::new("top")
-        .args(["-l", "1", "-pid", &std::process::id().to_string(), "-stats", "mem"])
+        .args([
+            "-l",
+            "1",
+            "-pid",
+            &std::process::id().to_string(),
+            "-stats",
+            "mem",
+        ])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
@@ -346,18 +440,20 @@ fn usage() -> (f64, f64) {
 }
 
 /// Types `count` characters, one every 50 ms, and returns each one's time from the keystroke to
-/// the end of the frame that drew it.
-async fn type_and_time(window: AnyWindowHandle, count: usize, cx: &mut AsyncApp) -> Vec<f64> {
+/// the end of painting the frame that shows it.
+async fn type_and_time(
+    window: AnyWindowHandle,
+    probe: &Probe,
+    count: usize,
+    cx: &mut AsyncApp,
+) -> Vec<f64> {
     let mut out = Vec::new();
     for i in 0..count {
         let key = if i % 6 == 5 { "space" } else { "a" };
-        let (tx, rx) = futures::channel::oneshot::channel();
+        let rx = probe.next_paint();
         let start = Instant::now();
         let _ = cx.update_window(window, |_, window, cx| {
             window.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx);
-            window.on_next_frame(move |_, _| {
-                let _ = tx.send(Instant::now());
-            });
         });
         if let Ok(end) = rx.await {
             out.push((end - start).as_secs_f64() * 1000.);
@@ -370,6 +466,7 @@ async fn type_and_time(window: AnyWindowHandle, count: usize, cx: &mut AsyncApp)
 fn bench(window: AnyWindowHandle, root: Entity<Root>, cx: &mut App) {
     cx.spawn(async move |cx| {
         wait(cx, 1500).await;
+        let probe = root.read_with(cx, |root, _| root.probe.clone());
         let (rss_start, _) = usage();
         let active = cx
             .update_window(window, |_, window, _| window.is_window_active())
@@ -402,25 +499,22 @@ fn bench(window: AnyWindowHandle, root: Entity<Root>, cx: &mut App) {
             });
         });
         next_frame(window, cx).await;
-        let typed = type_and_time(window, 120, cx).await;
+        let typed = type_and_time(window, &probe, 120, cx).await;
         summary("keystroke to painted frame, sample", typed);
 
         // The 5,000-line document.
         let long = long_document(5000);
         let lines = long.lines().count();
+        let painted = probe.next_paint();
         let started = Instant::now();
         let _ = cx.update_window(window, |_, _, cx| {
             root.update(cx, |root, cx| {
-                root.editor.update(cx, |e, cx| {
-                    e.state().update(cx, |s, cx| {
-                        let _ = s.set_source(&long, cx);
-                    });
-                });
+                root.editor.update(cx, |e, cx| e.set_markdown(&long, cx));
             });
         });
-        let shown = next_frame(window, cx).await;
+        let shown = painted.await.unwrap_or_else(|_| Instant::now());
         println!(
-            "opening a {lines}-line document ({} KB): {:.0} ms to its first frame",
+            "opening a {lines}-line document ({} KB): {:.0} ms to its first painted frame",
             long.len() / 1024,
             (shown - started).as_secs_f64() * 1000.
         );
@@ -434,7 +528,6 @@ fn bench(window: AnyWindowHandle, root: Entity<Root>, cx: &mut App) {
         // Scrolling it end to end, 60 points a frame, driven from the frame loop as a smooth
         // scroll is: each frame moves it and asks for the next.
         let handle = root.read_with(cx, |root, cx| root.editor.read(cx).scroll_handle().clone());
-        let probe = root.read_with(cx, |root, _| root.probe.clone());
         handle.set_offset(point(px(0.), px(0.)));
         next_frame(window, cx).await;
         let first = probe.frames.borrow().len();
@@ -486,10 +579,11 @@ fn bench(window: AnyWindowHandle, root: Entity<Root>, cx: &mut App) {
             });
         });
         wait(cx, 300).await;
-        let typed = type_and_time(window, 120, cx).await;
+        let typed = type_and_time(window, &probe, 120, cx).await;
         summary("keystroke to painted frame, 5,000-line document", typed);
 
-        // Idle: nothing changes for ten seconds, with the caret in the text (it blinks).
+        // Idle: nothing changes for ten seconds, with the caret in the text. The caret blinks
+        // twice a second while the editor has focus, so a few frames are drawn for it.
         wait(cx, 1000).await;
         let before = probe.frames.borrow().len();
         let (_, cpu_before) = usage();
@@ -497,11 +591,11 @@ fn bench(window: AnyWindowHandle, root: Entity<Root>, cx: &mut App) {
         let drawn = probe.frames.borrow().len() - before;
         let (_, cpu_after) = usage();
         println!(
-            "idle for 10 s, caret in the text (it blinks only while the window is active): {drawn} frames drawn, {:.2} s of CPU ({:.1}%)",
+            "idle for 10 s, caret in the text and blinking: {drawn} frames drawn, {:.2} s of CPU ({:.1}%)",
             cpu_after - cpu_before,
             (cpu_after - cpu_before) / 10. * 100.
         );
-        let _ = cx.update(|cx| cx.quit());
+        cx.update(|cx| cx.quit());
     })
     .detach();
 }
@@ -535,7 +629,7 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
     cx.spawn(async move |cx| {
         wait(cx, 800).await;
         match scene.as_str() {
-            // The slash menu, opened on the empty line before the spending heading's table.
+            // The slash menu, opened on a new line under the "This week" heading.
             "slash" => {
                 let _ = cx.update_window(window, |_, window, cx| {
                     root.update(cx, |root, cx| {
@@ -550,12 +644,11 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                                     gpui_blocks::markdown_editor::EditorCommand::InsertParagraphAfter(third),
                                     cx,
                                 );
-                                if let Ok(mut range) = s.capture_caret() {
-                                    let _ = s.replace_captured(&mut range, "/", cx);
-                                }
                             });
                         });
                     });
+                    // Typed, as the menu opens only for a `/` that's typed.
+                    window.dispatch_keystroke(Keystroke::parse("/").unwrap(), cx);
                 });
                 settle(window, cx).await;
             }
@@ -598,7 +691,7 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                             })
                         })
                     });
-                    let to = past + px(14.);
+                    let to = past - px(24.);
                     for step in 1..=12 {
                         let y = from.y + (to - from.y) * (step as f32 / 12.);
                         let _ = cx.update_window(window, |_, window, cx| {
@@ -679,11 +772,13 @@ impl Widget for Answer {
             .bytes()
             .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32))
             % 360;
-        // One id per body, so two cards never share a text view's state.
+        // The text view's id, from the body: two cards with the same body share it, which is
+        // harmless for text that isn't selectable.
         let id = SharedString::from(format!(
             "answer-{:x}",
-            body.bytes()
-                .fold(0u64, |h, b| h.wrapping_mul(1099511628211).wrapping_add(b as u64))
+            body.bytes().fold(0u64, |h, b| h
+                .wrapping_mul(1099511628211)
+                .wrapping_add(b as u64))
         ));
         div()
             .w_full()
@@ -738,11 +833,24 @@ impl Widget for Answer {
 
 /// An answer block's `from`, `asked` and answer.
 fn answer_parts(body: &str) -> (&str, &str, &str) {
-    let (head, answer) = body.split_once("---").unwrap_or(("", body));
+    // The header ends at a line that is just `---`.
+    let split = body
+        .match_indices("---")
+        .find(|(at, _)| {
+            let line_start = *at == 0 || body[..*at].ends_with('\n');
+            let rest = &body[at + 3..];
+            line_start && (rest.is_empty() || rest.starts_with('\n'))
+        })
+        .map(|(at, _)| (&body[..at], &body[at + 3..]));
+    let (head, answer) = split.unwrap_or(("", body));
     let field = |key: &str| {
         head.lines()
             .find_map(|l| l.strip_prefix(key).map(str::trim))
             .unwrap_or_default()
     };
-    (field("from:"), field("asked:"), answer.trim_start_matches('\n'))
+    (
+        field("from:"),
+        field("asked:"),
+        answer.trim_start_matches('\n'),
+    )
 }
