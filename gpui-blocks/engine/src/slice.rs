@@ -11,6 +11,9 @@
 //!   paragraph does not copy an empty one).
 //! - A table the selection touches is copied whole: a table with missing
 //!   cells has no Markdown form.
+//! - A closed toggle whose summary the selection covers is copied whole,
+//!   body included: its body holds no caret, and a delete over the summary
+//!   can remove all of it.
 //! - A list item whose own text lies before the selection (the selection
 //!   starts inside its nested list) is not copied as an empty item; its
 //!   nested content is lifted out instead.
@@ -79,6 +82,16 @@ impl Cut<'_> {
             .is_some_and(|r| r >= self.first && r <= self.last)
     }
 
+    /// Whether the selection covers all of leaf `id`'s text.
+    fn covers(&self, id: BlockId) -> bool {
+        if !self.touches(id) {
+            return false;
+        }
+        let len = self.doc.leaf_len(id).unwrap_or(0);
+        (id != self.range.start.block || self.range.start.offset == 0)
+            && (id != self.range.end.block || self.range.end.offset >= len)
+    }
+
     fn block(&self, id: BlockId) -> Vec<DetachedBlock> {
         let Some(entry) = self.doc.get(id) else {
             return Vec::new();
@@ -137,6 +150,15 @@ impl Cut<'_> {
             } else {
                 Vec::new()
             };
+        }
+        // A closed toggle's body holds no caret, so it has no rank and the
+        // walk below would drop it. A selection over the whole summary can
+        // delete the whole toggle, so it copies the whole toggle.
+        if *kind == (BlockKindData::Toggle { open: false })
+            && let Some(summary) = children.first()
+            && self.covers(*summary)
+        {
+            return vec![self.copy_whole(id)];
         }
         let mut cut: Vec<DetachedBlock> = Vec::new();
         for child in children {

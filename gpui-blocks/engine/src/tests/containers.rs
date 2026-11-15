@@ -286,3 +286,39 @@ fn insert_markdown_replaces_an_empty_line_and_leaves_a_line_after() {
     assert!(m.undo());
     assert_eq!(m.source(), "a\n\n");
 }
+
+#[test]
+fn copying_across_a_closed_toggle_keeps_its_body() {
+    let source = "a\n\n<details>\n<summary>T</summary>\n\nhidden\n\n</details>\n\nz";
+    let mut m = model(source);
+    let first = m.document().leaves().next().unwrap().id();
+    let last = m.document().leaves().last().unwrap().id();
+    m.set_selection(BlockSelection::Text {
+        anchor: BlockPosition::new(first, 0),
+        head: BlockPosition::new(last, 1),
+    })
+    .unwrap();
+    let range = m.doc().resolve_selection(m.selection()).unwrap();
+    let copied = crate::slice::selection_markdown(m.doc(), range).unwrap();
+    assert_eq!(copied, source);
+    // A cut is a copy and a delete: pasting it back loses nothing.
+    m.delete(false).unwrap();
+    m.paste_blocks(&copied).unwrap();
+    assert_eq!(m.source(), source);
+}
+
+#[test]
+fn copying_a_closed_toggle_at_the_document_start_keeps_its_body() {
+    let source = "<details>\n<summary>T</summary>\n\nhidden\n\n</details>\n\nz";
+    let mut m = model(source);
+    let first = m.document().leaves().next().unwrap().id();
+    let last = m.document().leaves().last().unwrap().id();
+    m.set_selection(BlockSelection::Text {
+        anchor: BlockPosition::new(first, 0),
+        head: BlockPosition::new(last, 1),
+    })
+    .unwrap();
+    let range = m.doc().resolve_selection(m.selection()).unwrap();
+    let copied = crate::slice::selection_markdown(m.doc(), range).unwrap();
+    assert_eq!(copied, source);
+}
