@@ -157,7 +157,8 @@ impl Reorder {
         // The order changed: each block that is still there starts from where it was drawn,
         // even when the drop merged or split blocks around it.
         if reordered(&self.last, &slots) {
-            let before: HashMap<BlockId, f32> = self.last.iter().map(|(id, s)| (*id, s.top)).collect();
+            let before: HashMap<BlockId, f32> =
+                self.last.iter().map(|(id, s)| (*id, s.top)).collect();
             for (id, slot) in &slots {
                 let Some(top) = before.get(id) else {
                     continue;
@@ -184,7 +185,9 @@ impl Reorder {
             _ => HashMap::new(),
         };
         // Every block that has somewhere to go, and the one under the pointer, has a spring.
-        let held = dragged.filter(|_| self.drag_slots.is_some()).map(|d| d.block);
+        let held = dragged
+            .filter(|_| self.drag_slots.is_some())
+            .map(|d| d.block);
         for id in targets.keys().copied().chain(held) {
             self.springs.entry(id).or_insert(Spring {
                 x: 0.,
@@ -234,8 +237,14 @@ impl Reorder {
 fn reordered(before: &[(BlockId, Slot)], after: &[(BlockId, Slot)]) -> bool {
     let in_before: HashSet<BlockId> = before.iter().map(|(id, _)| *id).collect();
     let in_after: HashSet<BlockId> = after.iter().map(|(id, _)| *id).collect();
-    let a = before.iter().map(|(id, _)| *id).filter(|id| in_after.contains(id));
-    let b = after.iter().map(|(id, _)| *id).filter(|id| in_before.contains(id));
+    let a = before
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| in_after.contains(id));
+    let b = after
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| in_before.contains(id));
     !a.eq(b)
 }
 
@@ -320,7 +329,12 @@ mod tests {
     /// Runs frames 8 ms apart until nothing moves; returns how many it took.
     fn settle(r: &mut Reorder, layout: &[(BlockId, Slot)], start: Instant) -> usize {
         for n in 1..200 {
-            let (_, moving) = r.frame(layout.to_vec(), None, start + Duration::from_millis(8 * n as u64), false);
+            let (_, moving) = r.frame(
+                layout.to_vec(),
+                None,
+                start + Duration::from_millis(8 * n as u64),
+                false,
+            );
             if !moving {
                 return n;
             }
@@ -337,20 +351,42 @@ mod tests {
         r.frame(layout.clone(), None, t, false);
         r.begin_drag(middles(&slots(&b)));
         // Picked up at its middle (20) and moved 75 down, to 95: past block 1's middle (60), not 2's (100).
-        let d = Dragged { block: b[0], dy: 75., pointer: 95., velocity: 300. };
+        let d = Dragged {
+            block: b[0],
+            dy: 75.,
+            pointer: 95.,
+            velocity: 300.,
+        };
         assert_eq!(r.drop_gap(&d), Some(2));
-        let (offsets, moving) = r.frame(layout.clone(), Some(d), t + Duration::from_millis(8), false);
+        let (offsets, moving) =
+            r.frame(layout.clone(), Some(d), t + Duration::from_millis(8), false);
         assert!(moving);
-        assert_eq!(offsets[&b[0]], 75., "the dragged block is exactly under the pointer");
-        assert!(!offsets.contains_key(&b[1]), "the block passed starts where it is");
-        let (offsets, _) = r.frame(layout.clone(), Some(d), t + Duration::from_millis(16), false);
+        assert_eq!(
+            offsets[&b[0]], 75.,
+            "the dragged block is exactly under the pointer"
+        );
+        assert!(
+            !offsets.contains_key(&b[1]),
+            "the block passed starts where it is"
+        );
+        let (offsets, _) = r.frame(
+            layout.clone(),
+            Some(d),
+            t + Duration::from_millis(16),
+            false,
+        );
         assert!(offsets[&b[1]] < 0., "the block passed is moving up");
         assert!(!offsets.contains_key(&b[2]), "the block not passed stays");
         // Held there, block 1 ends a whole slot up and stops asking for frames.
         let mut moving = true;
         let mut n = 3;
         while moving && n < 100 {
-            let (o, m) = r.frame(layout.clone(), Some(d), t + Duration::from_millis(8 * n), false);
+            let (o, m) = r.frame(
+                layout.clone(),
+                Some(d),
+                t + Duration::from_millis(8 * n),
+                false,
+            );
             moving = m;
             n += 1;
             if !moving {
@@ -367,7 +403,12 @@ mod tests {
         let t = Instant::now();
         r.frame(slots(&b), None, t, false);
         r.begin_drag(middles(&slots(&b)));
-        let d = Dragged { block: b[0], dy: 50., pointer: 70., velocity: 600. };
+        let d = Dragged {
+            block: b[0],
+            dy: 50.,
+            pointer: 70.,
+            velocity: 600.,
+        };
         r.frame(slots(&b), Some(d), t, false);
         r.release(d);
         // The model moved block 0 after block 1.
@@ -377,7 +418,10 @@ mod tests {
         // It was drawn at 0 + 50 and now lays out at 40: it starts about 10 below its slot.
         assert!((offsets[&b[0]] - 10.).abs() < 6., "{offsets:?}");
         let frames = settle(&mut r, &after, t + Duration::from_millis(8));
-        assert!(frames < 40, "settles within about 300 ms, took {frames} frames");
+        assert!(
+            frames < 40,
+            "settles within about 300 ms, took {frames} frames"
+        );
         let (offsets, moving) = r.frame(after, None, t + Duration::from_secs(2), false);
         assert!(offsets.is_empty() && !moving);
     }
@@ -409,7 +453,12 @@ mod tests {
         let t = Instant::now();
         r.frame(slots(&b), None, t, true);
         r.begin_drag(middles(&slots(&b)));
-        let d = Dragged { block: b[0], dy: 50., pointer: 70., velocity: 0. };
+        let d = Dragged {
+            block: b[0],
+            dy: 50.,
+            pointer: 70.,
+            velocity: 0.,
+        };
         let (o, moving) = r.frame(slots(&b), Some(d), t, true);
         assert_eq!(o[&b[0]], 50.);
         assert_eq!(o[&b[1]], -40.);
@@ -431,7 +480,11 @@ mod tests {
         after[2].1.top = 120.;
         let (o, moving) = r.frame(after, None, t, false);
         assert!(moving);
-        assert_eq!(o[&para], 40. - 120., "the paragraph starts where it was drawn");
+        assert_eq!(
+            o[&para],
+            40. - 120.,
+            "the paragraph starts where it was drawn"
+        );
         assert_eq!(o[&last], 120. - 80., "so does the block it passed");
         assert!(!o.contains_key(&list) && !o.contains_key(&gone));
     }
@@ -443,7 +496,12 @@ mod tests {
         let t = Instant::now();
         r.frame(slots(&b), None, t, false);
         r.frame(slots(&[b[1], b[0], b[2]]), None, t, false);
-        let (o, _) = r.frame(slots(&[b[1], b[2]]), None, t + Duration::from_millis(8), false);
+        let (o, _) = r.frame(
+            slots(&[b[1], b[2]]),
+            None,
+            t + Duration::from_millis(8),
+            false,
+        );
         assert!(!o.contains_key(&b[0]));
     }
 

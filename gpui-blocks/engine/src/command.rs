@@ -69,7 +69,10 @@ pub enum EditorCommand {
     /// inside its body (text, blocks or cells) into a caret at the end of
     /// its summary. A read-only editor runs it too, as view state, with no
     /// undo step and no `Changed` event.
-    SetToggleOpen { block: BlockId, open: bool },
+    SetToggleOpen {
+        block: BlockId,
+        open: bool,
+    },
     /// Unwrap the nearest callout or toggle around the caret: its blocks
     /// move out in place, a toggle's summary first.
     Unwrap,
@@ -980,13 +983,14 @@ impl BlockEditorModel {
         if !empty_paragraph {
             return self.paste_blocks_markdown(markdown);
         }
-        let Ok(parsed) =
-            gpui_kit::base::text::editor_host::parse_markdown(markdown, self.doc.extensions.clone())
-        else {
+        let Ok(parsed) = gpui_kit::base::text::editor_host::parse_markdown(
+            markdown,
+            self.doc.extensions.clone(),
+        ) else {
             return Ok(false);
         };
-        let mut defs = super::import::Defs::with_source(markdown)
-            .with_extensions(self.doc.extensions.clone());
+        let mut defs =
+            super::import::Defs::with_source(markdown).with_extensions(self.doc.extensions.clone());
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
         for node in parsed.iter() {
@@ -1056,7 +1060,8 @@ impl BlockEditorModel {
             tx.replace_text(pos.block, pos.offset..len, InlineText::new())?;
             let summary = DetachedBlock::paragraph(tail);
             let at = BlockPosition::new(summary.id, 0);
-            let next = DetachedBlock::container(BlockKindData::Toggle { open: false }, vec![summary]);
+            let next =
+                DetachedBlock::container(BlockKindData::Toggle { open: false }, vec![summary]);
             tx.insert(parent, index + 1, vec![next])?;
             Ok(caret(at))
         })?;
@@ -1160,7 +1165,11 @@ impl BlockEditorModel {
                 .index_in_parent(pos.block)
                 .ok_or(StepError::UnknownBlock(pos.block))?;
             let block = tx.remove_block(pos.block)?;
-            tx.insert(parent, index, vec![DetachedBlock::container(kind, vec![block])])?;
+            tx.insert(
+                parent,
+                index,
+                vec![DetachedBlock::container(kind, vec![block])],
+            )?;
             Ok(caret(pos))
         })
     }
@@ -1372,8 +1381,8 @@ impl BlockEditorModel {
         else {
             return Ok(false);
         };
-        let mut defs = super::import::Defs::with_source(text)
-            .with_extensions(self.doc.extensions.clone());
+        let mut defs =
+            super::import::Defs::with_source(text).with_extensions(self.doc.extensions.clone());
         super::import::collect_definitions(&parsed, &mut defs);
         let mut blocks = Vec::new();
         for node in parsed.iter() {
@@ -1663,7 +1672,10 @@ impl BlockEditorModel {
                 let resolved = self.caret_resolved()?;
                 let pos = resolved.pos;
                 let Some(container) = resolved.nearest(&self.doc, |k| {
-                    matches!(k, BlockKindData::Callout { .. } | BlockKindData::Toggle { .. })
+                    matches!(
+                        k,
+                        BlockKindData::Callout { .. } | BlockKindData::Toggle { .. }
+                    )
                 }) else {
                     return Ok(false);
                 };
@@ -2095,11 +2107,7 @@ impl BlockEditorModel {
     /// undo step, and the block ends up selected. Nested blocks are refused
     /// with `Unsupported`; a move onto its own position is a no-op that
     /// returns `false`.
-    pub fn move_block_to(
-        &mut self,
-        block: BlockId,
-        to: usize,
-    ) -> Result<bool, CommandError> {
+    pub fn move_block_to(&mut self, block: BlockId, to: usize) -> Result<bool, CommandError> {
         let root = self.doc.root;
         let Some((parent, index)) = self.doc.index_in_parent(block) else {
             return Err(CommandError::Position(PositionError::UnknownBlock(block)));
@@ -2154,7 +2162,10 @@ impl BlockEditorModel {
         };
         let len = doc.children(parent).len();
         // In a toggle, nothing takes the summary's place at index 0.
-        let first = usize::from(matches!(doc.kind(parent), Some(BlockKindData::Toggle { .. })));
+        let first = usize::from(matches!(
+            doc.kind(parent),
+            Some(BlockKindData::Toggle { .. })
+        ));
         let new_index = if down {
             if index + 1 >= len {
                 return Ok(false);

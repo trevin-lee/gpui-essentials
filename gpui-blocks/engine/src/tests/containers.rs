@@ -4,11 +4,7 @@ use super::*;
 use crate::surfaces::with_default_surfaces;
 
 fn kinds(m: &BlockEditorModel) -> Vec<BlockKind> {
-    m.document()
-        .root()
-        .children()
-        .map(|b| b.kind())
-        .collect()
+    m.document().root().children().map(|b| b.kind()).collect()
 }
 
 /// A model whose extensions register the default callout and toggle
@@ -41,8 +37,8 @@ fn callout_from_a_registered_surface_round_trips() {
     // With the containers registered, the parser hands top-level callouts
     // over as surfaces; they import the same.
     let source = "> [!NOTE]\n> Hello\n>\n> more";
-    let m = BlockEditorModel::from_markdown(source, with_default_surfaces(Default::default()))
-        .unwrap();
+    let m =
+        BlockEditorModel::from_markdown(source, with_default_surfaces(Default::default())).unwrap();
     assert_eq!(kinds(&m), vec![BlockKind::Callout]);
     assert_eq!(m.source(), source);
 }
@@ -124,10 +120,7 @@ fn toggle_round_trips() {
 fn details_on_one_line_with_nothing_inside_is_an_empty_toggle() {
     let m = model("<details><summary>T</summary></details>");
     assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: false }]);
-    assert_eq!(
-        m.source(),
-        "<details>\n<summary>T</summary>\n\n</details>"
-    );
+    assert_eq!(m.source(), "<details>\n<summary>T</summary>\n\n</details>");
 }
 
 #[test]
@@ -335,7 +328,8 @@ const CLOSED: &str = "<details>\n<summary>T</summary>\n\nhidden\n\n</details>";
 fn deleting_the_block_after_a_closed_toggle_puts_the_caret_on_its_summary() {
     let mut m = model(&format!("a\n\n{CLOSED}\n\nz"));
     let z = m.document().root().children().last().unwrap().id();
-    m.set_selection(BlockSelection::Blocks { anchor: z, head: z }).unwrap();
+    m.set_selection(BlockSelection::Blocks { anchor: z, head: z })
+        .unwrap();
     m.delete(false).unwrap();
     m.insert_text("x", EditOrigin::Typing).unwrap();
     assert_eq!(
@@ -361,10 +355,21 @@ fn closing_a_toggle_moves_a_block_selection_out_of_its_body() {
     let mut m = model("<details open>\n<summary>T</summary>\n\nhidden\n\n</details>\n\nz");
     let toggle = m.document().root().children().next().unwrap().id();
     let body = m.document().leaves().nth(1).unwrap().id();
-    m.set_selection(BlockSelection::Blocks { anchor: body, head: body }).unwrap();
-    m.run(EditorCommand::SetToggleOpen { block: toggle, open: false }).unwrap();
+    m.set_selection(BlockSelection::Blocks {
+        anchor: body,
+        head: body,
+    })
+    .unwrap();
+    m.run(EditorCommand::SetToggleOpen {
+        block: toggle,
+        open: false,
+    })
+    .unwrap();
     let summary = m.document().leaves().next().unwrap().id();
-    assert_eq!(m.selection(), &BlockSelection::caret(BlockPosition::new(summary, 1)));
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::caret(BlockPosition::new(summary, 1))
+    );
     // Backspace now edits the summary, not the hidden body.
     m.delete(false).unwrap();
     assert_eq!(
@@ -380,14 +385,31 @@ fn closing_a_toggle_moves_a_cell_selection_out_of_its_body() {
     );
     let toggle = m.document().root().children().next().unwrap().id();
     let cells: Vec<_> = m.document().leaves().skip(1).map(|l| l.id()).collect();
-    m.set_selection(BlockSelection::Cells { anchor: cells[0], head: cells[3] }).unwrap();
-    m.run(EditorCommand::SetToggleOpen { block: toggle, open: false }).unwrap();
+    m.set_selection(BlockSelection::Cells {
+        anchor: cells[0],
+        head: cells[3],
+    })
+    .unwrap();
+    m.run(EditorCommand::SetToggleOpen {
+        block: toggle,
+        open: false,
+    })
+    .unwrap();
     let summary = m.document().leaves().next().unwrap().id();
-    assert_eq!(m.selection(), &BlockSelection::caret(BlockPosition::new(summary, 1)));
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::caret(BlockPosition::new(summary, 1))
+    );
 }
 
 fn summary_text(m: &BlockEditorModel) -> String {
-    m.document().leaves().next().unwrap().text().unwrap().to_string()
+    m.document()
+        .leaves()
+        .next()
+        .unwrap()
+        .text()
+        .unwrap()
+        .to_string()
 }
 
 #[test]
@@ -395,7 +417,11 @@ fn a_summary_that_isnt_one_paragraph_is_kept_as_text() {
     for summary in ["1. one", "# h", "- x", "> q"] {
         let source = format!("<details>\n<summary>{summary}</summary>\n\nbody\n\n</details>");
         let m = model(&source);
-        assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: false }], "{summary}");
+        assert_eq!(
+            kinds(&m),
+            vec![BlockKind::Toggle { open: false }],
+            "{summary}"
+        );
         assert_eq!(summary_text(&m), summary);
         // Written back escaped, it reads the same again.
         assert_eq!(summary_text(&model(&m.source())), summary, "{}", m.source());
@@ -408,7 +434,10 @@ fn a_summary_keeps_reference_links_and_inline_html() {
         "<details>\n<summary>see [the docs][d] <kbd>K</kbd></summary>\n\nbody\n\n</details>\n\n[d]: https://example.com",
     );
     let src = m.source();
-    assert!(src.contains("<summary>see [the docs](https://example.com) <kbd>K</kbd></summary>"), "{src}");
+    assert!(
+        src.contains("<summary>see [the docs](https://example.com) <kbd>K</kbd></summary>"),
+        "{src}"
+    );
 }
 
 #[test]
@@ -445,10 +474,16 @@ fn deleting_a_selection_into_a_summary_keeps_the_summary() {
 fn a_marker_made_a_link_by_a_definition_keeps_the_quote_and_its_text() {
     let m = surfaced("> [!note]\n> Hello [x] world\n\n[!note]: https://example.com");
     assert_eq!(kinds(&m)[0], BlockKind::Blockquote);
-    let text = m.document().leaves().next().unwrap().text().unwrap().to_string();
+    let text = m
+        .document()
+        .leaves()
+        .next()
+        .unwrap()
+        .text()
+        .unwrap()
+        .to_string();
     assert_eq!(text, "!note Hello [x] world");
 }
-
 
 #[test]
 fn details_open_with_a_value_is_open() {
@@ -460,11 +495,19 @@ fn details_open_with_a_value_is_open() {
         "<details class=\"x\" open>",
         "<details\nopen>",
     ] {
-        let m = model(&format!("{tag}\n<summary>T</summary>\n\nbody\n\n</details>"));
+        let m = model(&format!(
+            "{tag}\n<summary>T</summary>\n\nbody\n\n</details>"
+        ));
         assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: true }], "{tag}");
     }
-    for tag in ["<details>", "<details class=\"open\">", "<details data-open>"] {
-        let m = model(&format!("{tag}\n<summary>T</summary>\n\nbody\n\n</details>"));
+    for tag in [
+        "<details>",
+        "<details class=\"open\">",
+        "<details data-open>",
+    ] {
+        let m = model(&format!(
+            "{tag}\n<summary>T</summary>\n\nbody\n\n</details>"
+        ));
         assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: false }], "{tag}");
     }
 }
@@ -477,14 +520,25 @@ fn only_registered_names_become_callouts() {
     // A name with no surface stays a quote, its marker kept as text.
     let m = surfaced("> [!custom]\n> a");
     assert_eq!(kinds(&m), vec![BlockKind::Blockquote]);
-    assert_eq!(m.document().leaves().next().unwrap().text(), Some("[!custom] a"));
+    assert_eq!(
+        m.document().leaves().next().unwrap().text(),
+        Some("[!custom] a")
+    );
     // So does a toggle's own surface written as a marker.
     let m = surfaced("> [!editor-toggle-open]\n> a");
     assert_eq!(kinds(&m), vec![BlockKind::Blockquote]);
     assert!(m.source().contains("editor-toggle-open"));
     // A registered name nested in a list, which gpui-kit leaves a quote, is one.
     let m = surfaced("- item\n\n  > [!TIP]\n  > a");
-    let item = m.document().root().children().next().unwrap().children().next().unwrap();
+    let item = m
+        .document()
+        .root()
+        .children()
+        .next()
+        .unwrap()
+        .children()
+        .next()
+        .unwrap();
     assert!(item.children().any(|b| b.kind() == BlockKind::Callout));
 }
 
@@ -492,7 +546,14 @@ fn only_registered_names_become_callouts() {
 fn set_callout_refuses_names_that_dont_round_trip() {
     let mut m = surfaced("a");
     caret_in(&mut m, 0, 1);
-    for name in ["", "two words", "a]b", "1st", "custom", "editor-toggle-open"] {
+    for name in [
+        "",
+        "two words",
+        "a]b",
+        "1st",
+        "custom",
+        "editor-toggle-open",
+    ] {
         assert!(
             matches!(
                 m.run(EditorCommand::SetCallout(name.into())),
@@ -531,7 +592,11 @@ fn move_blocks_never_moves_a_toggle_summary_alone() {
     assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
     assert_eq!(m.source(), toggle.replace("b1\n\nb2", "b2\n\nb1"));
     let body = m.document().leaves().nth(1).unwrap().id();
-    m.set_selection(BlockSelection::Blocks { anchor: body, head: body }).unwrap();
+    m.set_selection(BlockSelection::Blocks {
+        anchor: body,
+        head: body,
+    })
+    .unwrap();
     assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
     assert_invariants(&m);
 }

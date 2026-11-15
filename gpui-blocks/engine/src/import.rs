@@ -133,7 +133,9 @@ fn callout_name(text: &str) -> Option<SharedString> {
 /// letter, then ASCII letters, digits, `-` and `_`.
 pub(crate) fn is_callout_name(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Whether `extensions` register a block surface named `name` (ASCII case
@@ -149,9 +151,8 @@ pub(crate) fn is_registered_callout(extensions: &Arc<MarkdownExtensions>, name: 
     {
         return false;
     }
-    parse_markdown(&format!("> [!{name}]\n> x"), extensions.clone()).is_ok_and(|nodes| {
-        matches!(nodes.first(), Some(BlockNode::Surface { .. }))
-    })
+    parse_markdown(&format!("> [!{name}]\n> x"), extensions.clone())
+        .is_ok_and(|nodes| matches!(nodes.first(), Some(BlockNode::Surface { .. })))
 }
 
 /// The callout name on a blockquote's first line, when the marker is alone
@@ -170,7 +171,10 @@ fn marker_on_first_line(defs: &Defs, span: Option<Span>) -> Option<SharedString>
 /// marker dropped from its first paragraph. Callouts at the top level arrive
 /// as surfaces when the host registered their name; this catches the nested
 /// ones, which gpui-kit leaves as blockquotes.
-fn quote_or_callout(mut children: Vec<DetachedBlock>, marker: Option<SharedString>) -> DetachedBlock {
+fn quote_or_callout(
+    mut children: Vec<DetachedBlock>,
+    marker: Option<SharedString>,
+) -> DetachedBlock {
     // The marker and the soft line break after it, which arrives as a space.
     let marker = marker.and_then(|name| match children.first() {
         Some(DetachedBlock {
@@ -190,7 +194,11 @@ fn quote_or_callout(mut children: Vec<DetachedBlock>, marker: Option<SharedStrin
             {
                 return None;
             }
-            let len = if text[len..].starts_with(' ') { len + 1 } else { len };
+            let len = if text[len..].starts_with(' ') {
+                len + 1
+            } else {
+                len
+            };
             Some((name, len, inline.len()))
         }
         _ => None,
@@ -209,7 +217,11 @@ fn quote_or_callout(mut children: Vec<DetachedBlock>, marker: Option<SharedStrin
 /// What a raw HTML block says about a toggle: `<details>` (with `open` or
 /// not) and its `<summary>`, or `</details>`.
 enum DetailsTag {
-    Open { open: bool, summary: String, closed: bool },
+    Open {
+        open: bool,
+        summary: String,
+        closed: bool,
+    },
     Close,
 }
 
@@ -329,7 +341,10 @@ fn summary_inline(summary: &str, defs: &Defs) -> InlineText {
 /// level, so a nested toggle is a pair inside the pair; a stack matches them.
 /// A tag without its partner stays the raw HTML it was.
 pub(crate) fn group_toggles(blocks: Vec<DetachedBlock>, defs: &Defs) -> Vec<DetachedBlock> {
-    if !blocks.iter().any(|b| matches!(details_tag(b), Some(DetailsTag::Open { .. }))) {
+    if !blocks
+        .iter()
+        .any(|b| matches!(details_tag(b), Some(DetailsTag::Open { .. })))
+    {
         return blocks;
     }
     let toggle = |open: bool, summary: &str, body: Vec<DetachedBlock>| {
@@ -395,7 +410,9 @@ pub(crate) fn import_block(node: &BlockNode, defs: &Defs, out: &mut Vec<Detached
         ),
         // A toggle's surface written as a callout marker is no callout: a
         // quote that keeps its marker as text.
-        BlockNode::Surface { name, children, .. } if !is_registered_callout(&defs.extensions, name) => {
+        BlockNode::Surface { name, children, .. }
+            if !is_registered_callout(&defs.extensions, name) =>
+        {
             let marker = InlineText::plain(&format!("[!{name}]"), TextMark::default());
             let mut quoted = vec![DetachedBlock::paragraph(marker)];
             quoted.extend(import_children(children, defs));

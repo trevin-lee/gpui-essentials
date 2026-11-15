@@ -338,7 +338,8 @@ impl RenderOnce for BlockEditor {
                     let ghost = (!ghost_drawn).then(|| {
                         ghost_drawn = true;
                         // Without the margins it has among other blocks.
-                        let copy = node.render(node_ix, flow.first(true).last(true), &node_cx, window, cx);
+                        let copy =
+                            node.render(node_ix, flow.first(true).last(true), &node_cx, window, cx);
                         use gpui_kit::component::ActiveTheme as _;
                         let theme = cx.theme();
                         deferred(
@@ -738,21 +739,25 @@ impl Element for EditorRoot {
         // A dragged block's selection box would mark the place it left, which other blocks
         // slide over; the copy under the pointer shows it instead.
         let dragging = state.block_drag.is_some_and(|d| d.active);
-        let selected_area = state.model.selected_blocks().filter(|_| !dragging).and_then(|(parent, range)| {
-            let doc = &state.model.doc;
-            let ids = doc.children(parent).get(range)?.to_vec();
-            let frame = frame.borrow();
-            frame
-                .leaves
-                .iter()
-                .filter(|leaf| {
-                    let path = doc.path(leaf.info.block);
-                    ids.iter()
-                        .any(|id| *id == leaf.info.block || path.contains(id))
-                })
-                .map(|leaf| leaf.bounds())
-                .reduce(|a, b| a.union(&b))
-        });
+        let selected_area = state
+            .model
+            .selected_blocks()
+            .filter(|_| !dragging)
+            .and_then(|(parent, range)| {
+                let doc = &state.model.doc;
+                let ids = doc.children(parent).get(range)?.to_vec();
+                let frame = frame.borrow();
+                frame
+                    .leaves
+                    .iter()
+                    .filter(|leaf| {
+                        let path = doc.path(leaf.info.block);
+                        ids.iter()
+                            .any(|id| *id == leaf.info.block || path.contains(id))
+                    })
+                    .map(|leaf| leaf.bounds())
+                    .reduce(|a, b| a.union(&b))
+            });
 
         window.handle_input(
             &focus,
@@ -878,7 +883,8 @@ impl Element for EditorRoot {
             // caret or starting a drag; nothing else handles this mouse-down.
             if !event.modifiers.shift
                 && entity.update(cx, |state, cx| {
-                    state.click_checkbox(event.position, cx) || state.click_toggle(event.position, cx)
+                    state.click_checkbox(event.position, cx)
+                        || state.click_toggle(event.position, cx)
                 })
             {
                 cx.stop_propagation();
