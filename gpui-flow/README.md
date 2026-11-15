@@ -1,0 +1,98 @@
+# gpui-flow
+
+A node-and-edge editor for [GPUI](https://www.gpui.rs) apps in the manner of
+[React Flow](https://reactflow.dev): a library, and an example window with one of everything.
+It's young: the API can change between commits, so pin one.
+
+## Use it
+
+It needs Rust 1.100 or newer, as GPUI Kit 0.9 does, and it pins `gpui-kit = "=0.9.1"` (which
+pins `gpui-pre` 0.3.12), so your app must use the same, or two GPUIs would be linked.
+
+```toml
+[dependencies]
+gpui-kit = "=0.9.1"
+gpui-flow = { git = "https://github.com/trevin-lee/WORKSPACE_REPO", rev = "<a commit>" }
+```
+
+Run the example with `cargo run --release --example flow` from this folder.
+
+## How it works
+
+- **What it is.** A `Flow` is a GPUI entity that holds nodes, edges and a viewport, and emits
+  events. It carries React Flow's pieces under their names: the `default`, `input`, `output`
+  and `group` node kinds and the host's own; handles; bezier, simple bezier, straight, step and
+  smooth step edges (the same routes, ported, up to 12.12.1's corner fix) with labels,
+  arrowheads, colors and animation; the dotted, lined or crossed background; the controls; the
+  minimap; panels.
+- **React Flow's behaviour, checked against its source.** The defaults are React Flow's (zoom
+  limits, grid, connection radius in flow units, wheel and scroll speeds, fit padding,
+  `setCenter` zooming to the largest), except two kept for speed: nodes off screen aren't
+  drawn, and nodes too small to read are drawn as boxes. So are its rules: a plain click on a
+  selected node keeps the selection and ⌘ adds or takes away; shift-drag draws a rectangle
+  even from a node, and takes the edges of any node it takes; a dragged connection snaps to a
+  handle under the pointer, else the nearest in reach, preferring the other kind; grid snapping
+  is in the flow, not the parent; `extent` holds on load as well as in a drag; a child is
+  always drawn above its parent, selected nodes above the rest, and an edge to a child at that
+  child's level (so above the group it's in); an edge whose handle doesn't exist isn't drawn;
+  delete takes the children that may go, and leaves one that may not where it is.
+- **React Flow's JSON.** A flow saves and loads as React Flow's own `toObject()` JSON:
+  camelCase fields, `parentId`, `extent` (`"parent"` or a box), `zIndex`, handles, markers,
+  `style.stroke` and `strokeWidth`, custom edge types by name (drawn as bezier), and any field
+  it doesn't read kept as it was, so a file comes back without loss.
+- **With the mouse and keys.** Drag the pane to pan; scroll or pinch to zoom about the pointer;
+  drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
+  rectangle; drag from a handle to another (either direction) to connect; click an edge to
+  select it; delete, ⌘A, escape (which also puts back a drag, resize, pan or rectangle), the
+  arrows (shift for four steps), ⌘+, ⌘−, ⌘0, ⇧1 to fit. The keys sit on a layer of their own
+  beside the nodes, so they only act while the flow itself has the focus, never while a text
+  field in a node or panel does, and a key with nothing to do goes on to the host.
+- **Inside a node.** A child that takes the focus when pressed (a text field) owns that press:
+  the node isn't selected or dragged, and the field keeps the focus. Others are marked as React
+  Flow marks them: `nodrag` for buttons and sliders, `nowheel` for lists that scroll.
+  Renderers get the `&Flow` to read (the entity is busy while it draws).
+- **Events a host can follow.** The events say what someone did: connect (with where a
+  dropped connection ended, for "drop on the pane to add a node"), clicks, drag start, move
+  and stop (escape included), arrow-key moves, resize start, move and end, delete (once, and
+  a host check can refuse it), and the selection and viewport whatever changed them,
+  transitions included. Changes made through the flow's methods aren't reported back.
+- **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
+  transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
+  sets the rem under each node to 16 points times the zoom, and nodes size themselves in
+  `units` (rems underneath), and their text with `font_size`. What a node sizes in pixels, a
+  hairline border, stays that size at every zoom. Nodes wholly off screen aren't built once
+  they've been measured; one that changes is built again so its handles stay true.
+- **What the flow paints itself.** Edges, the background, the minimap and the controls' icons,
+  with GPUI's paths and quads. Each node and handle reports where it was laid out, and the
+  edges are painted after that in the same frame, so a line never trails its node. Edges are
+  painted in levels among the nodes, cut to the pane (an edge running far off screen costs
+  only what's on it), and hit-tested against the lines last painted.
+- **Bad input.** Positions and sizes that aren't numbers, zoom limits the wrong way round, a
+  grid of 0, a parent chain that loops, two nodes with one id: each is put right or ignored,
+  never a panic or a hang, and each has a test.
+- **What a frame costs.** Measured by `--bench` in the example (a release build, 1280×820 at
+  2×, 120 Hz), as the app's own work from the start of a frame to the end of its painting:
+  0.5 ms panning the sample and 1.2 ms zooming it, so both hold 120 frames a second; 2.3 ms
+  with 500 nodes and 4 ms with 1000, zoomed out to fit, where they're drawn as boxes. What got
+  it there, each found with a profiler:
+  - The background's marks and the edges are each gathered into one path. GPUI gives every
+    primitive a place in its ordering tree and every batch of paths its own render pass, so
+    ten thousand dots as quads and an edge a path cost milliseconds each.
+  - Text takes its size from `NodeContext::font_size`, which snaps to half a pixel. Text that
+    follows the zoom exactly asks for a new font size on every frame of a zoom, and making the
+    font and its glyphs then costs more than the rest of the frame.
+  - Nodes are looked up and changed by id through an index, not by searching the list.
+  - Below a zoom of 0.3, nodes are drawn as boxes of the size they measured, not built.
+  - Edges off screen are skipped before they're flattened.
+- **Drawing only on change.** Nothing draws while nothing changes, with one exception:
+  animated edges redraw the flow twenty times a second while one is on screen.
+- **Names.** React Flow's `Position` is `Side` and `Background` is `FlowBackground`, because
+  GPUI exports both names and hosts import both crates whole.
+- **Not yet.** Reconnecting an existing edge by dragging its end; a node toolbar; edge
+  renderers of the host's own (a custom type is drawn as a bezier); panning when a drag nears
+  the pane's edge; connecting by clicking two handles in turn; `dragHandle`; markers that
+  scale with the line's width; a keyboard path through nodes and accessibility; undo.
+
+## License
+
+Apache-2.0. See the repository's LICENSE and NOTICE.

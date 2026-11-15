@@ -1,0 +1,7 @@
+# The flow canvas's Rust, the Mac app's version, pinned for this folder only: rustup installs it
+# beside whatever the machine's default is, on the first build here, and leaves that default
+# alone. GPUI needs a recent stable.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

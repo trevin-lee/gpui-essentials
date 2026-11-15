@@ -1,0 +1,44 @@
+# The flow canvas: a node-and-edge editor in the manner of React Flow, for the Mac app, as a
+# library with an example window. Nodes are ordinary GPUI elements; edges, the background, the
+# minimap and the controls are painted by the crate.
+[package]
+name = "gpui-flow"
+version = "0.1.0"
+description = "A node-based editor in the manner of React Flow, in GPUI"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "gpui_flow"
+
+# Its own workspace, beside the Mac app's rather than in it, until the app uses it.
+[workspace]
+
+[dependencies]
+# The app's pins, exactly: GPUI comes as GPUI Kit, which pins gpui-pre 0.3.12.
+gpui-kit = "=0.9.1"
+# Nodes and edges save and load as JSON, and a node's data is any JSON value.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
+# GPUI's version of the image crate to save the picture.
+gpui-pre = { version = "=0.3.12", features = ["test-support"], optional = true }
+gpui-pre-macos = { version = "=0.3.12", features = ["test-support"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+[features]
+# Pictures of the example's window rendered offscreen (`--shot`), as the editor's.
+shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
+
+[[example]]
+name = "flow"
+
+[dev-dependencies]
+gpui-kit = { version = "=0.9.1", features = ["test-support"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = true
