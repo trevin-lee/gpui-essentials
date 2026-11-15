@@ -1,0 +1,28 @@
+# Four GPUI crates in one workspace, so they build and test against one GPUI.
+[workspace]
+resolver = "3"
+members = ["gpui-blocks", "gpui-calendar", "gpui-chatwidgets", "gpui-flow"]
+
+[workspace.package]
+edition = "2024"
+# GPUI Kit 0.9 needs it.
+rust-version = "1.100"
+license = "Apache-2.0"
+repository = "https://github.com/trevin-lee/gpui-essentials"
+
+# Pinned exactly, here only: GPUI comes as GPUI Kit, which pins a snapshot of Zed's GPUI
+# (gpui-pre 0.3.12). Every crate takes these, so an app using several of them links one GPUI,
+# and must use the same versions itself.
+[workspace.dependencies]
+gpui-kit = "=0.9.1"
+gpui-pre = "=0.3.12"
+gpui-pre-macos = "=0.3.12"
+gpui-pre-apple = "=0.3.12"
+
+# For this repository's own builds (the examples and their measurements). Cargo ignores a
+# dependency's profiles, so apps using these crates build with their own.
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = true

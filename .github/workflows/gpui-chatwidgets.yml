@@ -1,0 +1,70 @@
+name: gpui-chatwidgets
+
+# Runs when gpui-chatwidgets, or something every crate shares, changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gpui-chatwidgets/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/gpui-chatwidgets.yml"
+  pull_request:
+    paths:
+      - "gpui-chatwidgets/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/gpui-chatwidgets.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    # GPUI draws through Metal, so GitHub's macOS runners build and run its tests, the headless
+    # ones included.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # rust-toolchain.toml pins the version; rustup installs it on first use.
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-chatwidgets-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-gpui-chatwidgets-
+      - run: cargo fmt -p gpui-chatwidgets --check
+      - run: cargo clippy -p gpui-chatwidgets --locked --all-targets -- -D warnings
+      - run: cargo clippy -p gpui-chatwidgets --locked --all-targets --features shots -- -D warnings
+      # Unit, interaction and headless tests, and the README's examples compiled.
+      - run: cargo test -p gpui-chatwidgets --locked
+      - run: cargo doc -p gpui-chatwidgets --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  parser:
+    # The parser and model alone (default-features = false) must build and pass on Linux with no
+    # GPUI in the build: apps test their non-UI crates there.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-chatwidgets-parser-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-gpui-chatwidgets-parser-
+      - run: cargo clippy -p gpui-chatwidgets --locked --no-default-features --all-targets -- -D warnings
+      - run: cargo test -p gpui-chatwidgets --locked --no-default-features
+      # Nothing of GPUI may be in the parser-only build.
+      - run: "! cargo tree -p gpui-chatwidgets --no-default-features -e normal --locked | grep -E 'gpui-(kit|pre)'"

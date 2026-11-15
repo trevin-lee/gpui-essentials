@@ -1,0 +1,51 @@
+name: gpui-blocks
+
+# Runs when gpui-blocks, or something every crate shares, changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gpui-blocks/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/gpui-blocks.yml"
+  pull_request:
+    paths:
+      - "gpui-blocks/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/gpui-blocks.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    # GPUI draws through Metal, so GitHub's macOS runners build and run its tests, the headless
+    # ones included.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # rust-toolchain.toml pins the version; rustup installs it on first use.
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-blocks-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-gpui-blocks-
+      - run: cargo fmt -p gpui-blocks --check
+      - run: cargo clippy -p gpui-blocks --locked --all-targets -- -D warnings
+      - run: cargo clippy -p gpui-blocks --locked --all-targets --features shots -- -D warnings
+      # Unit, interaction and headless tests, and the README's examples compiled.
+      - run: cargo test -p gpui-blocks --locked
+      - run: cargo doc -p gpui-blocks --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings

@@ -1,6 +1,0 @@
-# The Rust this crate is built and tested with. rustup installs it beside your default on the
-# first build here and leaves that default alone. GPUI needs a recent stable.
-[toolchain]
-channel = "1.100.0"
-profile = "minimal"
-components = ["clippy", "rustfmt"]

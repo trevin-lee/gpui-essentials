@@ -39,7 +39,7 @@ It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
 ```toml
 [dependencies]
 gpui-kit = "0.9.1"
-gpui-blocks = { git = "https://github.com/trevin-lee/gpui-blocks", rev = "<a commit>" }
+gpui-blocks = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
 Pin a commit: until it's on crates.io, any commit can change the API.
@@ -202,6 +202,6 @@ Not done yet:
 
 ## License
 
-Apache-2.0, as gpui-kit-markdown-editor and GPUI Kit are. See [LICENSE](LICENSE) and
-[NOTICE](NOTICE). Notion is a trademark of Notion Labs, Inc., and this project isn't affiliated
+Apache-2.0, as gpui-kit-markdown-editor and GPUI Kit are. See [LICENSE](../LICENSE) and
+[NOTICE](../NOTICE). Notion is a trademark of Notion Labs, Inc., and this project isn't affiliated
 with it.
