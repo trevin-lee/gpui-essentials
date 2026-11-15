@@ -1,0 +1,9 @@
+root = Stack([t])
+$base = 10
+$double = $base * 2
+$label = "Total: " + @Sum([$base, $double])
+$list = [$base, {x: $double}]
+$fromCard = Card([])
+$withStep = @ToAssistant("x")
+t = TextContent($label + " " + $list[1].x + " " + $later + " " + $neverDeclared)
+$later = "late"

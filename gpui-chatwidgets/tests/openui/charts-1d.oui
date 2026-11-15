@@ -1,0 +1,8 @@
+root = Stack([pie, donut, semi, radial, single, slices])
+pie = PieChart(["Rent", "Food", "Fun"], [1200, 340, 120])
+donut = PieChart(["Low", "Med", "High"], [@Count(@Filter(tasks, "priority", "==", "low")), @Count(@Filter(tasks, "priority", "==", "medium")), @Count(@Filter(tasks, "priority", "==", "high"))], "donut")
+semi = PieChart(["Done", "Left"], [7, 3], "pie", "semiCircular")
+radial = RadialChart(["Mon", "Tue"], [5, 8])
+single = SingleStackedBarChart(["Used", "Free"], [60, 40])
+slices = PieChart(["A", "B"], [1, -2])
+tasks = [{priority: "low"}, {priority: "high"}, {priority: "high"}, {priority: "medium"}]

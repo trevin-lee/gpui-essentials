@@ -1,0 +1,40 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "ok"
+     }
+    },
+    null,
+    null,
+    null
+   ],
+   "direction": null,
+   "gap": null,
+   "justify": null
+  }
+ },
+ "errors": [
+  {
+   "code": "type-mismatch",
+   "component": "Stack",
+   "path": "/align",
+   "statementId": "root"
+  }
+ ],
+ "unresolved": [],
+ "orphaned": [
+  "x",
+  "y"
+ ],
+ "incomplete": false,
+ "statementCount": 4,
+ "state": {}
+}

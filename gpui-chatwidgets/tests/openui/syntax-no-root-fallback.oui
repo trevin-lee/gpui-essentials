@@ -1,0 +1,3 @@
+intro = TextContent("Not the root")
+main = Stack([intro, more])
+more = TextContent("More")

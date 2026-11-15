@@ -1,0 +1,38 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "bad \\x41 escape"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "short \\u12 escape"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "raw\ttab inside"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 4,
+ "state": {}
+}

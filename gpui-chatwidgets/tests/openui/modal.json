@@ -1,0 +1,164 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Edit",
+      "action": {
+       "steps": [
+        {
+         "type": "set",
+         "target": "$showEdit",
+         "valueAST": {
+          "k": "Bool",
+          "v": true
+         }
+        }
+       ]
+      },
+      "variant": "secondary"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Modal",
+     "props": {
+      "title": "Edit note",
+      "open": {
+       "__reactive": "assign",
+       "target": "$showEdit",
+       "expr": {
+        "k": "StateRef",
+        "n": "$value"
+       }
+      },
+      "children": [
+       {
+        "type": "element",
+        "typeName": "Form",
+        "props": {
+         "name": "note",
+         "buttons": {
+          "type": "element",
+          "typeName": "Buttons",
+          "props": {
+           "buttons": [
+            {
+             "type": "element",
+             "typeName": "Button",
+             "props": {
+              "label": "Save",
+              "action": {
+               "steps": [
+                {
+                 "type": "continue_conversation",
+                 "message": "Save the note"
+                },
+                {
+                 "type": "set",
+                 "target": "$showEdit",
+                 "valueAST": {
+                  "k": "Bool",
+                  "v": false
+                 }
+                },
+                {
+                 "type": "set",
+                 "target": "$saved",
+                 "valueAST": {
+                  "k": "Bool",
+                  "v": true
+                 }
+                }
+               ]
+              },
+              "variant": "primary"
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "Button",
+             "props": {
+              "label": "Cancel",
+              "action": {
+               "steps": [
+                {
+                 "type": "set",
+                 "target": "$showEdit",
+                 "valueAST": {
+                  "k": "Bool",
+                  "v": false
+                 }
+                }
+               ]
+              },
+              "variant": "tertiary"
+             }
+            }
+           ]
+          }
+         },
+         "fields": [
+          {
+           "type": "element",
+           "typeName": "FormControl",
+           "props": {
+            "label": "Title",
+            "input": {
+             "type": "element",
+             "typeName": "Input",
+             "props": {
+              "name": "title",
+              "placeholder": "A short title",
+              "type": "text",
+              "rules": {
+               "required": true,
+               "maxLength": 40
+              }
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      ],
+      "size": "lg"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Callout",
+     "props": {
+      "variant": "success",
+      "title": "Saved",
+      "description": "The note was saved.",
+      "visible": {
+       "__reactive": "assign",
+       "target": "$saved",
+       "expr": {
+        "k": "StateRef",
+        "n": "$value"
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 10,
+ "state": {
+  "$showEdit": false,
+  "$saved": false
+ }
+}

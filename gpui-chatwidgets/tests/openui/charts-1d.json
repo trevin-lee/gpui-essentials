@@ -1,0 +1,108 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "PieChart",
+     "props": {
+      "labels": [
+       "Rent",
+       "Food",
+       "Fun"
+      ],
+      "values": [
+       1200,
+       340,
+       120
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "PieChart",
+     "props": {
+      "labels": [
+       "Low",
+       "Med",
+       "High"
+      ],
+      "values": [
+       1,
+       1,
+       2
+      ],
+      "variant": "donut"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "PieChart",
+     "props": {
+      "labels": [
+       "Done",
+       "Left"
+      ],
+      "values": [
+       7,
+       3
+      ],
+      "variant": "pie",
+      "appearance": "semiCircular"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "RadialChart",
+     "props": {
+      "labels": [
+       "Mon",
+       "Tue"
+      ],
+      "values": [
+       5,
+       8
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "SingleStackedBarChart",
+     "props": {
+      "labels": [
+       "Used",
+       "Free"
+      ],
+      "values": [
+       60,
+       40
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "PieChart",
+     "props": {
+      "labels": [
+       "A",
+       "B"
+      ],
+      "values": [
+       1,
+       -2
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 8,
+ "state": {}
+}

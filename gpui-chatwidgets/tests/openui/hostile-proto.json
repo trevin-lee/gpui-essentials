@@ -1,0 +1,53 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "fine"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "cs"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Table",
+     "props": {
+      "columns": [
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Proto",
+         "data": [
+          {
+           "constructor": "c",
+           "toString": "s",
+           "ok": "fine"
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 5,
+ "state": {}
+}

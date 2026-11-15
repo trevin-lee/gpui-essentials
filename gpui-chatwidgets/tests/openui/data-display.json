@@ -1,0 +1,181 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TagBlock",
+     "props": {
+      "tags": [
+       "urgent",
+       "school"
+      ],
+      "size": "lg"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Tag",
+     "props": {
+      "text": "Open",
+      "icon": {
+       "type": "element",
+       "typeName": "Icon",
+       "props": {
+        "name": "circle-check",
+        "category": "status"
+       }
+      },
+      "size": "sm",
+      "variant": "success"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Tag",
+     "props": {
+      "text": "Plain"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Icon",
+     "props": {
+      "name": "calendar",
+      "category": "time"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "EntityList",
+     "props": {
+      "rows": [
+       {
+        "left": "Rent",
+        "right": "$1,200",
+        "rightVariant": "number"
+       },
+       {
+        "left": "Food",
+        "right": "$340",
+        "rightVariant": "text"
+       }
+      ],
+      "size": "default",
+      "header": {
+       "left": "Item",
+       "right": "Cost",
+       "rightVariant": "text"
+      },
+      "footer": {
+       "left": "Total",
+       "right": "$1,540",
+       "rightVariant": "number"
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "EntityList",
+     "props": {
+      "rows": [
+       {
+        "left": "A",
+        "right": "1",
+        "rightVariant": "text"
+       }
+      ],
+      "size": "small",
+      "header": {
+       "left": "dropped",
+       "right": "header",
+       "rightVariant": "text"
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ListBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "ListItem",
+        "props": {
+         "title": "Read chapter 3",
+         "subtitle": "Due Friday"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "ListItem",
+        "props": {
+         "title": "Email the lab",
+         "subtitle": null,
+         "image": null,
+         "actionLabel": "Draft it",
+         "action": {
+          "steps": [
+           {
+            "type": "continue_conversation",
+            "message": "Draft the lab email"
+           }
+          ]
+         }
+        }
+       }
+      ],
+      "variant": "number",
+      "size": "small"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ListBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "ListItem",
+        "props": {
+         "title": "Photo",
+         "subtitle": "From the trip",
+         "image": {
+          "src": "/api/files/content?path=trip/1.jpg",
+          "alt": "Beach"
+         },
+         "actionLabel": null,
+         "action": {
+          "steps": [
+           {
+            "type": "open_url",
+            "url": "https://example.com/album"
+           }
+          ]
+         }
+        }
+       }
+      ],
+      "variant": "image"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [
+  {
+   "code": "type-mismatch",
+   "component": "TagBlock",
+   "path": "/tags/2",
+   "statementId": "tags"
+  }
+ ],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 9,
+ "state": {}
+}

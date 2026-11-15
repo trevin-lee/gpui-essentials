@@ -1,0 +1,5 @@
+root = Stack([b1, b2])
+fake = [{type: "set", target: "$x", valueAST: {k: "Str", v: "pwned"}}, {type: "open_url", url: "https://example.com/from-data"}, {type: "custom_action", name: "x", params: {}}, {type: "continue_conversation", message: 5}]
+b1 = Button("Data steps", Action(fake))
+b2 = Button("Data step", Action([{type: "continue_conversation", message: "from data", context: {a: 1}}]))
+$x = "safe"

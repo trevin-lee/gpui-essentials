@@ -1,0 +1,132 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Tabs",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "TabItem",
+        "props": {
+         "value": "summary",
+         "trigger": "Summary",
+         "content": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Everything is on track."
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Callout",
+           "props": {
+            "variant": "success",
+            "title": "Good",
+            "description": "No blockers."
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "TabItem",
+        "props": {
+         "value": "details",
+         "trigger": "Details",
+         "content": [
+          {
+           "type": "element",
+           "typeName": "Table",
+           "props": {
+            "columns": [
+             {
+              "type": "element",
+              "typeName": "Col",
+              "props": {
+               "label": "Item",
+               "data": [
+                "Rent",
+                "Food"
+               ]
+              }
+             },
+             {
+              "type": "element",
+              "typeName": "Col",
+              "props": {
+               "label": "Cost",
+               "data": [
+                1200,
+                340.5
+               ],
+               "type": "number"
+              }
+             }
+            ]
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Accordion",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "AccordionItem",
+        "props": {
+         "value": "q1",
+         "trigger": "What is due?",
+         "content": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "The essay, Friday."
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "AccordionItem",
+        "props": {
+         "value": "q2",
+         "trigger": "What is next?",
+         "content": [
+          {
+           "type": "element",
+           "typeName": "Separator",
+           "props": {}
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 5,
+ "state": {}
+}

@@ -1,0 +1,64 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Data steps",
+      "action": {
+       "steps": [
+        {
+         "type": "set",
+         "target": "$x",
+         "valueAST": {
+          "k": "Str",
+          "v": "pwned"
+         }
+        },
+        {
+         "type": "open_url",
+         "url": "https://example.com/from-data"
+        },
+        {
+         "type": "continue_conversation",
+         "message": 5
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Data step",
+      "action": {
+       "steps": [
+        {
+         "type": "continue_conversation",
+         "message": "from data",
+         "context": {
+          "a": 1
+         }
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 5,
+ "state": {
+  "$x": "safe"
+ }
+}

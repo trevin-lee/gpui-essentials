@@ -1,0 +1,261 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Buttons",
+     "props": {
+      "buttons": [
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Tell me more"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Ask",
+         "action": {
+          "steps": [
+           {
+            "type": "continue_conversation",
+            "message": "Explain the second chart",
+            "context": {
+             "chart": 2,
+             "tags": [
+              "a",
+              "b"
+             ],
+             "nested": {
+              "ok": true,
+              "n": null
+             }
+            }
+           }
+          ]
+         },
+         "variant": "secondary",
+         "type": "normal",
+         "size": "small"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Open docs",
+         "action": {
+          "steps": [
+           {
+            "type": "open_url",
+            "url": "https://example.com/docs?x=1#top"
+           }
+          ]
+         },
+         "variant": "tertiary",
+         "type": "normal",
+         "size": "large"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Read and summarize",
+         "action": {
+          "steps": [
+           {
+            "type": "open_url",
+            "url": "https://example.com"
+           },
+           {
+            "type": "continue_conversation",
+            "message": "Summarize this page"
+           }
+          ]
+         },
+         "variant": "primary",
+         "type": "destructive",
+         "size": "extra-small"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Reset",
+         "action": {
+          "steps": [
+           {
+            "type": "reset",
+            "targets": [
+             "$a",
+             "$b"
+            ]
+           },
+           {
+            "type": "set",
+            "target": "$a",
+            "valueAST": {
+             "k": "BinOp",
+             "op": "+",
+             "left": {
+              "k": "StateRef",
+              "n": "$a"
+             },
+             "right": {
+              "k": "Num",
+              "v": 1
+             }
+            }
+           }
+          ]
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Buttons",
+     "props": {
+      "buttons": [
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Up"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Down"
+        }
+       }
+      ],
+      "direction": "column"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "IconButton",
+        "props": {
+         "name": "Refresh",
+         "icon": {
+          "type": "element",
+          "typeName": "Icon",
+          "props": {
+           "name": "refresh-cw",
+           "category": "arrows"
+          }
+         },
+         "action": {
+          "steps": [
+           {
+            "type": "continue_conversation",
+            "message": "Refresh it"
+           }
+          ]
+         },
+         "variant": "primary",
+         "size": "small",
+         "shape": "circle"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "IconButton",
+        "props": {
+         "name": "Settings",
+         "icon": {
+          "type": "element",
+          "typeName": "Icon",
+          "props": {
+           "name": "settings"
+          }
+         }
+        }
+       }
+      ],
+      "direction": "row"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Buttons",
+     "props": {
+      "buttons": [
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Legacy open",
+         "action": {
+          "type": "open_url",
+          "url": "https://example.com/legacy"
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Legacy say",
+         "action": {
+          "type": "continue_conversation",
+          "context": "ctx"
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Odd",
+         "action": "not an action"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [
+  {
+   "code": "type-mismatch",
+   "component": "Button",
+   "path": "/variant",
+   "statementId": "b5"
+  },
+  {
+   "code": "type-mismatch",
+   "component": "Button",
+   "path": "/label",
+   "statementId": "b6"
+  }
+ ],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 13,
+ "state": {
+  "$a": 1,
+  "$b": "x"
+ }
+}

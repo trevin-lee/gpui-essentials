@@ -1,0 +1,7 @@
+root = Stack([header, row, grid, plain], "column", "l", "stretch", "start")
+header = CardHeader("Weekly review", "Nov 10 – Nov 16")
+row = Stack([cardA, cardB], "row", "m", "center", "between", true)
+cardA = Card([TextContent("Raised card"), TextContent("Second line", "small")])
+cardB = Card([TextContent("Sunk card")], "sunk", "row", "s", "end", "evenly", false)
+grid = Stack([Card([TextContent("One")], "clear"), Card([TextContent("Two")]), Card([TextContent("Three")])], "row", "2xl", "baseline", "around", true)
+plain = Stack(["A bare string", 42, true])

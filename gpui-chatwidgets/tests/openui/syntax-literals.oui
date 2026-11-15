@@ -1,0 +1,12 @@
+root = Stack([a, b, c, d, e, f, g, h, i, tbl])
+a = TextContent("Tab\tnew\nline \"quoted\" back\\slash é 😀 slash\/")
+b = TextContent('single \'quoted\' \n and "double" inside')
+c = TextContent("unicode: 日本語 — ünïcödé")
+d = TextContent("" + -3 + " " + 1.5e3 + " " + 2E-3 + " " + 0.1 + " " + 1e21 + " " + 1e-7 + " " + 007)
+e = TextContent("" + true + " " + false + " " + null)
+f = Stack([[1, 2, [3, [4]]], {a: 1, "b c": 2, 3: "three", $d: 4, Upper: 5}],)
+g = TextContent("trailing commas",)
+h = Stack([TextContent("x"), , TextContent("y"),])
+i = TextContent("key order: " + keys)
+keys = "" + {b: 1, "2": 2, a: 3, "1": 4}
+tbl = Table([Col("Obj", [{b: 1, "2": 2, a: 3, "1": 4, b: 9}])])

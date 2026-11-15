@@ -1,0 +1,156 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "CardHeader",
+     "props": {
+      "title": "Weekly review",
+      "subtitle": "Nov 10 – Nov 16"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "Card",
+        "props": {
+         "children": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Raised card"
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Second line",
+            "size": "small"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Card",
+        "props": {
+         "children": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Sunk card"
+           }
+          }
+         ],
+         "variant": "sunk",
+         "direction": "row",
+         "gap": "s",
+         "align": "end",
+         "justify": "evenly",
+         "wrap": false
+        }
+       }
+      ],
+      "direction": "row",
+      "gap": "m",
+      "align": "center",
+      "justify": "between",
+      "wrap": true
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "Card",
+        "props": {
+         "children": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "One"
+           }
+          }
+         ],
+         "variant": "clear"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Card",
+        "props": {
+         "children": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Two"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Card",
+        "props": {
+         "children": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Three"
+           }
+          }
+         ]
+        }
+       }
+      ],
+      "direction": "row",
+      "gap": "2xl",
+      "align": "baseline",
+      "justify": "around",
+      "wrap": true
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       "A bare string",
+       42,
+       true
+      ]
+     }
+    }
+   ],
+   "direction": "column",
+   "gap": "l",
+   "align": "stretch",
+   "justify": "start"
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 7,
+ "state": {}
+}

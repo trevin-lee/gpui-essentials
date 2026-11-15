@@ -1,0 +1,39 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Not the root"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "More"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [
+  {
+   "code": "no-root",
+   "component": "Stack",
+   "path": "",
+   "statementId": "main",
+   "severity": "warning"
+  }
+ ],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 3,
+ "state": {}
+}

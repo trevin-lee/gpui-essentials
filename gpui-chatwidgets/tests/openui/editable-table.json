@@ -1,0 +1,85 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "InlineHeader",
+     "props": {
+      "heading": "Team Roster",
+      "description": "Click a cell to edit"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "EditableTable",
+     "props": {
+      "name": "roster",
+      "columns": [
+       {
+        "type": "text",
+        "key": "name",
+        "header": "Name"
+       },
+       {
+        "type": "select",
+        "key": "role",
+        "header": "Role",
+        "options": [
+         {
+          "value": "eng",
+          "label": "Engineering"
+         },
+         {
+          "value": "design",
+          "label": "Design"
+         }
+        ]
+       },
+       {
+        "type": "date-single",
+        "key": "start",
+        "header": "Start Date",
+        "width": 140
+       },
+       {
+        "type": "url",
+        "key": "default",
+        "header": ""
+       }
+      ],
+      "data": [
+       {
+        "id": "1",
+        "values": [
+         "Alex Kim",
+         "eng",
+         "2024-01-15",
+         "https://example.com"
+        ]
+       },
+       {
+        "id": "2",
+        "values": [
+         "Jamie Lee",
+         "design",
+         "2024-03-02",
+         7
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 11,
+ "state": {}
+}
