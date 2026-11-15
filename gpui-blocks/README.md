@@ -158,4 +158,4 @@ Not done yet:
 
 ## License
 
-Apache-2.0, as gpui-kit-markdown-editor and GPUI Kit are. See [LICENSE-APACHE](LICENSE-APACHE).
+Apache-2.0, as gpui-kit-markdown-editor and GPUI Kit are. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
