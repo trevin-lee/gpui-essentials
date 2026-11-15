@@ -60,7 +60,8 @@ pub enum EditorCommand {
     WrapInToggle,
     /// Open or close a toggle. Closing it turns a selection with an end
     /// inside its body (text, blocks or cells) into a caret at the end of
-    /// its summary.
+    /// its summary. A read-only editor runs it too, as view state, with no
+    /// undo step and no `Changed` event.
     SetToggleOpen { block: BlockId, open: bool },
     /// Unwrap the nearest callout or toggle around the caret: its blocks
     /// move out in place, a toggle's summary first.
@@ -1159,11 +1160,48 @@ impl BlockEditorModel {
         if self.doc.kind(toggle) == Some(&BlockKindData::Toggle { open }) {
             return Ok(false);
         }
-        let summary = self.doc.children(toggle).first().copied();
-        let body: Vec<BlockId> = self.doc.children(toggle).iter().skip(1).copied().collect();
-        // A selection end inside the body would be hidden, and an edit
-        // would change blocks nobody can see: the selection becomes a caret
-        // at the end of the summary, whatever kind it was.
+        let moved = self.caret_out_of_closing(toggle, open);
+        self.transact(EditOrigin::Command("set_toggle_open"), |tx| {
+            tx.set_kind(toggle, BlockKindData::Toggle { open })?;
+            Ok(moved.and_then(caret))
+        })
+    }
+
+    /// Open or close a toggle as view state, for a read-only editor: no
+    /// history, though the document's revision moves on so the view draws
+    /// it again. The selection leaves a closing body as in `SetToggleOpen`.
+    pub(crate) fn set_toggle_open_as_view(
+        &mut self,
+        toggle: BlockId,
+        open: bool,
+    ) -> Result<bool, CommandError> {
+        if !matches!(self.doc.kind(toggle), Some(BlockKindData::Toggle { .. })) {
+            return Err(CommandError::Unsupported("not a toggle"));
+        }
+        if self.doc.kind(toggle) == Some(&BlockKindData::Toggle { open }) {
+            return Ok(false);
+        }
+        let moved = self.caret_out_of_closing(toggle, open);
+        let step = crate::step::Step::SetKind {
+            block: toggle,
+            kind: BlockKindData::Toggle { open },
+        };
+        step.apply(&mut self.doc).map_err(CommandError::from)?;
+        self.doc.refresh_order();
+        self.doc.revision += 1;
+        if let Some(pos) = moved {
+            self.selection = BlockSelection::caret(pos);
+        }
+        Ok(true)
+    }
+
+    /// Where the selection goes when `toggle` changes to `open`: a selection
+    /// end inside a closing body would be hidden, and an edit would change
+    /// blocks nobody can see, so the selection, whatever its kind, becomes
+    /// a caret at the end of the summary.
+    fn caret_out_of_closing(&self, toggle: BlockId, open: bool) -> Option<BlockPosition> {
+        let summary = self.doc.children(toggle).first().copied()?;
+        let body = self.doc.children(toggle).get(1..).unwrap_or_default();
         let inside = |block: BlockId| self.doc.path(block).iter().any(|id| body.contains(id));
         let ends = match &self.selection {
             BlockSelection::Text { anchor, head } => [anchor.block, head.block],
@@ -1171,17 +1209,8 @@ impl BlockEditorModel {
                 [*anchor, *head]
             }
         };
-        let moved = match summary {
-            Some(summary) if !open && ends.into_iter().any(inside) => {
-                let end = self.doc.leaf_len(summary).unwrap_or(0);
-                Some(BlockPosition::new(summary, end))
-            }
-            _ => None,
-        };
-        self.transact(EditOrigin::Command("set_toggle_open"), |tx| {
-            tx.set_kind(toggle, BlockKindData::Toggle { open })?;
-            Ok(moved.and_then(caret))
-        })
+        (!open && ends.into_iter().any(inside))
+            .then(|| BlockPosition::new(summary, self.doc.leaf_len(summary).unwrap_or(0)))
     }
 
     /// Backspace at the start of a blockquote's first paragraph: move it

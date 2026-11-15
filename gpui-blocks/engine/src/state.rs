@@ -810,6 +810,19 @@ impl BlockEditorState {
         command: EditorCommand,
         cx: &mut Context<Self>,
     ) -> Result<bool, CommandError> {
+        // Opening or closing a toggle is how a reader sees its body, so it
+        // works read-only too, as view state: no undo step, no `Changed`.
+        if self.readonly
+            && let EditorCommand::SetToggleOpen { block, open } = command
+        {
+            let selection = self.model.selection().clone();
+            let changed = self.model.set_toggle_open_as_view(block, open)?;
+            if self.model.selection() != &selection {
+                cx.emit(BlockEditorEvent::SelectionChanged);
+            }
+            cx.notify();
+            return Ok(changed);
+        }
         if self.readonly {
             return Ok(false);
         }
