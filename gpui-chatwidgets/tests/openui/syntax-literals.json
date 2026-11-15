@@ -1,0 +1,137 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Tab\tnew\nline \"quoted\" back\\slash é 😀 slash/"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "single 'quoted' \n and \"double\" inside"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "unicode: 日本語 — ünïcödé"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "-3 1500 0.002 0.1 1e+21 1e-7 7"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "true false "
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       [
+        1,
+        2,
+        [
+         3,
+         [
+          4
+         ]
+        ]
+       ],
+       {
+        "3": "three",
+        "a": 1,
+        "b c": 2,
+        "d": 4,
+        "Upper": 5
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "trailing commas"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Stack",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "TextContent",
+        "props": {
+         "text": "x"
+        }
+       },
+       null,
+       {
+        "type": "element",
+        "typeName": "TextContent",
+        "props": {
+         "text": "y"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "key order: [object Object]"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Table",
+     "props": {
+      "columns": [
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Obj",
+         "data": [
+          {
+           "1": 4,
+           "2": 2,
+           "b": 9,
+           "a": 3
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 12,
+ "state": {}
+}

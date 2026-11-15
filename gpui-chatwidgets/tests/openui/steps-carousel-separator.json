@@ -1,0 +1,100 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Steps",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "StepsItem",
+        "props": {
+         "title": "Open the form",
+         "details": "It's on the portal."
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "StepsItem",
+        "props": {
+         "title": "Fill it in",
+         "details": "Use your student number."
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "StepsItem",
+        "props": {
+         "title": "Submit",
+         "details": "Before 5pm."
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Separator",
+     "props": {
+      "orientation": "horizontal",
+      "decorative": true
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Carousel",
+     "props": {
+      "children": [
+       [
+        {
+         "type": "element",
+         "typeName": "TextContent",
+         "props": {
+          "text": "Slide one"
+         }
+        }
+       ],
+       [
+        {
+         "type": "element",
+         "typeName": "TextContent",
+         "props": {
+          "text": "Slide two"
+         }
+        },
+        {
+         "type": "element",
+         "typeName": "CodeBlock",
+         "props": {
+          "language": "bash",
+          "codeString": "ls -la"
+         }
+        }
+       ],
+       []
+      ],
+      "variant": "sunk"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Separator",
+     "props": {
+      "orientation": "vertical"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 5,
+ "state": {}
+}

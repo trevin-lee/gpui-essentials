@@ -1,0 +1,227 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "BarChart",
+     "props": {
+      "labels": [
+       "Oct",
+       "Nov",
+       "Dec"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product A",
+         "values": [
+          120,
+          150,
+          180
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product B",
+         "values": [
+          90,
+          -10,
+          140.5
+         ]
+        }
+       }
+      ],
+      "variant": "grouped",
+      "xLabel": "Month",
+      "yLabel": "Revenue",
+      "height": 240
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "BarChart",
+     "props": {
+      "labels": [
+       "Oct",
+       "Nov",
+       "Dec"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product A",
+         "values": [
+          120,
+          150,
+          180
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product B",
+         "values": [
+          90,
+          -10,
+          140.5
+         ]
+        }
+       }
+      ],
+      "variant": "stacked"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "LineChart",
+     "props": {
+      "labels": [
+       "Oct",
+       "Nov",
+       "Dec"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Views",
+         "values": [
+          1,
+          2
+         ]
+        }
+       }
+      ],
+      "variant": "natural",
+      "xLabel": "Month"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "AreaChart",
+     "props": {
+      "labels": [
+       "Oct",
+       "Nov",
+       "Dec"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Product A",
+         "values": [
+          120,
+          150,
+          180
+         ]
+        }
+       }
+      ],
+      "variant": "step"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "RadarChart",
+     "props": {
+      "labels": [
+       "Speed",
+       "Power",
+       "Range"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Car",
+         "values": [
+          3,
+          4,
+          5
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Bike",
+         "values": [
+          2,
+          1,
+          3
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "HorizontalBarChart",
+     "props": {
+      "labels": [
+       "A long category name",
+       "Another one"
+      ],
+      "series": [
+       {
+        "type": "element",
+        "typeName": "Series",
+        "props": {
+         "category": "Votes",
+         "values": [
+          10,
+          20
+         ]
+        }
+       }
+      ],
+      "variant": "stacked",
+      "xLabel": "Votes",
+      "yLabel": "Option"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "LineChart",
+     "props": {
+      "labels": [
+       "Oct",
+       "Nov",
+       "Dec"
+      ],
+      "series": [
+       null
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 12,
+ "state": {
+  "$weeks": null
+ }
+}

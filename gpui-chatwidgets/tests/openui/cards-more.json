@@ -1,0 +1,247 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "OverviewCardBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "OverviewCardItem",
+        "props": {
+         "id": "o1",
+         "top": {
+          "type": "element",
+          "typeName": "Text",
+          "props": {
+           "variant": "text",
+           "value": "Sleep",
+           "subtext": "7h 20m",
+           "subtextVariant": "number",
+           "size": "lg"
+          }
+         },
+         "bottom": {
+          "type": "element",
+          "typeName": "MetricIndicatorInline",
+          "props": {
+           "value": "92",
+           "subtext": "score"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "OverviewCardItem",
+        "props": {
+         "id": null,
+         "top": {
+          "type": "element",
+          "typeName": "ImageText",
+          "props": {
+           "src": "/api/files/content?path=avatar.png",
+           "alt": "Avatar",
+           "title": "Steps",
+           "subtitle": "Daily",
+           "bold": true,
+           "layout": "vertical",
+           "imageSize": 40
+          }
+         }
+        }
+       }
+      ],
+      "layout": "grid",
+      "responsive": false,
+      "action": {
+       "steps": [
+        {
+         "type": "continue_conversation",
+         "message": "Open overview"
+        }
+       ]
+      },
+      "gap": 12
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ContextCardBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "ContextCardItem",
+        "props": {
+         "id": "c1",
+         "title": "Weather",
+         "body": "**Sunny**, 21°",
+         "bgColor": "gray"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "ContextCardItem",
+        "props": {
+         "id": "c2",
+         "title": {
+          "type": "element",
+          "typeName": "Tag",
+          "props": {
+           "text": "Alert",
+           "icon": null,
+           "size": "sm",
+           "variant": "warning"
+          }
+         },
+         "body": "Storm later",
+         "bgColor": null,
+         "bgImageSrc": "https://evil.test/bg.jpg",
+         "bgImageAlt": "Clouds"
+        }
+       }
+      ],
+      "layout": "carousel",
+      "responsive": true,
+      "action": {
+       "type": "continue_conversation"
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "VisualCardBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "VisualCardItem",
+        "props": {
+         "body": {
+          "type": "element",
+          "typeName": "BoldText",
+          "props": {
+           "variant": "text",
+           "value": "Lisbon",
+           "subtext": "Portugal",
+           "subtextVariant": "text",
+           "size": "sm"
+          }
+         },
+         "id": "lis",
+         "bgImageSrc": "/api/files/content?path=trips/lisbon.jpg",
+         "tag": {
+          "type": "element",
+          "typeName": "Tag",
+          "props": {
+           "text": "Warm"
+          }
+         },
+         "bgImageAlt": "Lisbon at dusk"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "VisualCardItem",
+        "props": {
+         "body": {
+          "type": "element",
+          "typeName": "BoldText",
+          "props": {
+           "variant": "text",
+           "value": "Oslo",
+           "subtextVariant": "text",
+           "size": "sm"
+          }
+         },
+         "id": "osl"
+        }
+       }
+      ],
+      "layout": "grid",
+      "responsive": true,
+      "action": {
+       "steps": [
+        {
+         "type": "continue_conversation",
+         "message": "Plan a trip",
+         "context": "beach"
+        }
+       ]
+      },
+      "gap": "m"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Card",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "Stack",
+        "props": {
+         "children": [
+          {
+           "type": "element",
+           "typeName": "Text",
+           "props": {
+            "variant": "text",
+            "value": "Plain",
+            "subtextVariant": "text",
+            "size": "sm"
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "BoldText",
+           "props": {
+            "variant": "number",
+            "value": "1,000",
+            "subtext": "-5%",
+            "subtextVariant": "metric",
+            "size": "xs"
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "ImageTextLarge",
+           "props": {
+            "src": "/api/files/content?path=banner.png",
+            "alt": "Banner",
+            "title": "Big title",
+            "subtitle": "Sub",
+            "bold": true
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "MetricIndicatorWithStrikethrough",
+           "props": {
+            "value": "$9",
+            "subtext": null,
+            "previousValue": "$12"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 11,
+ "state": {}
+}

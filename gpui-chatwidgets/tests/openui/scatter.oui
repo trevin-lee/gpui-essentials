@@ -1,0 +1,4 @@
+root = Stack([chart])
+chart = ScatterChart([setA, setB], "Hours studied", "Score")
+setA = ScatterSeries("Class A", [Point(1, 60), Point(2, 70, 5), Point(3.5, 82)])
+setB = ScatterSeries("Class B", [Point(1, 55), Point(4, 90)])

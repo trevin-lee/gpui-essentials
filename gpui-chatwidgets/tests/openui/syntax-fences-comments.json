@@ -1,0 +1,31 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Title # not a comment // nor this"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "single # quoted // text"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 3,
+ "state": {}
+}

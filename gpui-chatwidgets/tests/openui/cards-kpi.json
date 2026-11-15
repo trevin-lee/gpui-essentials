@@ -1,0 +1,350 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "InlineHeader",
+     "props": {
+      "heading": "This Month",
+      "description": "Key account metrics"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "SnippetCardBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "SnippetCardItem",
+        "props": {
+         "id": "revenue",
+         "lhs": {
+          "type": "element",
+          "typeName": "IconText",
+          "props": {
+           "icon": {
+            "type": "element",
+            "typeName": "Icon",
+            "props": {
+             "name": "circle-dollar-sign",
+             "category": "finance"
+            }
+           },
+           "iconVariant": "neutral",
+           "iconSize": "m",
+           "title": "Revenue",
+           "subtitle": "Month to date",
+           "bold": false,
+           "layout": "horizontal"
+          }
+         },
+         "rhs": {
+          "type": "element",
+          "typeName": "BoldText",
+          "props": {
+           "variant": "number",
+           "value": "$48,200",
+           "subtext": "+8.1%",
+           "subtextVariant": "metric",
+           "size": "sm"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "SnippetCardItem",
+        "props": {
+         "id": "active-users",
+         "lhs": {
+          "type": "element",
+          "typeName": "IconText",
+          "props": {
+           "icon": {
+            "type": "element",
+            "typeName": "Icon",
+            "props": {
+             "name": "users",
+             "category": "people"
+            }
+           },
+           "iconVariant": "neutral",
+           "iconSize": "m",
+           "title": "Active Users",
+           "subtitle": "This month",
+           "bold": false,
+           "layout": "horizontal"
+          }
+         },
+         "rhs": {
+          "type": "element",
+          "typeName": "BoldText",
+          "props": {
+           "variant": "number",
+           "value": "1,204",
+           "subtext": "+3.4%",
+           "subtextVariant": "metric",
+           "size": "sm"
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "SnippetCardItem",
+        "props": {
+         "id": "churn",
+         "lhs": {
+          "type": "element",
+          "typeName": "IconText",
+          "props": {
+           "icon": {
+            "type": "element",
+            "typeName": "Icon",
+            "props": {
+             "name": "user-minus",
+             "category": "people"
+            }
+           },
+           "iconVariant": "neutral",
+           "iconSize": "m",
+           "title": "Churn",
+           "subtitle": "This month",
+           "bold": false,
+           "layout": "horizontal"
+          }
+         },
+         "rhs": {
+          "type": "element",
+          "typeName": "BoldText",
+          "props": {
+           "variant": "number",
+           "value": "1.8%",
+           "subtext": "-0.3%",
+           "subtextVariant": "metric",
+           "size": "sm"
+          }
+         }
+        }
+       }
+      ],
+      "layout": "grid",
+      "responsive": true,
+      "action": {
+       "steps": [
+        {
+         "type": "continue_conversation",
+         "message": "Explain this metric"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "InlineHeader",
+     "props": {
+      "heading": "Top Products",
+      "description": "By units sold"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "CompositeCardBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "CompositeCardItem",
+        "props": {
+         "id": "widget-pro",
+         "header": {
+          "type": "element",
+          "typeName": "IconText",
+          "props": {
+           "icon": {
+            "type": "element",
+            "typeName": "Icon",
+            "props": {
+             "name": "package",
+             "category": "shopping"
+            }
+           },
+           "iconVariant": "neutral",
+           "iconSize": "m",
+           "title": "Widget Pro",
+           "subtitle": "Best seller",
+           "bold": true,
+           "layout": "horizontal"
+          }
+         },
+         "body": [
+          {
+           "type": "element",
+           "typeName": "MetricIndicatorInline",
+           "props": {
+            "value": "2,410 units",
+            "subtext": "Sold this month",
+            "trend": {
+             "direction": "up",
+             "value": 12
+            }
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "BarChart",
+           "props": {
+            "labels": [
+             "W1",
+             "W2"
+            ],
+            "series": [
+             {
+              "type": "element",
+              "typeName": "Series",
+              "props": {
+               "category": "Units",
+               "values": [
+                500,
+                610
+               ]
+              }
+             }
+            ]
+           }
+          }
+         ],
+         "footer": {
+          "price": {
+           "type": "element",
+           "typeName": "BoldText",
+           "props": {
+            "variant": "text",
+            "value": "$29.00",
+            "subtextVariant": "text",
+            "size": "sm"
+           }
+          },
+          "button": {
+           "type": "element",
+           "typeName": "Button",
+           "props": {
+            "label": "View Details",
+            "action": {
+             "steps": [
+              {
+               "type": "continue_conversation",
+               "message": "Show details for Widget Pro"
+              }
+             ]
+            },
+            "variant": "secondary"
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "CompositeCardItem",
+        "props": {
+         "id": "widget-mini",
+         "header": {
+          "type": "element",
+          "typeName": "IconText",
+          "props": {
+           "icon": {
+            "type": "element",
+            "typeName": "Icon",
+            "props": {
+             "name": "box",
+             "category": "shopping"
+            }
+           },
+           "iconVariant": "neutral",
+           "iconSize": "m",
+           "title": "Widget Mini",
+           "subtitle": "New arrival",
+           "bold": true,
+           "layout": "horizontal"
+          }
+         },
+         "body": [
+          {
+           "type": "element",
+           "typeName": "MetricIndicatorInline",
+           "props": {
+            "value": "980 units",
+            "subtext": "Sold this month",
+            "trend": {
+             "direction": "down",
+             "value": 4
+            }
+           }
+          }
+         ],
+         "footer": {
+          "price": {
+           "type": "element",
+           "typeName": "MetricIndicatorWithStrikethrough",
+           "props": {
+            "value": "$14.00",
+            "subtext": "Sale",
+            "previousValue": "$18.00",
+            "trend": {
+             "direction": "down",
+             "value": 22
+            }
+           }
+          },
+          "button": {
+           "type": "element",
+           "typeName": "Button",
+           "props": {
+            "label": "View Details",
+            "action": {
+             "steps": [
+              {
+               "type": "continue_conversation",
+               "message": "Show details for Widget Mini"
+              }
+             ]
+            },
+            "variant": "secondary"
+           }
+          }
+         }
+        }
+       }
+      ],
+      "layout": "carousel",
+      "responsive": true,
+      "action": {
+       "steps": [
+        {
+         "type": "continue_conversation",
+         "message": "Show details",
+         "context": {
+          "source": "card"
+         }
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 30,
+ "state": {}
+}

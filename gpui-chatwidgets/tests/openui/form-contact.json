@@ -1,0 +1,178 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Contact Us",
+      "size": "large-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Form",
+     "props": {
+      "name": "contact",
+      "buttons": {
+       "type": "element",
+       "typeName": "Buttons",
+       "props": {
+        "buttons": [
+         {
+          "type": "element",
+          "typeName": "Button",
+          "props": {
+           "label": "Submit",
+           "action": {
+            "steps": [
+             {
+              "type": "continue_conversation",
+              "message": "Submit"
+             }
+            ]
+           },
+           "variant": "primary"
+          }
+         },
+         {
+          "type": "element",
+          "typeName": "Button",
+          "props": {
+           "label": "Cancel",
+           "action": {
+            "steps": [
+             {
+              "type": "continue_conversation",
+              "message": "Cancel"
+             }
+            ]
+           },
+           "variant": "secondary"
+          }
+         }
+        ]
+       }
+      },
+      "fields": [
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Name",
+         "input": {
+          "type": "element",
+          "typeName": "Input",
+          "props": {
+           "name": "name",
+           "placeholder": "Your name",
+           "type": "text",
+           "rules": {
+            "required": true,
+            "minLength": 2
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Email",
+         "input": {
+          "type": "element",
+          "typeName": "Input",
+          "props": {
+           "name": "email",
+           "placeholder": "you@example.com",
+           "type": "email",
+           "rules": {
+            "required": true,
+            "email": true
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Country",
+         "input": {
+          "type": "element",
+          "typeName": "Select",
+          "props": {
+           "name": "country",
+           "items": [
+            {
+             "type": "element",
+             "typeName": "SelectItem",
+             "props": {
+              "value": "us",
+              "label": "United States"
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "SelectItem",
+             "props": {
+              "value": "uk",
+              "label": "United Kingdom"
+             }
+            },
+            {
+             "type": "element",
+             "typeName": "SelectItem",
+             "props": {
+              "value": "de",
+              "label": "Germany"
+             }
+            }
+           ],
+           "placeholder": "Select...",
+           "rules": {
+            "required": true
+           }
+          }
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "FormControl",
+        "props": {
+         "label": "Message",
+         "input": {
+          "type": "element",
+          "typeName": "TextArea",
+          "props": {
+           "name": "message",
+           "placeholder": "Tell us more...",
+           "rows": 4,
+           "rules": {
+            "required": true,
+            "minLength": 10
+           }
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 9,
+ "state": {}
+}

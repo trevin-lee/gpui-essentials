@@ -1,0 +1,5 @@
+root = Stack([steps, sep, carousel, sep2])
+steps = Steps([StepsItem("Open the form", "It's on the portal."), StepsItem("Fill it in", "Use your student number."), StepsItem("Submit", "Before 5pm.")])
+sep = Separator("horizontal", true)
+carousel = Carousel([[TextContent("Slide one")], [TextContent("Slide two"), CodeBlock("bash", "ls -la")], []], "sunk")
+sep2 = Separator("vertical")

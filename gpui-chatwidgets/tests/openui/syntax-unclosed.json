@@ -1,0 +1,34 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Card",
+     "props": {
+      "children": [
+       {
+        "type": "element",
+        "typeName": "TextContent",
+        "props": {
+         "text": "cut off mid-string"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [
+  "title"
+ ],
+ "orphaned": [],
+ "incomplete": true,
+ "statementCount": 1,
+ "state": {}
+}

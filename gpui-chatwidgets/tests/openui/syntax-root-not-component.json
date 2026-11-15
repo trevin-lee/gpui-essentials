@@ -1,0 +1,17 @@
+{
+ "parsed": false,
+ "root": null,
+ "errors": [
+  {
+   "code": "no-root",
+   "component": "Stack",
+   "path": "",
+   "statementId": "root"
+  }
+ ],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 1,
+ "state": {}
+}

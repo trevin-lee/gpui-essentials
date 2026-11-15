@@ -1,0 +1,137 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "CardHeader",
+     "props": {
+      "title": "Title only"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Default text with **bold** and _italics_."
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Small",
+      "size": "small"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Large",
+      "size": "large"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Small heavy",
+      "size": "small-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Large heavy",
+      "size": "large-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "MarkDownRenderer",
+     "props": {
+      "textMarkdown": "# Heading\n\n- one\n- two\n\n`code`",
+      "variant": "card"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Callout",
+     "props": {
+      "variant": "info",
+      "title": "Note",
+      "description": "Office hours moved."
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Callout",
+     "props": {
+      "variant": "warning",
+      "title": "Careful",
+      "description": "The deadline is close."
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Callout",
+     "props": {
+      "variant": "error",
+      "title": "Failed",
+      "description": "The upload didn't finish."
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Callout",
+     "props": {
+      "variant": "neutral",
+      "title": "FYI",
+      "description": "Nothing to do."
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextCallout",
+     "props": {
+      "variant": "danger",
+      "title": "Overdrawn",
+      "description": "The account is below zero."
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextCallout",
+     "props": {}
+    },
+    {
+     "type": "element",
+     "typeName": "CodeBlock",
+     "props": {
+      "language": "rust",
+      "codeString": "fn main() {\n    println!(\"hi\");\n}"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "InlineHeader",
+     "props": {
+      "heading": "Budget",
+      "description": "This month so far"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 16,
+ "state": {}
+}

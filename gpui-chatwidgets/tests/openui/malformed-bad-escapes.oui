@@ -1,0 +1,4 @@
+root = Stack([a, b, c])
+a = TextContent("bad \x41 escape")
+b = TextContent("short \u12 escape")
+c = TextContent("raw	tab inside")

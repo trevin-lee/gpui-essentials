@@ -1,0 +1,7 @@
+= = =
+root = Stack([ok, ))) ]]] , TextContent("after junk")])
+%%% @@@ $$$ ^^^ ~~~
+ok = TextContent("ok")
+just some prose without an equals sign
+x = = 3
+y = TextContent("y")) ) )

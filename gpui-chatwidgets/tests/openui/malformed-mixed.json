@@ -1,0 +1,42 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "first"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "second",
+      "size": null
+     }
+    }
+   ]
+  }
+ },
+ "errors": [
+  {
+   "code": "excess-args",
+   "component": "TextContent",
+   "path": "",
+   "statementId": "b"
+  }
+ ],
+ "unresolved": [
+  "c",
+  "c"
+ ],
+ "orphaned": [],
+ "incomplete": true,
+ "statementCount": 3,
+ "state": {}
+}

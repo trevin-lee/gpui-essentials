@@ -1,0 +1,80 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "//evil.test/api/files/content?path=x.png"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "https://evil.test/api/files/content?path=x.png"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "/api/files/content/../agents?path=x"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "/api/files/content?path="
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "/api/files/content?other=1"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "https://someone@controller.invalid/api/files/content?path=x.png"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "/api/files/content?path=../../etc/passwd"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "blob:https://controller.invalid/123"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ImageBlock",
+     "props": {
+      "src": "/api/files/content?path=a.png&download=1"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 10,
+ "state": {}
+}

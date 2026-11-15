@@ -1,0 +1,2 @@
+$compact = false
+root = $compact ? Stack([TextContent("Compact")]) : Stack([TextContent("Full")])

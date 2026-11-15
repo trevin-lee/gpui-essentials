@@ -1,0 +1,9 @@
+# root isn't first, references come before definitions, one name is defined twice
+header = CardHeader("Later definition wins?", "first")
+root = Stack([header, body, missing, loop1])
+body = Card([TextContent(greeting)])
+greeting = "Hello"
+header = CardHeader("Later definition wins", "second")
+unused = TextContent("Nobody points here")
+loop1 = Card([loop2])
+loop2 = Stack([loop1])

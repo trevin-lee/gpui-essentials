@@ -1,0 +1,139 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Buttons",
+     "props": {
+      "buttons": [
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Okafor",
+         "action": {
+          "steps": [
+           {
+            "type": "set",
+            "target": "$picked",
+            "valueAST": {
+             "k": "Str",
+             "v": "Okafor"
+            }
+           },
+           {
+            "type": "set",
+            "target": "$count",
+            "valueAST": {
+             "k": "BinOp",
+             "op": "+",
+             "left": {
+              "k": "StateRef",
+              "n": "$count"
+             },
+             "right": {
+              "k": "Num",
+              "v": 1
+             }
+            }
+           },
+           {
+            "type": "continue_conversation",
+            "message": "Pick Okafor",
+            "context": {
+             "id": "p1"
+            }
+           }
+          ]
+         }
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Button",
+        "props": {
+         "label": "Lindqvist",
+         "action": {
+          "steps": [
+           {
+            "type": "set",
+            "target": "$picked",
+            "valueAST": {
+             "k": "Str",
+             "v": "Lindqvist"
+            }
+           },
+           {
+            "type": "set",
+            "target": "$count",
+            "valueAST": {
+             "k": "BinOp",
+             "op": "+",
+             "left": {
+              "k": "StateRef",
+              "n": "$count"
+             },
+             "right": {
+              "k": "Num",
+              "v": 1
+             }
+            }
+           },
+           {
+            "type": "continue_conversation",
+            "message": "Pick Lindqvist",
+            "context": {
+             "id": "p2"
+            }
+           }
+          ]
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Picked: none (0)"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Start over",
+      "action": {
+       "steps": [
+        {
+         "type": "reset",
+         "targets": [
+          "$picked",
+          "$count"
+         ]
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [
+  "nothing"
+ ],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 7,
+ "state": {
+  "$picked": "none",
+  "$count": 0
+ }
+}

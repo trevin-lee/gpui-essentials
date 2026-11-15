@@ -1,0 +1,178 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Open tasks",
+      "size": "large-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Table",
+     "props": {
+      "columns": [
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Task",
+         "data": [
+          "Essay",
+          "Lab report",
+          "Reading"
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Hours",
+         "data": [
+          3,
+          1.5,
+          null
+         ],
+         "type": "number"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Status",
+         "data": [
+          {
+           "type": "element",
+           "typeName": "Tag",
+           "props": {
+            "text": "open",
+            "icon": null,
+            "size": "sm",
+            "variant": "success"
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Tag",
+           "props": {
+            "text": "late",
+            "icon": null,
+            "size": "sm",
+            "variant": "danger"
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Tag",
+           "props": {
+            "text": "open",
+            "icon": null,
+            "size": "sm",
+            "variant": "success"
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Actions",
+         "data": [
+          {
+           "type": "element",
+           "typeName": "Button",
+           "props": {
+            "label": "Close",
+            "action": {
+             "steps": [
+              {
+               "type": "continue_conversation",
+               "message": "Close task",
+               "context": {
+                "id": 1
+               }
+              }
+             ]
+            }
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Button",
+           "props": {
+            "label": "Close",
+            "action": {
+             "steps": [
+              {
+               "type": "continue_conversation",
+               "message": "Close task",
+               "context": {
+                "id": 2
+               }
+              }
+             ]
+            }
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Button",
+           "props": {
+            "label": "Close",
+            "action": {
+             "steps": [
+              {
+               "type": "continue_conversation",
+               "message": "Close task",
+               "context": {
+                "id": 3
+               }
+              }
+             ]
+            }
+           }
+          }
+         ],
+         "type": "action"
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "Col",
+        "props": {
+         "label": "Short",
+         "data": [
+          "only one"
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "No more data"
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 5,
+ "state": {}
+}

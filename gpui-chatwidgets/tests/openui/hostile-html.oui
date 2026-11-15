@@ -1,0 +1,6 @@
+root = Stack([t, md, code, tag, btn])
+t = TextContent("<script>alert('x')</script><img src=x onerror=alert(1)>")
+md = MarkDownRenderer("<iframe src=\"https://evil.test\"></iframe>\n\n[click](javascript:alert(1))")
+code = CodeBlock("html", "<b>bold</b>")
+tag = Tag("<b>tag</b>")
+btn = Button("<i>Go</i>", @ToAssistant("<script>steal()</script>"))

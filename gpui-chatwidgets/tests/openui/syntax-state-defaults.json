@@ -1,0 +1,44 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "Total: 30 20 late "
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 9,
+ "state": {
+  "$base": 10,
+  "$double": 20,
+  "$label": "Total: 30",
+  "$list": [
+   10,
+   {
+    "x": 20
+   }
+  ],
+  "$fromCard": {
+   "type": "element",
+   "typeName": "Card",
+   "props": {
+    "children": []
+   }
+  },
+  "$withStep": null,
+  "$later": "late",
+  "$neverDeclared": null
+ }
+}

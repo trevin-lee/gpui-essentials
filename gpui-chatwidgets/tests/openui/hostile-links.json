@@ -1,0 +1,163 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "JS",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "javascript:alert(document.cookie)"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Data",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "data:text/html,<script>alert(1)</script>"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "File",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "file:///etc/passwd"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "User",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "https://bank.example@evil.test/"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Relative",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "/api/agents"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Upper",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "HTTPS://Example.COM/Path"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Legacy js",
+      "action": {
+       "type": "open_url",
+       "url": "javascript:alert(1)"
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Button",
+     "props": {
+      "label": "Mixed",
+      "action": {
+       "steps": [
+        {
+         "type": "open_url",
+         "url": "javascript:void(0)"
+        },
+        {
+         "type": "continue_conversation",
+         "message": "still sent"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "ListBlock",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "ListItem",
+        "props": {
+         "title": "Bad link",
+         "subtitle": null,
+         "image": null,
+         "actionLabel": "Go",
+         "action": {
+          "steps": [
+           {
+            "type": "open_url",
+            "url": "vbscript:msgbox"
+           }
+          ]
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 10,
+ "state": {}
+}

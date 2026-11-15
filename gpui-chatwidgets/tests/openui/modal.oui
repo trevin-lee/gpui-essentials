@@ -1,0 +1,10 @@
+root = Stack([openBtn, modal, toast])
+$showEdit = false
+$saved = false
+openBtn = Button("Edit", @Set($showEdit, true), "secondary")
+modal = Modal("Edit note", $showEdit, [form], "lg")
+form = Form("note", Buttons([saveBtn, cancelBtn]), [titleField])
+titleField = FormControl("Title", Input("title", "A short title", "text", {required: true, maxLength: 40}))
+saveBtn = Button("Save", Action([@ToAssistant("Save the note"), @Set($showEdit, false), @Set($saved, true)]), "primary")
+cancelBtn = Button("Cancel", @Set($showEdit, false), "tertiary")
+toast = Callout("success", "Saved", "The note was saved.", $saved)

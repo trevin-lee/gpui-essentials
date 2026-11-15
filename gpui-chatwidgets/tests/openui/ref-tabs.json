@@ -1,0 +1,85 @@
+{
+ "parsed": true,
+ "root": {
+  "type": "element",
+  "typeName": "Stack",
+  "props": {
+   "children": [
+    {
+     "type": "element",
+     "typeName": "TextContent",
+     "props": {
+      "text": "React vs Vue",
+      "size": "large-heavy"
+     }
+    },
+    {
+     "type": "element",
+     "typeName": "Tabs",
+     "props": {
+      "items": [
+       {
+        "type": "element",
+        "typeName": "TabItem",
+        "props": {
+         "value": "react",
+         "trigger": "React",
+         "content": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "React is a library by Meta for building UIs."
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Callout",
+           "props": {
+            "variant": "info",
+            "title": "Note",
+            "description": "React uses JSX syntax."
+           }
+          }
+         ]
+        }
+       },
+       {
+        "type": "element",
+        "typeName": "TabItem",
+        "props": {
+         "value": "vue",
+         "trigger": "Vue",
+         "content": [
+          {
+           "type": "element",
+           "typeName": "TextContent",
+           "props": {
+            "text": "Vue is a progressive framework by Evan You."
+           }
+          },
+          {
+           "type": "element",
+           "typeName": "Callout",
+           "props": {
+            "variant": "success",
+            "title": "Tip",
+            "description": "Vue has a gentle learning curve."
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "errors": [],
+ "unresolved": [],
+ "orphaned": [],
+ "incomplete": false,
+ "statementCount": 7,
+ "state": {}
+}

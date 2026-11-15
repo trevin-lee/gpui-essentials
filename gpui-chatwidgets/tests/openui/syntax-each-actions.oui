@@ -1,0 +1,7 @@
+root = Stack([buttons, picked, reset])
+$picked = "none"
+$count = 0
+people = [{id: "p1", name: "Okafor"}, {id: "p2", name: "Lindqvist"}]
+buttons = Buttons(@Each(people, "p", Button(p.name, Action([@Set($picked, p.name), @Set($count, $count + 1), @ToAssistant("Pick " + p.name, {id: p.id})]))))
+picked = TextContent("Picked: " + $picked + " (" + $count + ")")
+reset = Button("Start over", Action([@Reset($picked, $count), @Run(nothing), @Set("notavar", 1), @Reset()]))
