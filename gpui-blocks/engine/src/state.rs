@@ -1736,9 +1736,10 @@ impl BlockEditorState {
     }
 
     /// Each top-level block drawn in the last frame, in document order, with
-    /// the union of its text's bounds in window coordinates. A side menu
-    /// places its handles from these. Blocks scrolled out of the laid-out
-    /// range, and blocks with no text (a rule), are left out.
+    /// the union of its text's bounds in window coordinates. A block with no
+    /// text (a rule, a widget, a picture drawn as a block) has the bounds it
+    /// was drawn in instead. A side menu places its handles from these.
+    /// Blocks scrolled out of the laid-out range are left out.
     pub fn top_level_blocks(&self) -> Vec<(BlockId, Bounds<Pixels>)> {
         self.top_level_bounds()
             .into_iter()
@@ -1872,7 +1873,8 @@ impl BlockEditorState {
     }
 
     /// Top-level blocks with laid-out geometry, in document order, with the
-    /// union of their leaves' bounds (D22).
+    /// union of their leaves' bounds, or for a block with no leaves the
+    /// bounds it was drawn in (D22).
     pub(crate) fn top_level_bounds(&self) -> Vec<(usize, BlockId, Bounds<Pixels>)> {
         let doc = &self.model.doc;
         let frame = self.frame.borrow();
@@ -1890,6 +1892,25 @@ impl BlockEditorState {
             match out.iter_mut().find(|(_, id, _)| *id == top) {
                 Some(entry) => entry.2 = entry.2.union(&b),
                 None => out.push((ix, top, b)),
+            }
+        }
+        // Blocks with no text, as rules and widgets: the unit they were
+        // drawn as. A unit is a top-level block, or a chunk of a long list
+        // named by its first item.
+        let with_text = out.len();
+        for (unit, b) in &frame.units {
+            let Some(top) = doc.path(*unit).get(1).copied() else {
+                continue;
+            };
+            if out[..with_text].iter().any(|(_, id, _)| *id == top) {
+                continue;
+            }
+            let Some(ix) = children.iter().position(|c| *c == top) else {
+                continue;
+            };
+            match out[with_text..].iter_mut().find(|(_, id, _)| *id == top) {
+                Some(entry) => entry.2 = entry.2.union(b),
+                None => out.push((ix, top, *b)),
             }
         }
         out.sort_by_key(|(ix, _, _)| *ix);

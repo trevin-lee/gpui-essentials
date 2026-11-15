@@ -160,6 +160,7 @@ impl RenderOnce for BlockEditor {
         {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
+            cull_state.drawn.clear();
             let window_span = cull_state.visible.map(|(top, bottom)| {
                 // Overscan two viewports each way, so a fast scroll stays
                 // within laid-out blocks until the next frame catches up.
@@ -612,6 +613,7 @@ impl Element for EditorRoot {
             );
             frame.content = Some(self.content_bounds.get());
             frame.rem_size = window.rem_size();
+            frame.units = std::mem::take(&mut self.state.read(cx).cull.borrow_mut().drawn);
             {
                 let state = self.state.read(cx);
                 let doc = &state.model.doc;

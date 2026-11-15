@@ -4676,3 +4676,28 @@ fn the_chevron_takes_clicks_only_in_the_gutter_it_draws(cx: &mut TestAppContext)
     assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(inside).is_some()));
     assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(outside).is_none()));
 }
+
+#[gpui::test]
+fn blocks_with_no_text_report_where_they_were_drawn(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "first\n\n---\n\n<div>widget</div>\n\nlast");
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let ids: Vec<_> = editor.read_with(cx, |e, _| {
+        e.model().document().root().children().map(|b| b.id()).collect()
+    });
+    assert_eq!(blocks.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ids);
+    // In document order down the page, each with some height.
+    for pair in blocks.windows(2) {
+        assert!(pair[0].1.top() < pair[1].1.top(), "{blocks:?}");
+    }
+    assert!(blocks.iter().all(|(_, b)| b.size.height > px(0.)));
+    // A host handle drags the rule like any other block.
+    let (rule, bounds) = blocks[1];
+    let start = gpui::point(bounds.left() + px(2.), bounds.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(rule, start));
+    let over = gpui::point(start.x, blocks[3].1.bottom() + px(10.));
+    cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), "first\n\n<div>widget</div>\n\nlast\n\n---");
+}
