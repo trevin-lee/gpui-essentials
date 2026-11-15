@@ -24,7 +24,9 @@ pub(crate) struct Slot {
     pub(crate) pitch: f32,
 }
 
-/// Stiff and fast: about 150 ms to settle.
+/// Stiff and fast: a block is most of the way there (about 95 percent of its travel) in about
+/// 150 ms. Coming to rest, within `REST` and slower than `REST_SPEED`, takes about 160 to 390 ms
+/// at 120 Hz frames, the longer the farther it travels.
 const STIFFNESS: f32 = 1100.;
 /// Critically damped: blocks making room, or moved by a key, arrive without overshoot.
 const SETTLE: f32 = 2. * 1.0 * 33.2;
