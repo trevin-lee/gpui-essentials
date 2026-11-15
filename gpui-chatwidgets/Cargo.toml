@@ -2,15 +2,14 @@
 name = "gpui-chatwidgets"
 version = "0.1.0"
 description = "Draws AI agents' OpenUI cards (cards, tables, charts, forms, buttons) natively in GPUI"
-edition = "2024"
-# GPUI Kit 0.9 needs it.
-rust-version = "1.100"
-license = "Apache-2.0"
-repository = "https://github.com/trevin-lee/gpui-chatwidgets"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 readme = "README.md"
 keywords = ["gpui", "openui", "generative-ui", "chat", "gui"]
 categories = ["gui", "parser-implementations"]
-include = ["/src", "/examples", "/README.md", "/LICENSE", "/NOTICE"]
+include = ["/src", "/examples", "/README.md"]
 
 [lib]
 name = "gpui_chatwidgets"
@@ -25,13 +24,13 @@ serde_json = { version = "1", features = ["preserve_order"] }
 url = "2"
 # The renderer (the gpui feature). Pinned exactly: GPUI comes as GPUI Kit, which pins a snapshot
 # of Zed's GPUI (gpui-pre 0.3.12), and a host using this crate must link the same one.
-gpui-kit = { version = "=0.9.1", optional = true }
+gpui-kit = { workspace = true, optional = true }
 # The date picker's dates; the version GPUI Kit's own date picker uses.
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"], optional = true }
 # Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
 # GPUI's version of the image crate to save the picture.
-gpui-pre = { version = "=0.3.12", features = ["test-support"], optional = true }
-gpui-pre-macos = { version = "=0.3.12", features = ["test-support"], optional = true }
+gpui-pre = { workspace = true, features = ["test-support"], optional = true }
+gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [features]
@@ -49,15 +48,7 @@ required-features = ["gpui"]
 # GPUI's test support (a test window, simulated input) is macOS-only here, so the parser-only
 # build and its tests on Linux never pull GPUI in.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-gpui-kit = { version = "=0.9.1", features = ["test-support"] }
+gpui-kit = { workspace = true, features = ["test-support"] }
 # The overflow test lays text out with Core Text, as on screen, and reads the drawn scene.
-gpui-pre = { version = "=0.3.12", features = ["test-support", "bench-support"] }
-gpui-pre-apple = { version = "=0.3.12", features = ["font-kit"] }
-
-# For this repository's own builds (the example). Cargo ignores a dependency's profiles, so apps
-# using the crate build with their own.
-[profile.release]
-codegen-units = 1
-lto = "thin"
-opt-level = 3
-strip = true
+gpui-pre = { workspace = true, features = ["test-support", "bench-support"] }
+gpui-pre-apple = { workspace = true, features = ["font-kit"] }

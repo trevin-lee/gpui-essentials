@@ -12,7 +12,7 @@ pins `gpui-pre` 0.3.12), so your app must use the same, or two GPUIs would be li
 ```toml
 [dependencies]
 gpui-kit = "=0.9.1"
-gpui-flow = { git = "https://github.com/trevin-lee/WORKSPACE_REPO", rev = "<a commit>" }
+gpui-flow = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
 Run the example with `cargo run --release --example flow` from this folder.

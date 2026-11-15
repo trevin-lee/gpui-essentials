@@ -53,7 +53,7 @@ It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
 ```toml
 [dependencies]
 gpui-kit = "=0.9.1"
-gpui-calendar = { git = "https://github.com/trevin-lee/gpui-calendar", rev = "<a commit>" }
+gpui-calendar = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
 Pin a commit: until it's on crates.io, any commit can change the API.
@@ -210,5 +210,5 @@ Not done yet:
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The example's Inter fonts are under the
+Apache-2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE). The example's Inter fonts are under the
 SIL Open Font License 1.1 (`examples/fonts/OFL.txt`).

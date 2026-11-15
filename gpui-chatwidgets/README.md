@@ -48,7 +48,7 @@ It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
 ```toml
 [dependencies]
 gpui-kit = "=0.9.1"
-gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-chatwidgets", rev = "<a commit>" }
+gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
 Pin a commit: until it's on crates.io, any commit can change the API. The crate pins
@@ -66,7 +66,7 @@ A crate that reads cards but doesn't draw them (a server, or the part of an app 
 turns the renderer off and gets no GPUI at all:
 
 ```toml
-gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-chatwidgets", rev = "<a commit>", default-features = false }
+gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>", default-features = false }
 ```
 
 ```rust
@@ -250,5 +250,5 @@ card hands its host. With `--shots` it draws these pictures from a window that's
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE), which credits OpenUI (MIT), GPUI Kit
+Apache-2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE), which credits OpenUI (MIT), GPUI Kit
 (Apache-2.0) and Inter (OFL), bundled with the example.
