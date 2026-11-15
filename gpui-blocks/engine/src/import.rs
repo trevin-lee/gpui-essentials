@@ -204,8 +204,7 @@ fn details_tag(block: &DetachedBlock) -> Option<DetailsTag> {
     if !attrs.starts_with(['>', ' ', '\t', '\n']) {
         return None;
     }
-    let tag_end = attrs.find('>')?;
-    let open = attrs[..tag_end].split_ascii_whitespace().any(|a| a == "open");
+    let (open, tag_end) = scan_attributes(attrs)?;
     let after_tag = source.len() - attrs.len() + tag_end + 1;
     let rest = source[after_tag..].trim_start();
     let inner = rest
@@ -221,6 +220,52 @@ fn details_tag(block: &DetachedBlock) -> Option<DetailsTag> {
         summary,
         closed,
     })
+}
+
+/// Reads a start tag's attributes, from after its name: whether one is named
+/// `open` (with any value, or none, as HTML has it), and where the `>` that
+/// ends the tag is. `None` when the tag doesn't end.
+fn scan_attributes(attrs: &str) -> Option<(bool, usize)> {
+    let bytes = attrs.as_bytes();
+    let mut open = false;
+    let mut i = 0;
+    loop {
+        while bytes.get(i)?.is_ascii_whitespace() || bytes[i] == b'/' {
+            i += 1;
+        }
+        if bytes[i] == b'>' {
+            return Some((open, i));
+        }
+        let start = i;
+        while !matches!(bytes.get(i)?, b'=' | b'>' | b'/') && !bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        open |= &attrs[start..i] == "open";
+        while bytes.get(i)?.is_ascii_whitespace() {
+            i += 1;
+        }
+        if bytes[i] != b'=' {
+            continue;
+        }
+        i += 1;
+        while bytes.get(i)?.is_ascii_whitespace() {
+            i += 1;
+        }
+        match bytes[i] {
+            quote @ (b'"' | b'\'') => {
+                i += 1;
+                while *bytes.get(i)? != quote {
+                    i += 1;
+                }
+                i += 1;
+            }
+            _ => {
+                while !matches!(bytes.get(i)?, b'>') && !bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+            }
+        }
+    }
 }
 
 /// The summary's inline Markdown, as a paragraph's, parsed with the

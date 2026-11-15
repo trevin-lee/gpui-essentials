@@ -443,3 +443,22 @@ fn a_marker_made_a_link_by_a_definition_keeps_the_quote_and_its_text() {
     assert_eq!(text, "!note Hello [x] world");
 }
 
+
+#[test]
+fn details_open_with_a_value_is_open() {
+    for tag in [
+        "<details open>",
+        "<details open=\"\">",
+        "<details open=open>",
+        "<details OPEN = 'open'>",
+        "<details class=\"x\" open>",
+        "<details\nopen>",
+    ] {
+        let m = model(&format!("{tag}\n<summary>T</summary>\n\nbody\n\n</details>"));
+        assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: true }], "{tag}");
+    }
+    for tag in ["<details>", "<details class=\"open\">", "<details data-open>"] {
+        let m = model(&format!("{tag}\n<summary>T</summary>\n\nbody\n\n</details>"));
+        assert_eq!(kinds(&m), vec![BlockKind::Toggle { open: false }], "{tag}");
+    }
+}
