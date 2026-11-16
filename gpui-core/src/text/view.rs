@@ -17,7 +17,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use gpui::TextAlign;
 
 use super::markdown::{Align, Block, parse};
-use super::paragraph::{CodeStyle, Paragraph, ParagraphLayout, ParagraphStyle};
+use super::paragraph::{CodeStyle, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
 use crate::theme::{ActiveTheme as _, Theme};
 
 actions!(
@@ -127,6 +127,10 @@ pub struct TextViewStyle {
     /// keep [`list_item_gap`](Self::list_item_gap), and the first block anywhere has no space
     /// above it.
     pub block_gap: Option<BlockGap>,
+    /// Colours a fenced code block in its language (```` ```rust ````), from the host: gpui-core's
+    /// `highlight` feature makes one (`Highlighter::into_fn`), or a host brings its own. Ranges
+    /// out of order, overlapping, past the code or off a character's edge are passed over.
+    pub highlight: Option<super::HighlightFn>,
     /// Inline code: its family (the theme's mono family unless given), its size as a share of
     /// the text's (the text's unless given), its padding, corners, fill and colour.
     pub inline_code: InlineCodeStyle,
@@ -200,6 +204,7 @@ impl Default for TextViewStyle {
             table_text_size: None,
             table_header_weight: None,
             block_gap: None,
+            highlight: None,
             inline_code: InlineCodeStyle::default(),
             colors: TextViewColors::default(),
         }
@@ -476,7 +481,7 @@ fn lay(
                 let s = cx.heading(*level);
                 y = leaf(p, &s, x, width, y, sep, out, window);
             }
-            Block::Code { text, .. } => {
+            Block::Code { text, lang } => {
                 let (s, fill_, border, bw, radius, [pt, pr, pb, pl]) = cx.code();
                 let top = y;
                 let inner = (width - pl - pr - bw * 2.).max(px(8.));
@@ -488,16 +493,11 @@ fn lay(
                     border_width: bw,
                     radius: Corners::all(radius),
                 });
-                y = leaf(
-                    &Paragraph::plain(text.clone()),
-                    &s,
-                    x + pl + bw,
-                    inner,
-                    y + pt + bw,
-                    sep,
-                    out,
-                    window,
-                );
+                let p = match (&cx.style.highlight, lang) {
+                    (Some(f), Some(lang)) => highlighted(text, &f(lang, text)),
+                    _ => Paragraph::plain(text.clone()),
+                };
+                y = leaf(&p, &s, x + pl + bw, inner, y + pt + bw, sep, out, window);
                 y += pb + bw;
                 out.decos[deco_ix] = Deco::Box {
                     bounds: Bounds::new(point(x, top), size(width, y - top)),
@@ -694,6 +694,38 @@ fn lay(
     y
 }
 
+/// `text` with `spans`' colours, weights and italics: those that are in order, apart and on
+/// character edges (a host's highlighter isn't trusted to be).
+fn highlighted(text: &str, spans: &super::Highlights) -> Paragraph {
+    let mut p = Paragraph::default();
+    let mut at = 0;
+    for (r, style) in spans {
+        let fits = r.start >= at
+            && r.start < r.end
+            && r.end <= text.len()
+            && text.is_char_boundary(r.start)
+            && text.is_char_boundary(r.end);
+        if !fits {
+            continue;
+        }
+        p.push(&text[at..r.start], Marks::default());
+        p.push(
+            &text[r.clone()],
+            Marks {
+                color: style.color,
+                bold: style
+                    .font_weight
+                    .is_some_and(|w| w.0 >= FontWeight::SEMIBOLD.0),
+                italic: style.font_style == Some(gpui::FontStyle::Italic),
+                ..Marks::default()
+            },
+        );
+        at = r.end;
+    }
+    p.push(&text[at..], Marks::default());
+    p
+}
+
 #[allow(clippy::too_many_arguments)]
 fn leaf(
     p: &Paragraph,
@@ -717,15 +749,62 @@ fn leaf(
 }
 
 /// What a layout depends on besides its width: the text's size, colour and family, and the rem.
-type StyleKey = (Pixels, Hsla, SharedString, Pixels);
+/// What a layout depends on besides its width: the text's size, colour and family, the rem,
+/// and the view's style.
+type StyleKey = (Pixels, Hsla, SharedString, Pixels, u64);
 
-fn style_key(text: &gpui::TextStyle, rem: Pixels) -> StyleKey {
+fn style_key(text: &gpui::TextStyle, rem: Pixels, style: &TextViewStyle) -> StyleKey {
     (
         text.font_size.to_pixels(rem),
         text.color,
         text.font_family.clone(),
         rem,
+        style.fingerprint(),
     )
+}
+
+impl TextViewStyle {
+    /// Changes when anything a layout reads in the style does, so a host's new style (a theme
+    /// switch, a new highlighter) lays the view out again. Functions count by which they are.
+    fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+            self.paragraph_gap,
+            self.heading_base_font_size,
+            self.code_block,
+            self.list_indent,
+            self.list_item_gap,
+            self.list_marker_gap,
+            self.heading_margin_top,
+            self.heading_margin_bottom,
+            self.heading_line_height,
+            self.table_radius,
+            self.table_cell_padding,
+            self.table_text_size,
+            self.table_header_weight,
+            self.inline_code,
+            self.colors,
+            (),
+        )
+        .hash(&mut h);
+        let ptr = |p: Option<*const ()>| p.map(|p| p as usize);
+        (
+            ptr(self
+                .heading_font_size
+                .as_ref()
+                .map(|f| Arc::as_ptr(f) as *const ())),
+            ptr(self
+                .heading_margins
+                .as_ref()
+                .map(|f| Arc::as_ptr(f) as *const ())),
+            ptr(self.block_gap.as_ref().map(|f| Arc::as_ptr(f) as *const ())),
+            ptr(self.highlight.as_ref().map(|f| Arc::as_ptr(f) as *const ())),
+        )
+            .hash(&mut h);
+        h.finish()
+    }
 }
 
 /// Lays the view out at `width` in `text`, the text style around it. That style is taken where
@@ -781,7 +860,7 @@ fn layout_for(
     };
     let mut out = ViewLayout {
         width,
-        key: style_key(text, rem),
+        key: style_key(text, rem, style),
         height: px(0.),
         leaves: Vec::new(),
         decos: Vec::new(),
@@ -954,7 +1033,7 @@ impl Element for ViewElement {
                 _ => None,
             });
             let width = width.unwrap_or(px(400.));
-            let key = style_key(&text_style, window.rem_size());
+            let key = style_key(&text_style, window.rem_size(), &tv_style);
             let cached = state
                 .read(cx)
                 .layout
@@ -991,7 +1070,7 @@ impl Element for ViewElement {
     ) -> Prepainted {
         let width = bounds.size.width;
         let text_style = window.text_style();
-        let key = style_key(&text_style, window.rem_size());
+        let key = style_key(&text_style, window.rem_size(), &self.style);
         let cached = self
             .state
             .read(cx)
