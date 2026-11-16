@@ -22,30 +22,48 @@ on:
 
 permissions:
   contents: read
+  # The changes job lists a pull request's files.
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Only the newest commit's result matters, on main as on a pull request.
+  cancel-in-progress: true
 
 jobs:
+  # Whether the crate itself changed, as opposed to only the files every crate shares. The slow
+  # jobs (the iOS build, the shots lint) run on main always, and on a pull request only then.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      own: ${{ steps.diff.outputs.own }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ]; then echo own=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename' > files
+          if grep -qE '^(gpui\-chatwidgets/|gpui\-core/|\.github/workflows/gpui\-chatwidgets\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
+
   macos:
+    needs: changes
     # GPUI draws through Metal, so GitHub's macOS runners build and run its tests, the headless
     # ones included.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       # rust-toolchain.toml pins the version; rustup installs it on first use.
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      # Caches the registry and the build, keyed on Cargo.lock and the toolchain; only main
+      # saves, so pull requests don't push main's caches out of the 10 GB.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-gpui-chatwidgets-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: ${{ runner.os }}-gpui-chatwidgets-
+          key: gpui-chatwidgets
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt -p gpui-chatwidgets --check
       - run: cargo clippy -p gpui-chatwidgets --locked --all-targets -- -D warnings
-      - run: cargo clippy -p gpui-chatwidgets --locked --all-targets --features shots -- -D warnings
+      - if: needs.changes.outputs.own == 'true'
+        run: cargo clippy -p gpui-chatwidgets --locked --all-targets --features shots -- -D warnings
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-chatwidgets --locked
       - run: cargo doc -p gpui-chatwidgets --locked --no-deps
@@ -53,20 +71,20 @@ jobs:
           RUSTDOCFLAGS: -D warnings
 
   ios:
+    needs: changes
+    if: needs.changes.outputs.own == 'true'
     # The renderer on iOS, built for the simulator (Apple silicon) and the parser alone. An app
     # brings GPUI's iOS platform itself (gpui-pre-ios); the crate needs none. Tests run on macOS
     # with the touch settings forced (tests/touch.rs), not in a simulator.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      # Caches the registry and the build, keyed on Cargo.lock and the toolchain; only main
+      # saves, so pull requests don't push main's caches out of the 10 GB.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-gpui-chatwidgets-ios-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: ${{ runner.os }}-gpui-chatwidgets-ios-
+          key: gpui-chatwidgets-ios
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Into the toolchain rust-toolchain.toml pins, which rustup installs here first.
       - run: rustup target add aarch64-apple-ios-sim
       - run: cargo build -p gpui-chatwidgets --locked --target aarch64-apple-ios-sim
@@ -79,14 +97,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      # Caches the registry and the build, keyed on Cargo.lock and the toolchain; only main
+      # saves, so pull requests don't push main's caches out of the 10 GB.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-gpui-chatwidgets-parser-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: ${{ runner.os }}-gpui-chatwidgets-parser-
+          key: gpui-chatwidgets-parser
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy -p gpui-chatwidgets --locked --no-default-features --all-targets -- -D warnings
       - run: cargo test -p gpui-chatwidgets --locked --no-default-features
       # Nothing of GPUI, GPUI Kit or gpui-core may be in the parser-only build.
