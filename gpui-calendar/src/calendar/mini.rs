@@ -6,10 +6,11 @@ use std::collections::HashSet;
 
 use chrono::{Datelike, Duration, NaiveDate};
 use gpui::*;
-use gpui_core::{DatePickerEvent, DatePickerState, MonthGrid, Theme};
+use gpui_core::{
+    DatePickerEvent, DatePickerState, DismissReason, MonthGrid, Popover, Sheet, Theme,
+};
 
 use super::Calendar;
-use crate::overlay::{Popover, Sheet};
 use crate::time;
 
 /// How wide the side with the mini month is, in CSS pixels.
@@ -145,7 +146,7 @@ impl Calendar {
             return (Some(aside), None);
         }
         let this = cx.entity().downgrade();
-        let dismiss = move |_: &mut Window, cx: &mut App| {
+        let dismiss = move |_: &DismissReason, _: &mut Window, cx: &mut App| {
             this.update(cx, |c, cx| {
                 c.mini_open = false;
                 cx.notify();
@@ -159,6 +160,7 @@ impl Calendar {
         let open = if self.options.touch {
             Sheet::new("calendar-mini-sheet")
                 .open(true)
+                .take_focus(false)
                 .on_dismiss(dismiss)
                 .child(content)
                 .into_any_element()
@@ -173,8 +175,10 @@ impl Calendar {
             Popover::new("calendar-mini-popover")
                 .open(true)
                 .anchor(anchor)
-                .height(300.)
+                .take_focus(false)
+                .max_height(rems(30.))
                 .on_dismiss(dismiss)
+                .p(rems(4. / 15.))
                 .child(content)
                 .into_any_element()
         };
