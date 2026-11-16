@@ -103,6 +103,8 @@ pub enum CalendarEvent {
     Resize { event: EventRef, time: EventTime },
     /// Delete or Backspace was pressed with this event selected.
     Delete(EventRef),
+    /// One of an event's links was clicked: the host opens what it points at.
+    OpenLink { event: EventRef, link: EventLink },
 }
 
 /// A drag in progress, or a press that might become one.
@@ -145,6 +147,7 @@ pub(crate) struct Chip {
     /// "9 – 10:30 AM" on the grid, "9:30a" in the month.
     pub time: SharedString,
     pub location: Option<SharedString>,
+    pub links: Rc<[EventLink]>,
     pub color: u32,
     pub read_only: bool,
     /// Only all-day events change length from a span's right edge: a timed one's end has a
@@ -724,6 +727,18 @@ impl Calendar {
             .map(|h| h.bounds)
     }
 
+    /// Where one of an event's links was drawn in the last frame: its row when the chip lists
+    /// its links, or the chip's badge when that one link is all it has. None when it's only
+    /// counted.
+    pub fn link_bounds(&self, id: &str, index: usize) -> Option<Bounds<Pixels>> {
+        self.shared
+            .links
+            .borrow()
+            .iter()
+            .find(|l| l.id.as_ref() == id && l.index == index)
+            .map(|l| l.bounds)
+    }
+
     // Laying out.
 
     /// The shortest an event is drawn on the grid, in minutes: tall enough for a line of text.
@@ -755,6 +770,7 @@ impl Calendar {
             },
             time: time.into(),
             location: e.location.clone(),
+            links: e.links.as_slice().into(),
             color: self.color_of(e),
             read_only: self.is_read_only(e),
             all_day: e.time.is_all_day(),
@@ -937,6 +953,8 @@ impl Calendar {
                     return;
                 }
             }
+            // A link opens when it's let go without a drag; a drag from it moves its event.
+            Target::Link { id, .. } => self.select(Some(Selection::Event(id.clone())), cx),
             Target::Expand => {
                 self.all_day_expanded = true;
                 cx.notify();
@@ -998,6 +1016,20 @@ impl Calendar {
                 if moved < threshold {
                     return;
                 }
+                let target = match target {
+                    Target::Link {
+                        id,
+                        area,
+                        read_only,
+                        ..
+                    } => Target::Event {
+                        id,
+                        area,
+                        resize: false,
+                        read_only,
+                    },
+                    other => other,
+                };
                 match target {
                     Target::Event {
                         id,
@@ -1124,6 +1156,16 @@ impl Calendar {
                 }
                 Target::Day { date, .. } => {
                     self.select(Some(Selection::Slot { date, minute: 0 }), cx)
+                }
+                Target::Link { id, index, .. } => {
+                    if let Some(e) = self.event(&id)
+                        && let Some(link) = e.links.get(index)
+                    {
+                        cx.emit(CalendarEvent::OpenLink {
+                            event: e.to_ref(),
+                            link: link.clone(),
+                        });
+                    }
                 }
                 _ => {}
             },

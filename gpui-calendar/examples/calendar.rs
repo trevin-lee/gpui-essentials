@@ -9,7 +9,7 @@
 //! ```
 //!
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
-//! `dst-spring`, `dense`, `month-drag`. Pictures and the bench draw a window that's never shown
+//! `dst-spring`, `dense`, `month-drag`, `links`. Pictures and the bench draw a window that's never shown
 //! and never takes the keyboard.
 
 use std::path::PathBuf;
@@ -320,6 +320,35 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         .read_only(true),
     );
     out.iter_mut().find(|e| e.id == "design").unwrap().location = Some("Room 4".into());
+    // Links to docs and agents, as the app's Docs section would attach them.
+    let mut link = |id: &str, links: Vec<EventLink>| {
+        out.iter_mut().find(|e| e.id == id).unwrap().links = links;
+    };
+    link(
+        "design",
+        vec![EventLink::doc("doc-design", "Design review notes")],
+    );
+    link("lease", vec![EventLink::agent("main", "Main")]);
+    link(
+        "one-on-one",
+        vec![EventLink::doc("doc-priya", "1:1 with Priya")],
+    );
+    link(
+        "interview",
+        vec![
+            EventLink::doc("doc-loop", "Interview loop"),
+            EventLink::doc("doc-cv", "Résumé"),
+            EventLink::agent("main", "Main"),
+        ],
+    );
+    link("plan", vec![EventLink::agent("main", "Main")]);
+    link(
+        "section",
+        vec![
+            EventLink::doc("doc-cs162", "CS 162 notes"),
+            EventLink::agent("school", "School"),
+        ],
+    );
     // The standups are one recurring series, expanded by the host as a real one is.
     for e in out.iter_mut().filter(|e| e.id.starts_with("standup-")) {
         e.series = Some("standup".into());
@@ -558,6 +587,11 @@ impl Root {
         let mut now_at = now;
         match args.scene.as_str() {
             "day" => view = CalendarView::Day,
+            // Monday to Wednesday, where the events with links are.
+            "links" => {
+                view = CalendarView::Days(3);
+                date = monday;
+            }
             "month" | "month-drag" => view = CalendarView::Month,
             "overlap" => {
                 view = CalendarView::Days(3);
@@ -625,6 +659,9 @@ impl Root {
             }
             if scene.starts_with("dst") {
                 c.scroll_to_minute(-1.);
+            }
+            if scene == "links" {
+                c.scroll_to_minute(9. * 60.);
             }
             if scene == "overlap" {
                 c.scroll_to_minute(8. * 60. + 30.);
@@ -697,6 +734,17 @@ impl Root {
                     }
                 });
                 said
+            }
+            CalendarEvent::OpenLink { event, link } => {
+                let what = match link.kind {
+                    LinkKind::Doc => "doc",
+                    LinkKind::Agent => "agent",
+                };
+                format!(
+                    "Open the {what} {} (from {})",
+                    link.label,
+                    title(&event.id, cx)
+                )
             }
             CalendarEvent::Delete(event) => {
                 let said = format!("Deleted {}", title(&event.id, cx));
@@ -1098,7 +1146,7 @@ fn names_dont_clash(
         Selection,
         Area,
     ),
-    _: (CalendarSource, CalendarId, EventRef),
+    _: (CalendarSource, CalendarId, EventRef, EventLink, LinkKind),
     _: NaiveTime,
 ) {
 }

@@ -25,7 +25,18 @@ fn at(d: NaiveDate, h: u32, m: u32) -> DateTime<Utc> {
 
 fn events() -> Vec<Event> {
     vec![
-        Event::timed("a", "Planning", at(day(2), 11, 0), at(day(2), 12, 0)).calendar("work"),
+        Event::timed("a", "Planning", at(day(2), 11, 0), at(day(2), 12, 0))
+            .calendar("work")
+            .link(EventLink::doc("doc-plan", "Plan")),
+        Event::timed("notes", "Review", at(day(4), 13, 0), at(day(4), 15, 0))
+            .calendar("work")
+            .link(EventLink::doc("doc-review", "Review notes"))
+            .link(EventLink::agent("main", "Main")),
+        Event::timed("many", "Sync", at(day(5), 13, 0), at(day(5), 13, 45))
+            .calendar("work")
+            .link(EventLink::doc("x", "X"))
+            .link(EventLink::doc("y", "Y"))
+            .link(EventLink::doc("z", "Z")),
         Event::timed("ro", "All-hands", at(day(3), 9, 0), at(day(3), 10, 0))
             .calendar("work")
             .read_only(true),
@@ -564,4 +575,77 @@ fn nothing_is_made_when_every_calendar_is_read_only(cx: &mut TestAppContext) {
             .iter()
             .any(|e| matches!(e, CalendarEvent::Create { .. }))
     );
+}
+
+fn opened_links(seen: &Seen) -> Vec<(EventId, EventLink)> {
+    seen.borrow()
+        .iter()
+        .filter_map(|e| match e {
+            CalendarEvent::OpenLink { event, link } => Some((event.id.clone(), link.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[gpui_kit::test]
+fn a_click_on_a_listed_link_asks_the_host_to_open_it(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    c.update(cx, |c, _| c.scroll_to_minute(12. * 60.));
+    draw(cx);
+    // Two hours is room to list both links under the title.
+    let row = c
+        .read_with(cx, |c, _| c.link_bounds("notes", 1))
+        .expect("listed");
+    let chip = c.read_with(cx, |c, _| c.event_bounds("notes")).unwrap();
+    assert!(chip.contains(&row.center()));
+    cx.simulate_click(row.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        opened_links(&seen),
+        vec![("notes".into(), EventLink::agent("main", "Main"))]
+    );
+    assert!(has(&seen, &CalendarEvent::Select(Some("notes".into()))));
+    unchanged(&c, cx);
+}
+
+#[gpui_kit::test]
+fn a_small_chip_shows_its_one_link_as_a_mark_and_several_as_a_count(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    // An hour is too short to list a link: the mark by the title stands for it.
+    let mark = c
+        .read_with(cx, |c, _| c.link_bounds("a", 0))
+        .expect("a mark");
+    cx.simulate_click(mark.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        opened_links(&seen),
+        vec![("a".into(), EventLink::doc("doc-plan", "Plan"))]
+    );
+    // Three links on a short chip are a count, which isn't any one of them.
+    c.update(cx, |c, _| c.scroll_to_minute(12. * 60.));
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.event_bounds("many")).is_some());
+    assert!(c.read_with(cx, |c, _| c.link_bounds("many", 0)).is_none());
+}
+
+#[gpui_kit::test]
+fn a_drag_that_starts_on_a_link_moves_its_event(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    c.update(cx, |c, _| c.scroll_to_minute(12. * 60.));
+    draw(cx);
+    let row = c
+        .read_with(cx, |c, _| c.link_bounds("notes", 0))
+        .expect("listed");
+    drag(
+        cx,
+        row.center(),
+        point(row.center().x, row.center().y + px(48.)),
+    );
+    assert!(opened_links(&seen).is_empty());
+    assert!(
+        seen.borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Move { event, .. } if event.id == "notes"))
+    );
+    unchanged(&c, cx);
 }
