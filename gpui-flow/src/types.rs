@@ -238,6 +238,10 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_blank(s: &SharedString) -> bool {
+    s.is_empty()
+}
+
 fn is_zero(n: &i32) -> bool {
     *n == 0
 }
@@ -316,6 +320,13 @@ pub struct Node {
     /// How the node's text lines up; the kind's own way when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_align: Option<LabelAlign>,
+    /// An `image` node's picture: what the host's loader is asked for. The label is its
+    /// caption.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<Media>,
+    /// A `link` node's card: the address, and what the host found there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card: Option<LinkCard>,
     /// What the node links to, as the host names it (a document's id, say). The flow shows a
     /// link button and tells the host when it's pressed; it never opens anything itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -389,6 +400,8 @@ impl Node {
             icon: None,
             emoji: None,
             text_align: None,
+            media: None,
+            card: None,
             link: None,
             extra: Map::new(),
         }
@@ -507,6 +520,35 @@ impl Node {
         self
     }
 
+    /// An `image` node showing the picture the host's loader gives for `src`, `width` × `height`
+    /// pixels (the node keeps those proportions), with `alt` saying what it shows.
+    pub fn image(
+        mut self,
+        src: impl Into<SharedString>,
+        width: f32,
+        height: f32,
+        alt: impl Into<SharedString>,
+    ) -> Self {
+        self.kind = "image".into();
+        self.media = Some(Media {
+            src: src.into(),
+            width: Some(width),
+            height: Some(height),
+            alt: alt.into(),
+        });
+        self
+    }
+
+    /// A `link` node for this address, as a card the host fills in.
+    pub fn link_card(mut self, url: impl Into<SharedString>) -> Self {
+        self.kind = "link".into();
+        self.card = Some(LinkCard {
+            url: url.into(),
+            ..LinkCard::default()
+        });
+        self
+    }
+
     /// Links the node to something of the host's, by its id.
     pub fn link(mut self, link: impl Into<SharedString>) -> Self {
         self.link = Some(link.into());
@@ -521,6 +563,41 @@ impl Node {
             .map(|s| SharedString::from(s.to_string()))
             .unwrap_or_default()
     }
+}
+
+/// A picture an `image` node shows.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Media {
+    /// What the host's image loader is asked for: a file name, a document id, an address.
+    /// The flow never fetches it itself.
+    pub src: SharedString,
+    /// The picture's own size in pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<f32>,
+    /// What it shows, for someone who can't see it, and shown in its place until it loads.
+    #[serde(default, skip_serializing_if = "is_blank")]
+    pub alt: SharedString,
+}
+
+/// What a `link` node shows of an address: the address, and what the host found there (the
+/// flow asks it with `FlowEvent::LinkCardNeeded`, and never fetches anything itself).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkCard {
+    pub url: SharedString,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<SharedString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<SharedString>,
+    /// The site's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<SharedString>,
+    /// A preview picture, for the host's image loader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<SharedString>,
 }
 
 /// How a node's text lines up across it. (Not `TextAlign`, which GPUI exports too.)
