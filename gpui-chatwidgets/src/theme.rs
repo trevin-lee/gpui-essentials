@@ -26,6 +26,9 @@ pub struct CardColors {
     pub line: Hsla,
     /// The edge of something that can be pressed or typed in.
     pub line_strong: Hsla,
+    /// The ring around a button, tab or chip focused from the keyboard, drawn as given (the
+    /// web's `ring-3 ring-ring/50`: the ring colour at half strength).
+    pub focus_ring: Hsla,
     /// A recessed area: a sunk card, the tab strip, a list's number box.
     pub sunk: Hsla,
     /// A raised area: the chosen tab, a step's circle.
@@ -237,6 +240,7 @@ impl CardTheme {
                 text_faint: alpha(ink, 0.35),
                 line: alpha(line, 0.08),
                 line_strong: alpha(line, 0.14),
+                focus_ring: alpha(hex(0xf0f0f4), 0.5),
                 sunk: alpha(line, 0.04),
                 raised: alpha(line, 0.08),
                 highlight: alpha(line, 0.025),
@@ -288,6 +292,7 @@ impl CardTheme {
                 text_faint: alpha(ink, 0.35),
                 line: alpha(ink, 0.08),
                 line_strong: alpha(ink, 0.14),
+                focus_ring: alpha(hex(0x010507), 0.5),
                 sunk: alpha(ink, 0.04),
                 raised: hex(0xffffff),
                 highlight: alpha(ink, 0.025),
@@ -393,6 +398,7 @@ impl CardTheme {
             text_faint: c,
             line: c,
             line_strong: c,
+            focus_ring: c,
             sunk: c,
             raised: c,
             highlight: c,
@@ -476,6 +482,13 @@ mod tests {
             ..t.clone()
         };
         assert_eq!(bare.series_colors(2), vec![t.colors.text; 2]);
+    }
+
+    #[test]
+    fn the_focus_ring_is_the_accent_at_half_strength() {
+        for t in [CardTheme::dark(), CardTheme::light()] {
+            assert_eq!(t.colors.focus_ring, alpha(t.colors.accent, 0.5));
+        }
     }
 
     #[test]

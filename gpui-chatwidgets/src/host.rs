@@ -42,7 +42,7 @@ pub trait CardHost: 'static {
 
     /// The asset path of an SVG icon for a Lucide icon name a card wrote ("calendar",
     /// "circle-check"), or None to draw none. [`lucide_icon`](crate::lucide_icon) finds names
-    /// in GPUI Kit's bundled catalog, for a host that registers GPUI Kit's `AllAssets`.
+    /// in gpui-core's bundled Lucide set, for a host that serves gpui-core's `Icons`.
     fn icon(&self, name: &str, cx: &App) -> Option<SharedString> {
         let _ = (name, cx);
         None

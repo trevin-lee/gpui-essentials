@@ -93,17 +93,29 @@ fn load_fonts(cx: &mut App) {
     ]);
 }
 
-/// GPUI Kit's theme (its inputs, date picker and slider) and gpui-core's (the presses' focus
-/// ring) in the same mode as the cards.
-fn apply_themes(dark: bool, cx: &mut App) {
-    gpui_core::Theme::set(
-        if dark {
-            gpui_core::Theme::dark()
-        } else {
-            gpui_core::Theme::light()
-        },
-        cx,
-    );
+/// The gallery's assets: gpui-core's Lucide icons, which `lucide_icon` names for the cards,
+/// then GPUI Kit's own for its fields, date picker and slider. Both serve `icons/<name>.svg`.
+struct Assets;
+
+impl AssetSource for Assets {
+    fn load(&self, path: &str) -> Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        match gpui_core::Icons.load(path)? {
+            Some(svg) => Ok(Some(svg)),
+            None => gpui_kit::assets::Assets::new("").load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        let mut all = gpui_core::Icons.list(path)?;
+        all.extend(gpui_kit::assets::Assets::new("").list(path)?);
+        all.sort();
+        all.dedup();
+        Ok(all)
+    }
+}
+
+/// GPUI Kit's theme (its inputs, date picker and slider) in the same mode as the cards.
+fn apply_theme(dark: bool, cx: &mut App) {
     Theme::change(
         if dark {
             ThemeMode::Dark
@@ -244,7 +256,7 @@ impl Gallery {
 
     fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
         self.host.dark.set(dark);
-        apply_themes(dark, cx);
+        apply_theme(dark, cx);
         self.card.update(cx, |c, cx| c.refresh(cx));
         cx.notify();
     }
@@ -420,44 +432,42 @@ fn main() {
         }
         out
     };
-    application()
-        .with_assets(gpui_kit::assets::AllAssets::new(""))
-        .run(move |cx| {
-            load_fonts(cx);
-            gpui_kit::init(cx);
-            apply_themes(true, cx);
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-            cx.on_action(|_: &Quit, cx| cx.quit());
-            let offscreen = shots.is_some();
-            let size = if offscreen {
-                size(px(784.), px(3600.))
-            } else {
-                size(px(1280.), px(860.))
-            };
-            let options = WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some("OpenUI cards".into()),
-                    ..Default::default()
-                }),
-                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size, cx))),
-                // Pictures never show the window or take the keyboard.
-                focus: !offscreen,
-                show: !offscreen,
+    application().with_assets(Assets).run(move |cx| {
+        load_fonts(cx);
+        gpui_kit::init(cx);
+        apply_theme(true, cx);
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        let offscreen = shots.is_some();
+        let size = if offscreen {
+            size(px(784.), px(3600.))
+        } else {
+            size(px(1280.), px(860.))
+        };
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("OpenUI cards".into()),
                 ..Default::default()
-            };
-            let (window, root) = gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| Gallery::new(offscreen, window, cx))
-            })
-            .expect("the window");
-            if !offscreen {
-                cx.activate(true);
-            }
-            #[cfg(feature = "shots")]
-            if let Some(dir) = shots.clone() {
-                shots::run(window, root.clone(), dir, cx);
-            }
-            let _ = (window, root);
-        });
+            }),
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size, cx))),
+            // Pictures never show the window or take the keyboard.
+            focus: !offscreen,
+            show: !offscreen,
+            ..Default::default()
+        };
+        let (window, root) = gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| Gallery::new(offscreen, window, cx))
+        })
+        .expect("the window");
+        if !offscreen {
+            cx.activate(true);
+        }
+        #[cfg(feature = "shots")]
+        if let Some(dir) = shots.clone() {
+            shots::run(window, root.clone(), dir, cx);
+        }
+        let _ = (window, root);
+    });
 }
 
 #[cfg(feature = "shots")]

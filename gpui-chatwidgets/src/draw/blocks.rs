@@ -289,7 +289,7 @@ impl Draw<'_, '_> {
         match &it.press {
             Some(p) => {
                 let (action, words) = (p.action.clone(), p.words.clone());
-                pressable(self.id(&format!("{path}.press")))
+                pressable(self.id(&format!("{path}.press")), self.t)
                     .accessibility_label(p.words.clone())
                     .w_full()
                     .min_w_0()
