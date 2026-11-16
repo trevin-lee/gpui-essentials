@@ -270,13 +270,13 @@ fn nodes_move_to_new_places_smoothly(cx: &mut TestAppContext) {
     let b = rect(&flow, cx, "b");
     flow.update(cx, |f, cx| f.set_collapsed("a", true, cx));
     draw(cx);
-    std::thread::sleep(Duration::from_millis(40));
+    cx.executor().advance_clock(Duration::from_millis(40));
     draw(cx);
     let mid = rect(&flow, cx, "b");
     // On its way up, but not there yet.
     assert!(mid.y < b.y, "{mid:?} {b:?}");
     for _ in 0..30 {
-        std::thread::sleep(Duration::from_millis(20));
+        cx.executor().advance_clock(Duration::from_millis(20));
         draw(cx);
     }
     let end = rect(&flow, cx, "b");

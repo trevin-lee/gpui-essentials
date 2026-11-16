@@ -518,7 +518,8 @@ fn a_transition_reports_the_viewport_as_it_goes(cx: &mut TestAppContext) {
     events.borrow_mut().clear();
     flow.update(cx, |f, cx| f.zoom_to(2., cx));
     draw(cx);
-    std::thread::sleep(std::time::Duration::from_millis(120));
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(120));
     draw(cx);
     // Pressing the pane stops it part way, where the last report left it.
     cx.simulate_click(screen(&flow, cx, xy(600., 60.)), Modifiers::none());
