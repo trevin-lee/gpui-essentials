@@ -33,6 +33,8 @@ struct Panel {
     return_to: Option<FocusHandle>,
     /// Hang from this point instead of a trigger.
     point: Option<Point<Pixels>>,
+    /// Hang from this box instead of a trigger.
+    anchor_box: Option<Bounds<Pixels>>,
     trigger: FocusHandle,
     other: FocusHandle,
     scroll: ScrollHandle,
@@ -71,9 +73,10 @@ impl Render for Panel {
                 this.open = !this.open;
                 cx.notify();
             }));
-        let popover = match self.point {
-            Some(p) => popover.anchor(p),
-            None => popover.trigger(trigger),
+        let popover = match (self.point, self.anchor_box) {
+            (Some(p), _) => popover.anchor(p),
+            (None, Some(b)) => popover.anchor(b),
+            (None, None) => popover.trigger(trigger),
         };
         let other = Press::new("other")
             .track_focus(&self.other)
@@ -142,6 +145,7 @@ fn open_with(
                 stay: false,
                 return_to: None,
                 point: None,
+                anchor_box: None,
                 trigger: cx.focus_handle(),
                 other: cx.focus_handle(),
                 scroll: ScrollHandle::new(),
@@ -454,4 +458,18 @@ fn told_to_stay_it_stays_at_the_edge_when_its_trigger_scrolls_away(cx: &mut Test
         p.top() >= t.bottom() && p.top() <= t.bottom() + px(8.),
         "{p:?} {t:?}"
     );
+}
+
+#[gpui::test]
+fn an_anchor_partly_off_the_window_hangs_it_from_the_part_thats_seen(cx: &mut TestAppContext) {
+    let mut o = open_with(cx, Place::TopLeft, |p| {
+        p.anchor_box = Some(Bounds::new(
+            point(px(-100.), px(60.)),
+            size(px(200.), px(30.)),
+        ));
+    });
+    set_open(&mut o, true);
+    let p = popover(o.vcx).expect("open");
+    assert!(p.left() >= px(0.), "{p:?}");
+    assert!(p.top() >= px(90.), "below the box: {p:?}");
 }
