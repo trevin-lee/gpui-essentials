@@ -275,4 +275,14 @@ impl Doc {
     pub fn edited_by(&self) -> Option<&Person> {
         self.updated_by.as_ref().or(self.author.as_ref())
     }
+
+    /// The doc's icon, when it has one: its `icon` field (an emoji, say), which the host keeps
+    /// and the crate carries in `extra`. A list view draws a row's before its title.
+    pub fn icon(&self) -> Option<&str> {
+        self.extra
+            .get("icon")
+            .and_then(Json::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
 }

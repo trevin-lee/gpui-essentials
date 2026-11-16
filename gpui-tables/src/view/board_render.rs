@@ -169,10 +169,10 @@ impl TableView {
             .into_any_element()
     }
 
-    /// A finger's long press: on a card it picks the card up, and the finger then moves it.
-    /// Returns whether it took the press (a plain pan, which never becomes a long press,
-    /// scrolls instead).
-    fn long_press(
+    /// A finger's long press: on a card (or a list's line) it picks the card up, and the finger
+    /// then moves it. Returns whether it took the press (a plain pan, which never becomes a
+    /// long press, scrolls instead).
+    pub(crate) fn long_press(
         &mut self,
         ev: &LongPressEvent,
         window: &mut Window,
@@ -180,16 +180,12 @@ impl TableView {
     ) -> bool {
         match ev.phase {
             TouchPhase::Started => {
-                if self.board.drag.is_some() || self.shown.board.is_none() {
+                if self.board.drag.is_some() || self.move_lanes().is_none() {
                     return false;
                 }
-                let Some((column, index, card)) = self.card_at(ev.start_position) else {
+                let Some((row_id, key, card)) = self.pickup_at(ev.start_position) else {
                     return false;
                 };
-                let Some(col) = self.shown.board.as_ref().and_then(|c| c.get(column)) else {
-                    return false;
-                };
-                let (row_id, key) = (self.rows[col.rows[index]].id.clone(), col.key_string());
                 window.focus(&self.focus, cx);
                 let offset = ev.start_position - card.origin;
                 self.begin_card_drag(&row_id, &key, offset, ev.start_position, true, cx);
@@ -217,6 +213,21 @@ impl TableView {
                 false
             }
         }
+    }
+
+    /// What a finger pressing at `at` picks up: the row's id, the key of the column (or group)
+    /// it's in, and the card's (or line's) bounds.
+    fn pickup_at(&self, at: Point<Pixels>) -> Option<(String, String, gpui::Bounds<Pixels>)> {
+        if self.shown.list.is_some() {
+            return self.line_at(at);
+        }
+        let (column, index, card) = self.card_at(at)?;
+        let col = self.shown.board.as_ref()?.get(column)?;
+        Some((
+            self.rows[col.rows[index]].id.clone(),
+            col.key_string(),
+            card,
+        ))
     }
 
     /// The bounds of a column's cards (its list's), as last drawn.
@@ -696,13 +707,14 @@ impl TableView {
 }
 
 impl CardGhost {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             title: String::new(),
             lines: Vec::new(),
             theme: super::TableTheme::default(),
             width: px(0.),
             height: px(0.),
+            inline: false,
         }
     }
 }
@@ -717,6 +729,48 @@ impl Render for CardGhost {
             spread_radius: px(0.),
             inset: false,
         };
+        if self.inline {
+            // A list's line: the title, then its values to the right, each cut short.
+            return div()
+                .w(self.width)
+                .h(self.height)
+                .px(t.px(10.))
+                .flex()
+                .items_center()
+                .gap(t.px(12.))
+                .overflow_hidden()
+                .rounded(t.px(t.sizes.chip_radius))
+                .bg(t.colors.card)
+                .border_1()
+                .border_color(t.colors.line_strong)
+                // Opaque, as a card is, so the lines it passes don't show through it.
+                .shadow(vec![shadow])
+                .font_family(t.fonts.body.clone())
+                .text_size(t.px(t.sizes.text))
+                .text_color(t.colors.text)
+                .child(
+                    line(self.title.clone())
+                        .flex_1()
+                        .font_weight(FontWeight(t.sizes.medium)),
+                )
+                .child(
+                    div()
+                        .flex_shrink(1.)
+                        .min_w_0()
+                        .flex()
+                        .justify_end()
+                        .gap(t.px(12.))
+                        .overflow_hidden()
+                        .text_size(t.px(t.sizes.small))
+                        .text_color(t.colors.text_muted)
+                        .children(
+                            self.lines
+                                .iter()
+                                .map(|l| line(l.clone()).flex_shrink(1.).max_w(t.px(160.))),
+                        ),
+                )
+                .into_any_element();
+        }
         div()
             .w(self.width)
             .h(self.height)
@@ -751,5 +805,6 @@ impl Render for CardGhost {
                     .text_color(t.colors.text_muted)
                     .child(line(l.clone()))
             }))
+            .into_any_element()
     }
 }

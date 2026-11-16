@@ -199,6 +199,28 @@
             "830e07bc-1e39-4f10-92bd-4acefaecbd38"
           ],
           "collapsedGroups": []
+        },
+        {
+          "id": "7ff01fd9-e207-4ed2-8bd2-baacc71c8e00",
+          "name": "Directory",
+          "type": "list",
+          "order": "a2",
+          "sort": [
+            {
+              "propertyId": "c7a2ea20-b2f1-4c94-ae05-319acb5c7427",
+              "direction": "ascending"
+            }
+          ],
+          "filter": null,
+          "groupBy": null,
+          "columns": [],
+          "cardProperties": [
+            "57ee05cd-e009-42c7-bebf-f20686734721",
+            "9be4bcfc-49b6-4a08-b2e6-cc3ababced20",
+            "830e07bc-1e39-4f10-92bd-4acefaecbd38",
+            "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8"
+          ],
+          "collapsedGroups": []
         }
       ]
     }
@@ -207,6 +229,7 @@
     "id": "895fd7b3-26b9-4c7f-9118-bb16000f49c8",
     "kind": "page",
     "title": "Kestrel Ceramics",
+    "icon": "🏺",
     "order": "a0",
     "folderId": null,
     "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
@@ -246,6 +269,7 @@
     "id": "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c",
     "kind": "page",
     "title": "Bluefin Robotics",
+    "icon": "🤖",
     "order": "a1",
     "folderId": null,
     "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
@@ -284,6 +308,7 @@
     "id": "353c631c-dfd4-4f37-9200-339d068739fa",
     "kind": "page",
     "title": "Cedar & Pine Studio",
+    "icon": "🌲",
     "order": "a2",
     "folderId": null,
     "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
@@ -319,6 +344,7 @@
     "id": "a268aa87-2607-479d-a050-914a9d33a01c",
     "kind": "page",
     "title": "Lumen Freight",
+    "icon": "🚚",
     "order": "a3",
     "folderId": null,
     "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",

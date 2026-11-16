@@ -3,8 +3,9 @@
 //! Arabic and emoji, numbers of twenty digits), under headers and options with the same names,
 //! are laid out with Core Text (as on screen) in windows 360, 700 and 1400 wide, with the
 //! columns at their widths and at their narrowest, grouped and not, with a menu and a picker
-//! open. Any glyph or icon drawn past what clips it, past the table or past the window fails
-//! the test with where it is. The one place a glyph may cross its clip is the edges of the
+//! open; and on a board's cards and a list's lines, with every property on them. Any glyph or
+//! icon drawn past what clips it, past the table or past the window fails the test with where
+//! it is. The one place a glyph may cross its clip is the edges of the
 //! strip the columns after the title scroll in, where they're cut off until scrolled to.
 
 #![cfg(all(target_os = "macos", feature = "gpui"))]
@@ -140,7 +141,8 @@ fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
     let table = cx
         .debug_bounds("table")
         .or_else(|| cx.debug_bounds("board"))
-        .expect("the table or board is drawn");
+        .or_else(|| cx.debug_bounds("list"))
+        .expect("the table, board or list is drawn");
     // The columns after the title scroll sideways in a strip that cuts them off at its edges
     // (a board's columns scroll in the board itself).
     let strip = cx.debug_bounds("strip").unwrap_or(table);
@@ -360,6 +362,89 @@ fn no_card_column_or_folded_line_lets_its_text_out() {
                 draw(cx);
                 for o in overflows(cx) {
                     found.push(format!("{case}, {what}: {o}"));
+                }
+            }
+        }
+    }
+    found.dedup();
+    assert!(
+        found.is_empty(),
+        "{} glyphs past their place:\n{}",
+        found.len(),
+        found
+            .iter()
+            .take(60)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// People's "By stage" list with every property on its lines, grouped by stage or not, and
+/// every row with an icon of the worst kind.
+fn hostile_list(grouped: bool) -> (Doc, Vec<Doc>) {
+    const BY_STAGE: &str = "29bdd0f4-6c47-4d20-8928-78be9f6ae20b";
+    let (mut db, mut rows) = hostile();
+    let f = db.database.as_mut().unwrap();
+    let ids: Vec<String> = f.properties.iter().map(|p| p.id.clone()).collect();
+    let v = f.views.iter_mut().find(|v| v.id == BY_STAGE).unwrap();
+    v.card_properties = ids;
+    v.sort.clear();
+    if !grouped {
+        v.group_by = None;
+    }
+    for (i, r) in rows.iter_mut().enumerate() {
+        let icon = match i % 3 {
+            0 => "👩🏽‍💻".to_owned(),
+            1 => format!("{WORD}{WORD}"),
+            _ => "🏳️‍🌈🎓📚✅🚀".to_owned(),
+        };
+        r.extra.insert("icon".into(), icon.into());
+    }
+    (db, rows)
+}
+
+#[test]
+fn no_line_or_group_header_of_a_list_lets_its_text_out() {
+    const BY_STAGE: &str = "29bdd0f4-6c47-4d20-8928-78be9f6ae20b";
+    let mut found = Vec::new();
+    for width in [360., 700., 1400.] {
+        for touch in [false, true] {
+            for grouped in [true, false] {
+                let mut app = app_with_text();
+                let host = host();
+                if touch {
+                    let t = host.theme.borrow().clone().with_touch(true);
+                    *host.theme.borrow_mut() = t;
+                }
+                let (db, rows) = hostile_list(grouped);
+                let (table, cx) = open_with(
+                    &mut app,
+                    &host,
+                    db,
+                    rows,
+                    Some(BY_STAGE),
+                    size(px(width), px(900.)),
+                );
+                assert!(table.update(cx, |t, _| t.is_list()));
+                let case = format!(
+                    "list {width} wide{}{}",
+                    if touch { ", touch" } else { "" },
+                    if grouped { ", grouped" } else { "" }
+                );
+                // As drawn, then with a line focused (its border takes room).
+                for focus in [false, true] {
+                    if focus {
+                        table.update(cx, |t, cx| t.focus_cell("empty-row", NAME, cx));
+                        table.update(cx, |t, cx| t.focus_cell(ROWAN, NAME, cx));
+                    }
+                    draw(cx);
+                    for o in overflows(cx) {
+                        found.push(format!(
+                            "{case}{}: {o}",
+                            if focus { ", focused" } else { "" }
+                        ));
+                    }
                 }
             }
         }

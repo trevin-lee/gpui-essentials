@@ -31,8 +31,8 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 
 [features]
 default = ["gpui"]
-# The GPUI views (the table view). Without it (default-features = false) the crate is the model
-# and engine alone, with no GPUI in the build.
+# The GPUI views (tables, boards and lists). Without it (default-features = false) the crate
+# is the model and engine alone, with no GPUI in the build.
 gpui = ["dep:gpui", "dep:gpui-core"]
 # Pictures of the crm example's window rendered offscreen (`--shot`), for the README.
 shots = ["gpui", "gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
