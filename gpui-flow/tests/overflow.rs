@@ -129,7 +129,32 @@ fn worst_nodes() -> Vec<Node> {
             .kind("topic")
             .label(WORD)
             .link("doc:1"),
+        Node::new("styled", xy(700., 300.))
+            .label(text.clone())
+            .color("blue")
+            .icon("database")
+            .emoji("🎓")
+            .text_align(LabelAlign::Right),
     ]
+    .into_iter()
+    // Every whiteboard shape, at its own size and at a small fixed one.
+    .chain(NodeShape::ALL.iter().enumerate().flat_map(|(i, shape)| {
+        let at = xy(900. + (i % 3) as f32 * 260., (i / 3) as f32 * 260.);
+        [
+            Node::new(format!("{shape:?}"), at)
+                .shape(*shape)
+                .label(text.clone())
+                .color("green")
+                .icon("mail")
+                .emoji("🚀"),
+            Node::new(format!("small {shape:?}"), at + xy(0., 150.))
+                .shape(*shape)
+                .label(WORD)
+                .text_align(LabelAlign::Left)
+                .size(90., 50.),
+        ]
+    }))
+    .collect()
 }
 
 #[test]

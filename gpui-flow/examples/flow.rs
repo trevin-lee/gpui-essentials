@@ -32,6 +32,8 @@ struct Args {
     nodes: usize,
     /// A mind map in place of the sample: tab, enter and the arrows grow and walk it.
     mindmap: bool,
+    /// A whiteboard of shapes in place of the sample: every outline, palette color and badge.
+    whiteboard: bool,
 }
 
 fn args() -> Args {
@@ -41,6 +43,7 @@ fn args() -> Args {
         bench: false,
         nodes: 0,
         mindmap: false,
+        whiteboard: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -49,6 +52,7 @@ fn args() -> Args {
             "--scene" => out.scene = it.next().unwrap_or_default(),
             "--bench" => out.bench = true,
             "--mindmap" => out.mindmap = true,
+            "--whiteboard" => out.whiteboard = true,
             "--nodes" => out.nodes = it.next().and_then(|n| n.parse().ok()).unwrap_or(0),
             _ => {}
         }
@@ -247,6 +251,71 @@ fn note_node(node: &Node, ctx: &NodeContext) -> AnyElement {
 }
 
 /// A mind map of planning a trip: a root with ideas both ways, one of them folded away.
+/// A whiteboard sketch of a sign-up service: one of each shape, in the palette's colors, some
+/// with an icon or an emoji.
+fn whiteboard() -> (Vec<Node>, Vec<Edge>) {
+    let at = |x: f32, y: f32| xy(x, y);
+    let nodes = vec![
+        Node::new("user", at(0., 120.))
+            .shape(NodeShape::Ellipse)
+            .label("Someone signs up")
+            .emoji("👋"),
+        Node::new("form", at(240., 120.))
+            .shape(NodeShape::Parallelogram)
+            .label("Email and password")
+            .color("blue"),
+        Node::new("valid", at(480., 96.))
+            .shape(NodeShape::Diamond)
+            .label("Valid?")
+            .color("yellow"),
+        Node::new("db", at(740., 100.))
+            .shape(NodeShape::Cylinder)
+            .label("Users")
+            .icon("database")
+            .color("teal"),
+        Node::new("mail", at(720., 300.))
+            .shape(NodeShape::Document)
+            .label("Welcome email")
+            .icon("mail")
+            .color("purple"),
+        Node::new("api", at(480., 300.))
+            .shape(NodeShape::Hexagon)
+            .label("Auth service")
+            .icon("shield-check")
+            .color("green"),
+        Node::new("cdn", at(220., 320.))
+            .shape(NodeShape::Cloud)
+            .label("Sent from the edge")
+            .color("orange"),
+        Node::new("error", at(480., -60.))
+            .shape(NodeShape::Rounded)
+            .label("Show what's wrong")
+            .color("red")
+            .text_align(LabelAlign::Left),
+        Node::new("note", at(0., 320.))
+            .shape(NodeShape::Rectangle)
+            .label("Rate-limit sign-ups from one address")
+            .color("pink")
+            .text_align(LabelAlign::Left),
+    ];
+    let edge = |id: &str, s: &str, sh: &str, t: &str, th: &str| {
+        Edge::new(id, s, t)
+            .source_handle(sh)
+            .target_handle(th)
+            .kind(EdgeKind::SmoothStep)
+            .marker_end(Marker::arrow_closed())
+    };
+    let edges = vec![
+        edge("e1", "user", "right", "form", "left"),
+        edge("e2", "form", "right", "valid", "left"),
+        edge("e3", "valid", "right", "db", "left").label("yes"),
+        edge("e4", "valid", "top", "error", "bottom").label("no"),
+        edge("e5", "db", "bottom", "mail", "top"),
+        edge("e6", "valid", "bottom", "api", "top"),
+    ];
+    (nodes, edges)
+}
+
 fn mind_map() -> (Vec<Node>, Vec<Edge>) {
     let topics = [
         ("trip", "Kyoto in April", None),
@@ -350,6 +419,8 @@ impl Root {
         let mindmap = args.mindmap;
         let (nodes, edges) = if args.nodes > 0 {
             grid(args.nodes)
+        } else if args.whiteboard {
+            whiteboard()
         } else if mindmap {
             mind_map()
         } else {
@@ -664,7 +735,8 @@ actions!(flow_example, [Quit]);
 
 fn main() {
     let args = args();
-    gpui_platform::application().run(move |cx| {
+    // gpui-core's bundled icons, which nodes' badges draw.
+    gpui_platform::application().with_assets(gpui_core::Icons).run(move |cx| {
         gpui_core::init(cx);
         gpui_flow::init(cx);
         apply_theme(cx);
@@ -898,6 +970,9 @@ fn names_dont_clash(
         NodeContext,
         HandleRef,
         Extent,
+        LabelAlign,
+        NodeShape,
+        Palette,
         Side,
         HandleKind,
         EdgeKind,
