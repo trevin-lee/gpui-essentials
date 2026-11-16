@@ -79,6 +79,20 @@ pub struct Colors {
     pub bubble: Hsla,
     /// The faint pattern behind an empty state.
     pub empty_pattern: Hsla,
+    /// Code's colours, each at least 4.5:1 against the page, a card and `muted`. The web app
+    /// has none of its own; these are gpui-core's, shared through `design/tokens.json`.
+    pub syntax_keyword: Hsla,
+    pub syntax_string: Hsla,
+    pub syntax_comment: Hsla,
+    pub syntax_function: Hsla,
+    pub syntax_type: Hsla,
+    /// Numbers, booleans and other constants.
+    pub syntax_constant: Hsla,
+    pub syntax_property: Hsla,
+    /// Markup tags.
+    pub syntax_tag: Hsla,
+    pub syntax_attribute: Hsla,
+    pub syntax_punctuation: Hsla,
 }
 
 fn c(hex: u32) -> Hsla {
@@ -126,6 +140,16 @@ impl Colors {
             ready: c(0x4cc38a),
             bubble: c(0x2a2a30),
             empty_pattern: ca(0xffffff0f),
+            syntax_keyword: c(0xc4a7f5),
+            syntax_string: c(0x9fd38a),
+            syntax_comment: c(0x8b8b93),
+            syntax_function: c(0x8ab4f8),
+            syntax_type: c(0xe9c46a),
+            syntax_constant: c(0xf4a072),
+            syntax_property: c(0x7fd3e6),
+            syntax_tag: c(0xf28b82),
+            syntax_attribute: c(0xe9c46a),
+            syntax_punctuation: c(0xa1a1aa),
         }
     }
 
@@ -165,6 +189,16 @@ impl Colors {
             ready: c(0x1f8f5c),
             bubble: c(0xf1f1f3),
             empty_pattern: ca(0x00000012),
+            syntax_keyword: c(0x7c3aed),
+            syntax_string: c(0x237a35),
+            syntax_comment: c(0x63636b),
+            syntax_function: c(0x1d5fd1),
+            syntax_type: c(0x8a5a00),
+            syntax_constant: c(0xb2430c),
+            syntax_property: c(0x0b6e85),
+            syntax_tag: c(0xb3261e),
+            syntax_attribute: c(0x8a5a00),
+            syntax_punctuation: c(0x52525b),
         }
     }
 
