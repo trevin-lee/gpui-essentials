@@ -17,7 +17,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use gpui::TextAlign;
 
 use super::markdown::{Align, Block, parse};
-use super::paragraph::{Paragraph, ParagraphLayout, ParagraphStyle};
+use super::paragraph::{CodeStyle, Paragraph, ParagraphLayout, ParagraphStyle};
 use crate::theme::{ActiveTheme as _, Theme};
 
 actions!(
@@ -58,6 +58,52 @@ pub struct TextViewStyle {
     pub heading_font_size: Option<HeadingSize>,
     /// A code block's box: its fill, border, corners, padding and text.
     pub code_block: StyleRefinement,
+    /// How far a list's items are set in from its left edge (1.2 rems for bullets, 1.6 for
+    /// numbers unless given; never more than a quarter of the width).
+    pub list_indent: Option<Pixels>,
+    /// The space between a list's items (0.4 of the paragraph gap unless given).
+    pub list_item_gap: Option<Pixels>,
+    /// The space above a heading and below it (the paragraph gap unless given).
+    pub heading_margin_top: Option<Pixels>,
+    pub heading_margin_bottom: Option<Pixels>,
+    /// Inline code: its family (the theme's mono family unless given), its size as a share of
+    /// the text's (the text's unless given), its padding, corners, fill and colour.
+    pub inline_code: InlineCodeStyle,
+    /// Colours over the theme's, for a host with a palette of its own.
+    pub colors: TextViewColors,
+}
+
+/// Inline code's look in a [`TextView`]; every part optional.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InlineCodeStyle {
+    pub family: Option<SharedString>,
+    /// Its size as a share of the text's (0.875, as the web's `0.875em`).
+    pub size: Option<f32>,
+    /// Space either side of it, inside its fill.
+    pub padding: Option<Pixels>,
+    pub radius: Option<Pixels>,
+    pub background: Option<Hsla>,
+    pub color: Option<Hsla>,
+}
+
+/// A [`TextView`]'s colours, each over the theme's when given. The text's own colour is the
+/// colour of the text around the view.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextViewColors {
+    /// Links (the theme's foreground).
+    pub link: Option<Hsla>,
+    /// List bullets, numbers and task boxes (the theme's muted foreground).
+    pub list_marker: Option<Hsla>,
+    /// Horizontal rules (the theme's border).
+    pub rule: Option<Hsla>,
+    /// A quote's bar (the theme's border).
+    pub quote_bar: Option<Hsla>,
+    /// A table's lines (the theme's border).
+    pub table_line: Option<Hsla>,
+    /// The selection (the theme's ring at 30%).
+    pub selection: Option<Hsla>,
+    /// An image's description and other quiet text (the theme's muted foreground).
+    pub muted: Option<Hsla>,
 }
 
 impl Default for TextViewStyle {
@@ -67,6 +113,12 @@ impl Default for TextViewStyle {
             heading_base_font_size: None,
             heading_font_size: None,
             code_block: StyleRefinement::default(),
+            list_indent: None,
+            list_item_gap: None,
+            heading_margin_top: None,
+            heading_margin_bottom: None,
+            inline_code: InlineCodeStyle::default(),
+            colors: TextViewColors::default(),
         }
     }
 }
@@ -297,7 +349,14 @@ fn lay(
     let width = width.max(px(8.));
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 {
-            y += cx.gap;
+            let heading = |b: &Block| matches!(b, Block::Heading(..));
+            y += if heading(&blocks[i - 1]) {
+                cx.style.heading_margin_bottom.unwrap_or(cx.gap)
+            } else if heading(b) {
+                cx.style.heading_margin_top.unwrap_or(cx.gap)
+            } else {
+                cx.gap
+            };
         }
         let sep = if out.leaves.is_empty() { "" } else { "\n\n" };
         match b {
@@ -345,7 +404,7 @@ fn lay(
                 let deco_ix = out.decos.len();
                 out.decos.push(Deco::Box {
                     bounds: Bounds::default(),
-                    fill: cx.theme.border,
+                    fill: cx.style.colors.quote_bar.unwrap_or(cx.theme.border),
                     border: transparent_black(),
                     border_width: px(0.),
                     radius: px(1.5),
@@ -353,17 +412,21 @@ fn lay(
                 y = lay(inner, x + indent, width - indent, y, cx, out, window);
                 out.decos[deco_ix] = Deco::Box {
                     bounds: Bounds::new(point(x, top), size(bar, y - top)),
-                    fill: cx.theme.border,
+                    fill: cx.style.colors.quote_bar.unwrap_or(cx.theme.border),
                     border: transparent_black(),
                     border_width: px(0.),
                     radius: px(1.5),
                 };
             }
             Block::List { start, items } => {
-                let indent = (cx.rem * if start.is_some() { 1.6 } else { 1.2 }).min(width * 0.25);
+                let indent = cx
+                    .style
+                    .list_indent
+                    .unwrap_or(cx.rem * if start.is_some() { 1.6 } else { 1.2 })
+                    .min(width * 0.25);
                 for (n, item) in items.iter().enumerate() {
                     if n > 0 {
-                        y += cx.gap * 0.4;
+                        y += cx.style.list_item_gap.unwrap_or(cx.gap * 0.4);
                     }
                     let marker = match (start, item.checked) {
                         (_, Some(true)) => "☑".to_string(),
@@ -372,7 +435,11 @@ fn lay(
                         (None, None) => "•".to_string(),
                     };
                     let mut ms = cx.base.clone();
-                    ms.color = cx.theme.muted_foreground;
+                    ms.color = cx
+                        .style
+                        .colors
+                        .list_marker
+                        .unwrap_or(cx.theme.muted_foreground);
                     let m = ParagraphLayout::new(&Paragraph::plain(marker), &ms, indent, window);
                     out.decos.push(Deco::Text {
                         origin: point(x, y),
@@ -391,7 +458,7 @@ fn lay(
                 let mid = y + cx.base.line_height * 0.5;
                 out.decos.push(Deco::Box {
                     bounds: Bounds::new(point(x, mid), size(width, px(1.))),
-                    fill: cx.theme.border,
+                    fill: cx.style.colors.rule.unwrap_or(cx.theme.border),
                     border: transparent_black(),
                     border_width: px(0.),
                     radius: px(0.),
@@ -442,7 +509,7 @@ fn lay(
                     y = row_bottom;
                     out.decos.push(Deco::Box {
                         bounds: Bounds::new(point(x, y), size(width, px(1.))),
-                        fill: cx.theme.border,
+                        fill: cx.style.colors.table_line.unwrap_or(cx.theme.border),
                         border: transparent_black(),
                         border_width: px(0.),
                         radius: px(0.),
@@ -451,7 +518,7 @@ fn lay(
                 out.decos.push(Deco::Box {
                     bounds: Bounds::new(point(x, top), size(width, y - top)),
                     fill: transparent_black(),
-                    border: cx.theme.border,
+                    border: cx.style.colors.table_line.unwrap_or(cx.theme.border),
                     border_width: px(1.),
                     radius: cx.theme.radius_md().to_pixels(cx.rem),
                 });
@@ -514,11 +581,21 @@ fn layout_for(
         size,
         line_height: text.line_height_in_pixels(rem),
         color: text.color,
-        muted: theme.muted_foreground,
-        link: theme.foreground,
-        code_family: theme.mono_font_family.clone(),
-        code_background: theme.muted,
+        muted: style.colors.muted.unwrap_or(theme.muted_foreground),
+        link: style.colors.link.unwrap_or(theme.foreground),
+        code_family: style
+            .inline_code
+            .family
+            .clone()
+            .unwrap_or_else(|| theme.mono_font_family.clone()),
+        code_background: style.inline_code.background.unwrap_or(theme.muted),
         align: TextAlign::Left,
+        code: CodeStyle {
+            size: style.inline_code.size.map(|r| size * r),
+            padding: style.inline_code.padding.unwrap_or(px(0.)),
+            radius: style.inline_code.radius.unwrap_or(px(0.)),
+            color: style.inline_code.color,
+        },
     };
     let c = Ctx {
         theme,
@@ -540,6 +617,7 @@ fn layout_for(
 
 impl RenderOnce for TextView {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        crate::init_soon(cx);
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| ViewState {
             source: SharedString::default(),
             blocks: Rc::new(Vec::new()),
@@ -827,7 +905,7 @@ impl Element for ViewElement {
                 for b in leaf.layout.bands(r) {
                     window.paint_quad(fill(
                         Bounds::new(o + leaf.origin + b.origin, b.size),
-                        theme.selection(),
+                        self.style.colors.selection.unwrap_or(theme.selection()),
                     ));
                 }
             }

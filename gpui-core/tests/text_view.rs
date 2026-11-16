@@ -218,3 +218,131 @@ fn it_draws_in_the_colour_of_the_text_around_it() {
     });
     assert_eq!(dark, 0, "glyphs drawn dark on the dark theme");
 }
+
+#[test]
+fn a_hosts_style_reaches_what_is_drawn() {
+    use gpui::Hsla;
+    use gpui_core::text::{InlineCodeStyle, TextViewColors};
+    const RED: Hsla = Hsla {
+        h: 0.,
+        s: 0.9,
+        l: 0.5,
+        a: 1.,
+    };
+    const BLUE: Hsla = Hsla {
+        h: 0.6,
+        s: 0.9,
+        l: 0.5,
+        a: 1.,
+    };
+    const GREEN: Hsla = Hsla {
+        h: 0.33,
+        s: 0.9,
+        l: 0.4,
+        a: 1.,
+    };
+    struct Styled(gpui_core::TextViewStyle, &'static str);
+    impl Render for Styled {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(400.))
+                .debug_selector(|| "styled".into())
+                .child(TextView::markdown("s", self.1).style(self.0.clone()))
+        }
+    }
+    let style = gpui_core::TextViewStyle {
+        inline_code: InlineCodeStyle {
+            background: Some(BLUE),
+            color: Some(GREEN),
+            padding: Some(px(4.)),
+            radius: Some(px(3.)),
+            ..Default::default()
+        },
+        colors: TextViewColors {
+            list_marker: Some(RED),
+            rule: Some(RED),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut cx = app();
+    cx.update(gpui_core::init);
+    let st = style.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let v = cx.new(|_| Styled(st, "Some `code` here\n\n- item\n\n---"));
+        Root::new(v, window, cx)
+    });
+    vcx.run_until_parked();
+    let (glyphs, fills) = vcx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+        let scene = window.rendered_scene();
+        let glyphs: Vec<Hsla> = scene
+            .monochrome_sprites
+            .iter()
+            .map(|g| g.color)
+            .chain(scene.subpixel_sprites.iter().map(|g| g.color))
+            .collect();
+        let fills: Vec<Hsla> = scene
+            .quads
+            .iter()
+            .filter_map(|q| q.background.as_solid())
+            .collect();
+        (glyphs, fills)
+    });
+    let near = |a: Hsla, b: Hsla| (a.h - b.h).abs() < 0.02 && (a.l - b.l).abs() < 0.05;
+    assert!(fills.iter().any(|c| near(*c, BLUE)), "inline code's fill");
+    assert!(
+        glyphs.iter().any(|c| near(*c, GREEN)),
+        "inline code's text colour"
+    );
+    assert!(
+        glyphs.iter().any(|c| near(*c, RED)),
+        "the list marker's colour"
+    );
+    assert!(fills.iter().any(|c| near(*c, RED)), "the rule's colour");
+
+    // Tighter heading margins make a shorter view.
+    let height = |top: Option<gpui::Pixels>, bottom: Option<gpui::Pixels>| {
+        let mut cx = app();
+        cx.update(gpui_core::init);
+        let s = gpui_core::TextViewStyle {
+            heading_margin_top: top,
+            heading_margin_bottom: bottom,
+            ..Default::default()
+        };
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Styled(s, "Intro\n\n# Heading\n\nText"));
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        vcx.debug_bounds("styled").unwrap().size.height
+    };
+    assert!(height(Some(px(2.)), Some(px(2.))) < height(None, None));
+}
+
+#[test]
+fn copying_works_with_no_init_and_no_root() {
+    // A host that embeds a TextView and never calls gpui_core::init.
+    struct Bare;
+    impl Render for Bare {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(300.))
+                .debug_selector(|| "bare".into())
+                .child(TextView::markdown("bare", "Copy me").selectable(true))
+        }
+    }
+    let mut cx = app();
+    let (_, vcx) = cx.add_window_view(|_, _| Bare);
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    let b = vcx.debug_bounds("bare").unwrap();
+    vcx.simulate_click(
+        gpui::point(b.left() + px(4.), b.top() + px(4.)),
+        Modifiers::none(),
+    );
+    vcx.simulate_keystrokes("cmd-a cmd-c");
+    let copied = vcx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()));
+    assert_eq!(copied.as_deref(), Some("Copy me"));
+}
