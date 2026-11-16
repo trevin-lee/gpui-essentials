@@ -194,7 +194,8 @@ fn dragging_an_event_proposes_a_move_across_days(cx: &mut TestAppContext) {
         &seen,
         &CalendarEvent::Move {
             event: reference("a"),
-            time: want
+            time: want,
+            scope: EditScope::This,
         }
     ));
     assert!(has(&seen, &CalendarEvent::Select(Some("a".into()))));
@@ -212,7 +213,8 @@ fn dragging_the_bottom_edge_proposes_a_new_end(cx: &mut TestAppContext) {
         &seen,
         &CalendarEvent::Resize {
             event: reference("a"),
-            time: want
+            time: want,
+            scope: EditScope::This,
         }
     ));
     unchanged(&c, cx);
@@ -264,7 +266,13 @@ fn a_click_selects_and_a_double_click_opens(cx: &mut TestAppContext) {
     assert!(has(&seen, &CalendarEvent::Open("a".into())));
     // Delete asks the host.
     cx.simulate_keystrokes("backspace");
-    assert!(has(&seen, &CalendarEvent::Delete(reference("a"))));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: reference("a"),
+            scope: EditScope::This
+        }
+    ));
     unchanged(&c, cx);
 }
 
@@ -284,7 +292,7 @@ fn a_read_only_event_is_selected_but_not_moved_or_deleted(cx: &mut TestAppContex
         !seen
             .borrow()
             .iter()
-            .any(|e| matches!(e, CalendarEvent::Delete(_)))
+            .any(|e| matches!(e, CalendarEvent::Delete { .. }))
     );
 }
 
@@ -380,7 +388,8 @@ fn an_all_day_event_moves_by_weeks_in_the_month(cx: &mut TestAppContext) {
         &seen,
         &CalendarEvent::Move {
             event: reference("trip"),
-            time: EventTime::all_day(day(7), day(9))
+            time: EventTime::all_day(day(7), day(9)),
+            scope: EditScope::This,
         }
     ));
     unchanged(&c, cx);
@@ -395,7 +404,7 @@ fn the_host_applies_a_proposal_by_setting_the_event(cx: &mut TestAppContext) {
         spot(&c, cx, day(2), 14, 15),
     );
     let moved = seen.borrow().iter().find_map(|e| match e {
-        CalendarEvent::Move { event, time } => Some((event.id.clone(), *time)),
+        CalendarEvent::Move { event, time, .. } => Some((event.id.clone(), *time)),
         _ => None,
     });
     let (id, time) = moved.expect("a move");
@@ -415,7 +424,9 @@ fn proposed_edit(seen: &Seen) -> bool {
     seen.borrow().iter().any(|e| {
         matches!(
             e,
-            CalendarEvent::Move { .. } | CalendarEvent::Resize { .. } | CalendarEvent::Delete(_)
+            CalendarEvent::Move { .. }
+                | CalendarEvent::Resize { .. }
+                | CalendarEvent::Delete { .. }
         )
     })
 }
@@ -495,34 +506,70 @@ fn a_read_only_calendar_refuses_moves_resizes_and_deletes(cx: &mut TestAppContex
     });
     draw(cx);
     cx.simulate_keystrokes("backspace");
-    assert!(has(&seen, &CalendarEvent::Delete(reference("hol"))));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: reference("hol"),
+            scope: EditScope::This
+        }
+    ));
     unchanged(&c, cx);
 }
 
-#[gpui::test]
-fn an_edit_to_an_occurrence_names_it_and_its_series(cx: &mut TestAppContext) {
-    let (c, seen, cx) = open(cx);
-    c.update(cx, |c, _| c.scroll_to_minute(14. * 60.));
-    draw(cx);
-    drag(
-        cx,
-        spot(&c, cx, day(4), 18, 15),
-        spot(&c, cx, day(4), 19, 15),
-    );
-    let want = EventRef {
+fn gym4() -> EventRef {
+    EventRef {
         id: "gym@4".into(),
         series: Some("gym".into()),
         calendar: "home".into(),
-    };
+    }
+}
+
+fn asking(c: &Entity<Calendar>, cx: &VisualTestContext) -> bool {
+    c.read_with(cx, |c, _| c.is_asking())
+}
+
+fn edits(seen: &Seen) -> usize {
+    seen.borrow()
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                CalendarEvent::Move { .. }
+                    | CalendarEvent::Resize { .. }
+                    | CalendarEvent::Delete { .. }
+            )
+        })
+        .count()
+}
+
+/// Gym on Friday dragged an hour later: an occurrence of a weekly series.
+fn drag_gym(c: &Entity<Calendar>, cx: &mut VisualTestContext) {
+    c.update(cx, |c, _| c.scroll_to_minute(14. * 60.));
+    draw(cx);
+    drag(cx, spot(c, cx, day(4), 18, 15), spot(c, cx, day(4), 19, 15));
+}
+
+#[gpui::test]
+fn moving_an_occurrence_asks_which_ones_and_says_so(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    drag_gym(&c, cx);
+    // Nothing goes to the host until the person answers; the ghost stays where it was let go.
+    assert!(asking(&c, cx));
+    assert_eq!(edits(&seen), 0);
+    assert!(cx.debug_bounds("calendar-popover").is_some());
+    // A click on "This and following events".
+    let row = cx.debug_bounds("scope-1").expect("the answers");
+    cx.simulate_click(row.center(), Modifiers::none());
+    draw(cx);
+    assert!(!asking(&c, cx));
     assert!(has(
         &seen,
         &CalendarEvent::Move {
-            event: want.clone(),
-            time: EventTime::timed(at(day(4), 19, 0), at(day(4), 20, 0))
+            event: gym4(),
+            time: EventTime::timed(at(day(4), 19, 0), at(day(4), 20, 0)),
+            scope: EditScope::ThisAndFollowing,
         }
     ));
-    cx.simulate_keystrokes("delete");
-    assert!(has(&seen, &CalendarEvent::Delete(want)));
     // The other occurrence wasn't touched.
     assert!(
         !seen
@@ -531,6 +578,60 @@ fn an_edit_to_an_occurrence_names_it_and_its_series(cx: &mut TestAppContext) {
             .any(|e| matches!(e, CalendarEvent::Move { event, .. } if event.id == "gym@1"))
     );
     unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn the_keys_answer_and_escape_puts_the_event_back(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    drag_gym(&c, cx);
+    assert!(asking(&c, cx));
+    // Escape: no edit, no ghost.
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(!asking(&c, cx));
+    assert_eq!(edits(&seen), 0);
+    assert!(cx.debug_bounds("calendar-popover").is_none());
+    let b = c
+        .read_with(cx, |c, _| c.event_bounds("gym@4"))
+        .expect("drawn");
+    assert!((b.top() - spot(&c, cx, day(4), 18, 0).y).abs() < px(2.));
+    // Delete asks too; down twice and Enter is "All events".
+    c.update(cx, |c, cx| {
+        c.select(Some(Selection::Event("gym@4".into())), cx)
+    });
+    cx.simulate_keystrokes("delete");
+    assert!(asking(&c, cx));
+    cx.simulate_keystrokes("down down enter");
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: gym4(),
+            scope: EditScope::All
+        }
+    ));
+    unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn a_click_outside_the_question_drops_the_edit(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    drag_gym(&c, cx);
+    assert!(asking(&c, cx));
+    cx.simulate_click(spot(&c, cx, day(0), 15, 0), Modifiers::none());
+    draw(cx);
+    assert!(!asking(&c, cx));
+    assert_eq!(edits(&seen), 0);
+    // An event that doesn't repeat isn't asked about.
+    drag(
+        cx,
+        spot(&c, cx, day(2), 11, 15),
+        spot(&c, cx, day(2), 12, 15),
+    );
+    assert!(!asking(&c, cx));
+    assert!(seen.borrow().iter().any(|e| matches!(
+        e,
+        CalendarEvent::Move { event, scope: EditScope::This, .. } if event.id == "a"
+    )));
 }
 
 #[gpui::test]
@@ -703,7 +804,13 @@ fn the_agenda_lists_events_by_day_and_the_arrows_walk_it(cx: &mut TestAppContext
     cx.simulate_keystrokes("enter");
     assert!(has(&seen, &CalendarEvent::Open("ro".into())));
     cx.simulate_keystrokes("up backspace");
-    assert!(has(&seen, &CalendarEvent::Delete(reference("a"))));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: reference("a"),
+            scope: EditScope::This
+        }
+    ));
     unchanged(&c, cx);
 }
 
