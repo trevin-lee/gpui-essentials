@@ -41,7 +41,7 @@ fn render_children(doc: &EditorDocument, ids: &[BlockId]) -> Vec<(BlockId, Strin
     ids.iter().map(|id| (*id, block(doc, *id))).collect()
 }
 
-fn block(doc: &EditorDocument, id: BlockId) -> String {
+pub(crate) fn block(doc: &EditorDocument, id: BlockId) -> String {
     let Some(entry) = doc.get(id) else {
         return String::new();
     };
