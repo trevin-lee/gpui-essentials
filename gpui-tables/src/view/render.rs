@@ -8,8 +8,8 @@ use gpui::{
     Anchor, AnyElement, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, FontWeight, Hsla,
     InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Role, ScrollEvent, SharedString, StatefulInteractiveElement,
-    Styled, TouchDragEvent, TouchPhase, Window, anchored, canvas, deferred, div, point, px,
-    uniform_list,
+    Styled, TextAlign, TouchDragEvent, TouchPhase, Window, anchored, canvas, deferred, div, point,
+    px, uniform_list,
 };
 use gpui_core::{Icon, IconName, Input, Press, Selectable as _};
 
@@ -730,7 +730,14 @@ impl TableView {
     /// scrolls), at least a menu's width.
     fn render_editor(&self, e: &super::table::Editor, column: usize) -> AnyElement {
         let t = &self.theme;
+        // A number is typed at the right, where the cell shows it.
+        let align = if e.kind == PropertyType::Number {
+            TextAlign::Right
+        } else {
+            TextAlign::Left
+        };
         let input = Input::new(&e.state)
+            .text_align(align)
             .appearance(false)
             .accessibility_label(e.label.clone())
             .caret_color(t.colors.accent)
