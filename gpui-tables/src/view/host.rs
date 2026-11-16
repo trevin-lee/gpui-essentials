@@ -100,7 +100,8 @@ pub trait TableHost {
     }
 
     /// The people a person property's picker offers (the table keeps only the kinds the
-    /// property allows). The owner alone by default.
+    /// property allows), and the people a created-by or edited-by column's menu filters by.
+    /// The owner alone by default.
     fn people(&self, property: &Property) -> Vec<Person> {
         let _ = property;
         vec![Person::Owner]

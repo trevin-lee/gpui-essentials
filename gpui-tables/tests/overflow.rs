@@ -36,6 +36,18 @@ fn worst() -> String {
 fn hostile() -> (Doc, Vec<Doc>) {
     let (mut db, mut rows) = load("people");
     let fields = db.database.as_mut().unwrap();
+    fields.properties.push(Property::new(
+        "by",
+        "Added by",
+        PropertyType::CreatedBy,
+        "aF",
+    ));
+    fields.properties.push(Property::new(
+        "editor",
+        "Edited by",
+        PropertyType::EditedBy,
+        "aG",
+    ));
     for p in &mut fields.properties {
         p.name = format!("{} {WORD}", p.name);
         if let Some(options) = &mut p.config.options {
@@ -57,6 +69,8 @@ fn hostile() -> (Doc, Vec<Doc>) {
     let mut extra = Vec::new();
     for (i, r) in rows.iter_mut().enumerate() {
         r.title = format!("{} {}", r.title, worst());
+        r.author = Some(Person::agent(format!("agent-{WORD}")));
+        r.updated_by = Some(Person::agent(format!("{WORD}-{}", worst())));
         let values = r.values.get_or_insert_with(Values::new);
         for p in &props {
             let v = match p.kind {

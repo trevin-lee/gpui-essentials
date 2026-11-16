@@ -117,7 +117,8 @@ pub enum ProblemKind {
     KindNotAllowed,
     /// A date range ends before it starts.
     EndsBeforeStart,
-    /// A value is stored for a property the crate derives (created or edited time).
+    /// A value is stored for a property the crate derives (created or edited time, created
+    /// or edited by).
     Derived,
     /// A two-way relation whose back property is missing, or doesn't name it back.
     BrokenTwoWay,

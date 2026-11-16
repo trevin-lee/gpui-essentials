@@ -619,6 +619,110 @@ fn new_rows_in_a_group_get_its_value_and_the_filters(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn created_by_and_edited_by_show_who_and_never_edit(cx: &mut TestAppContext) {
+    const BY: &str = "c1a7e2b4-5d38-4f0e-9b61-0e4c7d2a9f13";
+    const EDITOR: &str = "e9d3b6f1-2a47-4c85-8e10-7f5b4a3c2d68";
+    const JONAH: &str = "842e7fc2-2954-4a6e-b12a-a1f6d42fddbb";
+    let host = TestHost::new();
+    let (mut db, mut rows) = load("people");
+    let f = db.database.as_mut().unwrap();
+    f.properties
+        .push(Property::new(BY, "Added by", PropertyType::CreatedBy, "aF"));
+    f.properties.push(Property::new(
+        EDITOR,
+        "Edited by",
+        PropertyType::EditedBy,
+        "aG",
+    ));
+    let all = f.views.iter_mut().find(|v| v.id == ALL_PEOPLE).unwrap();
+    for (id, order) in [(BY, "a05"), (EDITOR, "a08")] {
+        all.columns.push(Column {
+            property_id: id.into(),
+            width: None,
+            hidden: false,
+            order: order.into(),
+        });
+    }
+    // Theo's doc is older than updatedBy: his editor is his author.
+    rows.iter_mut().find(|r| r.id == THEO).unwrap().updated_by = None;
+    let (table, cx) = open_with(cx, &host, db, rows, None, size(px(1600.), px(700.)));
+
+    let cols = table.update(cx, |t, _| t.columns());
+    assert_eq!((cols[1].0.as_str(), cols[2].0.as_str()), (BY, EDITOR));
+    assert!(drawn(cx, "header:Added by") && drawn(cx, "header:Edited by"));
+    assert!(drawn(cx, cell(JONAH, BY)) && drawn(cx, cell(JONAH, EDITOR)));
+    let words = |table: &Entity<TableView>, cx: &mut VisualTestContext, row: &str, p: &str| {
+        table.update(cx, |t, _| t.cell_words(row, p)).unwrap()
+    };
+    // Drawn by the host's names, as a person cell is.
+    assert_eq!(words(&table, cx, JONAH, BY), "inbox-triage");
+    assert_eq!(words(&table, cx, JONAH, EDITOR), "Avery Lin");
+    assert_eq!(words(&table, cx, THEO, BY), "Career Planning");
+    assert_eq!(words(&table, cx, THEO, EDITOR), "Career Planning");
+
+    // Pressing, Enter and Delete do nothing to them: no picker, no field, no edit.
+    host.clear();
+    for p in [BY, EDITOR] {
+        click(cx, cell(JONAH, p));
+        click(cx, cell(JONAH, p));
+        assert!(!drawn(cx, "menu"), "no picker");
+        keys(cx, "enter");
+        keys(cx, "backspace");
+        keys(cx, "delete");
+        assert!(!drawn(cx, "menu"));
+    }
+    assert!(host.texts.borrow().is_empty(), "no field");
+    assert_eq!(host.edits(), []);
+
+    // The header's menu filters by who.
+    menu(cx, "Added by");
+    click(cx, "entry:Avery Lin");
+    assert_eq!(
+        host.last_view().filter,
+        Some(Filter::condition(BY, FilterOp::Is, "owner".into()))
+    );
+    assert_eq!(
+        titles(&table, cx),
+        [
+            "Ana Sofía Durán",
+            "Imani Castell",
+            "Lena Varga",
+            "Noor Ellison",
+            "Rowan Pike"
+        ]
+    );
+    // A new row made under that filter gets no value for it: the host fills in the author.
+    click(cx, "new:table");
+    let Edit::RowCreated { values, .. } = host.last_edit() else {
+        panic!()
+    };
+    assert!(!values.contains_key(BY) && !values.contains_key(EDITOR));
+
+    // Grouped by who changed each row last, with a New row in each group that sets nothing.
+    let (mut db, rows) = table.update(cx, |t, _| (t.database().clone(), t.rows().to_vec()));
+    let all = db
+        .database
+        .as_mut()
+        .unwrap()
+        .views
+        .iter_mut()
+        .find(|v| v.id == ALL_PEOPLE);
+    let all = all.unwrap();
+    all.filter = None;
+    all.group_by = Some(EDITOR.into());
+    table.update(cx, |t, cx| t.set_docs(db, rows, cx));
+    draw(cx);
+    assert!(drawn(cx, "group:owner"));
+    assert!(drawn(cx, "group:agent:career-planning"));
+    assert!(drawn(cx, "group:agent:inbox-triage"));
+    click(cx, "new:agent:inbox-triage");
+    let Edit::RowCreated { values, .. } = host.last_edit() else {
+        panic!()
+    };
+    assert!(values.is_empty(), "{values:?}");
+}
+
+#[gpui::test]
 fn touch_targets_are_44_points(cx: &mut TestAppContext) {
     let host = TestHost::touch();
     let (db, rows) = load("people");

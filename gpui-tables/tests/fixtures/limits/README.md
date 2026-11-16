@@ -50,7 +50,7 @@ characters, not bytes.
 | `no option <id>` | A select or multi-select value naming an option the property hasn't |
 | `a kind of person this property doesn't allow` | A person not in the property's `kinds`, or of a kind the crate doesn't know |
 | `ends before it starts` | A date range whose `end` is before its `start` |
-| `derived, never stored` | A value stored for a created time or edited time |
+| `derived, never stored` | A value stored for a created time, edited time, created-by or edited-by (any value but null) |
 
 Values for properties the database hasn't, and null values, aren't checked (they count toward
 the 200 values a row may have).
