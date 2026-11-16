@@ -131,6 +131,36 @@ fn blocks(nodes: &[Node], depth: usize) -> Vec<Block> {
     out
 }
 
+/// A text node's soft line breaks as spaces, as CommonMark and the web read them: a single line
+/// ending inside a paragraph, with the spaces and tabs either side of it, is one space. (A hard
+/// break, two spaces or a backslash before the line ending, is a `Break` node, kept as a line.)
+fn soft_breaks(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains(['\n', '\r']) {
+        return text.into();
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let last = lines.len() - 1;
+    let mut out = String::with_capacity(text.len());
+    for (i, line) in lines.into_iter().enumerate() {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let line = if i > 0 {
+            line.trim_start_matches([' ', '\t'])
+        } else {
+            line
+        };
+        let line = if i < last {
+            line.trim_end_matches([' ', '\t'])
+        } else {
+            line
+        };
+        if i > 0 {
+            out.push(' ');
+        }
+        out.push_str(line);
+    }
+    out.into()
+}
+
 fn inline(nodes: &[Node], depth: usize) -> Paragraph {
     let mut p = Paragraph::default();
     walk(nodes, &Marks::default(), &mut p, depth);
@@ -143,7 +173,7 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
     }
     for n in nodes {
         match n {
-            Node::Text(t) => p.push(&t.value, marks.clone()),
+            Node::Text(t) => p.push(&soft_breaks(&t.value), marks.clone()),
             Node::Emphasis(e) => walk(
                 &e.children,
                 &Marks {
@@ -280,6 +310,42 @@ mod tests {
         let b = parse("<script>alert(1)</script>\n\n![a cat](https://x.test/cat.png)");
         assert!(matches!(&b[0], Block::Paragraph(p) if p.text.contains("<script>")));
         assert!(matches!(&b[1], Block::Paragraph(p) if p.text == "a cat" && p.spans[0].1.muted));
+    }
+
+    #[test]
+    fn a_single_line_ending_is_a_space_and_a_hard_break_a_line() {
+        let b = parse(
+            "one line\nand the next,  \nthen a hard break\\\nand another\r\n  indented **bold\nacross**",
+        );
+        let Block::Paragraph(p) = &b[0] else {
+            panic!("{b:?}")
+        };
+        assert_eq!(
+            p.text,
+            "one line and the next,\nthen a hard break\nand another indented bold across"
+        );
+        assert!(
+            p.spans
+                .iter()
+                .any(|(r, m)| m.bold && &p.text[r.clone()] == "bold across")
+        );
+        // In a list item and a quote too; a code block keeps its lines.
+        let b = parse("- an item\n  that wraps\n\n> a quote\n> on two lines\n\n```\na\nb\n```");
+        let Block::List { items, .. } = &b[0] else {
+            panic!("{b:?}")
+        };
+        assert!(
+            matches!(&items[0].blocks[0], Block::Paragraph(p) if p.text == "an item that wraps"),
+            "{b:?}"
+        );
+        let Block::Quote(q) = &b[1] else {
+            panic!("{b:?}")
+        };
+        assert!(
+            matches!(&q[0], Block::Paragraph(p) if p.text == "a quote on two lines"),
+            "{q:?}"
+        );
+        assert!(matches!(&b[2], Block::Code { text, .. } if text == "a\nb"));
     }
 
     #[test]
