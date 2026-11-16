@@ -263,14 +263,22 @@ impl Ink {
 
     /// A line through `points` in dashes of `dash` with gaps as long, shifted `phase` along
     /// the line: raising the phase over time makes the dashes run toward the end.
-    pub fn dashed(&mut self, points: &[XY], width: f32, dash: f32, phase: f32, color: Hsla) {
-        if points.len() < 2 || dash <= 0. {
+    pub fn dashed(
+        &mut self,
+        points: &[XY],
+        width: f32,
+        dash: f32,
+        gap: f32,
+        phase: f32,
+        color: Hsla,
+    ) {
+        if points.len() < 2 || dash <= 0. || gap <= 0. {
             return;
         }
         let (origin, clip) = (self.origin, self.clip);
         let builder = self.builder(color, width);
         // In f64: an f32 running total stops growing on a long enough line.
-        let (dash, period) = (dash as f64, dash as f64 * 2.);
+        let (dash, period) = (dash as f64, dash as f64 + gap as f64);
         // How far into the pattern the line's start is.
         let mut at = (period - (phase as f64).rem_euclid(period)).rem_euclid(period);
         let mut drawing = false;
@@ -388,62 +396,128 @@ pub(crate) fn stroke(
 
 /// An edge's label, centered on `center`, on a patch of the pane's color so the line doesn't
 /// run through the text.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_label(
     origin: Point<Pixels>,
     text: &SharedString,
     center: XY,
     zoom: f32,
     colors: &FlowColors,
+    color: Hsla,
     window: &mut Window,
     cx: &mut App,
 ) {
     let font_size = f32::from(crate::node::font_size(10., zoom));
     // Too small to read: not worth the shaping.
-    if font_size < 3. || text.is_empty() {
+    if font_size < 3. || text.trim().is_empty() {
         return;
     }
-    let line: SharedString = text.replace('\n', " ").into();
-    let run = TextRun {
-        len: line.len(),
-        font: window.text_style().font(),
-        color: colors.edge_label,
-        background_color: None,
-        underline: None,
-        strikethrough: None,
+    // Wrapped at a width, and at most a few lines: a label is a word or a phrase on a line,
+    // never a page across the canvas.
+    let wrap = LABEL_WIDTH * zoom;
+    let Some(lines) = shape_label(text, font_size, wrap, color, window) else {
+        return;
     };
-    let shaped = window
-        .text_system()
-        .shape_line(line, px(font_size), &[run], None);
-    let width = f32::from(shaped.width);
     let line_height = font_size * 1.4;
-    let (pad_x, pad_y) = (4. * zoom, 2. * zoom);
+    let height: f32 = lines
+        .iter()
+        .map(|l| f32::from(l.size(px(line_height)).height))
+        .sum();
+    let width = lines
+        .iter()
+        .map(|l| f32::from(l.width()))
+        .fold(0., f32::max)
+        .min(wrap);
+    let (pad_x, pad_y) = (5. * zoom, 2. * zoom);
     let at = pt(origin, center);
-    let (x, y) = (
-        f32::from(at.x) - width / 2.,
-        f32::from(at.y) - line_height / 2.,
-    );
+    let (x, y) = (f32::from(at.x) - width / 2., f32::from(at.y) - height / 2.);
     window.paint_quad(quad(
         rect(
             x - pad_x,
             y - pad_y,
             width + pad_x * 2.,
-            line_height + pad_y * 2.,
+            height + pad_y * 2.,
         ),
-        px(2. * zoom),
+        px(4. * zoom),
         colors.edge_label_background,
-        px(0.),
-        transparent_black(),
+        px(1.),
+        colors.edge_label_background.blend(color.opacity(0.25)),
         BorderStyle::default(),
     ));
-    let _ = shaped.paint(
-        point(px(x), px(y)),
-        px(line_height),
-        TextAlign::Left,
-        None,
-        window,
-        cx,
-    );
+    let mut top = y;
+    for line in &lines {
+        let _ = line.paint(
+            point(px(x), px(top)),
+            px(line_height),
+            TextAlign::Center,
+            Some(Bounds::new(
+                point(px(x), px(top)),
+                size(px(width), px(line_height)),
+            )),
+            window,
+            cx,
+        );
+        top += f32::from(line.size(px(line_height)).height);
+    }
 }
+
+/// A label shaped to `wrap` points wide and at most [`LABEL_LINES`] lines, cut short with an
+/// ellipsis where it would go on (GPUI's own clamp only stops wrapping, and leaves the rest on
+/// the last line).
+fn shape_label(
+    text: &str,
+    font_size: f32,
+    wrap: f32,
+    color: Hsla,
+    window: &mut Window,
+) -> Option<Vec<WrappedLine>> {
+    let mut text = text.replace('\n', " ");
+    let font = window.text_style().font();
+    for attempt in 0..8 {
+        let run = TextRun {
+            len: text.len(),
+            font: font.clone(),
+            color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let lines = window
+            .text_system()
+            .shape_text(
+                text.clone().into(),
+                px(font_size),
+                &[run],
+                Some(px(wrap)),
+                None,
+            )
+            .ok()?;
+        let Some(cut) = lines.first().and_then(|line| {
+            let b = line.wrap_boundaries.get(LABEL_LINES - 1)?;
+            let glyph = line
+                .unwrapped_layout
+                .runs
+                .get(b.run_ix)?
+                .glyphs
+                .get(b.glyph_ix)?;
+            Some(glyph.index)
+        }) else {
+            return Some(lines.into_iter().collect());
+        };
+        // Cut where the last line ends, a little sooner on each try so the ellipsis fits too.
+        let mut end = cut.min(text.len());
+        for _ in 0..attempt * 2 + 1 {
+            end = text[..end].char_indices().last().map_or(0, |(i, _)| i);
+        }
+        text = format!("{}…", text[..end].trim_end());
+    }
+    None
+}
+
+/// How wide (in flow units) an edge's label may be before it wraps, and how many lines it
+/// keeps.
+pub(crate) const LABEL_WIDTH: f32 = 180.;
+const LABEL_LINES: usize = 4;
 
 /// The minimap: every node as a box, with what the pane doesn't show dimmed. Records how the
 /// flow was mapped into it, for presses.

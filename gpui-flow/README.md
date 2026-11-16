@@ -138,6 +138,20 @@ Run the example with `cargo run --release --example flow` from this folder.
     frames away and keeps what was in them (`Flow::unframe`).
   - Frames take a palette colour, an icon and an emoji like any node, and resize by their
     corners while selected.
+- **Edges on a whiteboard.**
+  - **Routing.** With `FlowOptions::avoid_nodes`, step and smooth-step edges go round the
+    nodes in their way: a right-angled route over a grid of the obstacles' sides, with each
+    turn costing extra (`routing`). Only nodes near the edge count, past 40 it doesn't try,
+    and a route is worked out again only when its ends or a node near it move. Frames and
+    groups aren't obstacles, since edges run inside them.
+  - **Lines** can be solid, dashed or dotted (`Edge::dash`, saved in React Flow's
+    `style.strokeDasharray`). They take a palette colour by name (`Edge::pencil`, saved as
+    subcanvas's `color`) for the line, its arrowheads and its label, and arrowheads go at
+    either end, both or neither (`Edge::arrows`).
+  - **Labels** wrap at 180 units, keep to four lines with an ellipsis after, and sit on a
+    small bordered patch.
+  - `Flow::edge_line` and `Flow::edge_label_point` say where an edge and its label were
+    last drawn.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

@@ -391,6 +391,19 @@ pub fn smooth_step_path(
     offset: f32,
 ) -> EdgePath {
     let (points, label) = step_points(source, source_position, target, target_position, offset);
+    rounded_path(&points, radius, label)
+}
+
+/// A line through `points` (corners at right angles), its corners rounded by `radius`, with
+/// its label at `label`.
+pub fn rounded_path(points: &[XY], radius: f32, label: XY) -> EdgePath {
+    let Some(&start) = points.first() else {
+        return EdgePath {
+            start: label,
+            segments: Vec::new(),
+            label,
+        };
+    };
     let mut segments = Vec::with_capacity(points.len() * 2);
     for i in 1..points.len() {
         let b = points[i];
@@ -418,10 +431,21 @@ pub fn smooth_step_path(
         });
     }
     EdgePath {
-        start: source,
+        start,
         segments,
         label,
     }
+}
+
+/// The middle of the longest piece of a line through `points`: where a routed edge's label
+/// reads best.
+pub fn longest_middle(points: &[XY]) -> XY {
+    points
+        .windows(2)
+        .max_by(|a, b| a[0].distance(a[1]).total_cmp(&b[0].distance(b[1])))
+        .map_or(points.first().copied().unwrap_or_default(), |w| {
+            (w[0] + w[1]) * 0.5
+        })
 }
 
 /// How far `p` is from the nearest point of the line through `points`.

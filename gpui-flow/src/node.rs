@@ -197,6 +197,10 @@ impl HandleBounds {
     }
 }
 
+/// A routed edge's route (none: it takes its usual one), with a hash of what it was worked out
+/// from.
+pub(crate) type Route = (u64, Option<Vec<XY>>);
+
 /// An edge's line as it was last painted.
 #[derive(Clone, Debug)]
 pub(crate) struct EdgeLine {
@@ -207,6 +211,8 @@ pub(crate) struct EdgeLine {
     pub reach: f32,
     /// In pane coordinates.
     pub points: Vec<XY>,
+    /// Where its label is centred, in pane coordinates, if it has one.
+    pub label: Option<XY>,
 }
 
 /// What a node measured the last time it was laid out.
@@ -240,6 +246,9 @@ pub(crate) struct Shared {
     /// What had the focus when the mouse button last went down, before anything handled the
     /// press: a node's child that takes the focus for that press owns it.
     pub press_focus: RefCell<Option<Option<FocusHandle>>>,
+    /// Each routed edge's route, with what it was worked out from, so it's worked out again
+    /// only when its ends or a node near it move.
+    pub routes: RefCell<HashMap<SharedString, Route>>,
     /// The canvas transform last handed to the host's listener.
     pub transform: Cell<Option<crate::flow::CanvasTransform>>,
     /// Whether the last input was a touch rather than the mouse: presses near edges reach

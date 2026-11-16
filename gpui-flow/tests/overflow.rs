@@ -49,6 +49,23 @@ fn draw(cx: &mut VisualTestContext) {
 /// padding), and how many glyphs there were.
 fn overflows(flow: &gpui::Entity<Flow>, cx: &mut VisualTestContext) -> (Vec<String>, usize) {
     draw(cx);
+    // Where each edge's label may be: centred on its point, as wide as a label wraps at, and
+    // a few lines tall (a little more, for the padding round it).
+    let labels: Vec<Bounds<Pixels>> = flow.read_with(cx, |f, _| {
+        let zoom = f.viewport().zoom;
+        f.edges()
+            .iter()
+            .filter_map(|e| f.edge_label_point(&e.id))
+            .map(|at| {
+                let c = f.flow_to_screen(at);
+                let (w, h) = ((180. + 12.) * zoom, (4. * 14. + 6.) * zoom);
+                Bounds::new(
+                    gpui::point(c.x - gpui::px(w / 2.), c.y - gpui::px(h / 2.)),
+                    gpui::size(gpui::px(w), gpui::px(h)),
+                )
+            })
+            .collect()
+    });
     let boxes: Vec<(String, Bounds<Pixels>)> = flow.read_with(cx, |f, _| {
         f.nodes()
             .iter()
@@ -93,7 +110,19 @@ fn overflows(flow: &gpui::Entity<Flow>, cx: &mut VisualTestContext) -> (Vec<Stri
                 );
                 l >= x - slack && r <= x + w + slack && t >= y - slack && btm <= y + h + slack
             });
-            if !inside {
+            // An edge's label may lie over a node; inside its own box, it's where it should be.
+            let in_label = labels.iter().any(|lb| {
+                let (x, y) = (
+                    f32::from(lb.origin.x) * scale,
+                    f32::from(lb.origin.y) * scale,
+                );
+                let (w, h) = (
+                    f32::from(lb.size.width) * scale,
+                    f32::from(lb.size.height) * scale,
+                );
+                l >= x - slack && r <= x + w + slack && t >= y - slack && btm <= y + h + slack
+            });
+            if !inside && !in_label {
                 out.push(format!(
                     "glyph at x {:.0}–{:.0}, y {:.0}–{:.0} {}",
                     l / scale,
@@ -108,6 +137,22 @@ fn overflows(flow: &gpui::Entity<Flow>, cx: &mut VisualTestContext) -> (Vec<Stri
         }
         (out, count)
     })
+}
+
+/// Edges between nodes far apart, labelled with the worst text, of every look.
+fn worst_edges() -> Vec<Edge> {
+    let text = worst();
+    vec![
+        Edge::new("e1", "default", "sized").label(text.clone()),
+        Edge::new("e2", "input", "topic")
+            .label(WORD)
+            .pencil("red")
+            .dash(EdgeDash::Dotted),
+        Edge::new("e3", "group", "linked")
+            .label(text)
+            .kind(EdgeKind::SmoothStep)
+            .dash(EdgeDash::Dashed),
+    ]
 }
 
 fn worst_nodes() -> Vec<Node> {
@@ -179,6 +224,7 @@ fn every_node_keeps_its_text_in_its_box() {
         let (flow, cx) = cx.add_window_view(move |_, cx| {
             Flow::new(cx)
                 .with_nodes(worst_nodes())
+                .with_edges(worst_edges())
                 .with_options(|o| {
                     o.min_zoom = 0.25;
                     o.max_zoom = 4.;

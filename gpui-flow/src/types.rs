@@ -591,6 +591,74 @@ impl<'de> Deserialize<'de> for EdgeKind {
     }
 }
 
+/// How an edge's line is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeDash {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+impl EdgeDash {
+    /// As React Flow (CSS) gives it: a dash array.
+    pub fn dasharray(self) -> Option<&'static str> {
+        match self {
+            EdgeDash::Solid => None,
+            EdgeDash::Dashed => Some("6 4"),
+            EdgeDash::Dotted => Some("1 4"),
+        }
+    }
+
+    /// From a CSS dash array: dotted when the dashes are much shorter than the gaps, dashed
+    /// otherwise, and solid for none.
+    pub fn from_dasharray(value: &Value) -> Self {
+        let text = match value {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            _ => return EdgeDash::Solid,
+        };
+        let parts: Vec<f32> = text
+            .split([',', ' '])
+            .filter_map(|p| p.trim().trim_end_matches("px").parse().ok())
+            .filter(|n: &f32| n.is_finite() && *n >= 0.)
+            .collect();
+        match parts.as_slice() {
+            [] => EdgeDash::Solid,
+            [d] if *d == 0. => EdgeDash::Solid,
+            [d] => {
+                if *d <= 2. {
+                    EdgeDash::Dotted
+                } else {
+                    EdgeDash::Dashed
+                }
+            }
+            [d, gap, ..] => {
+                if *d == 0. && *gap == 0. {
+                    EdgeDash::Solid
+                } else if *d * 2. <= *gap {
+                    EdgeDash::Dotted
+                } else {
+                    EdgeDash::Dashed
+                }
+            }
+        }
+    }
+}
+
+/// Which ends of an edge have arrowheads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Arrows {
+    None,
+    /// At the target.
+    #[default]
+    Forward,
+    /// At the source.
+    Reverse,
+    Both,
+}
+
 /// The arrowhead's shape.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -781,6 +849,11 @@ pub struct Edge {
     pub color: Option<u32>,
     /// The line's width in flow units; 1 when unset.
     pub stroke_width: Option<f32>,
+    /// Solid, dashed or dotted. Saved as React Flow saves it, in `style.strokeDasharray`.
+    pub dash: EdgeDash,
+    /// A color from the flow's palette by name (`blue`), saved as `color` as subcanvas saves
+    /// it: the line, its arrowheads and its label take it. An exact `color` wins over it.
+    pub pencil: Option<SharedString>,
     pub selectable: Option<bool>,
     pub deletable: Option<bool>,
     /// Higher is drawn later. An edge to a child node is drawn at that node's level.
@@ -854,6 +927,9 @@ struct EdgeWire {
     marker_end: Option<Marker>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     style: Map<String, Value>,
+    /// A palette color by name, as subcanvas saves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<SharedString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     selectable: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -883,6 +959,12 @@ impl From<EdgeWire> for Edge {
         if stroke_width.is_some() {
             style.remove("strokeWidth");
         }
+        // The dash array itself stays in `style`, so it's saved again as it came while it still
+        // means the same dash.
+        let dash = style
+            .get("strokeDasharray")
+            .map(EdgeDash::from_dasharray)
+            .unwrap_or_default();
         let mut extra = w.extra;
         if !style.is_empty() {
             extra.insert("style".into(), Value::Object(style));
@@ -903,6 +985,8 @@ impl From<EdgeWire> for Edge {
             marker_end: w.marker_end,
             color,
             stroke_width,
+            dash,
+            pencil: w.color,
             selectable: w.selectable,
             deletable: w.deletable,
             z_index: w.z_index,
@@ -926,6 +1010,15 @@ impl From<Edge> for EdgeWire {
         if let Some(w) = e.stroke_width.and_then(serde_json::Number::from_f64_lossy) {
             style.insert("strokeWidth".into(), Value::Number(w));
         }
+        let kept = style
+            .get("strokeDasharray")
+            .is_some_and(|d| EdgeDash::from_dasharray(d) == e.dash);
+        if !kept {
+            match e.dash.dasharray() {
+                Some(d) => style.insert("strokeDasharray".into(), Value::String(d.into())),
+                None => style.remove("strokeDasharray"),
+            };
+        }
         EdgeWire {
             id: e.id,
             source: e.source,
@@ -940,6 +1033,7 @@ impl From<Edge> for EdgeWire {
             marker_start: e.marker_start,
             marker_end: e.marker_end,
             style,
+            color: e.pencil,
             selectable: e.selectable,
             deletable: e.deletable,
             z_index: e.z_index,
@@ -983,6 +1077,8 @@ impl Edge {
             marker_end: None,
             color: None,
             stroke_width: None,
+            dash: EdgeDash::Solid,
+            pencil: None,
             selectable: None,
             deletable: None,
             z_index: 0,
@@ -1034,6 +1130,31 @@ impl Edge {
 
     pub fn stroke_width(mut self, width: f32) -> Self {
         self.stroke_width = Some(width);
+        self
+    }
+
+    pub fn dash(mut self, dash: EdgeDash) -> Self {
+        self.dash = dash;
+        self
+    }
+
+    /// Colors the edge with the palette's color of this name.
+    pub fn pencil(mut self, key: impl Into<SharedString>) -> Self {
+        self.pencil = Some(key.into());
+        self
+    }
+
+    /// Arrowheads at neither end, the target's, the source's, or both: closed ones, as
+    /// subcanvas draws them.
+    pub fn arrows(mut self, arrows: Arrows) -> Self {
+        let (start, end) = match arrows {
+            Arrows::None => (false, false),
+            Arrows::Forward => (false, true),
+            Arrows::Reverse => (true, false),
+            Arrows::Both => (true, true),
+        };
+        self.marker_start = start.then(Marker::arrow_closed);
+        self.marker_end = end.then(Marker::arrow_closed);
         self
     }
 
