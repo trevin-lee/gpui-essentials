@@ -5,14 +5,14 @@ use std::rc::Rc;
 
 use chrono::{Datelike as _, Duration, Local, NaiveDate, Weekday};
 use gpui::{
-    App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, KeyBinding, ParentElement as _, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, actions, div,
+    App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, Hsla,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Rems, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, actions, div,
     prelude::FluentBuilder as _, rems,
 };
 
 use crate::icon::{Icon, IconName};
-use crate::popover::Popover;
+use crate::popover::{Popover, PopoverColors};
 use crate::press::{Press, focus_ring};
 use crate::size::{Disableable, Selectable as _};
 use crate::theme::{ActiveTheme as _, Theme};
@@ -267,6 +267,15 @@ impl DatePickerState {
     }
 }
 
+/// The focus ring in the host's colour, drawn as given, or the theme's.
+fn ring_for(color: Option<Hsla>, cx: &App) -> gpui::BoxShadow {
+    let ring = focus_ring(cx);
+    match color {
+        Some(color) => gpui::BoxShadow { color, ..ring },
+        None => ring,
+    }
+}
+
 fn css(v: f32) -> Rems {
     rems(v / 15.)
 }
@@ -277,6 +286,7 @@ pub struct DatePicker {
     state: Entity<DatePickerState>,
     placeholder: SharedString,
     disabled: bool,
+    colors: DatePickerColors,
     style: StyleRefinement,
 }
 
@@ -286,8 +296,15 @@ impl DatePicker {
             state: state.clone(),
             placeholder: "Pick a date".into(),
             disabled: false,
+            colors: DatePickerColors::default(),
             style: StyleRefinement::default(),
         }
+    }
+
+    /// Colours over the theme's, for the field and its month.
+    pub fn colors(mut self, colors: DatePickerColors) -> Self {
+        self.colors = colors;
+        self
     }
 
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
@@ -318,8 +335,13 @@ impl RenderOnce for DatePicker {
             (st.open, st.label(), st.focus.clone())
         };
         let id = s.entity_id().as_u64();
-        let ring = focus_ring(cx);
-        let dark = theme.mode.is_dark();
+        let c = self.colors;
+        let ring = ring_for(c.focus_ring, cx);
+        let ring_border = c.focus_ring.unwrap_or(theme.ring);
+        let muted = c.placeholder.unwrap_or(theme.muted_foreground);
+        let fill = c
+            .field
+            .or_else(|| theme.mode.is_dark().then(|| theme.input.opacity(0.3)));
 
         let trigger = Press::new(ElementId::NamedInteger("date-picker".into(), id))
             .track_focus(&focus)
@@ -339,12 +361,13 @@ impl RenderOnce for DatePicker {
             .px(css(12.))
             .rounded(theme.radius_md())
             .border_1()
-            .border_color(theme.input)
-            .when(dark, |d| d.bg(theme.input.opacity(0.3)))
+            .border_color(c.border.unwrap_or(theme.input))
+            .when_some(fill, |d, fill| d.bg(fill))
+            .when_some(c.text, |d, text| d.text_color(text))
             .text_size(theme.text.sm)
             .when(self.disabled, |d| d.opacity(0.5))
-            .focus_visible(|st| st.border_color(theme.ring).shadow(vec![ring]))
-            .child(Icon::new(IconName::Calendar).color(theme.muted_foreground))
+            .focus_visible(move |st| st.border_color(ring_border).shadow(vec![ring]))
+            .child(Icon::new(IconName::Calendar).color(muted))
             .child(
                 div()
                     .min_w_0()
@@ -355,7 +378,7 @@ impl RenderOnce for DatePicker {
                     .overflow_hidden()
                     .px(css(3.))
                     .mx(css(-3.))
-                    .when(label.is_none(), |d| d.text_color(theme.muted_foreground))
+                    .when(label.is_none(), |d| d.text_color(muted))
                     .child(label.unwrap_or_else(|| self.placeholder.to_string())),
             )
             .on_click({
@@ -426,6 +449,7 @@ impl RenderOnce for DatePicker {
                     .open(open)
                     // The keyboard stays on the field, whose keys move through the month.
                     .take_focus(false)
+                    .when_some(c.popover, |p, colors| p.colors(colors))
                     .match_trigger_width(false)
                     .on_dismiss({
                         let s = s.clone();
@@ -439,7 +463,15 @@ impl RenderOnce for DatePicker {
                     .trigger(trigger)
                     .p(css(12.))
                     .when(open, |p| {
-                        p.child(month_view(&s, &theme, &MonthOptions::default(), cx))
+                        p.child(month_view(
+                            &s,
+                            &theme,
+                            &MonthOptions {
+                                colors: c,
+                                ..MonthOptions::default()
+                            },
+                            cx,
+                        ))
                     }),
             );
         gpui::Refineable::refine(root.style(), &self.style);
@@ -458,11 +490,44 @@ pub struct MonthGrid {
     style: StyleRefinement,
 }
 
-/// How a month is drawn beyond its state: dots under some days, and the touch size.
+/// A date picker's and a month's colours, each over the theme's when given: for a host with a
+/// palette of its own (a light card in a dark app).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DatePickerColors {
+    /// The field's fill (the theme's input at 30% in the dark, none in the light).
+    pub field: Option<Hsla>,
+    /// The field's border (the theme's input).
+    pub border: Option<Hsla>,
+    /// The field's date (the colour of the text around it).
+    pub text: Option<Hsla>,
+    /// The placeholder and the calendar icon (the theme's muted foreground).
+    pub placeholder: Option<Hsla>,
+    /// The keyboard focus ring, drawn as given, and the focused field's border (the theme's
+    /// ring).
+    pub focus_ring: Option<Hsla>,
+    /// The month's popover.
+    pub popover: Option<PopoverColors>,
+    /// A picked day's fill and number (the theme's primary and primary foreground).
+    pub selected: Option<Hsla>,
+    pub selected_text: Option<Hsla>,
+    /// The days between a range's ends (the theme's accent).
+    pub range: Option<Hsla>,
+    /// A day or an arrow under the pointer (the theme's accent).
+    pub hover: Option<Hsla>,
+    /// Today's number (the day's colour, in semibold, unless given).
+    pub today: Option<Hsla>,
+    /// Days outside the month, the weekdays' names and the dots (the theme's muted foreground).
+    pub muted: Option<Hsla>,
+    /// The border of the day the keyboard is on (the theme's ring at half strength).
+    pub cursor: Option<Hsla>,
+}
+
+/// How a month is drawn beyond its state: dots under some days, the touch size, the colours.
 #[derive(Clone, Default)]
 struct MonthOptions {
     dots: Option<Rc<dyn Fn(NaiveDate) -> bool>>,
     touch: bool,
+    colors: DatePickerColors,
 }
 
 impl MonthGrid {
@@ -485,6 +550,11 @@ impl MonthGrid {
         self.options.touch = true;
         self
     }
+
+    pub fn colors(mut self, colors: DatePickerColors) -> Self {
+        self.options.colors = colors;
+        self
+    }
 }
 
 impl Styled for MonthGrid {
@@ -498,7 +568,7 @@ impl RenderOnce for MonthGrid {
         let theme = cx.theme().clone();
         let s = self.state.clone();
         let focus = s.read(cx).focus.clone();
-        let ring = focus_ring(cx);
+        let ring = ring_for(self.options.colors.focus_ring, cx);
         let mut el = div()
             .id(ElementId::NamedInteger(
                 "month-grid".into(),
@@ -573,6 +643,13 @@ fn month_view(
         css(36.).into()
     };
     let dots = options.dots.clone();
+    let c = options.colors;
+    let muted = c.muted.unwrap_or(theme.muted_foreground);
+    let selected = c.selected.unwrap_or(theme.primary);
+    let selected_text = c.selected_text.unwrap_or(theme.primary_foreground);
+    let range = c.range.unwrap_or(theme.accent);
+    let hover = c.hover.unwrap_or(theme.accent);
+    let cursor_border = c.cursor.unwrap_or(theme.ring.opacity(0.5));
     let day_button = |d: NaiveDate| {
         let in_month = d.month() == month.month();
         let picked = value.start == Some(d) || value.end == Some(d);
@@ -593,26 +670,23 @@ fn month_view(
         .justify_center()
         .rounded(theme.radius_md())
         .text_size(theme.text.sm)
-        .when(!in_month, |b| b.text_color(theme.muted_foreground))
-        .when(between, |b| b.bg(theme.accent))
-        .when(picked, |b| {
-            b.bg(theme.primary).text_color(theme.primary_foreground)
-        })
-        .when(!picked, |b| b.hover(|st| st.bg(theme.accent)))
-        .when(on && !picked, |b| {
-            b.border_1().border_color(theme.ring.opacity(0.5))
-        })
+        .when(!in_month, |b| b.text_color(muted))
+        .when(between, |b| b.bg(range))
+        .when(picked, |b| b.bg(selected).text_color(selected_text))
+        .when(!picked, |b| b.hover(move |st| st.bg(hover)))
+        .when(on && !picked, |b| b.border_1().border_color(cursor_border))
         .when(d == today && !picked, |b| {
             b.font_weight(gpui::FontWeight::SEMIBOLD)
+                .when_some(c.today, |b, today| b.text_color(today))
         })
         .flex_col()
         .debug_selector(move || format!("day-{d}"))
         .child(d.day().to_string())
         .when(dots.as_ref().is_some_and(|has| has(d)), |b| {
             b.child(div().size(css(4.)).rounded_full().bg(if picked {
-                theme.primary_foreground
+                selected_text
             } else {
-                theme.muted_foreground
+                muted
             }))
         })
         .on_click(move |_, _, cx| s.update(cx, |st, cx| st.pick(d, cx)))
@@ -630,7 +704,7 @@ fn month_view(
         .items_center()
         .justify_center()
         .rounded(theme.radius_md())
-        .hover(|st| st.bg(theme.accent))
+        .hover(move |st| st.bg(hover))
         .child(Icon::new(icon))
         .on_click(move |_, _, cx| {
             s.update(cx, |st, cx| {
@@ -673,7 +747,7 @@ fn month_view(
                 .flex()
                 .justify_center()
                 .text_size(theme.text.xs)
-                .text_color(theme.muted_foreground)
+                .text_color(muted)
                 .child(w)
         })))
         .children((0..6).map(|w| {
