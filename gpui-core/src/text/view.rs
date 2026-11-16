@@ -16,8 +16,8 @@ use unicode_segmentation::UnicodeSegmentation as _;
 
 use gpui::TextAlign;
 
-use super::markdown::{Align, Block, parse};
-use super::paragraph::{CodeStyle, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
+use super::markdown::{Align, Block, parse_with};
+use super::paragraph::{Affinity, CodeStyle, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
 use crate::theme::{ActiveTheme as _, Theme};
 
 actions!(
@@ -218,21 +218,52 @@ type OnLink = Rc<dyn Fn(&str, &Modifiers, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct TextView {
     id: ElementId,
-    source: SharedString,
+    sources: Vec<(u64, SharedString)>,
     style: TextViewStyle,
     selectable: bool,
     on_link: Option<OnLink>,
+    caret: Option<Hsla>,
 }
 
 impl TextView {
     pub fn markdown(id: impl Into<ElementId>, source: impl Into<SharedString>) -> Self {
+        Self::blocks(id, [(0, source.into())])
+    }
+
+    /// One document from several Markdown sources, each under a key of the host's (unique in
+    /// the view), in order: a chat reply's settled blocks and its live tail, say. It's drawn,
+    /// spaced, selected and copied as one `markdown` view of the sources one after another
+    /// would be, but a source is read again only when its text changes, and each of its
+    /// top-level blocks laid out again only when that block changes: a streamed reply's last
+    /// source changing costs that source's last block, not the reply.
+    ///
+    /// A link like `[text][label]` resolves to a definition (`[label]: https://…`) in any of the
+    /// sources; a source's own definition wins over another's. When a source's definitions
+    /// change, the sources that could refer to them are read again.
+    ///
+    /// A selection stays while the sources before it and its own are unchanged, so text that's
+    /// settled can be selected and copied while the last source streams.
+    pub fn blocks(
+        id: impl Into<ElementId>,
+        sources: impl IntoIterator<Item = (u64, SharedString)>,
+    ) -> Self {
         Self {
             id: id.into(),
-            source: source.into(),
+            sources: sources.into_iter().collect(),
             style: TextViewStyle::default(),
             selectable: false,
             on_link: None,
+            caret: None,
         }
+    }
+
+    /// A caret in `color` after the text's last character (the last source's, with
+    /// [`blocks`](Self::blocks); at the start of its line when that source is empty), as a reply
+    /// being written shows. It's only drawn, never laid out, so taking it away can't move the
+    /// text. It doesn't blink: a host that wants it to sets and clears it on a timer of its own.
+    pub fn trailing_caret(mut self, color: Option<Hsla>) -> Self {
+        self.caret = color;
+        self
     }
 
     pub fn style(mut self, style: TextViewStyle) -> Self {
@@ -259,10 +290,84 @@ impl TextView {
 /// A place in the text: a paragraph of the layout and an offset in it.
 type Pos = (usize, usize);
 
+/// One top-level block of a source, and its layout at the last width and style it was laid out
+/// in, at the view's top left. It's kept while the block is the same as the one at its place
+/// when the source is read again. (A long list or table could keep a piece per item or row the
+/// same way, so a growing last item is all that's laid out again.)
+struct Piece {
+    block: Block,
+    laid: Option<Rc<ViewLayout>>,
+}
+
+/// A source of [`TextView::blocks`], read.
+struct KeyState {
+    key: u64,
+    source: SharedString,
+    /// Whether it could refer to a link definition (it has a `]`), so is read with the others'.
+    refers: bool,
+    /// The hash of the definitions it was read with.
+    read_with: u64,
+    /// Its own link reference definitions, as lines for the others to be read with.
+    definitions: String,
+    pieces: Vec<Piece>,
+}
+
+impl KeyState {
+    fn read(key: u64, source: SharedString, context: &str, previous: Option<Vec<Piece>>) -> Self {
+        let refers = source.contains(']');
+        let parsed = parse_with(&source, if refers { context } else { "" });
+        let mut k = KeyState {
+            key,
+            refers,
+            read_with: if refers { hash_of(context) } else { 0 },
+            definitions: parsed.definitions,
+            source,
+            pieces: Vec::new(),
+        };
+        k.set_blocks(parsed.blocks, previous.unwrap_or_default());
+        k
+    }
+
+    /// Its blocks, keeping the layout of each that's the same as the one at its place before.
+    fn set_blocks(&mut self, blocks: Vec<Block>, mut previous: Vec<Piece>) {
+        previous.truncate(blocks.len());
+        let mut previous = previous.into_iter();
+        self.pieces = blocks
+            .into_iter()
+            .map(|block| {
+                let laid = previous
+                    .next()
+                    .filter(|p| p.block == block)
+                    .and_then(|p| p.laid);
+                Piece { block, laid }
+            })
+            .collect();
+    }
+
+    /// Its paragraphs while every block is laid out; `None` before.
+    fn leaf_count(&self) -> Option<usize> {
+        self.pieces
+            .iter()
+            .map(|p| p.laid.as_ref().map(|l| l.leaves.len()))
+            .sum()
+    }
+}
+
+fn hash_of(text: &str) -> u64 {
+    use std::hash::{Hash as _, Hasher as _};
+    if text.is_empty() {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish().max(1)
+}
+
 /// What a view keeps between draws.
 struct ViewState {
-    source: SharedString,
-    blocks: Rc<Vec<Block>>,
+    keys: Vec<KeyState>,
+    /// Counts the changes to the sources, so a layout of older ones isn't taken for theirs.
+    generation: u64,
     focus: FocusHandle,
     anchor: Option<Pos>,
     head: Option<Pos>,
@@ -274,6 +379,77 @@ struct ViewState {
 }
 
 impl ViewState {
+    /// Takes the host's sources: reads those that are new or changed (and those whose
+    /// definitions to refer to have), keeps the layout of every block that's the same, and keeps
+    /// the selection if it's in what's unchanged.
+    fn sync(&mut self, sources: &[(u64, SharedString)]) {
+        let same = self.keys.len() == sources.len()
+            && self
+                .keys
+                .iter()
+                .zip(sources)
+                .all(|(k, (key, src))| k.key == *key && k.source == *src);
+        if same {
+            return;
+        }
+        let before: Vec<(u64, SharedString)> = self
+            .keys
+            .iter()
+            .map(|k| (k.key, k.source.clone()))
+            .collect();
+        let mut old: std::collections::HashMap<u64, KeyState> =
+            self.keys.drain(..).map(|k| (k.key, k)).collect();
+        // The sources' own definitions first: each is read alone, or kept if unchanged.
+        let mut keys: Vec<KeyState> = Vec::with_capacity(sources.len());
+        let mut changed = vec![false; sources.len()];
+        for (i, (key, src)) in sources.iter().enumerate() {
+            keys.push(match old.remove(key) {
+                Some(k) if k.source == *src => k,
+                prev => {
+                    changed[i] = true;
+                    KeyState::read(*key, src.clone(), "", prev.map(|k| k.pieces))
+                }
+            });
+        }
+        // Then those that could refer to a definition, with every source's.
+        let context: String = keys.iter().map(|k| k.definitions.as_str()).collect();
+        let h = hash_of(&context);
+        for (i, k) in keys.iter_mut().enumerate() {
+            if k.refers && k.read_with != h {
+                let pieces = std::mem::take(&mut k.pieces);
+                *k = KeyState::read(k.key, k.source.clone(), &context, Some(pieces));
+                changed[i] = true;
+            }
+        }
+        // The paragraphs before the first change keep their places: a selection among them
+        // stays.
+        let mut stable = 0;
+        for (i, k) in keys.iter().enumerate() {
+            let kept = !changed[i] && before.get(i).is_some_and(|(key, _)| *key == k.key);
+            if kept && let Some(n) = k.leaf_count() {
+                stable += n;
+                continue;
+            }
+            for p in &k.pieces {
+                match &p.laid {
+                    Some(l) => stable += l.leaves.len(),
+                    None => break,
+                }
+            }
+            break;
+        }
+        let inside = |p: Option<Pos>| p.is_none_or(|(leaf, _)| leaf < stable);
+        if !(inside(self.anchor) && inside(self.head)) {
+            self.anchor = None;
+            self.head = None;
+            self.selecting = false;
+        }
+        self.press = None;
+        self.keys = keys;
+        self.generation += 1;
+        self.layout = None;
+    }
+
     fn selection(&self) -> Option<(Pos, Pos)> {
         let (a, h) = (self.anchor?, self.head?);
         (a != h).then(|| if a <= h { (a, h) } else { (h, a) })
@@ -300,14 +476,16 @@ impl ViewState {
 }
 
 /// A paragraph placed in the view.
+#[derive(Clone)]
 struct Leaf {
     origin: Point<Pixels>,
-    layout: ParagraphLayout,
+    layout: Rc<ParagraphLayout>,
     paragraph: Rc<Paragraph>,
     /// What goes before it when copied with the one above.
     separator: &'static str,
 }
 
+#[derive(Clone)]
 enum Deco {
     Box {
         bounds: Bounds<Pixels>,
@@ -318,16 +496,32 @@ enum Deco {
     },
     Text {
         origin: Point<Pixels>,
-        layout: ParagraphLayout,
+        layout: Rc<ParagraphLayout>,
     },
+}
+
+impl Deco {
+    fn moved_down(&self, by: Pixels) -> Deco {
+        let mut d = self.clone();
+        match &mut d {
+            Deco::Box { bounds, .. } => bounds.origin.y += by,
+            Deco::Text { origin, .. } => origin.y += by,
+        }
+        d
+    }
 }
 
 struct ViewLayout {
     width: Pixels,
     key: StyleKey,
+    /// The sources' generation it was laid out from.
+    generation: u64,
     height: Pixels,
     leaves: Vec<Leaf>,
     decos: Vec<Deco>,
+    /// The last source's paragraphs, and where its first line starts (for a trailing caret
+    /// when it has none) and that line's height.
+    tail: Option<(std::ops::Range<usize>, Point<Pixels>, Pixels)>,
 }
 
 /// Everything layout needs from the theme, the window and the host's style.
@@ -446,6 +640,26 @@ impl Ctx<'_> {
     }
 }
 
+/// The space between two blocks one after the other: the host's for the pair, else the larger
+/// of a heading's margin and the next's, else the paragraph gap.
+fn gap(above: &Block, below: &Block, cx: &Ctx) -> Pixels {
+    let margins = |b: &Block| match b {
+        Block::Heading(level, _) => Some(cx.heading_margins(*level)),
+        _ => None,
+    };
+    let host = cx
+        .style
+        .block_gap
+        .as_ref()
+        .and_then(|f| f(kind(above), kind(below)));
+    host.unwrap_or_else(|| match (margins(above), margins(below)) {
+        (Some((_, below)), Some((above, _))) => below.max(above),
+        (Some((_, below)), None) => below,
+        (None, Some((above, _))) => above,
+        (None, None) => cx.gap,
+    })
+}
+
 fn lay(
     blocks: &[Block],
     x: Pixels,
@@ -458,21 +672,7 @@ fn lay(
     let width = width.max(px(8.));
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 {
-            let margins = |b: &Block| match b {
-                Block::Heading(level, _) => Some(cx.heading_margins(*level)),
-                _ => None,
-            };
-            let host = cx
-                .style
-                .block_gap
-                .as_ref()
-                .and_then(|f| f(kind(&blocks[i - 1]), kind(b)));
-            y += host.unwrap_or_else(|| match (margins(&blocks[i - 1]), margins(b)) {
-                (Some((_, below)), Some((above, _))) => below.max(above),
-                (Some((_, below)), None) => below,
-                (None, Some((above, _))) => above,
-                (None, None) => cx.gap,
-            });
+            y += gap(&blocks[i - 1], b, cx);
         }
         let sep = if out.leaves.is_empty() { "" } else { "\n\n" };
         match b {
@@ -560,7 +760,7 @@ fn lay(
                     let mx = (indent - gap - marker_w).max(px(0.));
                     out.decos.push(Deco::Text {
                         origin: point(x + mx, y),
-                        layout: m,
+                        layout: Rc::new(m),
                     });
                     let before = out.leaves.len();
                     y = lay(&item.blocks, x + indent, width - indent, y, cx, out, window);
@@ -645,7 +845,7 @@ fn lay(
                         let h = l.height;
                         out.leaves.push(Leaf {
                             origin: point(cx0, row_top + pad),
-                            layout: l,
+                            layout: Rc::new(l),
                             paragraph: Rc::new(p),
                             separator: sep,
                         });
@@ -741,7 +941,7 @@ fn leaf(
     let h = l.height;
     out.leaves.push(Leaf {
         origin: point(x, y),
-        layout: l,
+        layout: Rc::new(l),
         paragraph: Rc::new(p.clone()),
         separator: sep,
     });
@@ -820,11 +1020,13 @@ impl TextViewStyle {
     }
 }
 
-/// Lays the view out at `width` in `text`, the text style around it. That style is taken where
-/// GPUI applies its parents' (while laying out or painting), not inside a measure, which runs
-/// outside them.
+/// Lays the view out at `width` in `text`, the text style around it: each source's blocks
+/// that aren't laid out at this width and style, then all of them one after another. That style
+/// is taken where GPUI applies its parents' (while laying out or painting), not inside a
+/// measure, which runs outside them.
+#[allow(clippy::too_many_arguments)]
 fn layout_for(
-    state: &ViewState,
+    state: &mut ViewState,
     style: &TextViewStyle,
     key: StyleKey,
     text: &gpui::TextStyle,
@@ -872,14 +1074,83 @@ fn layout_for(
         rem,
         gap: style.paragraph_gap.to_pixels(rem),
     };
+    for k in &mut state.keys {
+        for piece in &mut k.pieces {
+            if piece
+                .laid
+                .as_ref()
+                .is_some_and(|l| l.width == width && l.key == key)
+            {
+                continue;
+            }
+            let mut out = ViewLayout {
+                width,
+                key: key.clone(),
+                generation: 0,
+                height: px(0.),
+                leaves: Vec::new(),
+                decos: Vec::new(),
+                tail: None,
+            };
+            out.height = lay(
+                std::slice::from_ref(&piece.block),
+                px(0.),
+                width,
+                px(0.),
+                &c,
+                &mut out,
+                window,
+            );
+            piece.laid = Some(Rc::new(out));
+            #[cfg(test)]
+            tests::LAID.with(|n| n.set(n.get() + 1));
+        }
+    }
     let mut out = ViewLayout {
         width,
         key,
+        generation: state.generation,
         height: px(0.),
         leaves: Vec::new(),
         decos: Vec::new(),
+        tail: None,
     };
-    out.height = lay(&state.blocks, px(0.), width, px(0.), &c, &mut out, window);
+    let mut y = px(0.);
+    let mut above: Option<&Block> = None;
+    let last = state.keys.len().checked_sub(1);
+    for (i, k) in state.keys.iter().enumerate() {
+        let first_leaf = out.leaves.len();
+        let mut top = None;
+        for piece in &k.pieces {
+            let Some(laid) = &piece.laid else { continue };
+            if let Some(a) = above {
+                y += gap(a, &piece.block, &c);
+            }
+            top.get_or_insert(y);
+            for (j, leaf) in laid.leaves.iter().enumerate() {
+                let mut leaf = leaf.clone();
+                leaf.origin.y += y;
+                // A block's first paragraph is a new one when copied after another's.
+                if j == 0 && !out.leaves.is_empty() && leaf.separator.is_empty() {
+                    leaf.separator = "\n\n";
+                }
+                out.leaves.push(leaf);
+            }
+            out.decos.extend(laid.decos.iter().map(|d| d.moved_down(y)));
+            y += laid.height;
+            above = Some(&piece.block);
+        }
+        if Some(i) == last {
+            // An empty last source starts where a paragraph after the rest would.
+            let at = top.unwrap_or(if above.is_some() { y + c.gap } else { px(0.) });
+            out.tail = Some((
+                first_leaf..out.leaves.len(),
+                point(px(0.), at),
+                c.base.line_height,
+            ));
+        }
+    }
+    out.height = y;
     out
 }
 
@@ -887,8 +1158,8 @@ impl RenderOnce for TextView {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         crate::init_soon(cx);
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| ViewState {
-            source: SharedString::default(),
-            blocks: Rc::new(Vec::new()),
+            keys: Vec::new(),
+            generation: 0,
             focus: cx.focus_handle(),
             anchor: None,
             head: None,
@@ -897,17 +1168,17 @@ impl RenderOnce for TextView {
             layout: None,
             bounds: Bounds::default(),
         });
-        state.update(cx, |s, _| {
-            if s.source != self.source {
-                s.blocks = Rc::new(parse(&self.source));
-                s.source = self.source.clone();
-                s.layout = None;
-                s.anchor = None;
-                s.head = None;
-            }
-        });
+        state.update(cx, |s, _| s.sync(&self.sources));
         let focus = state.read(cx).focus.clone();
-        let plain: SharedString = self.source.clone();
+        let plain: SharedString = match self.sources.as_slice() {
+            [(_, one)] => one.clone(),
+            many => many
+                .iter()
+                .map(|(_, s)| s.as_ref())
+                .collect::<Vec<_>>()
+                .join("\n\n")
+                .into(),
+        };
         let st = state.clone();
         let st2 = state.clone();
         let st3 = state.clone();
@@ -944,6 +1215,7 @@ impl RenderOnce for TextView {
             })
             .child(ViewElement {
                 state,
+                caret: self.caret,
                 fingerprint: self.style.fingerprint(),
                 style: self.style,
                 selectable: self.selectable,
@@ -961,6 +1233,8 @@ struct Prepainted {
 
 struct ViewElement {
     state: gpui::Entity<ViewState>,
+    /// The trailing caret's colour, if it's drawn.
+    caret: Option<Hsla>,
     style: TextViewStyle,
     /// The style's fingerprint, worked out once for this draw's measures and prepaint.
     fingerprint: u64,
@@ -1059,16 +1333,14 @@ impl Element for ViewElement {
             });
             let width = width.unwrap_or(px(400.));
             let key = style_key(&text_style, window.rem_size(), fingerprint);
-            let cached = state
-                .read(cx)
-                .layout
-                .clone()
-                .filter(|l| l.width == width && l.key == key);
+            let cached = state.read(cx).layout.clone().filter(|l| {
+                l.width == width && l.key == key && l.generation == state.read(cx).generation
+            });
             let l = match cached {
                 Some(l) => l,
-                None => {
+                None => state.update(cx, |s, cx| {
                     let l = Rc::new(layout_for(
-                        state.read(cx),
+                        s,
                         &tv_style,
                         key,
                         &text_style,
@@ -1076,9 +1348,9 @@ impl Element for ViewElement {
                         window,
                         cx,
                     ));
-                    state.update(cx, |s, _| s.layout = Some(l.clone()));
+                    s.layout = Some(l.clone());
                     l
-                }
+                }),
             };
             size(width, l.height)
         });
@@ -1097,23 +1369,26 @@ impl Element for ViewElement {
         let width = bounds.size.width;
         let text_style = window.text_style();
         let key = style_key(&text_style, window.rem_size(), self.fingerprint);
+        let generation = self.state.read(cx).generation;
         let cached = self
             .state
             .read(cx)
             .layout
             .clone()
-            .filter(|l| l.width == width && l.key == key);
+            .filter(|l| l.width == width && l.key == key && l.generation == generation);
         let l = match cached {
             Some(l) => l,
-            None => Rc::new(layout_for(
-                self.state.read(cx),
-                &self.style,
-                key,
-                &text_style,
-                width,
-                window,
-                cx,
-            )),
+            None => self.state.update(cx, |s, cx| {
+                Rc::new(layout_for(
+                    s,
+                    &self.style,
+                    key,
+                    &text_style,
+                    width,
+                    window,
+                    cx,
+                ))
+            }),
         };
         self.state.update(cx, |s, _| {
             s.layout = Some(l.clone());
@@ -1231,6 +1506,23 @@ impl Element for ViewElement {
             });
         }
 
+        // The trailing caret: after the last source's last character, or where its first line
+        // would start. Drawn over the text, never laid out.
+        if let (Some(color), Some((leaves, at, line))) = (self.caret, &l.tail) {
+            let caret = match l.leaves.get(leaves.clone()).and_then(|ls| ls.last()) {
+                Some(leaf) => {
+                    let c = leaf
+                        .layout
+                        .caret(leaf.paragraph.text.len(), Affinity::Downstream);
+                    Bounds::new(o + leaf.origin + c.origin, c.size)
+                }
+                None => Bounds::new(o + *at, size(px(2.), *line)),
+            };
+            if caret.intersects(&seen) {
+                window.paint_quad(fill(caret, color));
+            }
+        }
+
         if let Some(hb) = &prepainted.body {
             window.set_cursor_style(CursorStyle::IBeam, hb);
         }
@@ -1346,6 +1638,74 @@ mod tests {
     thread_local! {
         /// How many paragraphs have been painted.
         pub(super) static PAINTED: Cell<usize> = const { Cell::new(0) };
+        /// How many top-level blocks have been laid out.
+        pub(super) static LAID: Cell<usize> = const { Cell::new(0) };
+    }
+
+    struct Streamed {
+        sources: Vec<(u64, gpui::SharedString)>,
+        width: f32,
+    }
+
+    impl Render for Streamed {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(self.width))
+                .child(TextView::blocks("streamed", self.sources.clone()))
+        }
+    }
+
+    #[gpui::test]
+    fn a_change_to_the_last_block_lays_out_only_that_block(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut sources: Vec<(u64, gpui::SharedString)> = (0..30)
+            .map(|i| (i, format!("Settled paragraph {i}.").into()))
+            .collect();
+        sources.push((
+            30,
+            "The tail's first.\n\nIts second.\n\nIts third, grow".into(),
+        ));
+        let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let m = made.clone();
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Streamed {
+                sources,
+                width: 300.,
+            });
+            *m.borrow_mut() = Some(v.clone());
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        let v = made.borrow().clone().unwrap();
+        let laid = |vcx: &mut gpui::VisualTestContext, f: &dyn Fn(&mut Streamed)| {
+            LAID.with(|n| n.set(0));
+            vcx.update(|_, cx| {
+                v.update(cx, |s, cx| {
+                    f(s);
+                    cx.notify();
+                })
+            });
+            vcx.run_until_parked();
+            LAID.with(|n| n.get())
+        };
+        // The tail's last paragraph grows: that block alone.
+        let n = laid(vcx, &|s| {
+            s.sources[30].1 = "The tail's first.\n\nIts second.\n\nIts third, growing".into()
+        });
+        assert_eq!(n, 1);
+        // A new block in the tail: that one.
+        let n = laid(vcx, &|s| {
+            s.sources[30].1 =
+                "The tail's first.\n\nIts second.\n\nIts third, growing\n\nA fourth".into()
+        });
+        assert_eq!(n, 1);
+        // A new source after it: its block.
+        let n = laid(vcx, &|s| s.sources.push((31, "Another.".into())));
+        assert_eq!(n, 1);
+        // Nothing changed: nothing.
+        assert_eq!(laid(vcx, &|_| {}), 0);
+        // A new width: every block.
+        assert_eq!(laid(vcx, &|s| s.width = 250.), 35);
     }
 
     struct Long(String);
