@@ -94,11 +94,6 @@ actions!(
         PageUp,
         /// A page down.
         PageDown,
-        /// In the field of the add-property menu (or another menu with a field over a list):
-        /// the list's entry above.
-        FieldUp,
-        /// In such a field: the list's entry below.
-        FieldDown,
         /// In the bar of views: opens the focused tab's menu (⌥↓).
         TabMenu,
     ]
@@ -107,18 +102,13 @@ actions!(
 /// The key context the table's bindings apply in.
 pub const CONTEXT: &str = "GpuiTablesTable";
 
-/// The key context of a menu's field that moves through a list under it (the add-property
-/// menu's name over its types): Up and Down move the list's highlight while typing goes to
-/// the field.
-pub const MENU_FIELD: &str = "GpuiTablesMenuField";
-
 /// The key context of the bar of views ([`TableView::with_view_bar`]): Left and Right move
 /// along the tabs, ⌥↓ opens the focused tab's menu, Down and Escape go back to the view.
 pub const VIEW_BAR: &str = "GpuiTablesViewBar";
 
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
-/// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; and Up and Down in a menu's
-/// field over a list ([`MENU_FIELD`]); and the bar of views' ([`VIEW_BAR`]).
+/// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; and the bar of views'
+/// ([`VIEW_BAR`]).
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -137,12 +127,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("alt-down", ColumnMenu, c),
         KeyBinding::new("pageup", PageUp, c),
         KeyBinding::new("pagedown", PageDown, c),
-    ]);
-    // Over the field's own Up and Down (which would go to its start and end).
-    let f = Some("GpuiTablesMenuField > GpuiCoreInput");
-    cx.bind_keys([
-        KeyBinding::new("up", FieldUp, f),
-        KeyBinding::new("down", FieldDown, f),
     ]);
     let b = Some(VIEW_BAR);
     cx.bind_keys([

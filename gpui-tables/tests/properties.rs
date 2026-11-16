@@ -97,7 +97,7 @@ fn the_plus_adds_a_property_of_each_type(cx: &mut TestAppContext) {
         }
         let before = properties(&table, cx);
         click(cx, "add-property");
-        assert!(drawn(cx, "menu-field"), "the name's field is drawn");
+        assert!(drawn(cx, "menu-picker"), "the name's picker is drawn");
         let name = format!("New {}", kind.label());
         type_text(cx, &name);
         click(cx, item(kind.label()));
@@ -160,7 +160,7 @@ fn the_add_menu_works_from_the_keyboard_and_names_what_it_isnt_given(cx: &mut Te
     type_text(cx, "Deal size");
     // Up and Down move through the types while typing stays in the field.
     keys(cx, "down down up");
-    assert!(drawn(cx, "menu-field"));
+    assert!(drawn(cx, "menu-picker"));
     keys(cx, "enter");
     let p = first_property(&host);
     assert_eq!(p.name, "Deal size");
@@ -325,10 +325,13 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     };
     let start = names(&table, cx);
     assert_eq!(start[0], "Lead");
+    // The options open beside the column's menu, each opening its own beside them.
     menu(cx, "Stage");
     click(cx, item("Edit options"));
     assert!(drawn(cx, "pill:Lead"), "options drawn as their pills");
+    assert!(drawn(cx, "menu-submenu-Edit options"));
     click(cx, item("Lead"));
+    assert!(drawn(cx, "menu-submenu-Lead"));
     // Recoloured: one of the ten colours.
     for c in Color::ALL {
         assert!(drawn(cx, item(&color_name(c))), "{c} offered");
@@ -336,28 +339,35 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     click(cx, item("Red"));
     let p = first_property(&host);
     assert_eq!(p.option(LEAD).unwrap().color, Color::Red);
-    // Moved down.
+    // Moved down: the options draw anew in their new order, Lead's submenu closed.
     click(cx, item("Move down"));
     let after = names(&table, cx);
     assert_eq!(after[1], "Lead");
     assert_eq!(after[0], start[1]);
-    // Renamed.
-    click(cx, item("Rename"));
+    assert!(!drawn(cx, "menu-submenu-Lead"));
+    // Renamed, in a step of its own, then back on the column's menu.
+    click(cx, item("Lead"));
+    click(cx, item("Rename option"));
     type_name(cx, "Cold lead");
     keys(cx, "enter");
     assert_eq!(
         property(&table, cx, STAGE).option(LEAD).unwrap().name,
         "Cold lead"
     );
+    assert!(drawn(cx, item("Edit options")), "back on the column's menu");
     // Another's name is refused.
     let n = batches(&host);
-    click(cx, item("Rename"));
+    click(cx, item("Edit options"));
+    click(cx, item("Cold lead"));
+    click(cx, item("Rename option"));
     type_name(cx, "warm");
     keys(cx, "enter");
     assert!(drawn(cx, "menu-note"));
     assert_eq!(batches(&host), n);
     click(cx, item("Back"));
     // Deleted: rows still name it, and show empty.
+    click(cx, item("Edit options"));
+    click(cx, item("Cold lead"));
     click(cx, item("Delete option"));
     let batch = last_batch(&host);
     assert_eq!(batch.len(), 1, "no row is rewritten: {batch:?}");
@@ -380,7 +390,8 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     let p = property(&table, cx, STAGE);
     assert_eq!(p.options().last().unwrap().name, "Churned");
     assert_eq!(p.options().last().unwrap().color, Color::Default);
-    assert!(drawn(cx, "pill:Churned"), "back on the options");
+    click(cx, item("Edit options"));
+    assert!(drawn(cx, "pill:Churned"), "in the options");
 }
 
 fn color_name(c: &Color) -> String {
@@ -403,7 +414,7 @@ fn a_numbers_format_and_a_dates_time(cx: &mut TestAppContext) {
     let p = property(&table, cx, WARMTH);
     assert_eq!(p.config.format, Some(NumberFormat::Currency));
     assert_eq!(p.config.currency.as_deref(), Some("USD"));
-    // The currency on a page of its own.
+    // The currency in a submenu of its own.
     click(cx, item("Currency code"));
     click(cx, item("EUR"));
     click(cx, item("1.00"));
@@ -418,7 +429,11 @@ fn a_numbers_format_and_a_dates_time(cx: &mut TestAppContext) {
     let p = property(&table, cx, WARMTH);
     assert_eq!(p.config.format, Some(NumberFormat::Plain));
     assert_eq!(p.config.currency, None, "a currency only with its format");
+    // Escape closes the submenu, then the menu.
     keys(cx, "escape");
+    assert!(table.read_with(cx, |t, _| t.has_popover()));
+    keys(cx, "escape");
+    assert!(!table.read_with(cx, |t, _| t.has_popover()));
     // A date's time: what new values get, the menu staying open.
     menu(cx, "Last contacted");
     click(cx, item("Include time"));
@@ -704,7 +719,7 @@ fn limits_are_refused_with_a_note(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "menu-field"));
     // An option's name stops at its own limit.
     click(cx, item("Lead"));
-    click(cx, item("Rename"));
+    click(cx, item("Rename option"));
     type_name(cx, "Prospective");
     keys(cx, "enter");
     assert_eq!(
@@ -751,13 +766,18 @@ fn property_menus_are_44_points_on_touch(cx: &mut TestAppContext) {
     };
     tall(cx, "add-property".into());
     click(cx, "add-property");
-    tall(cx, "menu-field".into());
     tall(cx, item("Number"));
     keys(cx, "escape");
+    // A tap opens a submenu, its rows as tall.
     menu(cx, "Stage");
     tall(cx, item("Edit options"));
-    click(cx, item("Edit options"));
+    let at = rect(cx, item("Edit options")).center();
+    tap(cx, at);
     tall(cx, item("Lead"));
+    let at = rect(cx, item("Lead")).center();
+    tap(cx, at);
+    tall(cx, item("Rename option"));
+    tall(cx, item("Red"));
     click(cx, item("Add an option"));
     tall(cx, "menu-field".into());
     tall(cx, item("Save"));

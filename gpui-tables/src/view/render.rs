@@ -1220,23 +1220,15 @@ impl TableView {
                 return popover.into_any_element();
             }
         };
-        // A header partly scrolled past the table's left edge hangs its menu from what shows of
-        // it, so the menu stays in the window.
-        let table = self.bounds.get();
-        let target = if target.left() < table.left() && target.right() > table.left() {
-            gpui::Bounds::new(
-                point(table.left(), target.top()),
-                gpui::size(target.right() - table.left(), target.size.height),
-            )
-        } else {
-            target
-        };
-        // A menu's width, or its anchor's if that's wider, inside the window (its edges, the
-        // popover's border and padding).
-        let room = (window.viewport_size().width - px(26.)).max(px(0.));
+        // A menu's width, or what's seen of its anchor if that's wider (gpui-core's Popover
+        // hangs it from the part of a header that's in the window), inside the window (its
+        // edges, the popover's border and padding).
+        let viewport = window.viewport_size();
+        let seen = target.intersect(&gpui::Bounds::new(point(px(0.), px(0.)), viewport));
+        let room = (viewport.width - px(26.)).max(px(0.));
         let width = t
             .pixels(t.sizes.menu_width, self.rem)
-            .max(target.size.width)
+            .max(seen.size.width)
             .min(room);
         let body = div()
             .debug_selector(|| "menu".into())
@@ -1260,12 +1252,17 @@ impl TableView {
                 .p(t.px(4.))
                 .child(body.w(width).child(self.popup_menu(cx)))
                 .into_any_element(),
-            // A name is typed: the field has the keyboard, and the popover leaves it there.
+            // A name is typed: the picker's field has the keyboard, and the popover leaves it
+            // there.
             Popover::AddProperty => popover
                 .take_focus(false)
                 .accessibility_label("Add a property")
                 .p(t.px(4.))
-                .child(body.w(width).child(self.render_add_property(cx)))
+                .child(
+                    body.w(width)
+                        .children(self.render_note(cx))
+                        .child(self.add_property_picker(cx)),
+                )
                 .into_any_element(),
             Popover::Property { page, property_id } if page.is_field() => {
                 let label = self
@@ -1373,16 +1370,12 @@ impl TableView {
         cx.notify();
     }
 
-    /// The open menu's or picker's entries as gpui-core's, and what each one's id does. An
-    /// entry's id is its label (numbered when two are the same), so a test or a host finds it
-    /// as `menu-item-<label>`. An option is drawn as the table draws it in a cell, a coloured
+    /// Entries as gpui-core's, what each one's id does, and the one to open on. An entry's id
+    /// is its label (numbered when two in the same menu are the same), so a test or a host finds
+    /// it as `menu-item-<label>`. An option is drawn as the table draws it in a cell, a coloured
     /// pill (`label_element`), while its name stays the entry's label: what assistive tech
-    /// reads and what a picker's search matches.
-    fn menu_entries(&self) -> (Vec<MenuEntry>, PickActions, Option<SharedString>) {
-        self.entries_of(self.entries())
-    }
-
-    /// Entries as gpui-core's, what each one's id does, and the one to open on.
+    /// reads and what a picker's search matches. An entry with a submenu comes with its
+    /// entries, to be made into the submenu ([`TableView::menu_of`]).
     pub(crate) fn entries_of(
         &self,
         entries: Vec<Entry>,
@@ -1401,11 +1394,12 @@ impl TableView {
                 hint,
                 disabled,
                 highlight,
+                submenu,
             } = e;
-            let Some(action) = action else {
+            if action.is_none() && submenu.is_none() {
                 out.push(MenuEntry::Heading(label.into()));
                 continue;
-            };
+            }
             let mut id = SharedString::from(label.clone());
             let mut n = 1;
             while used.contains(&id) {
@@ -1433,10 +1427,53 @@ impl TableView {
             if highlight && open_on.is_none() {
                 open_on = Some(id.clone());
             }
-            actions.push((id, action));
-            out.push(MenuEntry::Item(item));
+            if let Some(action) = action {
+                actions.push((id.clone(), action));
+            }
+            out.push(MenuEntry::Item(id, item, submenu));
         }
         (out, Rc::new(actions), open_on)
+    }
+
+    /// Entries as gpui-core's PopupMenu, their submenus made the same way. A submenu takes its
+    /// rows' size and colours from the menu it opens from.
+    ///
+    /// gpui-core keeps which submenu is open by its entry's place, so a menu is keyed by `key`,
+    /// the menus opened so far and where its submenus' entries are: when those move (an option
+    /// moved or deleted, Date grouping added), it draws anew, its submenus closed and on its
+    /// highlighted entry, rather than opening another entry's submenu in their place.
+    pub(crate) fn menu_of(
+        &self,
+        key: &str,
+        entries: Vec<Entry>,
+        cx: &mut Context<Self>,
+    ) -> PopupMenu {
+        let mut shape = std::hash::DefaultHasher::new();
+        for (i, e) in entries.iter().enumerate() {
+            if e.submenu.is_some() {
+                std::hash::Hash::hash(&(i, &e.label), &mut shape);
+            }
+        }
+        let shape = std::hash::Hasher::finish(&shape);
+        let (entries, actions, open_on) = self.entries_of(entries);
+        let mut menu = PopupMenu::new(ElementId::NamedInteger(
+            format!("{key}-{shape:x}").into(),
+            self.menu_serial,
+        ));
+        for e in entries {
+            menu = match e {
+                MenuEntry::Heading(title) => menu.heading(title),
+                MenuEntry::Item(_, item, None) => menu.item(item),
+                MenuEntry::Item(id, item, Some(sub)) => {
+                    let sub = self.menu_of(&format!("{key}/{id}"), sub, cx);
+                    menu.item(item.submenu(sub))
+                }
+            };
+        }
+        if let Some(id) = open_on {
+            menu = menu.highlight(id);
+        }
+        menu.on_select(self.on_pick(actions, cx))
     }
 
     /// Runs a picked entry's action. Shift (Shift-Enter, or a Shift-click) adds a sort to the
@@ -1469,33 +1506,30 @@ impl TableView {
         }
     }
 
-    /// The column's menu or the Columns menu as gpui-core's PopupMenu: its sections under their
-    /// headings (at the table's small size), rows 28 points tall at the table's text size (44 on
-    /// touch), checks in a column before the labels as Notion's, opening with its first entry
-    /// highlighted.
+    /// The open menu as gpui-core's PopupMenu: its sections under their headings (at the
+    /// table's small size), rows 28 points tall at the table's text size (44 on touch), checks
+    /// in a column before the labels as Notion's, and the deeper menus (a type, the options, a
+    /// number's format) as submenus beside their entries. It opens on its highlighted entry, or
+    /// the one a step of it came back from.
     pub(crate) fn popup_menu(&self, cx: &mut Context<Self>) -> PopupMenu {
         let t = &self.theme;
-        let (entries, actions, open_on) = self.menu_entries();
-        let mut menu = PopupMenu::new(ElementId::NamedInteger(
-            "gpui-tables-menu".into(),
-            self.menu_serial,
-        ))
-        .touch(t.touch)
-        .row_height(t.px(28.))
-        .text_size(t.px(t.sizes.text))
-        .heading_size(t.px(t.sizes.small))
-        .check_leading(true)
-        .colors(self.menu_colors());
-        for e in entries {
-            menu = match e {
-                MenuEntry::Heading(title) => menu.heading(title),
-                MenuEntry::Item(item) => menu.item(item),
-            };
+        let entries = self.entries();
+        let back_to = self
+            .reopen_on
+            .clone()
+            .filter(|on| entries.iter().any(|e| e.label == *on));
+        let menu = self
+            .menu_of("gpui-tables-menu", entries, cx)
+            .touch(t.touch)
+            .row_height(t.px(28.))
+            .text_size(t.px(t.sizes.text))
+            .heading_size(t.px(t.sizes.small))
+            .check_leading(true)
+            .colors(self.menu_colors());
+        match back_to {
+            Some(on) => menu.highlight(on),
+            None => menu,
         }
-        if let Some(id) = open_on {
-            menu = menu.highlight(id);
-        }
-        menu.on_select(self.on_pick(actions, cx))
     }
 
     /// A cell's picker as gpui-core's Picker: typing searches the options (people, rows), Enter
@@ -1506,7 +1540,7 @@ impl TableView {
     fn picker(&self, cell: super::CellRef, cx: &mut Context<Self>) -> Picker {
         let t = &self.theme;
         let field = FieldColors::of(t);
-        let (entries, actions, _) = self.menu_entries();
+        let (entries, actions, _) = self.entries_of(self.entries());
         let kind = self.cell_target(cell).map(|(_, p)| p.kind.clone());
         let placeholder = match kind {
             Some(PropertyType::Select | PropertyType::MultiSelect) => "Search or create an option",
@@ -1519,7 +1553,7 @@ impl TableView {
         ))
         .placeholder(placeholder)
         .items(entries.into_iter().filter_map(|e| match e {
-            MenuEntry::Item(item) => Some(item),
+            MenuEntry::Item(_, item, _) => Some(item),
             MenuEntry::Heading(_) => None,
         }))
         .touch(t.touch)
@@ -1668,10 +1702,11 @@ impl FieldColors {
     }
 }
 
-/// A menu's entry, before it's handed to gpui-core: a section's heading, or an entry.
+/// A menu's entry, before it's handed to gpui-core: a section's heading, or an entry with its
+/// id and the entries of its submenu, if it opens one.
 pub(crate) enum MenuEntry {
     Heading(SharedString),
-    Item(PopupMenuItem),
+    Item(SharedString, PopupMenuItem, Option<Vec<Entry>>),
 }
 
 /// What each entry's id does.
@@ -1801,79 +1836,64 @@ impl TableView {
             .into_any_element()
     }
 
-    /// The + menu: the new property's name, typed, over the types it can have. Up and Down in
-    /// the field move through the types, Enter makes the highlighted one, a press makes any.
-    fn render_add_property(&self, cx: &mut Context<Self>) -> AnyElement {
-        use super::properties::PropAction;
-        let t = &self.theme;
-        let Some(f) = &self.field else {
-            return div().into_any_element();
-        };
+    /// The + menu as gpui-core's Picker, naming rather than filtering: the new property's name
+    /// typed in its field over the types it can have. Up and Down move through the types while
+    /// typing stays in the field; Enter makes the highlighted one, a press any, named as typed.
+    fn add_property_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let full = self
             .database
             .database
             .as_ref()
             .is_some_and(|d| d.properties.len() >= self.host.limits().properties);
-        let kinds = PropertyType::ADDABLE;
-        let highlighted = kinds
-            .get(self.add_kind.0)
-            .map_or("", |k| k.label())
-            .to_owned();
-        let mut menu = PopupMenu::new(ElementId::NamedInteger(
-            "gpui-tables-add-types".into(),
-            self.add_kind.1,
-        ))
-        .take_focus(false)
-        .touch(t.touch)
-        .row_height(t.px(28.))
-        .text_size(t.px(t.sizes.text))
-        .heading_size(t.px(t.sizes.small))
-        .check_leading(true)
-        .colors(self.menu_colors())
-        .heading("Type");
-        for k in kinds {
-            menu = menu.item(
-                PopupMenuItem::new(k.label().to_owned(), k.label().to_owned())
-                    .icon(type_icon(k))
-                    .disabled(full),
-            );
-        }
-        let this = cx.entity().downgrade();
-        let menu = menu
-            .highlight(highlighted)
-            .on_highlight(move |id, cx| {
-                let Some(id) = id else { return };
-                let _ = this.update(cx, |t, _| {
-                    if let Some(i) = kinds.iter().position(|k| k.label() == id.as_ref()) {
-                        t.add_kind.0 = i;
-                    }
-                });
-            })
-            .on_select(cx.listener(|this, pick: &MenuSelect, window, cx| {
-                if let Some(k) = PropertyType::ADDABLE
-                    .iter()
-                    .find(|k| k.label() == pick.id.as_ref())
-                {
-                    this.activate_property(PropAction::Add(k.clone()), window, cx);
-                }
-            }));
+        let types = PropertyType::ADDABLE.iter().map(|k| {
+            PopupMenuItem::new(k.label().to_owned(), k.label().to_owned())
+                .icon(type_icon(k))
+                .disabled(full)
+        });
+        let pick = cx.listener(|this, pick: &MenuSelect, window, cx| {
+            if let Some(k) = PropertyType::ADDABLE
+                .iter()
+                .find(|k| k.label() == pick.id.as_ref())
+            {
+                let name = pick.query.as_deref().unwrap_or_default();
+                this.add_property(k.clone(), name, window, cx);
+            }
+        });
+        self.naming_picker("gpui-tables-add-property", "Property name", types, pick)
+    }
+
+    /// A + menu's Picker: a name typed in its field over what to make (the types), which stay
+    /// whole as it's typed. It opens on the entry a step of it came back from.
+    pub(crate) fn naming_picker(
+        &self,
+        id: &'static str,
+        placeholder: &'static str,
+        items: impl IntoIterator<Item = PopupMenuItem>,
+        on_select: impl Fn(&MenuSelect, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let t = &self.theme;
+        let field = FieldColors::of(t);
+        let picker = Picker::new(ElementId::NamedInteger(id.into(), self.menu_serial))
+            .filter(false)
+            .placeholder(placeholder)
+            .items(items)
+            .touch(t.touch)
+            .row_height(t.px(28.))
+            .text_size(t.px(t.sizes.text))
+            .check_leading(true)
+            .caret_color(field.caret)
+            .selection_color(field.selection)
+            .placeholder_color(field.placeholder)
+            .colors(self.menu_colors())
+            .on_select(on_select);
+        let picker = match self.reopen_on.clone() {
+            Some(on) => picker.highlight(on),
+            None => picker,
+        };
         div()
-            .flex()
-            .flex_col()
-            .gap(t.px(4.))
-            .child(
-                self.field_box(&f.state, "Property name".into())
-                    .mt(t.px(4.))
-                    .key_context(super::MENU_FIELD)
-                    .on_action(
-                        cx.listener(|this, _: &super::FieldUp, _, cx| this.move_add_kind(-1, cx)),
-                    )
-                    .on_action(
-                        cx.listener(|this, _: &super::FieldDown, _, cx| this.move_add_kind(1, cx)),
-                    ),
-            )
-            .children(self.render_note(cx))
-            .child(menu)
+            .id(id)
+            .debug_selector(|| "menu-picker".into())
+            .child(picker)
             .into_any_element()
     }
 }

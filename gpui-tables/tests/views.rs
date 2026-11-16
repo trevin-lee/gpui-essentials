@@ -201,7 +201,7 @@ fn the_plus_makes_a_view_of_each_type_and_shows_it(cx: &mut TestAppContext) {
     ] {
         let before = views(&table, cx);
         click(cx, "add-view");
-        assert!(drawn(cx, "menu-field"), "the name's field");
+        assert!(drawn(cx, "menu-picker"), "the name's picker");
         let name = format!("My {label}");
         type_text(cx, &name);
         click(cx, item(label));
@@ -450,16 +450,17 @@ fn the_settings_group_and_bucket_by_date(cx: &mut TestAppContext) {
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.group_by.as_deref(), Some(STAGE));
     assert!(table.update(cx, |t, _| !t.groups().is_empty()));
-    // Back on the settings, no date grouping for a select.
+    // The settings still open beside, no date grouping for a select.
     assert!(drawn(cx, item("Group by")) && !drawn(cx, item("Date grouping")));
 
-    // By a date: its buckets come next.
-    click(cx, item("Group by"));
+    // By a date: its buckets come next, in Date grouping, which the settings draw anew on.
     click(cx, item("Last contacted"));
     assert_eq!(
         changed(&last_batch(&host)[0]).group_by.as_deref(),
         Some(LAST_CONTACTED)
     );
+    assert!(drawn(cx, item("Date grouping")) && !drawn(cx, item("Month")));
+    keys(cx, "right");
     assert!(drawn(cx, item("Month")) && drawn(cx, item("Relative")));
     click(cx, item("Month"));
     let v = changed(&last_batch(&host)[0]).clone();
@@ -500,22 +501,25 @@ fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext
     click(cx, item("Tags"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.card_properties, [COMPANY, LAST_CONTACTED, OWNER, TAGS]);
-    // A shown one's page moves and hides it.
+    // A shown one's submenu moves and hides it; moved, the list draws anew in its order.
     click(cx, item("Company"));
     click(cx, item("Move down"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.card_properties, [LAST_CONTACTED, COMPANY, OWNER, TAGS]);
+    assert!(!drawn(cx, "menu-submenu-Company"));
+    click(cx, item("Company"));
     click(cx, item("Move up"));
     assert_eq!(
         changed(&last_batch(&host)[0]).card_properties,
         [COMPANY, LAST_CONTACTED, OWNER, TAGS]
     );
+    click(cx, item("Company"));
     click(cx, item("Hide"));
     assert_eq!(
         changed(&last_batch(&host)[0]).card_properties,
         [LAST_CONTACTED, OWNER, TAGS]
     );
-    keys(cx, "escape");
+    keys(cx, "escape escape");
 
     // A list's lines: the same, called Properties.
     click(cx, tab(FOLLOW_UP_VIEW));
@@ -527,7 +531,7 @@ fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext
         changed(&last_batch(&host)[0]).card_properties,
         [COMPANY, LAST_CONTACTED, ROLE]
     );
-    keys(cx, "escape");
+    keys(cx, "escape escape");
 
     // A table's are its columns: the Properties menu its headers open.
     click(cx, tab("All people"));
@@ -627,12 +631,26 @@ fn the_bar_works_from_the_keyboard(cx: &mut TestAppContext) {
     enter_up(cx);
     assert_eq!(shown(&table, cx).id, PIPELINE);
     assert!(!table_focused(&table, cx), "still on the tab");
-    // ⌥↓ opens its menu; Escape closes it, back on the tab; Down goes to the board.
+    // ⌥↓ opens its menu; Enter or → opens a submenu and ← closes it; Escape closes a submenu,
+    // then the menu, back on the tab; Down goes to the board.
     keys(cx, "alt-down");
     assert!(drawn(cx, item("Rename")));
     keys(cx, "down");
     keys(cx, "enter");
-    assert!(drawn(cx, item("Board")), "Change type, picked by the keys");
+    assert!(drawn(cx, item("Board")), "Change type, opened by the keys");
+    keys(cx, "left");
+    assert!(!drawn(cx, item("Board")));
+    keys(cx, "down right");
+    assert!(
+        drawn(cx, item("Group by")),
+        "View settings, opened by the keys"
+    );
+    keys(cx, "right");
+    assert!(drawn(cx, item("Tags")), "and its Group by");
+    keys(cx, "escape");
+    assert!(!drawn(cx, item("Tags")) && drawn(cx, item("Group by")));
+    keys(cx, "escape");
+    assert!(table.read_with(cx, |t, _| t.has_popover()));
     keys(cx, "escape");
     assert!(!table.read_with(cx, |t, _| t.has_popover()));
     keys(cx, "left");
@@ -684,8 +702,11 @@ fn the_bar_and_its_menus_are_44_points_on_touch(cx: &mut TestAppContext) {
     ] {
         assert!(rect(cx, item(label)).size.height >= px(44.), "{label}");
     }
-    keys(cx, "escape");
+    // A tap opens a submenu, its rows as tall.
+    let at = rect(cx, item("View settings")).center();
+    tap(cx, at);
+    assert!(rect(cx, item("Group by")).size.height >= px(44.));
+    keys(cx, "escape escape");
     click(cx, "add-view");
     assert!(rect(cx, item("Board")).size.height >= px(44.));
-    assert!(rect(cx, "menu-field").size.height >= px(44.));
 }

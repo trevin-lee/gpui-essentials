@@ -10,7 +10,11 @@
 //! through [`TableHost::view_shown`](super::TableHost::view_shown).
 //!
 //! The menus are gpui-core's `PopupMenu` in a `Popover` hanging from the tab (or the bar's
-//! settings button), a page at a time, as the property menus are: gpui-core has no submenus.
+//! settings button). A view's menu opens its types and its settings as submenus beside their
+//! entries, and the settings open the grouping, a date's buckets and the properties on cards
+//! and lines (each with its own submenu to hide or move it) the same way. A rename and a delete
+//! take a step of their own, as the property menus' do. The + menu is gpui-core's `Picker`
+//! naming rather than filtering: the new view's name typed over its types.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,7 +30,8 @@ use crate::model::{DateBucket, Edit, PropertyType, View, ViewType, new_id, trunc
 /// The types a view can be made as or changed to (galleries aren't drawn in v1).
 pub(crate) const VIEW_TYPES: &[ViewType] = &[ViewType::Table, ViewType::Board, ViewType::List];
 
-/// A page of a view's menu.
+/// A view's menu: its own, a step of it, or one of its submenus opened on its own
+/// ([`ViewMenu`]).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ViewPage {
     /// Rename, change type, settings, duplicate, move, delete.
@@ -47,8 +52,6 @@ pub(crate) enum ViewPage {
     GroupDate,
     /// The properties a board's cards or a list's lines show, in order.
     Properties,
-    /// One of those: hide it, or move it up or down.
-    Property(String),
 }
 
 impl ViewPage {
@@ -66,7 +69,8 @@ pub(crate) enum ViewAnchor {
     Settings,
 }
 
-/// A page of a view's menu, which [`TableView::open_view_menu`] opens as the bar does.
+/// A view's menu or a part of it, which [`TableView::open_view_menu`] opens on its own, hanging
+/// from the view's tab: its submenus and steps too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMenu {
     /// Rename, change type, settings, duplicate, move left or right, delete.
@@ -107,8 +111,6 @@ impl From<ViewMenu> for ViewPage {
 pub(crate) enum ViewAction {
     Page(ViewPage),
     Back,
-    /// A new view of this type, named as typed (the + menu).
-    Add(ViewType),
     /// The new board grouped by this property (after the + menu asked).
     AddBoard(String),
     SetType(ViewType),
@@ -123,8 +125,8 @@ pub(crate) enum ViewAction {
     GroupDate(DateBucket),
     /// Shown on cards or lines, or not.
     ToggleCard(String),
-    /// The card property page's property moved up or down.
-    MoveCard(isize),
+    /// A card property moved up or down.
+    MoveCard(String, isize),
     /// A table's columns: the Properties menu.
     Columns,
     ClearSorts,
@@ -205,6 +207,9 @@ fn untitled(title: &str) -> String {
     }
 }
 
+/// The settings' entry for a date grouping's buckets, highlighted as it appears.
+const DATE_GROUPING: &str = "Date grouping";
+
 /// Why a board can't be made: nothing to group by.
 const NO_GROUP: &str = "A board groups cards by a select, multi-select, checkbox, person or \
                         date property, and there's none yet: add one in a table first";
@@ -247,17 +252,18 @@ impl TableView {
     }
 
     /// Opens the + menu, as pressing the bar's + does: a field for the new view's name over the
-    /// types it can have (table, board, list). Typing names it; Up and Down move through the
-    /// types; Enter, or a press on a type, makes it and shows it.
+    /// types it can have (table, board, list), in gpui-core's `Picker` naming rather than
+    /// filtering. Typing names it; Up and Down move through the types; Enter, or a press on a
+    /// type, makes it and shows it.
     pub fn open_add_view_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.remember_bar_focus(window, cx);
-        self.open_add_view(String::new(), window, cx);
+        self.open_add_view(None, cx);
     }
 
-    /// Opens a page of a view's menu, hanging from its tab, as pressing the shown view's tab
-    /// (or right-clicking any) does: to rename it, change its type, see its settings, and so
-    /// on. A page that doesn't apply (a date's buckets for a view not grouped by a date)
-    /// doesn't open.
+    /// Opens a view's menu, hanging from its tab, as pressing the shown view's tab (or
+    /// right-clicking any) does, or a part of it on its own: its name to type, its types, its
+    /// settings, and so on, which its menu opens as submenus. A part that doesn't apply (a
+    /// date's buckets for a view not grouped by a date) doesn't open.
     pub fn open_view_menu(
         &mut self,
         view_id: &str,
@@ -411,16 +417,14 @@ impl TableView {
 
     // --- Pages ----------------------------------------------------------------------------------
 
-    fn open_add_view(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the + menu, on the type `on` when given (a board, back from what it groups by).
+    fn open_add_view(&mut self, on: Option<String>, cx: &mut Context<Self>) {
         self.ensure();
         self.date = None;
         self.close_property_menu();
         self.menu_serial += 1;
-        let kind = self.view_kind.0;
-        self.view_kind = (kind.min(VIEW_TYPES.len() - 1), self.view_kind.1 + 1);
         self.popover = Some(Popover::AddView);
-        let max = self.host.limits().name_chars;
-        self.open_field(FieldFor::NewView, name, max, "View name", window, cx);
+        self.reopen_on = on;
         cx.notify();
     }
 
@@ -493,14 +497,6 @@ impl TableView {
         cx.notify();
     }
 
-    /// Up or Down in the + menu's field: the type above or below.
-    pub(crate) fn move_view_kind(&mut self, by: isize, cx: &mut Context<Self>) {
-        let n = VIEW_TYPES.len() as isize;
-        let at = (self.view_kind.0 as isize + by).rem_euclid(n) as usize;
-        self.view_kind = (at, self.view_kind.1 + 1);
-        cx.notify();
-    }
-
     /// Why a view's menu can't do something now: a note it refused with, or a limit reached.
     pub(crate) fn view_note(&self, cx: &App) -> Option<String> {
         if let Some(n) = &self.note {
@@ -516,7 +512,7 @@ impl TableView {
             Some(Popover::AddView) if fields.views.len() >= limits.views => {
                 Some(self.full_views_note())
             }
-            Some(Popover::AddView | Popover::View { .. }) if at_max => Some(format!(
+            Some(Popover::View { .. }) if at_max => Some(format!(
                 "Names are at most {} characters",
                 self.field.as_ref().map_or(0, |f| f.max_chars)
             )),
@@ -539,7 +535,8 @@ impl TableView {
 
     // --- Entries ----------------------------------------------------------------------------
 
-    /// The entries of a view's menu, or of the new board's group-by question.
+    /// The entries of a view's menu (or a part of it opened on its own), or of the new board's
+    /// group-by question.
     pub(crate) fn view_entries(&self) -> Vec<Entry> {
         use ViewAction as A;
         use gpui_core::IconName as I;
@@ -556,28 +553,26 @@ impl TableView {
             out.push(back());
             return out;
         }
-        let Some(Popover::View { page, anchor, .. }) = &self.popover else {
+        let Some(Popover::View { page, .. }) = &self.popover else {
             return Vec::new();
         };
         let Some(v) = self.menu_view() else {
             return Vec::new();
         };
-        let mut out = Vec::new();
         match page {
             ViewPage::Menu => {
                 let views = fields.views_in_order();
                 let at = views.iter().position(|x| x.id == v.id).unwrap_or(0);
-                out.push(Entry::heading(v.name.clone()));
-                out.push(act("Rename", A::Page(ViewPage::Rename)).icon(I::Pencil));
-                out.push(
-                    act("Change type", A::Page(ViewPage::Type))
+                let mut out = vec![
+                    Entry::heading(v.name.clone()),
+                    act("Rename", A::Page(ViewPage::Rename)).icon(I::Pencil),
+                    Entry::sub("Change type", self.view_type_entries(v))
                         .icon(view_icon(&v.kind))
                         .hint(ops::view_type_label(&v.kind)),
-                );
-                out.push(
-                    act("View settings", A::Page(ViewPage::Settings)).icon(I::SlidersHorizontal),
-                );
-                out.push(act("Duplicate", A::Duplicate).icon(I::Copy));
+                    Entry::sub("View settings", self.settings_entries(v, false))
+                        .icon(I::SlidersHorizontal),
+                    act("Duplicate", A::Duplicate).icon(I::Copy),
+                ];
                 if at > 0 {
                     out.push(act("Move left", A::Move(-1)).icon(I::ArrowLeft));
                 }
@@ -585,181 +580,220 @@ impl TableView {
                     out.push(act("Move right", A::Move(1)).icon(I::ArrowRight));
                 }
                 out.push(act("Delete view", A::Page(ViewPage::Delete)).icon(I::Trash));
-                return out;
+                out
             }
-            ViewPage::Type => {
-                out.push(Entry::heading("Type"));
-                for k in VIEW_TYPES {
-                    let on = *k == v.kind;
-                    out.push(
-                        act(ops::view_type_label(k), A::SetType(k.clone()))
-                            .icon(view_icon(k))
-                            .checked(on)
-                            .highlighted(on),
-                    );
-                }
-            }
+            ViewPage::Type => self.view_type_entries(v),
             ViewPage::BoardGroup => {
-                out.push(Entry::heading("Group by"));
+                let mut out = vec![Entry::heading("Group by")];
                 for p in ops::groupable(fields) {
                     out.push(act(&p.name, A::Board(p.id.clone())).icon(type_icon(&p.kind)));
                 }
+                out.push(back());
+                out
             }
-            ViewPage::Delete => {
-                out.push(Entry::heading(format!("Delete {}?", v.name)));
-                out.push(act("Delete view", A::Delete).icon(I::Trash));
-                out.push(act("Cancel", A::Back).icon(I::X).highlighted(true));
-                return out;
-            }
-            ViewPage::Settings => {
-                let group = v.group_by.as_deref().and_then(|g| fields.property(g));
-                out.push(Entry::heading("View settings"));
-                out.push(
-                    act("Change type", A::Page(ViewPage::Type))
-                        .icon(view_icon(&v.kind))
-                        .hint(ops::view_type_label(&v.kind)),
-                );
-                out.push(
-                    act("Group by", A::Page(ViewPage::Group))
-                        .icon(I::Group)
-                        .hint(hint(group.map_or("None", |p| p.name.as_str()))),
-                );
-                if group.is_some_and(|p| p.kind.is_date()) {
-                    out.push(
-                        act("Date grouping", A::Page(ViewPage::GroupDate))
-                            .icon(I::CalendarDays)
-                            .hint(bucket_label(
-                                v.group_date.as_ref().unwrap_or(&DateBucket::Relative),
-                            )),
-                    );
-                }
-                match v.kind {
-                    ViewType::Board | ViewType::List => {
-                        let n = ops::card_properties(fields, v).len();
-                        let label = if v.kind == ViewType::Board {
-                            "Card properties"
-                        } else {
-                            "Properties"
-                        };
-                        out.push(
-                            act(label, A::Page(ViewPage::Properties))
-                                .icon(I::Rows3)
-                                .hint(format!("{n} shown")),
-                        );
-                    }
-                    _ => {
-                        let n = ops::all_columns(fields, v)
-                            .iter()
-                            .filter(|c| !c.hidden)
-                            .count();
-                        out.push(
-                            act("Properties", A::Columns)
-                                .icon(I::Columns3)
-                                .hint(format!("{n} shown")),
-                        );
-                    }
-                }
-                if !v.sort.is_empty() || v.filter.is_some() {
-                    out.push(Entry::heading("Sort and filter"));
-                }
-                if !v.sort.is_empty() {
-                    out.push(
-                        act("Remove sorts", A::ClearSorts)
-                            .icon(I::ArrowUpDown)
-                            .hint(hint(&self.sort_summary(v))),
-                    );
-                }
-                if v.filter.is_some() {
-                    out.push(
-                        act("Clear filter", A::ClearFilter)
-                            .icon(I::FunnelX)
-                            .hint(hint(&self.filter_summary(v))),
-                    );
-                }
-                if *anchor == ViewAnchor::Settings {
-                    return out;
-                }
-            }
-            ViewPage::Group => {
-                out.push(Entry::heading("Group by"));
-                if v.kind != ViewType::Board {
-                    let on = v.group_by.is_none();
-                    out.push(
-                        act("None", A::GroupBy(None))
-                            .icon(I::X)
-                            .checked(on)
-                            .highlighted(on),
-                    );
-                }
-                for p in ops::groupable(fields) {
-                    let on = v.group_by.as_deref() == Some(p.id.as_str());
-                    out.push(
-                        act(&p.name, A::GroupBy(Some(p.id.clone())))
-                            .icon(type_icon(&p.kind))
-                            .checked(on)
-                            .highlighted(on),
-                    );
-                }
-            }
-            ViewPage::GroupDate => {
-                out.push(Entry::heading("Date grouping"));
-                let current = v.group_date.clone().unwrap_or(DateBucket::Relative);
-                for b in DateBucket::ALL {
-                    let on = *b == current;
-                    out.push(
-                        act(bucket_label(b), A::GroupDate(b.clone()))
-                            .checked(on)
-                            .highlighted(on),
-                    );
-                }
-            }
-            ViewPage::Properties => {
-                let shown = ops::card_properties(fields, v);
-                out.push(Entry::heading("Shown"));
-                for id in &shown {
-                    if let Some(p) = fields.property(id) {
-                        out.push(
-                            act(&p.name, A::Page(ViewPage::Property(id.clone())))
-                                .icon(type_icon(&p.kind))
-                                .checked(true),
-                        );
-                    }
-                }
-                let hidden: Vec<_> = fields
-                    .properties_in_order()
-                    .into_iter()
-                    .filter(|p| p.kind != PropertyType::Title && !shown.contains(&p.id))
-                    .collect();
-                if !hidden.is_empty() {
-                    out.push(Entry::heading("Hidden"));
-                }
-                for p in hidden {
-                    out.push(
-                        act(&p.name, A::ToggleCard(p.id.clone()))
-                            .icon(type_icon(&p.kind))
-                            .checked(false),
-                    );
-                }
-            }
-            ViewPage::Property(pid) => {
-                let shown = ops::card_properties(fields, v);
-                let Some(i) = shown.iter().position(|x| x == pid) else {
-                    out.push(back());
-                    return out;
-                };
-                let name = fields.property(pid).map_or("", |p| p.name.as_str());
-                out.push(Entry::heading(name.to_owned()));
-                out.push(act("Hide", A::ToggleCard(pid.clone())).icon(I::EyeOff));
-                if i > 0 {
-                    out.push(act("Move up", A::MoveCard(-1)).icon(I::ArrowUp));
-                }
-                if i + 1 < shown.len() {
-                    out.push(act("Move down", A::MoveCard(1)).icon(I::ArrowDown));
-                }
-            }
-            ViewPage::Rename => {}
+            ViewPage::Delete => vec![
+                Entry::heading(format!("Delete {}?", v.name)),
+                act("Delete view", A::Delete).icon(I::Trash),
+                act("Cancel", A::Back).icon(I::X).highlighted(true),
+            ],
+            // On its own (the bar's settings button), it changes the type too.
+            ViewPage::Settings => self.settings_entries(v, true),
+            ViewPage::Group => self.group_entries(v),
+            ViewPage::GroupDate => self.group_date_entries(v),
+            ViewPage::Properties => self.card_entries(v),
+            ViewPage::Rename => Vec::new(),
         }
-        out.push(back());
+    }
+
+    /// The types a view can change to, its own checked.
+    fn view_type_entries(&self, v: &View) -> Vec<Entry> {
+        let mut out = vec![Entry::heading("Type")];
+        for k in VIEW_TYPES {
+            let on = *k == v.kind;
+            out.push(
+                Entry::act(
+                    ops::view_type_label(k),
+                    Action::View(ViewAction::SetType(k.clone())),
+                )
+                .icon(view_icon(k))
+                .checked(on)
+                .highlighted(on),
+            );
+        }
+        out
+    }
+
+    /// A view's settings: its type (`with_type`, unless its menu has Change type already), its
+    /// grouping and a date's buckets, the properties shown, and its sorts and filter cleared.
+    fn settings_entries(&self, v: &View, with_type: bool) -> Vec<Entry> {
+        use ViewAction as A;
+        use gpui_core::IconName as I;
+        let act = |label: &str, a: A| Entry::act(label, Action::View(a));
+        let Some(fields) = self.database.database.as_ref() else {
+            return Vec::new();
+        };
+        let group = v.group_by.as_deref().and_then(|g| fields.property(g));
+        let mut out = vec![Entry::heading("View settings")];
+        if with_type {
+            out.push(
+                Entry::sub("Change type", self.view_type_entries(v))
+                    .icon(view_icon(&v.kind))
+                    .hint(ops::view_type_label(&v.kind)),
+            );
+        }
+        out.push(
+            Entry::sub("Group by", self.group_entries(v))
+                .icon(I::Group)
+                .hint(hint(group.map_or("None", |p| p.name.as_str()))),
+        );
+        if group.is_some_and(|p| p.kind.is_date()) {
+            out.push(
+                Entry::sub(DATE_GROUPING, self.group_date_entries(v))
+                    .icon(I::CalendarDays)
+                    .hint(bucket_label(
+                        v.group_date.as_ref().unwrap_or(&DateBucket::Relative),
+                    ))
+                    .highlighted(self.menu_focus.as_deref() == Some(DATE_GROUPING)),
+            );
+        }
+        match v.kind {
+            ViewType::Board | ViewType::List => {
+                let n = ops::card_properties(fields, v).len();
+                let label = if v.kind == ViewType::Board {
+                    "Card properties"
+                } else {
+                    "Properties"
+                };
+                out.push(
+                    Entry::sub(label, self.card_entries(v))
+                        .icon(I::Rows3)
+                        .hint(format!("{n} shown")),
+                );
+            }
+            _ => {
+                let n = ops::all_columns(fields, v)
+                    .iter()
+                    .filter(|c| !c.hidden)
+                    .count();
+                out.push(
+                    act("Properties", A::Columns)
+                        .icon(I::Columns3)
+                        .hint(format!("{n} shown")),
+                );
+            }
+        }
+        if !v.sort.is_empty() || v.filter.is_some() {
+            out.push(Entry::heading("Sort and filter"));
+        }
+        if !v.sort.is_empty() {
+            out.push(
+                act("Remove sorts", A::ClearSorts)
+                    .icon(I::ArrowUpDown)
+                    .hint(hint(&self.sort_summary(v))),
+            );
+        }
+        if v.filter.is_some() {
+            out.push(
+                act("Clear filter", A::ClearFilter)
+                    .icon(I::FunnelX)
+                    .hint(hint(&self.filter_summary(v))),
+            );
+        }
+        out
+    }
+
+    /// What a view can group by, the current one checked (and None, but for a board).
+    fn group_entries(&self, v: &View) -> Vec<Entry> {
+        use ViewAction as A;
+        let Some(fields) = self.database.database.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = vec![Entry::heading("Group by")];
+        if v.kind != ViewType::Board {
+            let on = v.group_by.is_none();
+            out.push(
+                Entry::act("None", Action::View(A::GroupBy(None)))
+                    .icon(gpui_core::IconName::X)
+                    .checked(on)
+                    .highlighted(on),
+            );
+        }
+        for p in ops::groupable(fields) {
+            let on = v.group_by.as_deref() == Some(p.id.as_str());
+            out.push(
+                Entry::act(&p.name, Action::View(A::GroupBy(Some(p.id.clone()))))
+                    .icon(type_icon(&p.kind))
+                    .checked(on)
+                    .highlighted(on),
+            );
+        }
+        out
+    }
+
+    /// How a date grouping buckets, the current one checked.
+    fn group_date_entries(&self, v: &View) -> Vec<Entry> {
+        let mut out = vec![Entry::heading("Date grouping")];
+        let current = v.group_date.clone().unwrap_or(DateBucket::Relative);
+        for b in DateBucket::ALL {
+            let on = *b == current;
+            out.push(
+                Entry::act(
+                    bucket_label(b),
+                    Action::View(ViewAction::GroupDate(b.clone())),
+                )
+                .checked(on)
+                .highlighted(on),
+            );
+        }
+        out
+    }
+
+    /// The properties a board's cards or a list's lines show, in order, each opening a submenu
+    /// to hide or move it; then the rest, to show.
+    fn card_entries(&self, v: &View) -> Vec<Entry> {
+        use ViewAction as A;
+        use gpui_core::IconName as I;
+        let Some(fields) = self.database.database.as_ref() else {
+            return Vec::new();
+        };
+        let focus = |id: &str| self.menu_focus.as_deref() == Some(id);
+        let shown = ops::card_properties(fields, v);
+        let mut out = vec![Entry::heading("Shown")];
+        for (i, id) in shown.iter().enumerate() {
+            let Some(p) = fields.property(id) else {
+                continue;
+            };
+            let act = |label: &str, a: A| Entry::act(label, Action::View(a));
+            let mut sub = vec![act("Hide", A::ToggleCard(id.clone())).icon(I::EyeOff)];
+            if i > 0 {
+                sub.push(act("Move up", A::MoveCard(id.clone(), -1)).icon(I::ArrowUp));
+            }
+            if i + 1 < shown.len() {
+                sub.push(act("Move down", A::MoveCard(id.clone(), 1)).icon(I::ArrowDown));
+            }
+            out.push(
+                Entry::sub(p.name.clone(), sub)
+                    .icon(type_icon(&p.kind))
+                    .checked(true)
+                    .highlighted(focus(id)),
+            );
+        }
+        let hidden: Vec<_> = fields
+            .properties_in_order()
+            .into_iter()
+            .filter(|p| p.kind != PropertyType::Title && !shown.contains(&p.id))
+            .collect();
+        if !hidden.is_empty() {
+            out.push(Entry::heading("Hidden"));
+        }
+        for p in hidden {
+            out.push(
+                Entry::act(&p.name, Action::View(A::ToggleCard(p.id.clone())))
+                    .icon(type_icon(&p.kind))
+                    .checked(false)
+                    .highlighted(focus(&p.id)),
+            );
+        }
         out
     }
 
@@ -831,7 +865,6 @@ impl TableView {
                 self.open_view_page(v.id, page, anchor, window, cx);
             }
             ViewAction::Back => self.view_back(window, cx),
-            ViewAction::Add(kind) => self.add_view(kind, window, cx),
             ViewAction::AddBoard(group) => {
                 let name = self.new_view.take().map(|n| n.name).unwrap_or_default();
                 self.create_view(ViewType::Board, name, Some(group), window, cx);
@@ -907,21 +940,17 @@ impl TableView {
                     .as_deref()
                     .and_then(|g| fields.property(g))
                     .is_some_and(|p| p.kind.is_date());
+                // Grouped by a date, its buckets are the next question: the settings draw anew
+                // with Date grouping beside Group by, highlighted.
+                if date && !self.groups_by_date(&v) {
+                    self.menu_focus = Some(DATE_GROUPING.into());
+                }
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
-                // Grouped by a date, its buckets are the next question; else back to settings.
-                let next = if date {
-                    ViewPage::GroupDate
-                } else {
-                    ViewPage::Settings
-                };
-                self.open_view_page(v.id, next, anchor, window, cx);
             }
             ViewAction::GroupDate(b) => {
                 let Some(mut v) = current else { return };
                 v.group_date = (b != DateBucket::Relative).then_some(b);
-                let id = v.id.clone();
                 self.emit_views(vec![self.view_changed(v)], None, window, cx);
-                self.open_view_page(id, ViewPage::Settings, anchor, window, cx);
             }
             ViewAction::ToggleCard(pid) => {
                 let Some(v) = current else { return };
@@ -933,23 +962,15 @@ impl TableView {
                     );
                     return;
                 }
-                let id = v.id.clone();
+                // The properties draw anew in their new order, on the one shown or hidden.
+                self.menu_focus = Some(pid);
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
-                self.open_view_page(id, ViewPage::Properties, anchor, window, cx);
             }
-            ViewAction::MoveCard(by) => {
+            ViewAction::MoveCard(pid, by) => {
                 let Some(v) = current else { return };
-                let Some(Popover::View {
-                    page: ViewPage::Property(pid),
-                    ..
-                }) = self.popover.clone()
-                else {
-                    return;
-                };
                 let changed = ops::move_card_property(&fields, &v, &pid, by);
-                let id = v.id.clone();
+                self.menu_focus = Some(pid);
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
-                self.open_view_page(id, ViewPage::Property(pid), anchor, window, cx);
             }
             ViewAction::Columns => {
                 let Some(v) = current else { return };
@@ -960,30 +981,23 @@ impl TableView {
             ViewAction::ClearSorts => {
                 let Some(mut v) = current else { return };
                 v.sort.clear();
-                let id = v.id.clone();
                 self.emit_views(vec![self.view_changed(v)], None, window, cx);
-                self.open_view_page(id, ViewPage::Settings, anchor, window, cx);
             }
             ViewAction::ClearFilter => {
                 let Some(mut v) = current else { return };
                 v.filter = None;
-                let id = v.id.clone();
                 self.emit_views(vec![self.view_changed(v)], None, window, cx);
-                self.open_view_page(id, ViewPage::Settings, anchor, window, cx);
             }
         }
     }
 
-    /// Back a page: from a card property to the properties, from grouping and properties to
-    /// the settings, from a board's group to the types, else to the view's menu (or closed,
-    /// for the settings opened from the bar's button).
+    /// Back from a step: to the view's menu (or the settings, from the bar's button) on the
+    /// entry it came from, or to the + menu, on Board, from a new board's group. Its menu, or a
+    /// part of it opened on its own, closes.
     fn view_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.popover, Some(Popover::NewBoard)) {
-            let name = self.new_view.take().map(|n| n.name).unwrap_or_default();
-            self.open_add_view(name, window, cx);
-            if let Some(i) = VIEW_TYPES.iter().position(|k| *k == ViewType::Board) {
-                self.view_kind = (i, self.view_kind.1 + 1);
-            }
+            self.new_view = None;
+            self.open_add_view(Some(ops::view_type_label(&ViewType::Board).into()), cx);
             return;
         }
         let Some(Popover::View {
@@ -995,18 +1009,20 @@ impl TableView {
             self.close_view_menu(window, cx);
             return;
         };
-        let to = match page {
-            ViewPage::Property(_) => Some(ViewPage::Properties),
-            ViewPage::Group | ViewPage::GroupDate | ViewPage::Properties => {
-                Some(ViewPage::Settings)
+        let to = match (page, anchor) {
+            (ViewPage::BoardGroup, ViewAnchor::Settings) => {
+                Some((ViewPage::Settings, "Change type"))
             }
-            ViewPage::BoardGroup => Some(ViewPage::Type),
-            ViewPage::Menu => None,
-            _ if anchor == ViewAnchor::Settings => None,
-            _ => Some(ViewPage::Menu),
+            (ViewPage::BoardGroup, ViewAnchor::Tab) => Some((ViewPage::Menu, "Change type")),
+            (ViewPage::Rename, ViewAnchor::Tab) => Some((ViewPage::Menu, "Rename")),
+            (ViewPage::Delete, ViewAnchor::Tab) => Some((ViewPage::Menu, "Delete view")),
+            _ => None,
         };
         match to {
-            Some(page) => self.open_view_page(view_id, page, anchor, window, cx),
+            Some((page, from)) => {
+                self.open_view_page(view_id, page, anchor, window, cx);
+                self.reopen_on = Some(from.into());
+            }
             None => self.close_view_menu(window, cx),
         }
     }
@@ -1060,9 +1076,15 @@ impl TableView {
         cx.notify();
     }
 
-    /// The + menu's type picked (or Enter on the highlighted one): a new view named as typed,
-    /// or for its type; a board asks what to group by when there's no select.
-    fn add_view(&mut self, kind: ViewType, window: &mut Window, cx: &mut Context<Self>) {
+    /// The + menu's type picked (or Enter on the highlighted one): a new view named `typed`, or
+    /// for its type; a board asks what to group by when there's no select.
+    pub(crate) fn add_view(
+        &mut self,
+        kind: ViewType,
+        typed: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(fields) = self.database.database.clone() else {
             return;
         };
@@ -1071,7 +1093,7 @@ impl TableView {
             self.refuse(self.full_views_note(), cx);
             return;
         }
-        let typed = truncate_chars(&self.typed_name(cx), limits.name_chars).to_owned();
+        let typed = truncate_chars(typed.trim(), limits.name_chars).to_owned();
         if kind == ViewType::Board {
             match ops::board_group(&fields, None) {
                 Some(g) => self.create_view(kind, typed, Some(g), window, cx),
@@ -1127,15 +1149,6 @@ impl TableView {
             .as_ref()
             .map(|f| f.state.read(cx).value().trim().to_owned())
             .unwrap_or_default()
-    }
-
-    /// Enter in the + menu's field: the highlighted type.
-    pub(crate) fn commit_new_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let kind = VIEW_TYPES
-            .get(self.view_kind.0)
-            .cloned()
-            .unwrap_or(ViewType::Table);
-        self.add_view(kind, window, cx);
     }
 
     /// Enter (or Save) on a view's name.

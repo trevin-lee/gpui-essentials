@@ -152,7 +152,7 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
 
 | | |
 |---|---|
-| ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: its property (rename, change type, edit options), then sort, filter by an option, move, hide, with room for checks before the labels](docs/table-menu.png) |
+| ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: its property (rename, change type, edit options), then sort, filter by an option, move, hide, with room for checks before the labels; its types open in a submenu beside Change type](docs/table-menu.png) |
 | ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked and today ringed, with Today and Clear](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
 | ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | |
@@ -384,28 +384,30 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
 
 | | |
 |---|---|
-| ![The + menu: a new property's name typed over the fifteen types it can have](docs/table-columns.png) | ![Stage's options as their pills, each opening its page to rename, recolour, move or delete it; Add an option and Back under them](docs/table-options.png) |
+| ![The + menu: a new property's name typed over the fifteen types it can have](docs/table-columns.png) | ![Stage's column menu with its options open beside Edit options as their pills, and beside them the first option's submenu to rename, recolour, move or delete it](docs/table-options.png) |
 
 - **Adding.** The + after the last column (or Add a property in a column's menu) opens a field
-  for the name over the types: every type but the title. Typing names it, Up and Down move
-  through the types while the field keeps the keyboard, Enter or a press on a type makes it.
+  for the name over the types: every type but the title (gpui-core's `Picker`, its field naming
+  rather than filtering). Typing names it, Up and Down move through the types while the field
+  keeps the keyboard, Enter or a press on a type makes it.
   Nothing typed names it for its type ("Number", then "Number 2"). It's a `propertyCreated` with a
   new id, `PropertyConfig::default_for` its type (a number plain, a select with no options, a date
   without its time, a person allowing the owner and agents) and an `order` after every
   property's (`order::between`), then a `viewChanged` adding its column at the end of the view
   shown, in one batch. The table scrolls to it. A relation asks for its database and whether it's
   two-way first (below).
-- **The column's menu** starts with its property's entries:
+- **The column's menu** starts with its property's entries. Those with a chevron open a submenu
+  beside them (gpui-core's `PopupMenuItem::submenu`), which stays open while its picks apply:
   - **Rename** opens a field with the name selected: Enter (or Save) is a `propertyChanged`.
   - **Change type** lists the types, the current one checked: a pick is a `propertyChanged` with
     the new type and `Property::retyped`'s config (below). The title's menu has no Change type.
   - **Edit options** (selects and multi-selects) lists the options as their pills. Each opens its
-    page: Rename, the ten colours, Move up, Move down, Delete option. Add an option opens a field.
-    Every change is a `propertyChanged` with the whole property: options are placed by their
-    order in the list. A deleted option's rows keep naming it and show empty, as any value
-    naming an option the property hasn't does.
-  - **Number format**: Number, Percent or Currency, the currency on a page of its own (USD, EUR,
-    GBP, JPY, CNY, INR, KRW, CAD, AUD, CHF), and decimal places (default, or 0 to 4).
+    own submenu: Rename option, the ten colours, Move up, Move down, Delete option. Add an option
+    and Rename option open a field. Every change is a `propertyChanged` with the whole property:
+    options are placed by their order in the list. A deleted option's rows keep naming it and
+    show empty, as any value naming an option the property hasn't does.
+  - **Number format**: Number, Percent or Currency, the currency in a submenu of its own (USD,
+    EUR, GBP, JPY, CNY, INR, KRW, CAD, AUD, CHF), and decimal places (default, or 0 to 4).
   - **Include time** (dates) toggles `includeTime`: what a new value gets. A value keeps its own
     `includeTime`; one picked in an empty cell then holds the day's start in the viewer's zone.
   - **Relation**: the database it relates to (the host's `databases`, and this one), and **Show
@@ -413,6 +415,11 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
   - **People**: whether it allows the owner, agents or both (not neither).
   - **Delete property** asks first, opening on Cancel: Delete property is a `propertyDeleted`.
     The title can't be deleted.
+  - **Steps, not submenus, for a name or a confirm.** A rename, a new option's name and a
+    delete's confirm replace the menu in its popover, as Notion's name field sits over its menu:
+    a field (gpui-core's `Input`) keeps the keys a submenu would take, and a confirm that opens on
+    Cancel can't be crossed by a pointer on its way past. Save, Back and Cancel go back to the
+    column's menu on the entry the step came from.
 - **Two-way relations** are both databases' properties, written in one batch:
   - A new two-way relation is two `propertyCreated`s: this database's, then the related one's
     (`relation::two_way_pair`), each naming the other as `backPropertyId` with `twoWay` set. The
@@ -447,12 +454,14 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
   note at the limit. A name another property (or option) has, case aside, or an empty name, is
   refused too.
 - **Keys and touch.** Everything is in menus the keyboard drives (⌥↓ opens a column's menu; Up,
-  Down, Home, End and Enter move and pick; Escape closes), with Back on every page. Fields take
-  Enter to save. On touch every entry, field and the + are at least 44 points tall.
-- **Pages, not submenus.** gpui-core has no submenu, so a property's menu is one popover whose
-  content changes page by page, each page gpui-core's `PopupMenu` (or a field in its `Input`).
+  Down, Home, End and Enter move and pick; Enter, Space or → opens a submenu and ← or Escape
+  closes it; Escape closes the menu). Fields take Enter to save. A submenu opens on a tap, as on
+  a press. On touch every entry, the rename fields and the + are at least 44 points tall.
+- **Moving an option** draws its list anew in the new order, on the option moved, with its
+  submenu closed (gpui-core keeps an open submenu by its entry's place).
 - **For a host's own control**, `TableView::open_add_property_menu` and
-  `TableView::open_property_menu(property_id, PropertyMenu::Options, ..)` open the same menus.
+  `TableView::open_property_menu(property_id, PropertyMenu::Options, ..)` open the same menus:
+  a submenu or step on its own, hanging from the column's header.
 - **Boards and lists** have no column headers, so they have no property menus yet; their
   properties change from a table view of the same database.
 
@@ -465,7 +474,7 @@ new docs, as a header's change is.
 
 | | |
 |---|---|
-| ![The bar's + menu: a new view's name typed over its three types, under the +](docs/view-add.png) | ![The Pipeline board's settings under its tab: its type, what it groups by, its card properties, and its sort to remove](docs/view-settings.png) |
+| ![The bar's + menu: a new view's name typed over its three types, Board highlighted, under the +](docs/view-add.png) | ![The Pipeline board's menu under its tab, View settings open beside it (what it groups by, its card properties, its sort to remove), and beside that the card properties, shown then hidden](docs/view-settings.png) |
 
 ```rust,ignore
 let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(true));
@@ -484,14 +493,14 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   view is shown, so the host needn't store it, and `TableHost::view_shown` tells a host that wants
   to remember it. Pressing the shown view's tab, or right-clicking any tab, opens its menu.
 - **Adding.** + opens a field for the name over the types: Table, Board and List (galleries
-  aren't drawn in v1). Typing names it, Up and Down move through the types while the field keeps
+  aren't drawn in v1), in gpui-core's naming `Picker` as for properties. Typing names it, Up and Down move through the types while the field keeps
   the keyboard, Enter or a press makes it; nothing typed names it for its type ("Board", then
   "Board 2"). It's a `viewCreated` with a new id, an `order` after every view's
   (`order::between`) and the type's defaults (no sort, filter or columns; a table shows every
   property), and the new view is shown. A **board** groups by the first select property; with no
   select it asks which property to group by (any multi-select, checkbox, person or date), and
   with nothing that can group it says so (add one from a table first).
-- **A view's menu:**
+- **A view's menu**, its chevroned entries opening submenus beside them:
   - **Rename** opens a field with the name selected: Enter (or Save) is a `viewChanged`.
   - **Change type** lists Table, Board and List: a `viewChanged` with the new type. A table or
     list keeps its grouping; a board keeps one that can group, else takes the first select,
@@ -505,17 +514,20 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     one batch.
   - **Delete view** asks first, opening on Cancel: Delete view is a `viewDeleted`. The last view
     can't be deleted. Deleting the view shown shows its neighbour (the next, else the one
-    before).
-- **View settings**, from a view's menu or the bar's settings button:
+    before). As for properties, the rename and the confirm are steps in the popover, not
+    submenus.
+- **View settings**, a submenu of a view's menu, or a menu of its own from the bar's settings
+  button (with Change type at its top); each of these is a submenu of it:
   - **Group by** lists the properties that can group, the current one checked, and None for a
     table or list (a board always groups). A pick is a `viewChanged` with `groupBy`, its folded
     groups let go and its `groupDate` kept only for a date.
   - **Date grouping**, while it groups by a date: Relative, Day, Week, Month or Year
-    (`groupDate`, absent for relative). Grouping by a date goes on to it.
+    (`groupDate`, absent for relative). Grouping by a date adds it under Group by, highlighted,
+    the settings drawn anew so → opens it.
   - **Card properties** (a board) and **Properties** (a list) list the properties shown on cards
     or lines, in order, then the hidden ones. A hidden one pressed is shown after the others; a
-    shown one opens its page, to hide it or move it up or down. Each is a `viewChanged` with
-    `cardProperties`.
+    shown one opens its own submenu, to hide it or move it up or down (the list then drawn anew
+    in its order, on the one moved). Each is a `viewChanged` with `cardProperties`.
   - **Properties** (a table) opens the Properties menu the column headers have (Show and hide
     properties).
   - **Remove sorts** and **Clear filter**, while it sorts or filters, each a `viewChanged`.
@@ -530,12 +542,12 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   view's tab (`TableView::focus_view_bar` does too). In the bar Left and Right move along the
   tabs, Enter shows the focused one (or opens the shown one's menu), ⌥↓ opens its menu, Tab
   reaches +, the sort and filter summary and the settings, and Down or Escape goes back to the
-  view. The menus are driven as the property menus are (Up, Down, Home, End, Enter, Escape, Back
-  on every page), and a menu opened from the bar gives the keyboard back to it when it closes.
+  view. The menus are driven as the property menus are (Up, Down, Home, End, Enter; → and ←
+  open and close a submenu, Escape closes the innermost), and a menu opened from the bar gives
+  the keyboard back to it when it closes.
 - **Touch.** With `TableTheme::with_touch(true)` tabs, +, the summaries and the settings button
-  are 44 points tall (+ and the settings 44 wide), as is every menu entry and field.
-- **Pages, not submenus**, as for properties: gpui-core has no submenu yet, so a view's menu is
-  one popover whose content changes page by page.
+  are 44 points tall (+ and the settings 44 wide), as is every menu and submenu entry and the
+  rename field; a tap opens a submenu.
 
 ## Databases and rows are docs
 
