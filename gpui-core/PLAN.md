@@ -109,12 +109,19 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
 5. **TextView** (markdown display with styles; links as events), on `pulldown-cmark`.
 6. **DatePicker** (popover with a month grid). Together with 3–5, this unlocks
    gpui-chatwidgets.
-7. **The markdown engine under the blocks fork.** The fork has its own IME, keymap, model and
-   undo. It draws through the kit's `base::text::editor_host`, the kit's 34k-line text engine,
-   with about 190 references across 15 files. The fork's toolbar is unused, so it isn't needed.
-   This is the largest single piece. When the blocks crate's turn comes, I'll choose between
-   giving gpui-core a general markdown layout engine that TextView shares, and moving the
-   fork's drawing onto plain GPUI text layout. gpui-blocks and its fork switch after this.
+7. **A rich-text paragraph layer, for the blocks fork.** The fork owns its model, IME, keymap
+   and undo, but draws through the kit's 34k-line text engine (`base::text::editor_host`). Agreed
+   with the gpui-blocks session (2026-11-15):
+   - gpui-core gets one paragraph layer, shared with TextView (step 5) and with the Input's
+     multi-line wrapping (step 4). It covers styled runs plus inline boxes (pictures, mention
+     chips) on a baseline, wrapping to a width, index↔point both ways, and selection and range
+     painting. GPUI's `StyledText` can't hold inline boxes, so the layer shapes runs itself. It
+     may be built before step 4, since Input needs the same shaping and hit testing.
+   - The fork's block chrome (headings, lists, quotes, callouts, toggles, code blocks, tables)
+     stays in the fork, drawn with plain GPUI on the layer.
+   - The fork's Markdown import moves to `markdown` (mdast) directly. That's the gpui-blocks
+     session's work and needs nothing from gpui-core.
+   The blocks session will write the fork's needs as tests against the layer's API.
 8. **The Mac app**, last. It needs 1–5 and Switch, and moves in one PR in open-cloud-agents
    that Main merges.
 

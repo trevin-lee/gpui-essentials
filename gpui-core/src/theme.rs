@@ -218,7 +218,7 @@ pub struct Theme {
     pub text: TypeScale,
     /// The base corner radius (the web's `--radius`, its `rounded-lg`), in rems.
     pub radius: Rems,
-    /// The smallest a pressable target is drawn in the touch size ([`crate::Size::Touch`]):
+    /// The smallest a pressable target is drawn in the touch size ([`crate::ControlSize::Touch`]):
     /// 44 points, Apple's minimum. In the window's points; it doesn't zoom.
     pub touch_target: Pixels,
 }

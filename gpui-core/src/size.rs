@@ -1,8 +1,8 @@
 //! What every component shares: a size, and being disabled or selected.
 
-/// How big a component draws. Everything but [`Size::Touch`] is in rems, so it zooms.
+/// How big a component draws. Everything but [`ControlSize::Touch`] is in rems, so it zooms.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Size {
+pub enum ControlSize {
     XSmall,
     Small,
     #[default]
@@ -15,23 +15,23 @@ pub enum Size {
 
 /// A component that comes in sizes.
 pub trait Sizable: Sized {
-    fn with_size(self, size: Size) -> Self;
+    fn with_size(self, size: ControlSize) -> Self;
 
     fn xsmall(self) -> Self {
-        self.with_size(Size::XSmall)
+        self.with_size(ControlSize::XSmall)
     }
 
     fn small(self) -> Self {
-        self.with_size(Size::Small)
+        self.with_size(ControlSize::Small)
     }
 
     fn large(self) -> Self {
-        self.with_size(Size::Large)
+        self.with_size(ControlSize::Large)
     }
 
     /// At least 44 points each way, for touch screens.
     fn touch(self) -> Self {
-        self.with_size(Size::Touch)
+        self.with_size(ControlSize::Touch)
     }
 }
 
