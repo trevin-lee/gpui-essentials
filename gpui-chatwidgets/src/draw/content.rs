@@ -8,7 +8,7 @@ use gpui_kit::component::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::Draw;
+use super::{Draw, pressable};
 use crate::openui::{
     Callout, EntityList, GalleryImage, Icon, IconText, ImageSrc, ImageText, Line, ListBlock,
     Metric, Size, Surface, TextSize, Tone,
@@ -690,7 +690,7 @@ impl Draw<'_, '_> {
                     let go = self.cx.listener(move |this, _, window, cx| {
                         this.press(&action, &words, None, None, window, cx)
                     });
-                    let press = gpui_kit::base::Button::new(self.id(&format!("{path}.i{i}")))
+                    let press = pressable(self.id(&format!("{path}.i{i}")))
                         .accessibility_label(it.title.clone())
                         .w_full()
                         .min_w_0()

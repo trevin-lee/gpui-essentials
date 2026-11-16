@@ -3,12 +3,12 @@
 
 use std::rc::Rc;
 
-use gpui_kit::base::Button as Press;
+use gpui_core::Disableable as _;
 use gpui_kit::component::input::Input as KitInput;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::Draw;
+use super::{Draw, pressable};
 use crate::openui::{Cell, ColumnKind, Component, EditableTable, Table};
 
 /// A column's width in CSS pixels, from the longest text it holds: each column is as wide as
@@ -296,7 +296,7 @@ impl Draw<'_, '_> {
                         let edit = self.cx.listener(move |this, _, window, cx| {
                             this.edit_cell(&key, r, c, window, cx)
                         });
-                        let press = Press::new(self.id(&format!("{path}.c{r}.{c}")))
+                        let press = pressable(self.id(&format!("{path}.c{r}.{c}")))
                             .accessibility_label(format!("{}: {text}", col.header))
                             .w_full()
                             .min_w_0()
@@ -341,7 +341,7 @@ impl Draw<'_, '_> {
         let save_it = self
             .cx
             .listener(move |this, _, window, cx| this.save_table(&key, &tbl, window, cx));
-        let save = Press::new(self.id(&format!("{path}.save")))
+        let save = pressable(self.id(&format!("{path}.save")))
             .accessibility_label("Save Changes")
             .disabled(!dirty)
             .flex_none()

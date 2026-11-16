@@ -2302,6 +2302,7 @@ name = "gpui-chatwidgets"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "gpui-core",
  "gpui-kit",
  "gpui-pre",
  "gpui-pre-apple",

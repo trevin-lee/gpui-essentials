@@ -33,8 +33,8 @@ Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconT
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
 
 Text fields, the date picker and the slider are GPUI Kit's. Everything else is drawn with GPUI's
-own elements, its buttons through GPUI Kit's unstyled button so the keyboard reaches them (Tab to
-move, Enter or Space to press). Markdown goes through GPUI Kit's text view, so it can be selected
+own elements, everything pressable through gpui-core's `Press` (in this workspace) so the
+keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there. Markdown goes through GPUI Kit's text view, so it can be selected
 and copied; a code block has a Copy button.
 
 | Charts | A form |
@@ -159,7 +159,10 @@ pixels and are drawn as `rems(size / rem_base)`, so a host that zooms by changin
 rem zooms its cards too. `frame` draws the card in a rounded, bordered box, as a chat bubble.
 
 GPUI Kit's text fields, date picker and slider take their colours from GPUI Kit's own theme,
-which is also the host's.
+which is also the host's. The focus ring around a button, tab or chip focused from the keyboard
+is gpui-core's, in its theme's `ring` colour. To set it in the cards' mode, depend on
+`gpui-core` from this repository at the same commit and call
+`gpui_core::Theme::set(gpui_core::Theme::light(), cx)` (or `dark()`, the default).
 
 ### Hooks and events
 

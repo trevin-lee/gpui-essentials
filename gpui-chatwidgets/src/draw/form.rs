@@ -4,7 +4,7 @@
 
 use std::rc::Rc;
 
-use gpui_kit::base::Button as Press;
+use gpui_core::{Disableable as _, Selectable as _};
 use gpui_kit::component::date_picker::DatePicker;
 use gpui_kit::component::input::Input as KitInput;
 use gpui_kit::component::input::Textarea;
@@ -13,8 +13,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::{Value as Json, json};
 
-use super::Draw;
 use super::content::Glyph;
+use super::{Draw, pressable};
 use crate::openui::{
     Button, ButtonVariant, Buttons, Choice, Direction, Field, Form, IconButton, Input, Size,
     Surface, Toggle,
@@ -355,7 +355,7 @@ impl Draw<'_, '_> {
                         };
                         this.edit(&k, &binding, value, cx);
                     });
-                    let chip = Press::new(self.id(&format!("{key}.chip{i}")))
+                    let chip = pressable(self.id(&format!("{key}.chip{i}")))
                         .role(Role::CheckBox)
                         .accessibility_label(o.label.clone())
                         .disabled(o.disabled)
@@ -417,7 +417,7 @@ impl Draw<'_, '_> {
         let choose = self
             .cx
             .listener(move |this, _, window, cx| on(this, window, cx));
-        let press = Press::new(self.id(id))
+        let press = pressable(self.id(id))
             .role(role)
             .accessibility_label(label.to_string())
             .disabled(disabled)
@@ -624,7 +624,7 @@ impl Draw<'_, '_> {
                 (None, Some(icon)) => Some(self.icon_element(&icon.name, 20., t.colors.text)),
                 _ => None,
             };
-            let card = Press::new(self.id(&format!("{key}.card{i}")))
+            let card = pressable(self.id(&format!("{key}.card{i}")))
                 .role(if multiple {
                     Role::CheckBox
                 } else {
@@ -706,7 +706,7 @@ impl Draw<'_, '_> {
             };
             cx.notify();
         });
-        let trigger = Press::new(self.id(&format!("{key}.select")))
+        let trigger = pressable(self.id(&format!("{key}.select")))
             .role(Role::ComboBox)
             .accessibility_label(shown.clone())
             .w_full()
@@ -770,7 +770,7 @@ impl Draw<'_, '_> {
                 let choose = self
                     .cx
                     .listener(move |this, _, window, cx| pick(this, v.clone(), window, cx));
-                let option = Press::new(self.id(&format!("{key}.opt{i}")))
+                let option = pressable(self.id(&format!("{key}.opt{i}")))
                     .role(Role::ListBoxOption)
                     .accessibility_label(label.clone())
                     .selected(on)
@@ -880,7 +880,7 @@ impl Draw<'_, '_> {
                 cx,
             )
         });
-        let press = Press::new(self.id(path))
+        let press = pressable(self.id(path))
             .accessibility_label(b.label.clone())
             .flex_none()
             .max_w_full()
@@ -950,7 +950,7 @@ impl Draw<'_, '_> {
         let go = self.cx.listener(move |this, _, window, cx| {
             this.press(&action, &words, None, None, window, cx)
         });
-        let press = Press::new(self.id(path))
+        let press = pressable(self.id(path))
             .accessibility_label(b.name.clone())
             .flex_none()
             .size(self.px(side))

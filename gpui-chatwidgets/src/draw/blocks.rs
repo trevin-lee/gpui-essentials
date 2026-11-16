@@ -1,12 +1,11 @@
 //! Card blocks: grids (or a carousel) of small cards — snippet, overview, context, composite
 //! and visual — each pressable when its block has an action.
 
-use gpui_kit::base::Button as Press;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::Draw;
 use super::content::{Glyph, img_from};
+use super::{Draw, pressable};
 use crate::openui::{CardBlock, CardBlockKind, CardItem};
 
 impl Draw<'_, '_> {
@@ -290,7 +289,7 @@ impl Draw<'_, '_> {
         match &it.press {
             Some(p) => {
                 let (action, words) = (p.action.clone(), p.words.clone());
-                Press::new(self.id(&format!("{path}.press")))
+                pressable(self.id(&format!("{path}.press")))
                     .accessibility_label(p.words.clone())
                     .w_full()
                     .min_w_0()

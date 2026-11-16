@@ -93,8 +93,17 @@ fn load_fonts(cx: &mut App) {
     ]);
 }
 
-/// GPUI Kit's theme (its inputs, date picker and slider) in the same mode as the cards.
-fn apply_kit_theme(dark: bool, cx: &mut App) {
+/// GPUI Kit's theme (its inputs, date picker and slider) and gpui-core's (the presses' focus
+/// ring) in the same mode as the cards.
+fn apply_themes(dark: bool, cx: &mut App) {
+    gpui_core::Theme::set(
+        if dark {
+            gpui_core::Theme::dark()
+        } else {
+            gpui_core::Theme::light()
+        },
+        cx,
+    );
     Theme::change(
         if dark {
             ThemeMode::Dark
@@ -235,7 +244,7 @@ impl Gallery {
 
     fn set_dark(&mut self, dark: bool, cx: &mut Context<Self>) {
         self.host.dark.set(dark);
-        apply_kit_theme(dark, cx);
+        apply_themes(dark, cx);
         self.card.update(cx, |c, cx| c.refresh(cx));
         cx.notify();
     }
@@ -416,7 +425,7 @@ fn main() {
         .run(move |cx| {
             load_fonts(cx);
             gpui_kit::init(cx);
-            apply_kit_theme(true, cx);
+            apply_themes(true, cx);
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.on_action(|_: &Quit, cx| cx.quit());
             let offscreen = shots.is_some();
