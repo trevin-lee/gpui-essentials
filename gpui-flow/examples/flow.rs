@@ -34,6 +34,8 @@ struct Args {
     mindmap: bool,
     /// A whiteboard of shapes in place of the sample: every outline, palette color and badge.
     whiteboard: bool,
+    /// A Mermaid flowchart, imported and laid out, in place of the sample.
+    mermaid: bool,
 }
 
 fn args() -> Args {
@@ -44,6 +46,7 @@ fn args() -> Args {
         nodes: 0,
         mindmap: false,
         whiteboard: false,
+        mermaid: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -53,6 +56,7 @@ fn args() -> Args {
             "--bench" => out.bench = true,
             "--mindmap" => out.mindmap = true,
             "--whiteboard" => out.whiteboard = true,
+            "--mermaid" => out.mermaid = true,
             "--nodes" => out.nodes = it.next().and_then(|n| n.parse().ok()).unwrap_or(0),
             _ => {}
         }
@@ -436,6 +440,18 @@ impl Root {
             grid(args.nodes)
         } else if args.whiteboard {
             whiteboard()
+        } else if args.mermaid {
+            let chart = "flowchart LR
+  subgraph signup [Sign-up]
+    A([Someone signs up]) --> B[/Email and password/]
+    B --> C{Valid?}
+  end
+  C -->|yes| D[(Users)]
+  C -.->|no| E[Show what's wrong]
+  D ==> F{{Welcome email}}
+  E --> B";
+            let object = import::from_mermaid(chart).expect("the sample reads");
+            (object.nodes, object.edges)
         } else if mindmap {
             mind_map()
         } else {
