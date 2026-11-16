@@ -30,13 +30,14 @@
 //! `nodrag` and `nowheel` classes mark it.
 //!
 //! A flow saves and loads as React Flow's own JSON ([`FlowObject`]), keeping the fields it
-//! doesn't read.
+//! doesn't read, and as a versioned [`json::Document`] with stable ids, for storing.
 
 pub mod export;
 mod flow;
 pub mod geometry;
 pub mod graph;
 pub mod import;
+pub mod json;
 pub mod node;
 mod paint;
 pub mod routing;

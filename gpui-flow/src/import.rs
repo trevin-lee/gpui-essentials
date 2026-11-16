@@ -144,6 +144,7 @@ fn subcanvas_node(id: String, o: &Map<String, Value>) -> Node {
                 width: number(pick(&["width", "mediaWidth"])),
                 height: number(pick(&["height", "mediaHeight"])),
                 alt: text(pick(&["alt"])).unwrap_or_default().into(),
+                extra: Map::new(),
             });
         }
         "link" => {
