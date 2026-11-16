@@ -44,13 +44,13 @@ mod types;
 
 pub use flow::{
     AddChild, AddSibling, Cancel, CanvasTransform, ContextTarget, DeleteSelected, EdgeDefaults,
-    FitView, Flow, FlowEvent, FlowOptions, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar,
-    MoveRight, MoveRightFar, MoveUp, MoveUpFar, OpenLink, PanelPosition, PointerMode, SelectAll,
-    ZoomIn, ZoomOut, ZoomReset, bind_keys,
+    FitView, Flow, FlowEvent, FlowOptions, FrameSelection, HandleRef, MoveDown, MoveDownFar,
+    MoveLeft, MoveLeftFar, MoveRight, MoveRightFar, MoveUp, MoveUpFar, OpenLink, PanelPosition,
+    PointerMode, SelectAll, Unframe, ZoomIn, ZoomOut, ZoomReset, bind_keys,
 };
 pub use node::{
-    HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, group_node, labeled_node,
-    shape_node, topic_node, units,
+    HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, frame_node, group_node,
+    labeled_node, shape_node, topic_node, units,
 };
 pub use paint::{BackgroundVariant, FlowBackground};
 pub use theme::{FlowColors, Palette, Pencil};

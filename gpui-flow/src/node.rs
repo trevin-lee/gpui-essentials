@@ -910,6 +910,76 @@ pub fn group_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .into_any_element()
 }
 
+/// How tall a frame's title band is, and how wide the band along its border that takes presses
+/// (inside it, a press is the pane's), in flow units.
+pub(crate) const FRAME_TITLE: f32 = 28.;
+pub(crate) const FRAME_BORDER: f32 = 10.;
+
+/// The built-in `frame` kind: an area that holds other nodes (their parent), with its title
+/// over it. It's taken by its title and its border, and resized by its corners while selected.
+pub fn frame_node(node: &Node, ctx: &NodeContext) -> AnyElement {
+    let pencil = ctx.colors.pencil(node.color.as_deref());
+    let colored = node.color.is_some();
+    let (w, h) = (node.width.unwrap_or(360.), node.height.unwrap_or(240.));
+    let stroke = if ctx.selected {
+        ctx.colors.selected
+    } else if colored {
+        pencil.stroke
+    } else {
+        ctx.colors.node_border
+    };
+    let title = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .w_full()
+        .h(units(FRAME_TITLE))
+        .px(units(4.))
+        .flex()
+        .items_center()
+        .gap(units(6.))
+        .overflow_hidden()
+        .text_size(ctx.font_size(12.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(if colored {
+            pencil.text
+        } else {
+            ctx.colors.muted_text
+        })
+        .children(badges(node, ctx, pencil.text))
+        .child(
+            div()
+                .min_w_0()
+                .max_h_full()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(node.label_text()),
+        );
+    let body = div()
+        .absolute()
+        .left_0()
+        .top(units(FRAME_TITLE))
+        .w_full()
+        .h(units((h - FRAME_TITLE).max(0.)))
+        .rounded(units(8.))
+        .border_1()
+        .border_color(stroke)
+        .bg(if colored {
+            pencil.fill.opacity(0.55)
+        } else {
+            ctx.colors.group
+        })
+        .child(ctx.resizer(120., FRAME_TITLE + 40.));
+    div()
+        .relative()
+        .w(units(w))
+        .h(units(h))
+        .child(title)
+        .child(body)
+        .into_any_element()
+}
+
 /// The built-in `topic` kind, for mind maps: the label in a rounded box with no handles (a tree
 /// layout joins topics by their sides), larger and bolder for a root.
 pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
@@ -959,5 +1029,6 @@ pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     kinds.insert("group".into(), Rc::new(|n, c, _, _, _| group_node(n, c)));
     kinds.insert("topic".into(), Rc::new(|n, c, _, _, _| topic_node(n, c)));
     kinds.insert("shape".into(), Rc::new(|n, c, _, _, _| shape_node(n, c)));
+    kinds.insert("frame".into(), Rc::new(|n, c, _, _, _| frame_node(n, c)));
     kinds
 }
