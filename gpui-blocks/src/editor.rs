@@ -296,6 +296,10 @@ pub struct Editor {
     embed_heights: docs::Heights,
     /// The embed being resized.
     resizing: Option<ResizeStart>,
+    /// A document link pasted on a line of its own, which can become a sub-page or an embed.
+    paste_offer: Option<PasteOffer>,
+    /// The app's documents, for the title of a pasted `doc:` address.
+    docs: Option<Arc<dyn Docs>>,
     /// The headings a table of contents lists, kept up to date after each change.
     headings: Arc<std::sync::Mutex<Vec<Heading>>>,
     /// The blocks' ids in [`Editor::document`].
@@ -384,10 +388,14 @@ impl Editor {
                     let typed = matches!(origin, EditOrigin::Typing | EditOrigin::Backspace);
                     let open = std::mem::take(&mut this.open_on_next_change) || typed;
                     this.update_headings(cx);
+                    this.refresh_paste_offer(*origin == EditOrigin::Paste, cx);
                     this.refresh_slash(open, cx);
                     cx.emit(EditorEvent::Changed);
                 }
-                BlockEditorEvent::SelectionChanged => this.refresh_slash(false, cx),
+                BlockEditorEvent::SelectionChanged => {
+                    this.keep_paste_offer(cx);
+                    this.refresh_slash(false, cx)
+                }
                 BlockEditorEvent::Blur => this.close_slash(cx),
                 BlockEditorEvent::EditLinkRequested { url } => {
                     cx.emit(EditorEvent::EditLinkRequested { url: url.clone() })
@@ -413,6 +421,8 @@ impl Editor {
             headings,
             embed_heights,
             resizing: None,
+            paste_offer: None,
+            docs: options.docs.clone(),
             touch_drag: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
@@ -496,6 +506,131 @@ impl Editor {
     /// [`crate::docs`]).
     pub fn insert_mention(&mut self, id: &str, title: &str, cx: &mut Context<Self>) {
         self.insert_doc(id, docs::mention(id, title), false, cx);
+    }
+
+    /// After a paste, offers to turn a line holding only a document link (a mention, or the text
+    /// `doc:id`) into a sub-page or an embed. Any other change closes the offer.
+    fn refresh_paste_offer(&mut self, pasted: bool, cx: &mut Context<Self>) {
+        let offer = pasted
+            .then(|| paste_offer(&self.state, self.docs.as_deref(), cx))
+            .flatten();
+        if offer.is_some() || self.paste_offer.is_some() {
+            self.paste_offer = offer;
+            cx.notify();
+        }
+    }
+
+    /// Closes the offer when the caret leaves its line.
+    fn keep_paste_offer(&mut self, cx: &mut Context<Self>) {
+        let Some(offer) = &self.paste_offer else {
+            return;
+        };
+        let here = self.state.read(cx).model().caret().map(|c| c.block);
+        if here != Some(offer.block) {
+            self.paste_offer = None;
+            cx.notify();
+        }
+    }
+
+    /// Turns the offered line into `kind`, as one undo step.
+    fn take_paste_offer(&mut self, kind: PasteAs, cx: &mut Context<Self>) {
+        let Some(offer) = self.paste_offer.take() else {
+            return;
+        };
+        cx.notify();
+        if kind == PasteAs::Mention && !offer.plain {
+            return;
+        }
+        let len = self
+            .state
+            .read(cx)
+            .model()
+            .document()
+            .block(offer.block)
+            .and_then(|b| b.text())
+            .map(str::len);
+        let Some(len) = len else {
+            return;
+        };
+        self.state.update(cx, |state, cx| {
+            let _ = state.set_selection(
+                BlockSelection::Text {
+                    anchor: BlockPosition::new(offer.block, 0),
+                    head: BlockPosition::new(offer.block, len),
+                },
+                cx,
+            );
+        });
+        match kind {
+            PasteAs::Mention => self.insert_mention(&offer.doc, &offer.title, cx),
+            PasteAs::Page => self.insert_page(&offer.doc, &offer.title, cx),
+            PasteAs::Embed => self.insert_embed(&offer.doc, &offer.title, docs::DEFAULT_VIEW, cx),
+        }
+    }
+
+    /// The offer's menu, under the pasted line.
+    fn paste_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+        let offer = self.paste_offer.as_ref()?;
+        let state = self.state.read(cx);
+        if state.is_readonly() {
+            return None;
+        }
+        let caret = state.caret_bounds()?;
+        let theme = cx.theme();
+        let (bg, fg, muted, border, accent) = (
+            theme.popover,
+            theme.popover_foreground,
+            theme.muted_foreground,
+            theme.border,
+            theme.accent,
+        );
+        let this = cx.entity().downgrade();
+        let mut kinds = Vec::new();
+        if offer.plain {
+            kinds.push((PasteAs::Mention, "Mention"));
+        }
+        kinds.push((PasteAs::Page, "Page"));
+        kinds.push((PasteAs::Embed, "Embed"));
+        let items = kinds.into_iter().map(move |(kind, label)| {
+            let this = this.clone();
+            div()
+                .id(label)
+                .debug_selector(move || format!("blocks-paste-{label}"))
+                .px(px(10.))
+                .py(px(5.))
+                .rounded(px(5.))
+                .cursor_pointer()
+                .hover(move |s| s.bg(accent))
+                .child(label)
+                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                    cx.stop_propagation();
+                    let _ = this.update(cx, |this, cx| this.take_paste_offer(kind, cx));
+                })
+        });
+        Some(
+            deferred(
+                anchored()
+                    .position(point(caret.left(), caret.bottom() + px(6.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(2.))
+                            .p(px(4.))
+                            .rounded(px(8.))
+                            .border_1()
+                            .border_color(border)
+                            .bg(bg)
+                            .text_color(fg)
+                            .text_size(px(13.))
+                            .shadow_md()
+                            .child(div().px(px(6.)).text_color(muted).child("Show as"))
+                            .children(items),
+                    ),
+            )
+            .with_priority(2),
+        )
     }
 
     fn insert_doc(&mut self, id: &str, markdown: String, block: bool, cx: &mut Context<Self>) {
@@ -1111,6 +1246,71 @@ fn embed_block(state: &BlockEditorState, start: &ResizeStart) -> Option<BlockId>
         .find(|id| top_level(state, *id) == Some(top))
 }
 
+/// What a pasted document link can become.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PasteAs {
+    Mention,
+    Page,
+    Embed,
+}
+
+/// A line holding only a pasted document link.
+#[derive(Clone, Debug)]
+struct PasteOffer {
+    block: BlockId,
+    doc: String,
+    title: String,
+    /// Pasted as the text `doc:id`, not yet a mention.
+    plain: bool,
+}
+
+/// The offer for the caret's line, when it's a paragraph holding only a document link.
+fn paste_offer(
+    state: &Entity<BlockEditorState>,
+    docs: Option<&dyn Docs>,
+    cx: &App,
+) -> Option<PasteOffer> {
+    let state = state.read(cx);
+    let model = state.model();
+    let caret = model.caret()?;
+    let block = model.document().block(caret.block)?;
+    if block.kind() != BlockKind::Paragraph {
+        return None;
+    }
+    let text = block.text()?.trim();
+    // Text from another app: `[title](doc:id)` pasted as it was written.
+    if let Some((doc, title)) = docs::mention_of(text) {
+        return Some(PasteOffer {
+            block: caret.block,
+            doc,
+            title,
+            plain: true,
+        });
+    }
+    if let Some(id) = docs::doc_id(text) {
+        let title = docs
+            .and_then(|d| d.info(id, cx))
+            .map(|i| i.title.to_string())
+            .unwrap_or_else(|| "Untitled".into());
+        return Some(PasteOffer {
+            block: caret.block,
+            doc: id.to_string(),
+            title,
+            plain: true,
+        });
+    }
+    if text != "\u{FFFC}" {
+        return None;
+    }
+    let (doc, title) = docs::mention_of(&block.inline_markdown()?)?;
+    Some(PasteOffer {
+        block: caret.block,
+        doc,
+        title,
+        plain: false,
+    })
+}
+
 /// Whether the caret is on an empty paragraph, which a block inserted there replaces.
 fn on_empty_line(state: &BlockEditorState) -> bool {
     let model = state.model();
@@ -1468,6 +1668,7 @@ impl Render for Editor {
         let side_menu = self.side_menu(cx);
         let slash_menu = self.slash_menu(cx);
         let handles = self.selection_handles(window, cx);
+        let paste_menu = self.paste_menu(cx);
         let resize = self.resizing.is_some().then(|| {
             // While an embed's height is dragged, the pointer is followed anywhere in the window.
             let this = cx.entity().downgrade();
@@ -1536,6 +1737,7 @@ impl Render for Editor {
             .children(side_menu)
             .children(slash_menu)
             .children(handles)
+            .children(paste_menu)
             .children(resize)
             .children(edit_menu)
             .child(self.long_press_watch(cx))

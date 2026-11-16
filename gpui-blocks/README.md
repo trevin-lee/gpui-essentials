@@ -204,6 +204,9 @@ the content with `Options::embeds(..)`; the editor keeps the space, draws the fr
 selects, moves and deletes the block whole, and lets the bottom edge be dragged to change the
 height. Without content from your app, it says the document isn't shown there.
 
+Pasting a document link on a line of its own (a mention, `[title](doc:id)` from another app, or
+the address `doc:id`) offers to show it as a mention, a sub-page or an embed.
+
 `Options::docs` also adds Page, Link to page and Embed to the slash menu, which send
 `NewPageRequested`, `DocLinkRequested` and `EmbedRequested`; answer with `insert_page`,
 `insert_mention` or `insert_embed`. A click on a link sends `DocClicked`, and the editor
