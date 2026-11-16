@@ -8,7 +8,6 @@ use gpui::{
     App, Entity, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     StatefulInteractiveElement, Styled, Window, div, rems,
 };
-use gpui_kit::component::ActiveTheme;
 
 // Medium input-family proportions (10px/8px at the default 16px rem),
 // expressed on the same relative axis as the editor's content rows.
@@ -62,7 +61,7 @@ impl RenderOnce for BlockEditor {
             .max_h(max_height)
             .overflow_y_scroll()
             .when_some(scroll, |this, scroll| this.track_scroll(&scroll))
-            .text_color(cx.theme().foreground)
+            .text_color(gpui_core::Theme::global(cx).foreground)
             // Padding belongs to the native root, inside the sole scroll owner.
             .child(
                 crate::BlockEditor::new(&self.state)
@@ -82,7 +81,7 @@ impl RenderOnce for BlockEditor {
                 div()
                     .px(rems(INPUT_PADDING_X / 2.))
                     .border_b_1()
-                    .border_color(cx.theme().border)
+                    .border_color(gpui_core::Theme::global(cx).border)
                     .child(crate::EditorToolbar::new(&self.state)),
             )
             .child(viewport)
