@@ -224,3 +224,87 @@ fn a_press_on_a_disabled_one_doesnt_fall_through(cx: &mut TestAppContext) {
     click(vcx, "off");
     assert_eq!(outer.get(), 0);
 }
+
+struct Small {
+    pressed: Rc<Cell<usize>>,
+    keep: gpui::FocusHandle,
+    no_focus: bool,
+}
+
+impl Render for Small {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = self.pressed.clone();
+        div()
+            .size_full()
+            .p(px(100.))
+            .child(
+                div()
+                    .id("keeper")
+                    .track_focus(&self.keep)
+                    .w(px(10.))
+                    .h(px(10.)),
+            )
+            .child(
+                Press::new("small")
+                    .debug_selector(|| "small".into())
+                    .w(px(10.))
+                    .h(px(10.))
+                    .min_hit(px(44.))
+                    .focus_on_press(!self.no_focus)
+                    .on_click(move |_, _, _| p.set(p.get() + 1)),
+            )
+    }
+}
+
+fn open_small(
+    cx: &mut TestAppContext,
+    no_focus: bool,
+) -> (Rc<Cell<usize>>, gpui::FocusHandle, &mut VisualTestContext) {
+    cx.update(gpui_core::init);
+    let pressed = Rc::new(Cell::new(0));
+    let p = pressed.clone();
+    let keep = Rc::new(RefCell::new(None));
+    let k = keep.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let handle = cx.focus_handle();
+        *k.borrow_mut() = Some(handle.clone());
+        let small = cx.new(|_| Small {
+            pressed: p,
+            keep: handle,
+            no_focus,
+        });
+        Root::new(small, window, cx)
+    });
+    vcx.run_until_parked();
+    let keep = keep.borrow().clone().unwrap();
+    (pressed, keep, vcx)
+}
+
+#[gpui::test]
+fn a_small_press_takes_a_finger_sized_square(cx: &mut TestAppContext) {
+    let (pressed, _, vcx) = open_small(cx, false);
+    let b = vcx.debug_bounds("small").unwrap();
+    // 15 pixels right of its 10-pixel middle: outside what's drawn, inside the 44-point square.
+    vcx.simulate_click(
+        gpui::point(b.center().x + px(15.), b.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    assert_eq!(pressed.get(), 1);
+    // 30 pixels off: outside the square.
+    vcx.simulate_click(
+        gpui::point(b.center().x + px(30.), b.center().y),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    assert_eq!(pressed.get(), 1);
+}
+
+#[gpui::test]
+fn a_press_that_doesnt_take_the_focus_leaves_it(cx: &mut TestAppContext) {
+    let (pressed, keep, vcx) = open_small(cx, true);
+    vcx.update(|window, cx| window.focus(&keep, cx));
+    click(vcx, "small");
+    assert_eq!(pressed.get(), 1);
+    vcx.update(|window, _| assert!(keep.is_focused(window), "the press took the focus"));
+}
