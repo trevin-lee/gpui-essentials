@@ -26,7 +26,6 @@ use super::{
     transaction::EditOrigin,
 };
 use crate::support::BlinkCursor;
-use gpui_kit::base::text::MarkdownExtensions;
 
 pub(crate) const CONTEXT: &str = "BlockEditor";
 
@@ -487,7 +486,7 @@ impl BlockEditorState {
                 }
             }),
         ];
-        let model = BlockEditorModel::from_markdown("", MarkdownExtensions::default())
+        let model = BlockEditorModel::from_markdown("", super::Extensions::bare())
             .unwrap_or_else(|_| unreachable!("empty source always parses"));
         Self {
             model,
@@ -625,8 +624,7 @@ impl BlockEditorState {
     /// custom nodes, and the block surfaces callouts and toggles are drawn
     /// in (see [`crate::surfaces`]). Set before `with_source`; the document
     /// so far is parsed again with them.
-    pub fn with_markdown_extensions(mut self, extensions: impl Into<MarkdownExtensions>) -> Self {
-        let extensions = extensions.into();
+    pub fn with_markdown_extensions(mut self, extensions: super::Extensions) -> Self {
         let source = self.model.source();
         if let Ok(model) = BlockEditorModel::from_markdown(&source, extensions) {
             self.model = model;

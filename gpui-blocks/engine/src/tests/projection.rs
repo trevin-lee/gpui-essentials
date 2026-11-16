@@ -5,35 +5,32 @@ use super::props::{Rng, document};
 use super::*;
 use crate::{
     direct::project_block,
-    import::{Defs, collect_definitions, import_block},
-    step::{DetachedBlock, DetachedContent},
+    document::{BlockContent, EditorDocument},
+    id::BlockId,
 };
 use gpui_kit::base::text::editor_host::BlockNode;
 
 /// Structure and content without ids.
-fn shape(block: &DetachedBlock, out: &mut String) {
-    out.push_str(&format!("{:?}(", block.kind));
-    match &block.content {
-        DetachedContent::Children(children) => {
+fn shape(doc: &EditorDocument, id: BlockId, out: &mut String) {
+    let Some(entry) = doc.get(id) else {
+        return;
+    };
+    out.push_str(&format!("{:?}(", entry.kind));
+    match &entry.content {
+        BlockContent::Children(children) => {
             for child in children {
-                shape(child, out);
+                shape(doc, *child, out);
             }
         }
-        DetachedContent::Leaf(content) => out.push_str(&format!("{content:?}")),
+        content => out.push_str(&format!("{content:?}")),
     }
     out.push(')');
 }
 
-fn shapes(nodes: &[BlockNode]) -> String {
-    let mut defs = Defs::default();
-    collect_definitions(nodes, &mut defs);
-    let mut blocks = Vec::new();
-    for node in nodes {
-        import_block(node, &defs, &mut blocks);
-    }
+fn shapes(m: &BlockEditorModel) -> String {
     let mut out = String::new();
-    for block in &blocks {
-        shape(block, &mut out);
+    for id in m.doc.children(m.doc.root) {
+        shape(&m.doc, *id, &mut out);
     }
     out
 }
@@ -176,9 +173,9 @@ fn assert_equivalent(m: &BlockEditorModel) {
         .filter_map(|id| project_block(&reparsed.doc, *id))
         .collect();
     assert_eq!(
-        shapes(&direct),
-        shapes(&parsed),
-        "direct projection differs from parse(serialize) for {source:?}"
+        shapes(m),
+        shapes(&reparsed),
+        "the model differs from parse(serialize) for {source:?}"
     );
     // Also compare the rendered node trees themselves, not only after
     // importing them back into the model.

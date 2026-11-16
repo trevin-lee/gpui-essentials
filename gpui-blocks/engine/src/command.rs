@@ -1,4 +1,5 @@
-// Changed in Trevin Lee's fork (2026): callout, toggle and host commands, safer moves.
+// Changed in Trevin Lee's fork (2026): callout, toggle and host commands, safer moves; Markdown
+// read with the engine's own parser.
 use super::{
     document::{BlockContent, EditorDocument},
     editor::BlockEditorModel,
@@ -477,26 +478,17 @@ impl BlockEditorModel {
         }
         let start = line.len() - line.trim_start().len();
         let parsed =
-            gpui_kit::base::text::editor_host::parse_markdown(core, self.doc.extensions.clone())
-                .ok()
-                .and_then(|parsed| {
-                    let mut defs = super::import::Defs::with_source(core)
-                        .with_extensions(self.doc.extensions.clone());
-                    super::import::collect_definitions(&parsed, &mut defs);
-                    let mut blocks = Vec::new();
-                    for node in parsed.iter() {
-                        super::import::import_block(node, &defs, &mut blocks);
-                    }
-                    match (blocks.len(), blocks.pop()) {
-                        (1, Some(block)) if block.kind == BlockKindData::Paragraph => {
-                            match block.content {
-                                DetachedContent::Leaf(BlockContent::Inline(inline)) => Some(inline),
-                                _ => None,
-                            }
+            super::import::parse_blocks(core, &self.doc.ext).and_then(|mut blocks| {
+                match (blocks.len(), blocks.pop()) {
+                    (1, Some(block)) if block.kind == BlockKindData::Paragraph => {
+                        match block.content {
+                            DetachedContent::Leaf(BlockContent::Inline(inline)) => Some(inline),
+                            _ => None,
                         }
-                        _ => None,
                     }
-                });
+                    _ => None,
+                }
+            });
         let Some(inline) = parsed else {
             return InlineText::plain(line, TextMark::default());
         };
@@ -990,20 +982,9 @@ impl BlockEditorModel {
         if !empty_paragraph {
             return self.paste_blocks_markdown(markdown);
         }
-        let Ok(parsed) = gpui_kit::base::text::editor_host::parse_markdown(
-            markdown,
-            self.doc.extensions.clone(),
-        ) else {
+        let Some(mut blocks) = super::import::parse_blocks(markdown, &self.doc.ext) else {
             return Ok(false);
         };
-        let mut defs =
-            super::import::Defs::with_source(markdown).with_extensions(self.doc.extensions.clone());
-        super::import::collect_definitions(&parsed, &mut defs);
-        let mut blocks = Vec::new();
-        for node in parsed.iter() {
-            super::import::import_block(node, &defs, &mut blocks);
-        }
-        let mut blocks = super::import::group_toggles(blocks, &defs);
         if blocks.is_empty() {
             return Ok(false);
         }
@@ -1036,20 +1017,9 @@ impl BlockEditorModel {
         if block == self.doc.root || self.doc.get(block).is_none() {
             return Err(PositionError::UnknownBlock(block).into());
         }
-        let Ok(parsed) = gpui_kit::base::text::editor_host::parse_markdown(
-            markdown,
-            self.doc.extensions.clone(),
-        ) else {
+        let Some(blocks) = super::import::parse_blocks(markdown, &self.doc.ext) else {
             return Ok(false);
         };
-        let mut defs =
-            super::import::Defs::with_source(markdown).with_extensions(self.doc.extensions.clone());
-        super::import::collect_definitions(&parsed, &mut defs);
-        let mut blocks = Vec::new();
-        for node in parsed.iter() {
-            super::import::import_block(node, &defs, &mut blocks);
-        }
-        let blocks = super::import::group_toggles(blocks, &defs);
         let (Some(first), Some(last)) = (blocks.first().map(|b| b.id), blocks.last().map(|b| b.id))
         else {
             return Ok(false);
@@ -1162,7 +1132,7 @@ impl BlockEditorModel {
     fn set_callout(&mut self, name: SharedString) -> Result<bool, CommandError> {
         // Only a name the importer reads back as this callout: one a marker
         // can hold, with a surface the document registers to draw it.
-        if !super::import::is_registered_callout(&self.doc.extensions, &name) {
+        if !self.doc.ext.is_callout(&name) {
             return Err(CommandError::Unsupported("callout name"));
         }
         let name: SharedString = name.to_ascii_lowercase().into();
@@ -1423,19 +1393,9 @@ impl BlockEditorModel {
         {
             return Ok(false);
         }
-        let Ok(parsed) =
-            gpui_kit::base::text::editor_host::parse_markdown(text, self.doc.extensions.clone())
-        else {
+        let Some(blocks) = super::import::parse_blocks(text, &self.doc.ext) else {
             return Ok(false);
         };
-        let mut defs =
-            super::import::Defs::with_source(text).with_extensions(self.doc.extensions.clone());
-        super::import::collect_definitions(&parsed, &mut defs);
-        let mut blocks = Vec::new();
-        for node in parsed.iter() {
-            super::import::import_block(node, &defs, &mut blocks);
-        }
-        let blocks = super::import::group_toggles(blocks, &defs);
         // Nothing structural (one paragraph, soft line breaks only): plain
         // text, where each line becomes a block as typed.
         let has_atoms = |block: &DetachedBlock| {
