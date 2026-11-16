@@ -454,6 +454,7 @@ impl Root {
                     o.transition = std::time::Duration::from_millis(180);
                     o.edge_defaults.marker_end = Some(Marker::arrow_closed());
                     o.avoid_nodes = true;
+                    o.alignment_guides = true;
                     if mindmap {
                         o.layout =
                             Layout::Tree(TreeLayout::default().direction(TreeDirection::Both));
@@ -988,6 +989,11 @@ fn names_dont_clash(
         Extent,
         LabelAlign,
         NodeShape,
+        Align,
+        Distribute,
+        Guide,
+        EdgeDash,
+        Arrows,
         Palette,
         Side,
         HandleKind,

@@ -151,6 +151,7 @@ fn dark_colors() -> FlowColors {
         minimap_node: gray(0.5),
         minimap_mask: gray(0.06),
         minimap_view: gray(0.6),
+        guide: gray(0.7),
         palette: Palette::default(),
     }
 }

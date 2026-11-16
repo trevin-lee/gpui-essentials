@@ -152,6 +152,12 @@ Run the example with `cargo run --release --example flow` from this folder.
     small bordered patch.
   - `Flow::edge_line` and `Flow::edge_label_point` say where an edge and its label were
     last drawn.
+- **Lining up.** With `FlowOptions::alignment_guides`, dragged nodes line up with the edges
+  and middles of the nodes near them, within a few points (`guide_reach`), and guide lines
+  show what with (`Flow::alignment_guides`). It's off by default, as in React Flow.
+  `Flow::align_selected` lines the selection up by its left, centre, right, top, middle or
+  bottom; `distribute_selected` spaces it evenly across or down. Both work by where nodes are
+  in the flow, frames' children included, and send `NodeMove`.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

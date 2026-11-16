@@ -162,6 +162,11 @@ pub struct FlowOptions {
     /// Step and smooth step edges go round the nodes in their way, where that's quick to work
     /// out (see `routing`); otherwise they take their usual route.
     pub avoid_nodes: bool,
+    /// While nodes are dragged, they line up with the edges and middles of the nodes near
+    /// them, and guides show what with. Off by default, as in React Flow.
+    pub alignment_guides: bool,
+    /// How near (in points on screen) a dragged node must come to lining up for it to.
+    pub guide_reach: f32,
     /// How far (in points on screen) a pressed node must move before it counts as a drag.
     pub node_drag_threshold: f32,
     /// How long the viewport takes to get where the controls, a fit or a double click send it.
@@ -201,6 +206,8 @@ impl Default for FlowOptions {
             touch_target_size: 44.,
             layout: Layout::Free,
             avoid_nodes: false,
+            alignment_guides: false,
+            guide_reach: 6.,
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
             fit_padding: 0.1,
@@ -271,6 +278,33 @@ pub enum ContextTarget {
     Pane,
 }
 
+/// A guide drawn while a drag lines a node up with another: a line in the flow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Guide {
+    pub from: XY,
+    pub to: XY,
+}
+
+/// Which edges or middles [`Flow::align_selected`] lines up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    /// The middles across.
+    Center,
+    Right,
+    Top,
+    /// The middles up and down.
+    Middle,
+    Bottom,
+}
+
+/// Which way [`Flow::distribute_selected`] spaces nodes out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Distribute {
+    Horizontally,
+    Vertically,
+}
+
 /// One handle of one node.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HandleRef {
@@ -314,7 +348,7 @@ pub enum FlowEvent {
     NodeDragStart(Vec<NodeId>),
     NodeDrag(Vec<NodeId>),
     NodeDragStop(Vec<NodeId>),
-    /// The arrow keys moved these nodes.
+    /// The arrow keys, or an align or distribute command, moved these nodes.
     NodeMove(Vec<NodeId>),
     /// A node's resizer was taken hold of, moved, and let go of (or escape put it back).
     /// Resizing from a top or left corner moves the node as well.
@@ -524,6 +558,8 @@ pub struct Flow {
     frame_time: Instant,
     last_selection: (Vec<NodeId>, Vec<EdgeId>),
     touch: Option<TouchPress>,
+    /// What a drag of nodes lines up with, to draw.
+    guides: Vec<Guide>,
     /// In a tree layout: the tree as of the last frame, the nodes folded under a collapsed
     /// one, where each node is headed, and when the last step toward there was taken.
     tree: Tree,
@@ -630,6 +666,7 @@ impl Flow {
             frame_time: now(cx),
             last_selection: Default::default(),
             touch: None,
+            guides: Vec::new(),
             last_tap: None,
             tree: Tree::default(),
             folded: HashSet::new(),
@@ -2662,6 +2699,172 @@ impl Flow {
         true
     }
 
+    // Lining up.
+
+    /// The guides showing what the node being dragged lines up with, in the flow; empty when
+    /// it lines up with nothing, or nothing's dragged.
+    pub fn alignment_guides(&self) -> &[Guide] {
+        &self.guides
+    }
+
+    /// Where the dragged nodes' box, moved by `by`, lines up with a node near it: `by` moved
+    /// the little more it takes, and the guides to draw. Edges and middles each way line up
+    /// with edges and middles, within a few points on screen.
+    fn guided(&self, origins: &[(NodeId, XY)], by: XY) -> (XY, Vec<Guide>) {
+        let mut area: Option<Rect> = None;
+        for (id, origin) in origins {
+            let (Some(node), Some((w, h))) = (self.node(id), self.node_size(id)) else {
+                continue;
+            };
+            let parent = self
+                .absolute_position(id)
+                .map_or(xy(0., 0.), |at| at - node.position);
+            let at = parent + *origin + by;
+            let r = Rect::new(at.x, at.y, w, h);
+            area = Some(area.map_or(r, |a| a.union(&r)));
+        }
+        let Some(area) = area else {
+            return (by, Vec::new());
+        };
+        let reach = self.options.guide_reach / self.viewport.zoom;
+        let (pw, ph) = self.pane_size();
+        let seen = self.viewport.visible(pw.max(1.), ph.max(1.));
+        let moving: Vec<&NodeId> = origins.iter().map(|(id, _)| id).collect();
+        let others: Vec<Rect> = self
+            .nodes
+            .iter()
+            .filter(|n| self.shown(n))
+            .filter(|n| {
+                !moving
+                    .iter()
+                    .any(|m| self.is_under(&n.id, m) || self.is_under(m, &n.id))
+            })
+            .filter_map(|n| self.node_rect(&n.id))
+            .filter(|r| r.intersects(&seen))
+            .collect();
+        // The nearest line-up each way: how far, and with what.
+        let best = |mine: [f32; 3], theirs: &dyn Fn(&Rect) -> [f32; 3]| {
+            let mut best: Option<(f32, f32, Rect)> = None;
+            for r in &others {
+                for m in mine {
+                    for t in theirs(r) {
+                        let d = t - m;
+                        if d.abs() <= reach && best.is_none_or(|(b, _, _)| d.abs() < b.abs()) {
+                            best = Some((d, t, *r));
+                        }
+                    }
+                }
+            }
+            best
+        };
+        let across = |r: &Rect| [r.x, r.x + r.w / 2., r.right()];
+        let down = |r: &Rect| [r.y, r.y + r.h / 2., r.bottom()];
+        let x = best(across(&area), &across);
+        let y = best(down(&area), &down);
+        let by = by + xy(x.map_or(0., |b| b.0), y.map_or(0., |b| b.0));
+        let area = Rect::new(
+            area.x + x.map_or(0., |b| b.0),
+            area.y + y.map_or(0., |b| b.0),
+            area.w,
+            area.h,
+        );
+        let mut guides = Vec::new();
+        if let Some((_, at, r)) = x {
+            guides.push(Guide {
+                from: xy(at, area.y.min(r.y)),
+                to: xy(at, area.bottom().max(r.bottom())),
+            });
+        }
+        if let Some((_, at, r)) = y {
+            guides.push(Guide {
+                from: xy(area.x.min(r.x), at),
+                to: xy(area.right().max(r.right()), at),
+            });
+        }
+        (by, guides)
+    }
+
+    /// The selected nodes that move as themselves (not carried by a selected parent), with
+    /// their boxes in the flow.
+    fn arrangeable(&self) -> Vec<(NodeId, Rect)> {
+        self.nodes
+            .iter()
+            .filter(|n| n.selected && self.shown(n) && self.draggable(n))
+            .filter(|n| !self.ancestors(n).iter().any(|a| a.selected))
+            .filter_map(|n| Some((n.id.clone(), self.node_rect(&n.id)?)))
+            .collect()
+    }
+
+    /// Puts a node's top left corner at `at` in the flow, wherever its parent is.
+    fn place(&mut self, id: &NodeId, at: XY) {
+        let (Some(abs), Some(i)) = (self.absolute_position(id), self.index_of(id)) else {
+            return;
+        };
+        let parent = abs - self.nodes[i].position;
+        let to = self.within_extent(&self.nodes[i], at - parent);
+        self.nodes[i].position = to;
+    }
+
+    /// Lines the selected nodes up: their left sides with the leftmost, their middles with
+    /// the selection's, and so on. Says whether there were two or more to line up.
+    pub fn align_selected(&mut self, align: Align, cx: &mut Context<Self>) -> bool {
+        let boxes = self.arrangeable();
+        if boxes.len() < 2 {
+            return false;
+        }
+        let all = boxes
+            .iter()
+            .map(|(_, r)| *r)
+            .reduce(|a, b| a.union(&b))
+            .unwrap_or_default();
+        for (id, r) in &boxes {
+            let at = match align {
+                Align::Left => xy(all.x, r.y),
+                Align::Center => xy(all.x + (all.w - r.w) / 2., r.y),
+                Align::Right => xy(all.right() - r.w, r.y),
+                Align::Top => xy(r.x, all.y),
+                Align::Middle => xy(r.x, all.y + (all.h - r.h) / 2.),
+                Align::Bottom => xy(r.x, all.bottom() - r.h),
+            };
+            self.place(id, at);
+        }
+        cx.emit(FlowEvent::NodeMove(
+            boxes.into_iter().map(|(id, _)| id).collect(),
+        ));
+        cx.notify();
+        true
+    }
+
+    /// Spaces the selected nodes evenly across (or down) the room the outermost ones span,
+    /// keeping their order. Says whether there were three or more to space.
+    pub fn distribute_selected(&mut self, axis: Distribute, cx: &mut Context<Self>) -> bool {
+        let mut boxes = self.arrangeable();
+        if boxes.len() < 3 {
+            return false;
+        }
+        let horizontal = axis == Distribute::Horizontally;
+        let start = |r: &Rect| if horizontal { r.x } else { r.y };
+        let length = |r: &Rect| if horizontal { r.w } else { r.h };
+        boxes.sort_by(|a, b| {
+            (start(&a.1) + length(&a.1) / 2.).total_cmp(&(start(&b.1) + length(&b.1) / 2.))
+        });
+        let first = start(&boxes[0].1);
+        let last = boxes.last().map_or(first, |(_, r)| start(r) + length(r));
+        let total: f32 = boxes.iter().map(|(_, r)| length(r)).sum();
+        let gap = (last - first - total) / (boxes.len() - 1) as f32;
+        let mut at = first;
+        for (id, r) in &boxes {
+            let to = if horizontal { xy(at, r.y) } else { xy(r.x, at) };
+            self.place(id, to);
+            at += length(r) + gap;
+        }
+        cx.emit(FlowEvent::NodeMove(
+            boxes.into_iter().map(|(id, _)| id).collect(),
+        ));
+        cx.notify();
+        true
+    }
+
     /// Whether nodes are drawn as plain boxes at the current zoom.
     fn simplified(&self) -> bool {
         self.viewport.zoom < self.options.simplify_below_zoom
@@ -2997,6 +3200,13 @@ impl Flow {
                         cx.emit(FlowEvent::NodeDragStart(ids.clone()));
                     }
                     let by = self.drag_offset(origins, pressed, pointer - *grab);
+                    let by = if self.options.alignment_guides && self.tree_layout().is_none() {
+                        let (by, guides) = self.guided(origins, by);
+                        self.guides = guides;
+                        by
+                    } else {
+                        by
+                    };
                     for (id, origin) in origins.iter() {
                         let Some(i) = self.index_of(id) else {
                             continue;
@@ -3119,6 +3329,7 @@ impl Flow {
 
     /// Ends whatever the mouse was doing, as its release does.
     fn finish_drag(&mut self, cx: &mut Context<Self>) {
+        self.guides.clear();
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -3301,6 +3512,7 @@ impl Flow {
 
     /// Drops what's being dragged, putting back what it changed. Says whether anything was.
     fn cancel_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        self.guides.clear();
         match self.drag.take() {
             Some(Drag::Nodes { origins, moved, .. }) => {
                 for (id, origin) in &origins {
@@ -4214,6 +4426,7 @@ impl Render for Flow {
             }
             _ => None,
         };
+        let guides = self.guides.clone();
         let overlay = {
             let drag = self.drag.clone();
             let line_kind = self.options.connection_line.clone();
@@ -4221,6 +4434,10 @@ impl Render for Flow {
                 |_, _, _| {},
                 move |bounds, _, window, _| {
                     let origin = bounds.origin;
+                    for g in &guides {
+                        let line = [viewport.to_pane(g.from), viewport.to_pane(g.to)];
+                        paint::stroke(origin, &line, 1., colors.guide, window);
+                    }
                     if let Some(r) = drop_onto {
                         let a = viewport.to_pane(xy(r.x, r.y));
                         let pad = 4.;
