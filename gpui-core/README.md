@@ -17,7 +17,7 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   palette that differs from it (a light card in a dark app) takes its colours per element:
   `Press::focus_ring_color`, `Input::caret_color` / `selection_color` / `placeholder_color`,
   `Slider::track_color` / `fill_color` / `thumb_color`, `Tooltip::background` / `text_color` /
-  `border_color`, `Popover::colors`.
+  `border_color`, `Popover::colors`, `DatePicker::colors` / `MonthGrid::colors`.
 - **Popover.** `Popover::new(id).open(open).on_dismiss(…).trigger(element).child(…)` hangs a
   panel from its trigger, or from a box or point in the window with `anchor`. It goes below, or
   above where there's more room, stays inside the window and scrolls past `max_height`. A click
