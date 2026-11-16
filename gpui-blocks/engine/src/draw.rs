@@ -17,7 +17,7 @@ use gpui::{
 use gpui_core::text::paragraph::{
     Affinity, CodeStyle, InlineBox, Marks, Paragraph, ParagraphLayout, ParagraphStyle,
 };
-use gpui_kit::base::text::editor_host::TextMark;
+use gpui_kit::base::text::editor_host::{ColumnAlign, TextMark};
 
 use super::extension::{CustomNode, Extensions, InlineContext};
 use super::import::SOURCE_INLINE;
@@ -84,6 +84,8 @@ pub(crate) struct TextLeaf {
     style: ParagraphStyle,
     bands: Vec<(Range<usize>, Hsla)>,
     leaves: OwnLeaves,
+    /// Its paragraph and inline boxes, once built (to measure it before it's laid out).
+    built: Option<(Rc<Paragraph>, Vec<AnyElement>)>,
 }
 
 /// What a text leaf needs besides its text.
@@ -158,7 +160,52 @@ impl TextLeaf {
             style,
             bands,
             leaves: cx.leaves.clone(),
+            built: None,
         }
+    }
+
+    /// Its paragraph and inline boxes, built from its runs once (the boxes are laid out then).
+    fn build(&mut self, window: &mut Window, app: &mut App) -> Rc<Paragraph> {
+        if let Some((paragraph, _)) = &self.built {
+            return paragraph.clone();
+        }
+        let mut paragraph = Paragraph::default();
+        let mut boxes = Vec::new();
+        for run in std::mem::take(&mut self.runs) {
+            match run {
+                Run::Text(text, marks) => paragraph.push(&text, marks),
+                Run::Box(mut element, baseline) => {
+                    let size = element.layout_as_root(
+                        Size {
+                            width: AvailableSpace::MinContent,
+                            height: AvailableSpace::MinContent,
+                        },
+                        window,
+                        app,
+                    );
+                    paragraph.push_box(InlineBox {
+                        width: size.width,
+                        height: size.height,
+                        baseline: baseline.min(size.height),
+                    });
+                    boxes.push(element);
+                }
+            }
+        }
+        let paragraph = Rc::new(paragraph);
+        self.built = Some((paragraph.clone(), boxes));
+        paragraph
+    }
+
+    /// The width it takes unwrapped: the end of its longest line.
+    pub(crate) fn natural_width(&mut self, window: &mut Window, app: &mut App) -> Pixels {
+        let paragraph = self.build(window, app);
+        let layout = ParagraphLayout::new(&paragraph, &self.style, px(100_000.), window);
+        layout
+            .rows()
+            .iter()
+            .map(|row| layout.caret(row.range.end, Affinity::Upstream).left())
+            .fold(px(0.), Pixels::max)
     }
 }
 
@@ -245,30 +292,8 @@ impl Element for TextLeaf {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut paragraph = Paragraph::default();
-        let mut boxes = Vec::new();
-        for run in std::mem::take(&mut self.runs) {
-            match run {
-                Run::Text(text, marks) => paragraph.push(&text, marks),
-                Run::Box(mut element, baseline) => {
-                    let size = element.layout_as_root(
-                        Size {
-                            width: AvailableSpace::MinContent,
-                            height: AvailableSpace::MinContent,
-                        },
-                        window,
-                        cx,
-                    );
-                    paragraph.push_box(InlineBox {
-                        width: size.width,
-                        height: size.height,
-                        baseline: baseline.min(size.height),
-                    });
-                    boxes.push(element);
-                }
-            }
-        }
-        let paragraph = Rc::new(paragraph);
+        self.build(window, cx);
+        let (paragraph, boxes) = self.built.take().expect("built above");
         let cache: LayoutCache = Rc::default();
         let (measured, style, written) = (paragraph.clone(), self.style.clone(), cache.clone());
         let mut layout_style = Style::default();
@@ -406,6 +431,8 @@ pub(crate) struct Colors {
     pub(crate) code_background: Hsla,
     pub(crate) mono: gpui::SharedString,
     pub(crate) border: Hsla,
+    /// A table's fill.
+    pub(crate) surface: Hsla,
 }
 
 /// A line height snapped to whole device pixels, as GPUI Kit lays its text out.
@@ -455,6 +482,7 @@ pub(crate) enum Tree {
         inline: InlineText,
     },
     List(ListTree),
+    Table(TableTree),
     Quote(Vec<Tree>),
     Callout(gpui::SharedString, Vec<Tree>),
     /// A toggle: its summary, then its body when open.
@@ -476,8 +504,14 @@ struct ItemTree {
     children: Vec<Tree>,
 }
 
+pub(crate) struct TableTree {
+    aligns: Vec<ColumnAlign>,
+    /// Each row's cells, the header first: a cell's key and its text.
+    rows: Vec<Vec<(u64, InlineText)>>,
+}
+
 /// `block` as a tree the engine can draw: `None` when something in it is still drawn by GPUI
-/// Kit (code, tables, pictures).
+/// Kit (code, pictures).
 pub(crate) fn tree(
     doc: &super::document::EditorDocument,
     block: super::id::BlockId,
@@ -501,6 +535,24 @@ pub(crate) fn tree(
                 }
             }
             (K::List { .. }, _) => Tree::List(list_tree(doc, block, None)?),
+            (K::Table { aligns }, _) => Tree::Table(TableTree {
+                aligns: aligns.clone(),
+                rows: doc
+                    .children(block)
+                    .iter()
+                    .map(|row| {
+                        doc.children(*row)
+                            .iter()
+                            .map(|cell| match doc.get(*cell).map(|e| &e.content) {
+                                Some(BlockContent::Inline(inline)) if draws(inline) => {
+                                    Some((cell.as_u64(), inline.clone()))
+                                }
+                                _ => None,
+                            })
+                            .collect::<Option<Vec<_>>>()
+                    })
+                    .collect::<Option<_>>()?,
+            }),
             (K::Blockquote, _) => Tree::Quote(children(block)?),
             (K::Callout { name }, _) => Tree::Callout(name.clone(), children(block)?),
             (K::Toggle { open }, _) => {
@@ -652,6 +704,11 @@ pub(crate) fn draw(
             let leaf = TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app);
             div().pt(top).pb(bottom).child(leaf).into_any_element()
         }
+        Tree::Table(table) => div()
+            .pb(gap)
+            .w_full()
+            .child(table_element(table, color, d, window, app))
+            .into_any_element(),
         Tree::Rule => {
             // A hairline with more room around it than a paragraph gap. The previous block's
             // own gap counts toward the space above.
@@ -927,4 +984,139 @@ fn item_row(
         }
     };
     row.child(div().flex_auto().min_w_0().overflow_hidden().child(content))
+}
+
+/// A table cell's padding (GPUI Kit's `px_3` and `py(7)`), the narrowest a column starts from,
+/// and the rules between rows and columns and around the table.
+const CELL_PAD_X: f32 = 12.;
+const CELL_PAD_Y: f32 = 7.;
+const CELL_MIN: f32 = 48.;
+const RULE: f32 = 1.;
+
+/// A table as GPUI Kit lays it out, so the grips and the caret find its cells where they were:
+/// each column is a cell and slack. A cell grows to fit its widest line, never narrower than its
+/// floor; flex layout grows every cell alike and stops each at its width, so narrow columns fit
+/// and the widest share what's left. Room left after every cell fits goes to the slack, in
+/// proportion to the columns, after, around or before the cell as the column is aligned.
+fn table_element(
+    table: &TableTree,
+    color: Option<Hsla>,
+    d: &DrawCx<'_>,
+    window: &mut Window,
+    app: &mut App,
+) -> AnyElement {
+    // The cells' share of the free room while any is still growing; the slack's is about a
+    // millionth of it.
+    const CELL_GROW: f32 = 1e6;
+    let cols = table.rows.iter().map(Vec::len).max().unwrap_or(0);
+    let style = paragraph_style(d.base, d.body_size, d.body_line, d.colors);
+    let mut rows: Vec<Vec<TextLeaf>> = table
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(r, row)| {
+            row.iter()
+                .enumerate()
+                .map(|(c, (key, inline))| {
+                    let mut style = style.clone();
+                    style.align = match table.aligns.get(c) {
+                        Some(ColumnAlign::Center) => gpui::TextAlign::Center,
+                        Some(ColumnAlign::Right) => gpui::TextAlign::Right,
+                        _ => gpui::TextAlign::Left,
+                    };
+                    // The header keeps the body colour in a quote, as GPUI Kit's does.
+                    if let Some(color) = color.filter(|_| r > 0) {
+                        style.color = color;
+                    }
+                    let bands = d.bands.get(key).cloned().unwrap_or_default();
+                    TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app)
+                })
+                .collect()
+        })
+        .collect();
+    let divider = |c: usize| if c + 1 < cols { RULE } else { 0. };
+    // Each column's width to fit its widest line, with the cells' padding and divider.
+    let mut widths = vec![CELL_MIN; cols];
+    for row in &mut rows {
+        for (c, leaf) in row.iter_mut().enumerate() {
+            let w = f32::from(leaf.natural_width(window, app)) + CELL_PAD_X * 2. + divider(c);
+            widths[c] = widths[c].max(w);
+        }
+    }
+    // Rounded up to device pixels, or a column can lose the fraction that keeps a line whole.
+    let scale = window.scale_factor();
+    let ceil = |w: f32| (w * scale).ceil() / scale;
+    let floor = f32::from(window.rem_size() * 4.);
+    // Each cell's (narrowest, widest), its divider left out.
+    let columns: Vec<(f32, f32)> = widths
+        .iter()
+        .enumerate()
+        .map(|(c, &w)| {
+            let max = ceil(w - divider(c));
+            (ceil(w.min(floor) - divider(c)).min(max), max)
+        })
+        .collect();
+    let total = columns.iter().map(|(_, max)| max).sum::<f32>().max(1.);
+    let count = rows.len();
+    let border = d.colors.border;
+    let slack = |grow: f32| {
+        div()
+            .flex_basis(px(0.))
+            .flex_grow(grow)
+            .flex_shrink(0.)
+            .border_color(border)
+    };
+    let rows = rows.into_iter().enumerate().map(|(r, row)| {
+        let mut cells = row.into_iter();
+        let mut children = Vec::with_capacity(cols * 2);
+        for (c, &(min, max)) in columns.iter().enumerate() {
+            let last = c + 1 == cols;
+            let grow = max / total;
+            let (lead, trail) = match table.aligns.get(c) {
+                Some(ColumnAlign::Center) => (grow / 2., grow / 2.),
+                Some(ColumnAlign::Right) => (grow, 0.),
+                _ => (0., grow),
+            };
+            if lead > 0. {
+                children.push(slack(lead).into_any_element());
+            }
+            children.push(
+                div()
+                    .flex_basis(px(0.))
+                    .flex_grow(CELL_GROW)
+                    .min_w(px(min))
+                    .max_w(px(max))
+                    .overflow_hidden()
+                    .px(px(CELL_PAD_X))
+                    .py(px(CELL_PAD_Y))
+                    // A short row keeps its missing cells' places.
+                    .children(cells.next())
+                    .into_any_element(),
+            );
+            if trail > 0. || !last {
+                children.push(
+                    slack(trail)
+                        .when(!last, |s| s.border_r_1())
+                        .into_any_element(),
+                );
+            }
+        }
+        div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .when(r + 1 < count, |row| row.border_b_1())
+            .border_color(border)
+            .when(r == 0, |row| row.bg(d.colors.code_background))
+            .children(children)
+            .into_any_element()
+    });
+    div()
+        .w_full()
+        .overflow_hidden()
+        .bg(d.colors.surface)
+        .border_1()
+        .border_color(border)
+        .children(rows)
+        .into_any_element()
 }
