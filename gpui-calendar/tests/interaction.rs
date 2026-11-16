@@ -556,7 +556,7 @@ fn moving_an_occurrence_asks_which_ones_and_says_so(cx: &mut TestAppContext) {
     // Nothing goes to the host until the person answers; the ghost stays where it was let go.
     assert!(asking(&c, cx));
     assert_eq!(edits(&seen), 0);
-    assert!(cx.debug_bounds("calendar-popover").is_some());
+    assert!(cx.debug_bounds("gpui-core-popover").is_some());
     // A click on "This and following events".
     let row = cx.debug_bounds("scope-1").expect("the answers");
     cx.simulate_click(row.center(), Modifiers::none());
@@ -590,7 +590,7 @@ fn the_keys_answer_and_escape_puts_the_event_back(cx: &mut TestAppContext) {
     draw(cx);
     assert!(!asking(&c, cx));
     assert_eq!(edits(&seen), 0);
-    assert!(cx.debug_bounds("calendar-popover").is_none());
+    assert!(cx.debug_bounds("gpui-core-popover").is_none());
     let b = c
         .read_with(cx, |c, _| c.event_bounds("gym@4"))
         .expect("drawn");

@@ -415,9 +415,9 @@ fn the_recurring_question_fits_at_every_width() {
                 assert!(calendar.read_with(vcx, |c, _| c.is_asking()));
                 let window = Bounds::new(point(px(0.), px(0.)), size(px(w), px(h)));
                 let panel = if touch {
-                    "calendar-sheet"
+                    "gpui-core-sheet"
                 } else {
-                    "calendar-popover"
+                    "gpui-core-popover"
                 };
                 let b = vcx.debug_bounds(panel).expect("the question");
                 let inside = |r: Bounds<Pixels>, of: Bounds<Pixels>| {
@@ -582,9 +582,9 @@ fn the_event_panel_fits_at_every_width() {
                 // Narrow, the Mac shows the panel as a sheet too.
                 let narrow = w < 600.;
                 let outer = if touch || narrow {
-                    "calendar-sheet"
+                    "gpui-core-sheet"
                 } else {
-                    "calendar-popover"
+                    "gpui-core-popover"
                 };
                 let b = vcx
                     .debug_bounds(outer)

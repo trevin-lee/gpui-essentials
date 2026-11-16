@@ -349,7 +349,7 @@ fn on_touch_the_recurring_question_is_a_sheet_with_44_point_answers(cx: &mut Tes
         spot(&c, cx, day(5), 10, 15),
     );
     assert!(c.read_with(cx, |c, _| c.is_asking()));
-    assert!(cx.debug_bounds("calendar-sheet").is_some());
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
     for i in 0..3 {
         let row = cx
             .debug_bounds(Box::leak(format!("scope-{i}").into_boxed_str()))
@@ -369,7 +369,7 @@ fn on_touch_the_recurring_question_is_a_sheet_with_44_point_answers(cx: &mut Tes
         spot(&c, cx, day(5), 10, 15),
     );
     assert!(c.read_with(cx, |c, _| c.is_asking()));
-    let sheet = cx.debug_bounds("calendar-sheet").unwrap();
+    let sheet = cx.debug_bounds("gpui-core-sheet").unwrap();
     tap(cx, point(sheet.center().x, sheet.top() - px(40.)));
     assert!(!c.read_with(cx, |c, _| c.is_asking()));
     let moves = seen
@@ -395,11 +395,11 @@ fn on_touch_the_event_panel_is_a_sheet_with_44_point_rows(cx: &mut TestAppContex
     tap(cx, on);
     tap(cx, on);
     assert!(has(&seen, &CalendarEvent::Open("a".into())));
-    assert!(cx.debug_bounds("calendar-sheet").is_some());
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
     let link = cx.debug_bounds("panel-link-0").expect("the link");
     assert!(link.size.height >= px(44.), "{:?}", link.size);
     // A tap above the sheet closes it.
-    let sheet = cx.debug_bounds("calendar-sheet").unwrap();
+    let sheet = cx.debug_bounds("gpui-core-sheet").unwrap();
     tap(cx, point(sheet.center().x, sheet.top() - px(30.)));
     assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
 }
@@ -413,7 +413,7 @@ fn on_touch_the_mini_month_is_a_sheet_of_44_point_days(cx: &mut TestAppContext) 
     assert!(cx.debug_bounds("calendar-mini").is_none());
     let title = cx.debug_bounds("calendar-title").expect("a title");
     tap(cx, title.center());
-    assert!(cx.debug_bounds("calendar-sheet").is_some());
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
     let d = NaiveDate::from_ymd_opt(2026, 11, 24).unwrap();
     let cell = cx
         .debug_bounds(Box::leak(format!("day-{d}").into_boxed_str()))
