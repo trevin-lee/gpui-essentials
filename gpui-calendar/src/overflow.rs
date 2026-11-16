@@ -217,10 +217,23 @@ fn no_text_runs_over_at_phone_widths() {
 /// the calendar, from a phone to a wide window.
 #[test]
 fn the_header_fits_at_every_width() {
+    check_header(false);
+}
+
+/// And the header for touch, with its 44-point controls and no arrows.
+#[test]
+fn the_touch_header_fits_at_every_width() {
+    check_header(true);
+}
+
+fn check_header(touch: bool) {
     let mut cx = context();
     let (calendar, vcx) = cx.add_window_view(|_, cx| {
         Calendar::new(cx)
-            .with_options(|o| o.time_zone = TZ)
+            .with_options(|o| {
+                o.time_zone = TZ;
+                o.touch = touch;
+            })
             .with_now(at(day(2), 10, 40))
             .with_date(day(2))
             .with_events(worst_week())
@@ -259,4 +272,51 @@ fn the_header_fits_at_every_width() {
         }
     }
     assert!(found.is_empty(), "{}", found.join("\n"));
+}
+
+/// A swipe carries the days (their names, their events) and leaves the gutter's hours where
+/// they are.
+#[test]
+fn a_swipe_leaves_the_hours_in_place() {
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        let mut c = Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_view(CalendarView::Day)
+            .with_events(worst_week());
+        c.scroll_to_minute(8. * 60.);
+        c
+    });
+    vcx.simulate_resize(size(px(390.), px(844.)));
+    let find = |texts: &[drawn::Text], what: &str| {
+        texts
+            .iter()
+            .find(|t| t.text == what)
+            .map(|t| t.bounds.left())
+            .unwrap_or_else(|| panic!("{what:?} isn't drawn"))
+    };
+    let mut frame = |swipe: f32| {
+        calendar.update(vcx, |c, cx| {
+            c.swipe = swipe;
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        drawn::record();
+        vcx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        drawn::take()
+    };
+    let still = frame(0.);
+    let carried = frame(-120.);
+    assert_eq!(find(&still, "1 PM"), find(&carried, "1 PM"));
+    assert_eq!(find(&still, "PST"), find(&carried, "PST"));
+    let moved = find(&still, "Wednesday") - find(&carried, "Wednesday");
+    assert!((moved - px(120.)).abs() < px(0.5), "{moved:?}");
+    // The next day comes in beside it, its name right of the gutter.
+    assert!(carried.iter().any(|t| t.text == "Thursday"));
 }

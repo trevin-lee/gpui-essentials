@@ -5,9 +5,9 @@
 //! and sets the events again. The host's calendars decide each event's colour, whether it's
 //! shown and whether it can be edited.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::time::Duration as StdDuration;
+use std::time::{Duration as StdDuration, Instant};
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
@@ -139,6 +139,9 @@ pub(crate) enum Drag {
         original: EventTime,
         area: Area,
         now: (NaiveDate, f32),
+        /// How many minutes below the event's end it was grabbed (a finger takes the handle
+        /// from beside it), kept so the end doesn't jump to the finger.
+        shift: f32,
     },
 }
 
@@ -227,6 +230,37 @@ pub(crate) struct AgendaRow {
     pub end: SharedString,
 }
 
+/// Where a touch pan stands, as far as swiping goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Swiping {
+    /// No pan, or one that isn't a swipe.
+    No,
+    /// A pan that hasn't moved yet.
+    Undecided,
+    /// A sideways pan under the finger.
+    Yes,
+}
+
+/// A swipe easing to rest: from one offset to another over [`SETTLE`], timed by GPUI's clock and
+/// drawn a frame at a time; then, if it turned the period, the new one easing in.
+#[derive(Clone, Copy, Debug)]
+struct Settle {
+    from: f32,
+    to: f32,
+    start: Instant,
+    /// The period it turns to (1 next, -1 previous) once it's off the side.
+    turn: Option<i32>,
+    width: f32,
+}
+
+/// How long a swipe takes to ease out of the way, and the next period in.
+const SETTLE: StdDuration = StdDuration::from_millis(200);
+
+/// The speed at which a swipe is a flick, in points per second, and the stretch of the pan
+/// it's measured over.
+const FLICK_SPEED: f32 = 500.;
+const FLICK_WINDOW: StdDuration = StdDuration::from_millis(80);
+
 /// What a button in the narrow header does.
 type HeaderAction = Rc<dyn Fn(&mut Calendar, &mut Context<Calendar>)>;
 
@@ -260,6 +294,18 @@ pub struct Calendar {
     focus: FocusHandle,
     pub(crate) shared: Rc<Shared>,
     _tick: Option<Task<()>>,
+
+    /// Where a touch that's dragging something landed, and whether it has moved off it yet.
+    touch_from: Option<Point<Pixels>>,
+    touch_moved: bool,
+    /// A sideways swipe: how far it has carried the body, whether one is under the finger,
+    /// where it was when (for its speed), and the easing that settles it.
+    pub(crate) swipe: f32,
+    swiping: Swiping,
+    swipe_track: VecDeque<(Instant, f32)>,
+    settle: Option<Settle>,
+    /// The period beside this one, laid out while a swipe shows it.
+    neighbour: Option<Rc<Laid>>,
 }
 
 impl EventEmitter<CalendarEvent> for Calendar {}
@@ -312,6 +358,13 @@ impl Calendar {
             focus: cx.focus_handle(),
             shared: Rc::default(),
             _tick: Some(tick),
+            touch_from: None,
+            touch_moved: false,
+            swipe: 0.,
+            swiping: Swiping::No,
+            swipe_track: VecDeque::new(),
+            settle: None,
+            neighbour: None,
         }
     }
 
@@ -733,8 +786,15 @@ impl Calendar {
                 time::moved(*original, *grab, *now, *area != Area::Grid, step, tz),
             )),
             Drag::Resize {
-                id, original, now, ..
-            } => Some((Some(id.clone()), time::resized(*original, *now, step, tz))),
+                id,
+                original,
+                now,
+                shift,
+                ..
+            } => {
+                let to = (now.0, now.1 - shift);
+                Some((Some(id.clone()), time::resized(*original, to, step, tz)))
+            }
         }
     }
 
@@ -810,6 +870,43 @@ impl Calendar {
             all_day: e.time.is_all_day(),
             end,
         }
+    }
+
+    /// The period a swipe is bringing in, laid out, so it can be drawn beside the one leaving:
+    /// the next one when the view is pushed left, the previous one when pushed right. Kept
+    /// while the swipe lasts; none for the agenda, which scrolls its own way.
+    fn swipe_neighbour(&mut self) -> Option<paint::Neighbour> {
+        if self.swipe == 0. || matches!(self.view, CalendarView::Agenda(_)) {
+            self.neighbour = None;
+            return None;
+        }
+        let dir = if self.swipe < 0. { 1 } else { -1 };
+        let anchor = time::step(self.view, self.anchor, dir);
+        let (first, days) = time::visible_days(self.view, anchor, self.options.week_start);
+        let key = LayoutKey {
+            version: self.version,
+            view: self.view,
+            first,
+            days,
+            tz: self.options.time_zone,
+            hour12: self.options.hour12,
+            min_minutes: self.min_minutes(),
+        };
+        let laid = match &self.neighbour {
+            Some(laid) if laid.key == key => laid.clone(),
+            _ => {
+                let laid = Rc::new(self.build_layout(key));
+                self.neighbour = Some(laid.clone());
+                laid
+            }
+        };
+        Some(paint::Neighbour {
+            dir,
+            first,
+            days,
+            month: anchor.month(),
+            laid,
+        })
     }
 
     pub(crate) fn layout(&mut self) -> Rc<Laid> {
@@ -1106,14 +1203,22 @@ impl Calendar {
             self.finish(cx);
             return;
         }
-        let p = event.position;
+        self.drag_to(drag, event.position, false, cx);
+    }
+
+    /// Carries a press or a drag to `p`. A press becomes a drag once it has moved a few pixels,
+    /// or at once when `now` (a long press, or a touch on a selected event).
+    fn drag_to(&mut self, drag: Drag, p: Point<Pixels>, now: bool, cx: &mut Context<Self>) {
+        let Some(geo) = self.shared.geo.get() else {
+            return;
+        };
         let next = match drag {
             // The agenda is a list: nothing in it is dragged.
             Drag::Press { .. } if geo.kind == paint::Kind::Agenda => return,
             Drag::Press { at, target } => {
                 let threshold = 4. * geo.s;
                 let moved = (f32::from(p.x - at.x)).hypot(f32::from(p.y - at.y));
-                if moved < threshold {
+                if moved < threshold && !now {
                     return;
                 }
                 let target = match target {
@@ -1145,11 +1250,20 @@ impl Calendar {
                             return;
                         };
                         if resize {
+                            let grab = geo.pos(at, area);
+                            let shift = match original {
+                                EventTime::Timed { end, .. } if area == Area::Grid => {
+                                    let tz = self.options.time_zone;
+                                    grab.1 - time::wall_minutes(end, grab.0, tz)
+                                }
+                                _ => 0.,
+                            };
                             Drag::Resize {
                                 id,
                                 original,
                                 area,
                                 now: geo.pos(p, area),
+                                shift,
                             }
                         } else {
                             Drag::Move {
@@ -1193,12 +1307,17 @@ impl Calendar {
                 now: geo.pos(p, area),
             },
             Drag::Resize {
-                id, original, area, ..
+                id,
+                original,
+                area,
+                shift,
+                ..
             } => Drag::Resize {
                 id,
                 original,
                 area,
                 now: geo.pos(p, area),
+                shift,
             },
             Drag::Create { date, from, .. } => Drag::Create {
                 date,
@@ -1302,6 +1421,9 @@ impl Calendar {
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
+        if event.source == ScrollSource::Touch && self.swipe_scroll(event, &geo, cx) {
+            return;
+        }
         let delta = event.delta.pixel_delta(px(20.)).y;
         if geo.kind == paint::Kind::Agenda {
             let at = self.shared.agenda_scroll.get().unwrap_or(0.) - f32::from(delta);
@@ -1317,6 +1439,242 @@ impl Calendar {
         let minutes = -f32::from(delta) / f32::from(geo.hour_h) * 60.;
         self.scroll_by(minutes, &geo);
         cx.notify();
+    }
+
+    // Touch.
+
+    /// A long press: on an event it picks the event up, on empty time it makes one an hour
+    /// long (the usual length), and the finger then drags either. Returns whether it took it.
+    pub(crate) fn long_press(&mut self, event: &LongPressEvent, cx: &mut Context<Self>) -> bool {
+        let Some(geo) = self.shared.geo.get() else {
+            return false;
+        };
+        match event.phase {
+            TouchPhase::Started => {
+                if geo.kind == paint::Kind::Agenda || self.drag.is_some() {
+                    return false;
+                }
+                let target = match paint::target_at(&geo, &self.shared, event.start_position) {
+                    Target::Link {
+                        id,
+                        area,
+                        read_only,
+                        ..
+                    } => Target::Event {
+                        id,
+                        area,
+                        resize: false,
+                        read_only,
+                    },
+                    other => other,
+                };
+                let take = match &target {
+                    Target::Event { id, read_only, .. } => {
+                        !read_only && self.editable(id).is_some()
+                    }
+                    Target::Grid { .. } | Target::Day { .. } => self.new_event_calendar().is_some(),
+                    _ => false,
+                };
+                if !take {
+                    return false;
+                }
+                if let Target::Event { id, .. } = &target {
+                    self.select(Some(Selection::Event(id.clone())), cx);
+                }
+                self.touch_from = Some(event.start_position);
+                self.touch_moved = false;
+                let at = event.start_position;
+                self.drag_to(Drag::Press { at, target }, at, true, cx);
+                if let Some(Drag::Create { from, to, .. }) = &mut self.drag {
+                    *from = time::snap_floor(*from, self.options.snap());
+                    *to = *from + self.options.default_duration.num_minutes() as f32;
+                }
+                cx.notify();
+                true
+            }
+            _ => self.touch_follow(event.phase, event.position, true, &geo, cx),
+        }
+    }
+
+    /// A touch landing on the selected event, or on its handle: it drags the event (or its
+    /// end) straight away rather than scrolling. Let go without moving, it opens the event.
+    pub(crate) fn touch_drag(&mut self, event: &TouchDragEvent, cx: &mut Context<Self>) -> bool {
+        let Some(geo) = self.shared.geo.get() else {
+            return false;
+        };
+        match event.phase {
+            TouchPhase::Started => {
+                if !self.options.touch || geo.kind == paint::Kind::Agenda || self.drag.is_some() {
+                    return false;
+                }
+                let at = event.start_position;
+                let target = paint::target_at(&geo, &self.shared, at);
+                let Target::Event { id, read_only, .. } = &target else {
+                    return false;
+                };
+                if *read_only || self.selected_event() != Some(id) || self.editable(id).is_none() {
+                    return false;
+                }
+                self.touch_from = Some(at);
+                self.touch_moved = false;
+                self.drag = Some(Drag::Press { at, target });
+                true
+            }
+            _ => self.touch_follow(event.phase, event.position, false, &geo, cx),
+        }
+    }
+
+    /// The rest of a touch that's dragging something: it follows the finger once the finger
+    /// has moved off where it landed, and proposes what it made when the finger lifts.
+    fn touch_follow(
+        &mut self,
+        phase: TouchPhase,
+        p: Point<Pixels>,
+        long: bool,
+        geo: &Geo,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(from) = self.touch_from else {
+            return false;
+        };
+        match phase {
+            TouchPhase::Started | TouchPhase::Moved => {
+                let moved = (p - from).magnitude() as f32 >= 8. * geo.s;
+                self.touch_moved |= moved;
+                if self.touch_moved
+                    && let Some(drag) = self.drag.clone()
+                {
+                    self.drag_to(drag, p, long, cx);
+                }
+            }
+            TouchPhase::Ended => {
+                self.touch_from = None;
+                // A touch on the selected event that didn't move is a tap on it: open it.
+                if !long
+                    && !self.touch_moved
+                    && let Some(Drag::Press {
+                        target: Target::Event { id, .. },
+                        ..
+                    }) = self.drag.take()
+                {
+                    cx.emit(CalendarEvent::Open(id));
+                    cx.notify();
+                    return true;
+                }
+                self.finish(cx);
+            }
+            TouchPhase::Cancelled => {
+                self.touch_from = None;
+                self.drag = None;
+                cx.notify();
+            }
+        }
+        true
+    }
+
+    /// A finger's sideways pan: the body follows it, and past a fifth of the width (or flicked)
+    /// the next or previous period slides in. Returns whether the pan was a sideways one.
+    fn swipe_scroll(&mut self, event: &ScrollEvent, geo: &Geo, cx: &mut Context<Self>) -> bool {
+        let delta = event.delta.pixel_delta(px(20.));
+        let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
+        if event.touch_phase == TouchPhase::Started {
+            self.swiping = if self.drag.is_none() {
+                Swiping::Undecided
+            } else {
+                Swiping::No
+            };
+        }
+        // GPUI locks a pan to the way it first moves.
+        if self.swiping == Swiping::Undecided && (dx != 0. || dy != 0.) {
+            self.swiping = if dx.abs() > dy.abs() {
+                self.settle = None;
+                self.swipe_track.clear();
+                Swiping::Yes
+            } else {
+                Swiping::No
+            };
+        }
+        if self.swiping != Swiping::Yes {
+            if matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                self.swiping = Swiping::No;
+            }
+            return self.swiping == Swiping::Undecided;
+        }
+        let now = cx.background_executor().now();
+        self.swipe += dx;
+        self.swipe_track.push_back((now, self.swipe));
+        while self
+            .swipe_track
+            .front()
+            .is_some_and(|(t, _)| now.duration_since(*t) > FLICK_WINDOW)
+        {
+            self.swipe_track.pop_front();
+        }
+        match event.touch_phase {
+            TouchPhase::Started | TouchPhase::Moved => cx.notify(),
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                self.swiping = Swiping::No;
+                // The day area's width (the gutter stays), or the month's.
+                let width = f32::from(geo.bounds.right() - geo.gutter);
+                let far = self.swipe.abs() > width / 5.;
+                let speed = self.swipe_speed();
+                let flicked = speed.abs() >= FLICK_SPEED && speed.signum() == self.swipe.signum();
+                let turn = (event.touch_phase == TouchPhase::Ended && (far || flicked))
+                    .then_some(if self.swipe < 0. { 1 } else { -1 });
+                self.swipe_track.clear();
+                self.settle = Some(Settle {
+                    from: self.swipe,
+                    to: turn.map_or(0., |dir| -(dir as f32) * width),
+                    start: now,
+                    turn,
+                    width,
+                });
+                cx.notify();
+            }
+        }
+        true
+    }
+
+    /// How fast the swipe was going over its last moments, in points per second: the same
+    /// however often the touches came.
+    fn swipe_speed(&self) -> f32 {
+        let (Some((t0, x0)), Some((t1, x1))) = (self.swipe_track.front(), self.swipe_track.back())
+        else {
+            return 0.;
+        };
+        let dt = t1.duration_since(*t0).as_secs_f32();
+        if dt <= 0. { 0. } else { (x1 - x0) / dt }
+    }
+
+    /// Moves a settling swipe on to where it is at this frame, asking for the next frame while
+    /// it moves. At rest it asks for none.
+    fn advance_settle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(settle) = self.settle else {
+            return;
+        };
+        let now = cx.background_executor().now();
+        let t = (now.duration_since(settle.start).as_secs_f32() / SETTLE.as_secs_f32()).min(1.);
+        let eased = 1. - (1. - t).powi(3);
+        self.swipe = settle.from + (settle.to - settle.from) * eased;
+        if t < 1. {
+            window.request_animation_frame();
+            return;
+        }
+        self.settle = None;
+        if let Some(dir) = settle.turn {
+            // The new period comes in from the side the finger pushed from.
+            self.go_to(time::step(self.view, self.anchor, dir), cx);
+            let from = dir as f32 * settle.width;
+            self.swipe = from;
+            self.settle = Some(Settle {
+                from,
+                to: 0.,
+                start: now,
+                turn: None,
+                width: settle.width,
+            });
+            window.request_animation_frame();
+        }
     }
 
     // The keyboard.
@@ -1577,9 +1935,17 @@ impl Calendar {
         })
     }
 
-    /// The header for a narrow calendar, as on a phone: the title, Today, the period arrows,
-    /// and Day, Month and List. Drawn with plain elements, not GPUI Kit's buttons.
-    fn render_compact_header(&self, colors: CalendarColors, cx: &mut Context<Self>) -> Div {
+    /// The header for a narrow calendar or one taken by touch: the title (a short one when
+    /// narrow), Today, the period arrows (not on touch, where a swipe changes the period), and
+    /// the views (Day, Month and List when narrow). Drawn with plain elements, not GPUI Kit's
+    /// buttons; on touch each control is 44 points tall.
+    fn render_compact_header(
+        &self,
+        narrow: bool,
+        colors: CalendarColors,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let touch = self.options.touch;
         let this = cx.entity().downgrade();
         let on = move |f: HeaderAction| {
             let this = this.clone();
@@ -1598,7 +1964,8 @@ impl Calendar {
                 .flex_none()
                 .items_center()
                 .justify_center()
-                .h(rems(32. / 15.))
+                .h(rems(if touch { 44. } else { 32. } / 15.))
+                .min_w(rems(if touch { 44. } else { 0. } / 15.))
                 .px(rems(8. / 15.))
                 .rounded(rems(8. / 15.))
                 .text_size(rems(13. / 15.))
@@ -1613,17 +1980,31 @@ impl Calendar {
                 .child(label)
         };
         let view = self.view;
-        let views = [
-            (CalendarView::Day, "Day"),
-            (CalendarView::Month, "Month"),
-            (CalendarView::AGENDA, "List"),
-        ];
+        let views: &[(CalendarView, &str)] = if narrow {
+            &[
+                (CalendarView::Day, "Day"),
+                (CalendarView::Month, "Month"),
+                (CalendarView::AGENDA, "List"),
+            ]
+        } else {
+            &[
+                (CalendarView::Day, "Day"),
+                (CalendarView::Week, "Week"),
+                (CalendarView::Month, "Month"),
+                (CalendarView::AGENDA, "Agenda"),
+            ]
+        };
+        let title = if narrow {
+            self.short_title()
+        } else {
+            self.title()
+        };
         div()
             .flex()
             .flex_none()
             .items_center()
             .gap(rems(6. / 15.))
-            .h(rems(52. / 15.))
+            .h(rems(if touch { 56. } else { 52. } / 15.))
             .px(rems(12. / 15.))
             .border_b_1()
             .border_color(colors.line)
@@ -1636,7 +2017,7 @@ impl Calendar {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors.text)
                     .debug_selector(|| "calendar-title".into())
-                    .child(SharedString::from(self.short_title())),
+                    .child(SharedString::from(title)),
             )
             .child(
                 div()
@@ -1649,14 +2030,16 @@ impl Calendar {
                         control("today".into(), "Today".into(), false)
                             .on_click(on(Rc::new(|c, cx| c.go_to_today(cx)))),
                     )
-                    .child(
-                        control("previous".into(), "‹".into(), false)
-                            .on_click(on(Rc::new(|c, cx| c.previous(cx)))),
-                    )
-                    .child(
-                        control("next".into(), "›".into(), false)
-                            .on_click(on(Rc::new(|c, cx| c.next(cx)))),
-                    )
+                    .when(!touch, |d| {
+                        d.child(
+                            control("previous".into(), "‹".into(), false)
+                                .on_click(on(Rc::new(|c, cx| c.previous(cx)))),
+                        )
+                        .child(
+                            control("next".into(), "›".into(), false)
+                                .on_click(on(Rc::new(|c, cx| c.next(cx)))),
+                        )
+                    })
                     .child(
                         div()
                             .flex()
@@ -1666,9 +2049,10 @@ impl Calendar {
                             .rounded(rems(10. / 15.))
                             .border_1()
                             .border_color(colors.line)
-                            .children(views.into_iter().enumerate().map(|(i, (v, label))| {
+                            .children(views.iter().enumerate().map(|(i, &(v, label))| {
                                 let on_view = match (v, view) {
-                                    (CalendarView::Day, CalendarView::Days(_)) => true,
+                                    (CalendarView::Day, CalendarView::Days(_)) => narrow,
+                                    (CalendarView::Week, CalendarView::Days(_)) => true,
                                     (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
                                     _ => v == view,
                                 };
@@ -1792,6 +2176,7 @@ impl Render for Calendar {
         let colors = self
             .colors
             .unwrap_or_else(|| CalendarColors::from_theme(cx));
+        self.advance_settle(window, cx);
         let laid = self.layout();
         if self.last_range.is_none() {
             // The first frame tells the host what to supply.
@@ -1829,6 +2214,9 @@ impl Render for Calendar {
             },
             all_day_expanded: self.all_day_expanded,
             header_narrow: self.header.then(|| self.is_narrow(window)),
+            swipe: self.swipe,
+            neighbour: self.swipe_neighbour(),
+            lanes: None,
         };
         let this = cx.entity().downgrade();
         let body = paint::body(scene, self.shared.clone(), this);
@@ -1856,8 +2244,9 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
             .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
             .when(self.header, |d| {
-                if self.is_narrow(window) {
-                    d.child(self.render_compact_header(colors, cx))
+                let narrow = self.is_narrow(window);
+                if narrow || self.options.touch {
+                    d.child(self.render_compact_header(narrow, colors, cx))
                 } else {
                     d.child(self.render_header(cx).into_any_element())
                 }
