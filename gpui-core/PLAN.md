@@ -83,9 +83,10 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
   - every component works from the keyboard and shows a focus ring drawn with `ring`;
   - links, actions and images are emitted as events for the host, and the crate never fetches
     or opens anything itself.
-- **Icons.** A `lucide` feature (on by default) vendors Lucide's SVGs directly from upstream
-  (ISC; its licence goes in NOTICE) behind an `AssetSource` and an `IconName` list. Hosts can
-  chain their own assets in front.
+- **Icons.** Lucide's whole set is vendored from upstream (ISC; its licence sits beside the
+  SVGs and is credited in NOTICE) by `scripts/lucide.py`. The crate serves it at
+  `icons/<name>.svg` through an `AssetSource` (`Icons`) and names it with `IconName`. Hosts can
+  put their own assets in front. It's always built in; the minified SVGs add about 750 KB.
 - **Tests.**
   - Unit and interaction tests per component.
   - A headless overflow test that renders every component with long, unbreakable and
