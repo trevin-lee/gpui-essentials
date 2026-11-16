@@ -25,6 +25,8 @@ url = "2"
 # The renderer (the gpui feature). Pinned exactly: GPUI comes as GPUI Kit, which pins a snapshot
 # of Zed's GPUI (gpui-pre 0.3.12), and a host using this crate must link the same one.
 gpui-kit = { workspace = true, optional = true }
+# Everything pressable (buttons, tabs, chips, table cells): gpui-core's Press, on the same GPUI.
+gpui-core = { path = "../gpui-core", optional = true }
 # The date picker's dates; the version GPUI Kit's own date picker uses.
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"], optional = true }
 # Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
@@ -41,7 +43,7 @@ gpui-pre-macos = { workspace = true, features = ["test-support"], optional = tru
 default = ["gpui"]
 # The GPUI renderer. Without it (default-features = false) the crate is the parser and model
 # alone, with no GPUI in the build.
-gpui = ["dep:gpui-kit", "dep:chrono"]
+gpui = ["dep:gpui-kit", "dep:gpui-core", "dep:chrono"]
 # Pictures of the gallery example rendered offscreen (`--shots`).
 shots = ["gpui", "dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
 
