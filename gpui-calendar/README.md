@@ -53,6 +53,12 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
   asks to delete the selected event, and Escape drops a drag or the selection.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
   database, so a DST day doesn't depend on the machine's zone files.
+- **Narrow widths:** below 600 pixels the calendar lays itself out for a phone. The header is a
+  compact one, drawn without GPUI Kit: a short title ("Wed, Nov 18", "Nov 2026"), Today, the
+  arrows, and Day, Month and List. The gutter narrows, days too narrow for "Mon 16" show the name
+  over the number, "+3 more" becomes "+3", and the month's rows drop their times for the
+  title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
+  to "L…". `short_title()` gives the short title for a header of your own.
 - **Theming:** each calendar's colour, the week's first day, 12- or 24-hour time, and colours
   from GPUI Kit's theme. It scales with the window's rem, so it follows an app's zoom.
 
@@ -193,16 +199,19 @@ cargo run --release --example calendar -- --bench [--events 2000] [--packed]
 cargo run --release --features shots --example calendar -- --shot out.png --scene week
 ```
 
-`cargo test` also draws every view at widths from 720 to 2,200 pixels, and the agenda from 320,
+`cargo test` also draws every view at widths from 320 (the narrowest iPhone) to 2,200 pixels,
 with long titles, locations and links, laid out with Core Text and Inter as on screen, and fails
-if any text runs out of the area it's drawn in or into other text.
+if any text runs out of the area it's drawn in, runs into other text, or is cut to fewer than
+two letters and "…". It checks that the header's title gives way before its buttons run out of
+the calendar, at the same widths.
 
 The example is a week of sample events and a host that agrees to every proposal and says what
 happened at the bottom of the window. For pictures and the bench it pretends it's Wednesday 18
 November 2026, 10:40 in Los Angeles. Pictures and the bench draw a window that's never shown and
 never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `drag-create`,
-`drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag`, `links` and `agenda` (drawn
-720 pixels wide).
+`drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag`, `links`, `agenda` (drawn
+720 pixels wide) and, at an iPhone's 390 by 844, `compact`, `compact-week` and
+`compact-agenda`.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from GPUI
@@ -217,6 +226,8 @@ Kit's theme.
 | ![Wednesday on its own](docs/day.png) | ![A week packed with overlapping events](docs/dense.png) |
 | **Links to docs and agents** | **The agenda** |
 | ![Design review listing its notes; shorter events with a link's mark or a count](docs/links.png) | ![Tuesday's events listed with their times, colours and links](docs/agenda.png) |
+| **A day on a phone** | **The agenda on a phone** |
+| ![Wednesday at 390 pixels wide, with the compact header](docs/compact.png) | ![Tuesday's list at 390 pixels wide](docs/compact-agenda.png) |
 
 ## Performance
 

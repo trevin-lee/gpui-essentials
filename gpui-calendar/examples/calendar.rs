@@ -9,7 +9,8 @@
 //! ```
 //!
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
-//! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`. Pictures and the bench draw a window that's never shown
+//! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
+//! `compact-agenda`. Pictures and the bench draw a window that's never shown
 //! and never takes the keyboard.
 
 use std::path::PathBuf;
@@ -19,6 +20,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc, 
 use chrono_tz::Tz;
 use gpui_calendar::*;
 use gpui_kit::component::{Theme, ThemeMode};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 const TZ: Tz = chrono_tz::America::Los_Angeles;
@@ -587,8 +589,11 @@ impl Root {
         let mut now_at = now;
         match args.scene.as_str() {
             "day" => view = CalendarView::Day,
+            // A phone: the day, the week and the agenda at an iPhone's width.
+            "compact" => view = CalendarView::Day,
+            "compact-week" => {}
             // Tuesday morning, the day with the most links.
-            "agenda" => {
+            "agenda" | "compact-agenda" => {
                 view = CalendarView::AGENDA;
                 date = monday + Duration::days(1);
                 now_at = local(date, 8, 10);
@@ -677,9 +682,15 @@ impl Root {
         let subscription = cx.subscribe(&calendar, |this, calendar, event: &CalendarEvent, cx| {
             this.host(calendar, event, cx);
         });
+        // A phone's window has no room for the hint.
+        let status = if scene.starts_with("compact") {
+            ""
+        } else {
+            "Drag empty time to add an event; drag one to move it; t d w m a j k"
+        };
         Self {
             calendar,
-            status: "Drag empty time to add an event; drag one to move it; t d w m j k".into(),
+            status: status.into(),
             added: 0,
             _subscription: subscription,
         }
@@ -773,17 +784,19 @@ impl Render for Root {
             .font_family("Inter")
             .bg(c.background)
             .child(div().flex_1().min_h_0().child(self.calendar.clone()))
-            .child(
-                div()
-                    .flex_none()
-                    .px(px(16.))
-                    .py(px(7.))
-                    .border_t_1()
-                    .border_color(c.border)
-                    .text_size(px(12.))
-                    .text_color(c.muted_foreground)
-                    .child(self.status.clone()),
-            )
+            .when(!self.status.is_empty(), |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .px(px(16.))
+                        .py(px(7.))
+                        .border_t_1()
+                        .border_color(c.border)
+                        .text_size(px(12.))
+                        .text_color(c.muted_foreground)
+                        .child(self.status.clone()),
+                )
+            })
     }
 }
 
@@ -805,6 +818,7 @@ fn main() {
             // The agenda is pictured at the width it's meant for: a narrow column.
             let window_size = match args.scene.as_str() {
                 "agenda" => size(px(720.), px(900.)),
+                "compact" | "compact-week" | "compact-agenda" => size(px(390.), px(844.)),
                 _ => size(px(1280.), px(820.)),
             };
             let bounds = Bounds::centered(None, window_size, cx);
@@ -1114,7 +1128,7 @@ mod shots {
                         .expect("on screen");
                     drag_to(window, cx, point(grab.x + (to.x - grab.x) * 0.0, to.y));
                 }
-                "agenda" => {
+                "agenda" | "compact-agenda" => {
                     let _ = cx.update_window(window, |_, _, cx| {
                         calendar.update(cx, |c, cx| {
                             c.select(Some(Selection::Event("section".into())), cx)

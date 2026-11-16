@@ -427,6 +427,47 @@ pub fn weekday_name(day: Weekday, short: bool) -> &'static str {
 
 /// What the header calls the period on screen: "November 2026", "Nov – Dec 2026",
 /// "Dec 2026 – Jan 2027", or for a day, "Saturday, November 14, 2026".
+/// A shorter title for a narrow header: "Wed, Nov 18", "Nov 2026", "Nov – Dec 2026" or
+/// "Nov 17 – 30".
+pub fn short_title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -> String {
+    let short = |d: NaiveDate| format!("{} {}", month_short(d.month()), d.day());
+    let (first, days) = visible_days(view, anchor, first_day);
+    let last = first + Duration::days(days as i64 - 1);
+    match view {
+        CalendarView::Day => format!(
+            "{}, {}",
+            weekday_name(anchor.weekday(), true),
+            short(anchor)
+        ),
+        CalendarView::Month => format!("{} {}", month_short(anchor.month()), anchor.year()),
+        CalendarView::Agenda(_) if first == last => short(first),
+        CalendarView::Agenda(_) if first.month() == last.month() => {
+            format!("{} – {}", short(first), last.day())
+        }
+        CalendarView::Agenda(_) => format!("{} – {}", short(first), short(last)),
+        CalendarView::Week | CalendarView::Days(_) => {
+            if first.month() == last.month() {
+                format!("{} {}", month_short(first.month()), first.year())
+            } else if first.year() == last.year() {
+                format!(
+                    "{} – {} {}",
+                    month_short(first.month()),
+                    month_short(last.month()),
+                    last.year()
+                )
+            } else {
+                format!(
+                    "{} {} – {} {}",
+                    month_short(first.month()),
+                    first.year() % 100,
+                    month_short(last.month()),
+                    last.year() % 100
+                )
+            }
+        }
+    }
+}
+
 pub fn title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -> String {
     match view {
         CalendarView::Month => format!("{} {}", month_name(anchor.month()), anchor.year()),
@@ -838,6 +879,17 @@ mod tests {
             title(CalendarView::Agenda(7), d(2026, 11, 2), Weekday::Mon),
             "Nov 2 – 8, 2026"
         );
+        let short = |v, d| short_title(v, d, Weekday::Mon);
+        assert_eq!(short(CalendarView::Day, a), "Wed, Nov 18");
+        assert_eq!(short(CalendarView::Month, a), "Nov 2026");
+        assert_eq!(short(CalendarView::Week, a), "Nov 2026");
+        assert_eq!(short(CalendarView::Week, d(2026, 12, 1)), "Nov – Dec 2026");
+        assert_eq!(
+            short(CalendarView::Week, d(2026, 12, 30)),
+            "Dec 26 – Jan 27"
+        );
+        assert_eq!(short(CalendarView::Agenda(14), a), "Nov 18 – Dec 1");
+        assert_eq!(short(CalendarView::Agenda(7), d(2026, 11, 2)), "Nov 2 – 8");
     }
 
     #[test]
