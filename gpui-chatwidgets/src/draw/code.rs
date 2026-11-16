@@ -198,6 +198,9 @@ impl Draw<'_, '_> {
         let text = StyledText::new(code.clone()).with_highlights(highlights);
         let copied = self.v.ui.copied.as_deref() == Some(path);
         let (key, source) = (path.to_string(), code.clone());
+        let copy_it = self
+            .cx
+            .listener(move |this, _, _, cx| this.copy(&key, &source, cx));
         let copy = Press::new(self.id(&format!("{path}.copy")))
             .accessibility_label("Copy")
             .flex_none()
@@ -231,31 +234,29 @@ impl Draw<'_, '_> {
                 t.text.xs,
                 colors.text,
                 self.regular(),
-            ))
-            .on_click(
-                self.cx
-                    .listener(move |this, _, _, cx| this.copy(&key, &source, cx)),
-            );
-        let scroller = self
-            .sideways(
-                div()
-                    .id(self.id(&format!("{path}.scroll")))
-                    .w_full()
-                    .min_w_0()
-                    .overflow_x_scroll(),
-                &format!("{path}.code"),
-            )
-            .child(
-                div()
-                    .p(self.px(13.))
-                    .pr(self.px(72.))
-                    .font_family(t.fonts.mono.clone())
-                    .text_size(self.px(t.text.code))
-                    .line_height(self.px(t.text.code * 1.5))
-                    .text_color(colors.text)
-                    .whitespace_nowrap()
-                    .child(text),
-            );
+            ));
+        let copy = self.on_press(copy, true, copy_it);
+        let (scroller, handle) = self.scroll_x(&format!("{path}.scroll"), &format!("{path}.code"));
+        // The code takes its own width (at least the box's): what a scroller can scroll is what
+        // its children take.
+        let scroller = scroller.flex().child(
+            div()
+                .flex_none()
+                .min_w_full()
+                .p(self.px(13.))
+                .pr(self.px(72.))
+                .font_family(t.fonts.mono.clone())
+                .text_size(self.px(t.text.code))
+                .line_height(self.px(t.text.code * 1.5))
+                .text_color(colors.text)
+                .whitespace_nowrap()
+                .debug_selector({
+                    let sel = self.selector(&format!("code:{path}"));
+                    move || sel
+                })
+                .child(text),
+        );
+        let boxed = self.keep_sideways(div().relative(), handle);
         div()
             .w_full()
             .min_w_0()
@@ -263,8 +264,7 @@ impl Draw<'_, '_> {
             .flex_col()
             .gap(self.px(4.))
             .child(
-                div()
-                    .relative()
+                boxed
                     .w_full()
                     .min_w_0()
                     .rounded(self.px(t.radii.md))

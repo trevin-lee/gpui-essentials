@@ -14,6 +14,9 @@ mod form;
 mod layout;
 mod table;
 
+use std::rc::Rc;
+
+use gpui_kit::base::Button as Press;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -348,6 +351,95 @@ impl Draw<'_, '_> {
         let sel = format!("field:{}", self.selector(what));
         self.v.host.scroller(&sel);
         el.debug_selector(move || sel)
+    }
+
+    /// A region that scrolls sideways (`id` under the card's prefix), marked for the host's
+    /// overflow test as `what`. For touch it moves only with a sideways pan, so an up-and-down
+    /// one scrolls the chat instead of sliding the region along; [`Draw::keep_sideways`] on
+    /// something around it keeps the sideways pans it scrolls with.
+    pub fn scroll_x(&mut self, id: &str, what: &str) -> (Stateful<Div>, Option<ScrollHandle>) {
+        let el = div().id(self.id(id)).w_full().min_w_0().overflow_x_scroll();
+        let el = self.sideways(el, what);
+        if !self.t.touch {
+            return (el, None);
+        }
+        let handle = self
+            .window
+            .use_keyed_state(self.id(&format!("{id}.handle")), self.cx, |_, _| {
+                ScrollHandle::new()
+            })
+            .read(self.cx)
+            .clone();
+        (
+            el.restrict_scroll_to_axis().track_scroll(&handle),
+            Some(handle),
+        )
+    }
+
+    /// Keeps a finger's sideways pans over `el` from going further (to a carousel turning its
+    /// slide, or a chat that would scroll with them) while the region `handle` scrolls can
+    /// move. `el` is around the region, so the region has scrolled by then.
+    pub fn keep_sideways<E: InteractiveElement>(&self, el: E, handle: Option<ScrollHandle>) -> E {
+        let Some(handle) = handle else {
+            return el;
+        };
+        el.on_scroll(move |e, _, cx| {
+            if e.source == ScrollSource::Touch
+                && !e.delta.pixel_delta(px(1.)).x.is_zero()
+                && handle.max_offset().x > px(0.)
+            {
+                cx.stop_propagation();
+            }
+        })
+    }
+
+    /// Hands a press what it does. When the theme's `min_hit` is larger than the press may be
+    /// drawn, invisible areas over it (across its width, down its height and a square in its
+    /// middle, each `min_hit` deep and centred on it) take the same press, so it can be hit
+    /// across at least `min_hit` each way while it looks and lays out the same. For presses
+    /// that hold only a label or an icon: the areas lie over what's in them.
+    pub fn on_press(
+        &self,
+        press: Press,
+        enabled: bool,
+        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Press {
+        if self.t.min_hit <= 0. || !enabled {
+            return press.on_click(handler);
+        }
+        let side = px(self.t.min_hit);
+        let handler = Rc::new(handler);
+        let area = |name: &'static str| {
+            let h = handler.clone();
+            div().id(name).absolute().on_click(move |e, window, cx| {
+                cx.stop_propagation();
+                h(e, window, cx)
+            })
+        };
+        let across = area("hit-across")
+            .left_0()
+            .right_0()
+            .top(relative(0.5))
+            .mt(-side / 2.)
+            .h(side);
+        let down = area("hit-down")
+            .top_0()
+            .bottom_0()
+            .left(relative(0.5))
+            .ml(-side / 2.)
+            .w(side);
+        let middle = area("hit-middle")
+            .top(relative(0.5))
+            .left(relative(0.5))
+            .mt(-side / 2.)
+            .ml(-side / 2.)
+            .size(side);
+        press
+            .relative()
+            .child(across)
+            .child(down)
+            .child(middle)
+            .on_click(move |e, window, cx| handler(e, window, cx))
     }
 
     /// One component, by kind.

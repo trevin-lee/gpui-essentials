@@ -161,6 +161,17 @@ pub struct CardTheme {
     pub frame: bool,
     /// Whether the host's surroundings are dark (picks shadows and the code block's look).
     pub dark: bool,
+    /// The smallest target anything pressable takes presses in, in points per side (the
+    /// window's pixels, so it doesn't zoom with `rem_base`). A smaller control also takes them
+    /// in an invisible margin around it, centred on it, so it looks and lays out the same. 44
+    /// on iOS and Android, Apple's minimum for a touch target; 0 elsewhere, where a control
+    /// takes presses only where it's drawn.
+    pub min_hit: f32,
+    /// Whether people use the card with a finger. On, a region that scrolls sideways (a wide
+    /// table, code) moves only with a sideways pan, and keeps the pans it can scroll from the
+    /// chat around it, so up and down still scrolls the chat. On by default on iOS and Android.
+    /// A carousel follows a finger's swipe either way.
+    pub touch: bool,
 }
 
 fn hex(v: u32) -> Hsla {
@@ -197,6 +208,21 @@ fn code_colors() -> CodeColors {
 }
 
 impl CardTheme {
+    /// Apple's minimum touch target, in points per side: [`CardTheme::min_hit`] on iOS and
+    /// Android.
+    pub const TOUCH_HIT: f32 = 44.;
+
+    /// The theme for touch (`true`: 44-point targets, sideways scrollers that leave up and down
+    /// to the chat) or for a mouse and keyboard (`false`), whatever the platform. For an iPad
+    /// that switches when a trackpad is attached, or a test.
+    pub fn with_touch(self, touch: bool) -> CardTheme {
+        CardTheme {
+            min_hit: if touch { CardTheme::TOUCH_HIT } else { 0. },
+            touch,
+            ..self
+        }
+    }
+
     /// OpenUI's look on a charcoal chat: its neutrals at their opacities over the ground, its
     /// status colours, and an ink accent (near-white buttons with dark text).
     pub fn dark() -> CardTheme {
@@ -343,6 +369,12 @@ impl CardTheme {
             rem_base: 16.,
             frame: true,
             dark: true,
+            min_hit: if gpui_kit::is_mobile() {
+                CardTheme::TOUCH_HIT
+            } else {
+                0.
+            },
+            touch: gpui_kit::is_mobile(),
         }
     }
 
@@ -454,5 +486,18 @@ mod tests {
         };
         assert_eq!(t.px(15.), rems(1.));
         assert_eq!(t.px(7.5), rems(0.5));
+    }
+
+    #[test]
+    fn touch_defaults_by_platform_and_can_be_forced() {
+        let t = CardTheme::light();
+        let mobile = cfg!(any(target_os = "ios", target_os = "android"));
+        assert_eq!(t.touch, mobile);
+        assert_eq!(t.min_hit, if mobile { 44. } else { 0. });
+        let touch = t.clone().with_touch(true);
+        assert_eq!((touch.min_hit, touch.touch), (44., true));
+        let mouse = touch.with_touch(false);
+        assert_eq!((mouse.min_hit, mouse.touch), (0., false));
+        assert_eq!(mouse.colors, t.colors, "only the input settings change");
     }
 }

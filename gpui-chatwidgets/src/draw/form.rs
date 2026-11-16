@@ -339,6 +339,22 @@ impl Draw<'_, '_> {
                     let on = chosen.contains(&o.value);
                     let (k, binding, v, multiple) =
                         (key.to_string(), b.clone(), o.value.clone(), *multiple);
+                    let pick = self.cx.listener(move |this, _, _, cx| {
+                        let mut now = chosen_of(this.read(&binding).as_ref());
+                        let value = if multiple {
+                            if !now.iter().any(|x| x == &v) {
+                                now.push(v.clone());
+                            } else {
+                                now.retain(|x| x != &v);
+                            }
+                            json!(now)
+                        } else if now.first() == Some(&v) {
+                            Json::Null
+                        } else {
+                            Json::String(v.clone())
+                        };
+                        this.edit(&k, &binding, value, cx);
+                    });
                     let chip = Press::new(self.id(&format!("{key}.chip{i}")))
                         .role(Role::CheckBox)
                         .accessibility_label(o.label.clone())
@@ -369,24 +385,13 @@ impl Draw<'_, '_> {
                         .when_some(o.icon.as_ref(), |c, i| {
                             c.child(self.icon_element(&i.name, 14., t.colors.text))
                         })
-                        .child(self.line(o.label.clone(), t.text.sm, t.colors.text, self.regular()))
-                        .on_click(self.cx.listener(move |this, _, _, cx| {
-                            let mut now = chosen_of(this.read(&binding).as_ref());
-                            let value = if multiple {
-                                if !now.iter().any(|x| x == &v) {
-                                    now.push(v.clone());
-                                } else {
-                                    now.retain(|x| x != &v);
-                                }
-                                json!(now)
-                            } else if now.first() == Some(&v) {
-                                Json::Null
-                            } else {
-                                Json::String(v.clone())
-                            };
-                            this.edit(&k, &binding, value, cx);
-                        }));
-                    row = row.child(chip);
+                        .child(self.line(
+                            o.label.clone(),
+                            t.text.sm,
+                            t.colors.text,
+                            self.regular(),
+                        ));
+                    row = row.child(self.on_press(chip, !o.disabled, pick));
                 }
                 row.into_any_element()
             }
@@ -409,7 +414,10 @@ impl Draw<'_, '_> {
         on: impl Fn(&mut CardView, &mut Window, &mut Context<CardView>) + 'static,
     ) -> AnyElement {
         let t = self.t;
-        Press::new(self.id(id))
+        let choose = self
+            .cx
+            .listener(move |this, _, window, cx| on(this, window, cx));
+        let press = Press::new(self.id(id))
             .role(role)
             .accessibility_label(label.to_string())
             .disabled(disabled)
@@ -441,12 +449,8 @@ impl Draw<'_, '_> {
                             self.regular(),
                         ))
                     }),
-            )
-            .on_click(
-                self.cx
-                    .listener(move |this, _, window, cx| on(this, window, cx)),
-            )
-            .into_any_element()
+            );
+        self.on_press(press, !disabled, choose).into_any_element()
     }
 
     fn checkboxes(
@@ -694,6 +698,14 @@ impl Draw<'_, '_> {
             .map(|(_, l)| l.clone());
         let shown = label.clone().unwrap_or_else(|| placeholder.to_string());
         let k = key.to_string();
+        let toggle = self.cx.listener(move |this, _, _, cx| {
+            this.ui.select_open = if this.ui.select_open.as_deref() == Some(k.as_str()) {
+                None
+            } else {
+                Some(k.clone())
+            };
+            cx.notify();
+        });
         let trigger = Press::new(self.id(&format!("{key}.select")))
             .role(Role::ComboBox)
             .accessibility_label(shown.clone())
@@ -728,15 +740,8 @@ impl Draw<'_, '_> {
                 )
                 .flex_1(),
             )
-            .child(self.glyph(Glyph::ChevronDown, 14., t.colors.text_muted))
-            .on_click(self.cx.listener(move |this, _, _, cx| {
-                this.ui.select_open = if this.ui.select_open.as_deref() == Some(k.as_str()) {
-                    None
-                } else {
-                    Some(k.clone())
-                };
-                cx.notify();
-            }));
+            .child(self.glyph(Glyph::ChevronDown, 14., t.colors.text_muted));
+        let trigger = self.on_press(trigger, true, toggle);
         let mut el = div().relative().w_full().min_w_0().child(trigger);
         if open {
             let mut list = div()
@@ -762,33 +767,32 @@ impl Draw<'_, '_> {
             for (i, (value, label)) in options.iter().enumerate() {
                 let on = current == Some(value.as_str());
                 let (pick, v) = (pick.clone(), value.clone());
-                list = list.child(
-                    Press::new(self.id(&format!("{key}.opt{i}")))
-                        .role(Role::ListBoxOption)
-                        .accessibility_label(label.clone())
-                        .selected(on)
-                        .w_full()
-                        .min_w_0()
-                        .h(self.px(32.))
-                        .px(self.px(8.))
-                        .justify_between()
-                        .rounded(self.px(t.radii.sm))
-                        .hover(|s| s.bg(t.colors.highlight))
-                        .debug_selector({
-                            let sel = self.selector(&format!("pick:{label}"));
-                            move || sel
-                        })
-                        .child(
-                            self.line(label.clone(), t.text.sm, t.colors.text, self.regular())
-                                .flex_1(),
-                        )
-                        .when(on, |b| {
-                            b.child(self.glyph(Glyph::Check, 14., t.colors.text))
-                        })
-                        .on_click(self.cx.listener(move |this, _, window, cx| {
-                            pick(this, v.clone(), window, cx)
-                        })),
-                );
+                let choose = self
+                    .cx
+                    .listener(move |this, _, window, cx| pick(this, v.clone(), window, cx));
+                let option = Press::new(self.id(&format!("{key}.opt{i}")))
+                    .role(Role::ListBoxOption)
+                    .accessibility_label(label.clone())
+                    .selected(on)
+                    .w_full()
+                    .min_w_0()
+                    .h(self.px(32.))
+                    .px(self.px(8.))
+                    .justify_between()
+                    .rounded(self.px(t.radii.sm))
+                    .hover(|s| s.bg(t.colors.highlight))
+                    .debug_selector({
+                        let sel = self.selector(&format!("pick:{label}"));
+                        move || sel
+                    })
+                    .child(
+                        self.line(label.clone(), t.text.sm, t.colors.text, self.regular())
+                            .flex_1(),
+                    )
+                    .when(on, |b| {
+                        b.child(self.glyph(Glyph::Check, 14., t.colors.text))
+                    });
+                list = list.child(self.on_press(option, true, choose));
             }
             el = el.child(
                 deferred(
@@ -866,6 +870,16 @@ impl Draw<'_, '_> {
             .line_height(self.px(font * t.text.label_leading))
             .text_color(fg)
             .child(b.label.clone());
+        let go = self.cx.listener(move |this, _, window, cx| {
+            this.press(
+                &action,
+                &words,
+                form_name.as_deref(),
+                check.clone(),
+                window,
+                cx,
+            )
+        });
         let press = Press::new(self.id(path))
             .accessibility_label(b.label.clone())
             .flex_none()
@@ -888,17 +902,8 @@ impl Draw<'_, '_> {
                 let sel = self.selector(&format!("button:{}", b.label));
                 move || sel
             })
-            .child(label)
-            .on_click(self.cx.listener(move |this, _, window, cx| {
-                this.press(
-                    &action,
-                    &words,
-                    form_name.as_deref(),
-                    check.clone(),
-                    window,
-                    cx,
-                )
-            }));
+            .child(label);
+        let press = self.on_press(press, true, go);
         div()
             .id(self.id(&format!("{path}.wrap")))
             .flex_none()
@@ -942,6 +947,9 @@ impl Draw<'_, '_> {
             _ => (transparent_black(), t.colors.text, transparent_black()),
         };
         let (action, words) = (b.action.clone(), b.name.clone());
+        let go = self.cx.listener(move |this, _, window, cx| {
+            this.press(&action, &words, None, None, window, cx)
+        });
         let press = Press::new(self.id(path))
             .accessibility_label(b.name.clone())
             .flex_none()
@@ -956,11 +964,10 @@ impl Draw<'_, '_> {
                 let sel = self.selector(&format!("button:{}", b.name));
                 move || sel
             })
-            .child(self.icon_element(&b.icon.name, 16., fg))
-            .on_click(self.cx.listener(move |this, _, window, cx| {
-                this.press(&action, &words, None, None, window, cx)
-            }));
-        // Its name, for the people the icon says nothing to.
+            .child(self.icon_element(&b.icon.name, 16., fg));
+        let press = self.on_press(press, true, go);
+        // Its name, for the people the icon says nothing to: on hover with a mouse, and with a
+        // long press on touch (GPUI shows an element's tooltip for one).
         let name = b.name.clone();
         div()
             .id(self.id(&format!("{path}.tip")))

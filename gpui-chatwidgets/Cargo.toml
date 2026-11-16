@@ -30,8 +30,12 @@ chrono = { version = "0.4.45", default-features = false, features = ["std", "clo
 # Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
 # GPUI's version of the image crate to save the picture.
 gpui-pre = { workspace = true, features = ["test-support"], optional = true }
-gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+# The shots feature's offscreen window is the Mac's. On iOS an app brings GPUI's platform itself
+# (gpui-pre-ios), and GPUI Kit pulls in no platform there.
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 
 [features]
 default = ["gpui"]
