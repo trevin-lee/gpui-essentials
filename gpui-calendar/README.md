@@ -47,10 +47,13 @@ their look.
   your app to open it; a drag that starts on one moves the event.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
-  from event to event. With nothing selected, ← and → change the period. `j` or `n` goes to the
-  next period and `k` or `p` to the previous one. `t` goes to today, and `d`, `w`, `m` and `a`
-  switch views. In the agenda the arrows go from event to event down the list. Enter opens the selected event or makes one in the selected slot, Delete or Backspace
-  asks to delete the selected event, and Escape drops a drag or the selection.
+  from event to event; ← and → cross into the next or previous day (and period) in the day,
+  week and month views. With nothing selected, ← and → change the period. `j` goes to the next
+  period and `k` or `p` to the previous one. `t` goes to today, and `d`, `w`, `m` and `a` switch
+  views. In the agenda the arrows go from event to event down the list. `n` proposes a new event
+  at the selected slot, or at the next round half hour today. Enter opens the selected event or
+  makes one in the selected slot, Delete or Backspace asks to delete the selected event, and
+  Escape drops a drag or the selection.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
   database, so a DST day doesn't depend on the machine's zone files. A second zone
   (`secondary_zone`) adds a column of its hours left of the day and week grids' own, under its

@@ -1067,3 +1067,134 @@ fn find_looks_in_the_notes_too(cx: &mut TestAppContext) {
     draw(cx);
     assert!(cx.debug_bounds("panel").is_some());
 }
+
+fn created(seen: &Seen) -> Vec<EventTime> {
+    seen.borrow()
+        .iter()
+        .filter_map(|e| match e {
+            CalendarEvent::Create { time, .. } => Some(*time),
+            _ => None,
+        })
+        .collect()
+}
+
+#[gpui::test]
+fn n_proposes_a_new_event_at_the_slot_or_the_next_half_hour(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    // Nothing selected: the next round half hour today (it's 10:40 on Wednesday).
+    cx.simulate_keystrokes("n");
+    assert_eq!(
+        created(&seen),
+        vec![EventTime::timed(at(day(2), 11, 0), at(day(2), 12, 0))]
+    );
+    // From next week, it comes back to today.
+    cx.simulate_keystrokes("j");
+    assert_eq!(c.read_with(cx, |c, _| c.date()), day(9));
+    cx.simulate_keystrokes("n");
+    assert_eq!(c.read_with(cx, |c, _| c.visible_days().0), day(0));
+    // A selected slot: there.
+    c.update(cx, |c, cx| {
+        c.select(
+            Some(Selection::Slot {
+                date: day(4),
+                minute: 15 * 60 + 30,
+            }),
+            cx,
+        )
+    });
+    cx.simulate_keystrokes("n");
+    assert_eq!(
+        created(&seen).last(),
+        Some(&EventTime::timed(at(day(4), 15, 30), at(day(4), 16, 30)))
+    );
+    // In the month, a day.
+    cx.simulate_keystrokes("m");
+    c.update(cx, |c, cx| {
+        c.select(
+            Some(Selection::Slot {
+                date: day(5),
+                minute: 0,
+            }),
+            cx,
+        )
+    });
+    cx.simulate_keystrokes("n");
+    assert_eq!(
+        created(&seen).last(),
+        Some(&EventTime::all_day(day(5), day(6)))
+    );
+}
+
+#[gpui::test]
+fn the_arrows_cross_days_in_the_day_week_and_month(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    let slot = |c: &Entity<Calendar>, cx: &VisualTestContext| {
+        c.read_with(cx, |c, _| match c.selection() {
+            Some(Selection::Slot { date, .. }) => Some(*date),
+            _ => None,
+        })
+    };
+    // The day: → is the next day, and the view follows it.
+    cx.simulate_keystrokes("d down right");
+    assert_eq!(slot(&c, cx), Some(day(3)));
+    assert_eq!(
+        c.read_with(cx, |c, _| (c.view(), c.date())),
+        (CalendarView::Day, day(3))
+    );
+    cx.simulate_keystrokes("left left");
+    assert_eq!(c.read_with(cx, |c, _| c.date()), day(1));
+    // The week: from Sunday, → is next Monday, in next week.
+    cx.simulate_keystrokes("w");
+    c.update(cx, |c, cx| {
+        c.select(
+            Some(Selection::Slot {
+                date: day(6),
+                minute: 600,
+            }),
+            cx,
+        )
+    });
+    cx.simulate_keystrokes("right");
+    assert_eq!(slot(&c, cx), Some(day(7)));
+    assert_eq!(c.read_with(cx, |c, _| c.visible_days().0), day(7));
+    // The month: → a day, ↓ a week.
+    cx.simulate_keystrokes("m right down");
+    assert_eq!(slot(&c, cx), Some(day(15)));
+    // t, d, w, m and a all still do what they say.
+    cx.simulate_keystrokes("t");
+    assert_eq!(c.read_with(cx, |c, _| c.date()), day(2));
+    for (key, view) in [
+        ("d", CalendarView::Day),
+        ("w", CalendarView::Week),
+        ("m", CalendarView::Month),
+        ("a", CalendarView::AGENDA),
+    ] {
+        cx.simulate_keystrokes(key);
+        assert_eq!(c.read_with(cx, |c, _| c.view()), view, "{key}");
+    }
+}
+
+#[gpui::test]
+fn the_now_line_redraws_once_a_minute_and_no_more(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        gpui_core::init(cx);
+        gpui_calendar::init(cx);
+    });
+    // The real clock, not a pretended one: the line at the current time keeps moving.
+    let (calendar, vcx) = cx.add_window_view(|_, cx| Calendar::new(cx));
+    let redraws = Rc::new(std::cell::Cell::new(0));
+    vcx.update(|_, cx| {
+        let r = redraws.clone();
+        cx.observe(&calendar, move |_, _| r.set(r.get() + 1))
+            .detach();
+    });
+    vcx.run_until_parked();
+    // Ten minutes in steps of a second: at most one redraw a minute.
+    for _ in 0..600 {
+        vcx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        vcx.run_until_parked();
+    }
+    let n = redraws.get();
+    assert!((9..=11).contains(&n), "{n} redraws in ten minutes");
+}
