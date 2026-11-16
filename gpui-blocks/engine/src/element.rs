@@ -176,6 +176,14 @@ impl RenderOnce for BlockEditor {
         };
         let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
         let own_extensions = self.state.read(cx).model.doc.ext.clone();
+        let list_cx = super::draw::ListContext {
+            base: &typography,
+            body_size,
+            body_line,
+            colors: &text_colors,
+            dark: text_style.is_dark(),
+            bands: &backgrounds,
+        };
         let mut children: Vec<AnyElement> = Vec::new();
         {
             let mut cull_state = cull.borrow_mut();
@@ -312,6 +320,12 @@ impl RenderOnce for BlockEditor {
                         },
                     ) => {
                         let last_chunk = range.end == ids.len();
+                        let block_id = snapshot.blocks[unit.block].id;
+                        let tree = super::draw::list_tree(
+                            &self.state.read(cx).model.doc,
+                            block_id,
+                            Some(range.clone()),
+                        );
                         let chunk = BlockNode::List {
                             children: items[range.clone()].to_vec(),
                             ordered: *ordered,
@@ -327,14 +341,35 @@ impl RenderOnce for BlockEditor {
                         } else {
                             flow.first(false)
                         };
-                        chunk.render(
-                            node_ix,
-                            // Inner chunks drop the list's bottom gap.
-                            flow.last(!last_chunk || is_last_node),
-                            &node_cx,
-                            window,
-                            cx,
-                        )
+                        if let Some(tree) = tree {
+                            super::draw::top_level_list(
+                                &tree,
+                                super::draw::Place {
+                                    first: node_ix == 0 && range.start == 0,
+                                    // Inner chunks drop the list's bottom gap.
+                                    last: !last_chunk || is_last_node,
+                                    prev: None,
+                                    body_size,
+                                    paragraph_gap,
+                                },
+                                &list_cx,
+                                &super::draw::LeafContext {
+                                    extensions: &own_extensions,
+                                    leaves: &own_leaves,
+                                },
+                                window,
+                                cx,
+                            )
+                        } else {
+                            chunk.render(
+                                node_ix,
+                                // Inner chunks drop the list's bottom gap.
+                                flow.last(!last_chunk || is_last_node),
+                                &node_cx,
+                                window,
+                                cx,
+                            )
+                        }
                     }
                     _ => {
                         let block_id = snapshot.blocks[unit.block].id;
@@ -367,6 +402,9 @@ impl RenderOnce for BlockEditor {
                                     Some(Own::Text(Some(*level), inline.clone()))
                                 }
                                 (Some(K::HorizontalRule), _) => Some(Own::Rule),
+                                (Some(K::List { .. }), _) => {
+                                    super::draw::list_tree(doc, block_id, None).map(Own::List)
+                                }
                                 (
                                     Some(K::Custom),
                                     Some(BlockContent::Atom(AtomData::Custom(node))),
@@ -407,6 +445,17 @@ impl RenderOnce for BlockEditor {
                                 cx,
                             ),
                             Some(Own::Rule) => super::draw::rule(place, &text_colors),
+                            Some(Own::List(tree)) => super::draw::top_level_list(
+                                &tree,
+                                place,
+                                &list_cx,
+                                &super::draw::LeafContext {
+                                    extensions: &own_extensions,
+                                    leaves: &own_leaves,
+                                },
+                                window,
+                                cx,
+                            ),
                             Some(Own::Custom(node)) => {
                                 super::draw::custom_block(&node, place, &own_extensions, window, cx)
                             }

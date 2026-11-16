@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, Hsla,
     InspectorElementId, IntoElement, LayoutId, ParentElement as _, Pixels, Point, Size, Style,
@@ -426,6 +427,7 @@ pub(crate) enum Own {
     /// A paragraph (no level) or a heading.
     Text(Option<u8>, InlineText),
     Rule,
+    List(ListTree),
     Custom(gpui_kit::base::text::MarkdownNode),
     /// A break, a link definition or an unknown block: nothing to see.
     Nothing,
@@ -581,4 +583,280 @@ pub(crate) fn custom_block(
         place.paragraph_gap
     };
     div().pb(gap).child(content).into_any_element()
+}
+
+// Lists.
+
+/// A list as the engine draws it: copied out of the document first, since drawing needs the
+/// app.
+pub(crate) struct ListTree {
+    ordered: bool,
+    start: Option<u32>,
+    items: Vec<ItemTree>,
+}
+
+struct ItemTree {
+    checked: Option<bool>,
+    children: Vec<ItemChild>,
+}
+
+enum ItemChild {
+    Paragraph(u64, InlineText),
+    List(ListTree),
+}
+
+/// `list` (or `items` of it, for a chunk of a long list) as a tree the engine can draw: `None`
+/// when something in it is still drawn by GPUI Kit.
+pub(crate) fn list_tree(
+    doc: &super::document::EditorDocument,
+    list: super::id::BlockId,
+    items: Option<Range<usize>>,
+) -> Option<ListTree> {
+    use super::document::BlockContent;
+    use super::kind::BlockKindData as K;
+    let Some(K::List { ordered, start }) = doc.kind(list) else {
+        return None;
+    };
+    let all = doc.children(list);
+    let range = items.unwrap_or(0..all.len());
+    let mut out = Vec::with_capacity(range.len());
+    for item in &all[range.clone()] {
+        let Some(K::ListItem { checked, .. }) = doc.kind(*item) else {
+            return None;
+        };
+        let mut children = Vec::new();
+        for child in doc.children(*item) {
+            match (doc.kind(*child), doc.get(*child).map(|e| &e.content)) {
+                (Some(K::Paragraph), Some(BlockContent::Inline(inline))) if draws(inline) => {
+                    children.push(ItemChild::Paragraph(child.as_u64(), inline.clone()))
+                }
+                (Some(K::List { .. }), _) => {
+                    children.push(ItemChild::List(list_tree(doc, *child, None)?))
+                }
+                _ => return None,
+            }
+        }
+        out.push(ItemTree {
+            checked: *checked,
+            children,
+        });
+    }
+    Some(ListTree {
+        ordered: *ordered,
+        // A chunk of a long list carries on its numbering.
+        start: if *ordered && range.start > 0 {
+            Some(start.unwrap_or(1) + range.start as u32)
+        } else {
+            *start
+        },
+        items: out,
+    })
+}
+
+const BULLETS: [&str; 5] = ["•", "◦", "▪", "‣", "⁃"];
+
+/// An item's marker: a bullet by depth, or its number (a letter in a nested ordered list).
+fn list_marker(ix: usize, start: Option<u32>, ordered: bool, depth: usize) -> String {
+    if !ordered {
+        return BULLETS[depth.min(BULLETS.len() - 1)].to_string();
+    }
+    let ordinal = start
+        .unwrap_or(1)
+        .saturating_add(u32::try_from(ix).unwrap_or(u32::MAX));
+    if depth == 0 || start == Some(0) {
+        return format!("{ordinal}.");
+    }
+    let first = if depth == 1 { b'A' } else { b'a' };
+    let mut remaining = ordinal;
+    let mut letters = Vec::new();
+    while remaining > 0 {
+        remaining -= 1;
+        letters.push((first + (remaining % 26) as u8) as char);
+        remaining /= 26;
+    }
+    format!("{}.", letters.into_iter().rev().collect::<String>())
+}
+
+/// The white or black check drawn in a done task's box.
+const CHECK_SVG_LIGHT: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
+const CHECK_SVG_DARK: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="black" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
+
+/// What drawing a list needs besides the list.
+pub(crate) struct ListContext<'a> {
+    pub(crate) base: &'a gpui::TextStyle,
+    pub(crate) body_size: Pixels,
+    pub(crate) body_line: Pixels,
+    pub(crate) colors: &'a Colors,
+    pub(crate) dark: bool,
+    pub(crate) bands: &'a HashMap<u64, Vec<(Range<usize>, Hsla)>>,
+}
+
+/// A top-level list, with the paragraph gap below it.
+pub(crate) fn top_level_list(
+    list: &ListTree,
+    place: Place,
+    lists: &ListContext<'_>,
+    cx: &LeafContext<'_>,
+    window: &mut Window,
+    app: &mut App,
+) -> AnyElement {
+    let gap = if place.last {
+        px(0.)
+    } else {
+        place.paragraph_gap
+    };
+    list_element(list, 0, lists, cx, window, app)
+        .pb(gap)
+        .into_any_element()
+}
+
+fn list_element(
+    list: &ListTree,
+    depth: usize,
+    lists: &ListContext<'_>,
+    cx: &LeafContext<'_>,
+    window: &mut Window,
+    app: &mut App,
+) -> gpui::Div {
+    let mut items = Vec::with_capacity(list.items.len());
+    for (ix, item) in list.items.iter().enumerate() {
+        items.push(item_element(list, item, ix, depth, lists, cx, window, app));
+    }
+    div().w_full().min_w_0().children(items)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn item_element(
+    list: &ListTree,
+    item: &ItemTree,
+    ix: usize,
+    depth: usize,
+    lists: &ListContext<'_>,
+    cx: &LeafContext<'_>,
+    window: &mut Window,
+    app: &mut App,
+) -> AnyElement {
+    let indent = lists.body_size * 1.4;
+    let mut rows: Vec<gpui::Div> = Vec::new();
+    let mut after_list = false;
+    for (child_ix, child) in item.children.iter().enumerate() {
+        match child {
+            ItemChild::Paragraph(key, inline) => {
+                let mut style =
+                    paragraph_style(lists.base, lists.body_size, lists.body_line, lists.colors);
+                // A done task steps back so the open ones stand out.
+                if item.checked == Some(true) {
+                    style.color = lists.colors.muted;
+                }
+                let bands = lists.bands.get(key).cloned().unwrap_or_default();
+                let leaf = TextLeaf::new(*key, inline, style, bands, cx, window, app);
+                if child_ix > 0 && !after_list {
+                    // A later paragraph lines up with the item's text.
+                    let continued = div().w_full().pl(indent).overflow_hidden().child(leaf);
+                    match rows.pop() {
+                        Some(row) => rows.push(div().child(row).child(continued)),
+                        None => rows.push(continued),
+                    }
+                } else {
+                    rows.push(item_row(
+                        leaf.into_any_element(),
+                        list,
+                        item,
+                        ix,
+                        depth,
+                        lists,
+                    ));
+                }
+                after_list = false;
+            }
+            ItemChild::List(nested) => {
+                rows.push(div().ml(indent).child(list_element(
+                    nested,
+                    depth + 1,
+                    lists,
+                    cx,
+                    window,
+                    app,
+                )));
+                after_list = true;
+            }
+        }
+    }
+    div()
+        .w_full()
+        .min_w_0()
+        .when(ix > 0, |d| d.pt(lists.body_size * 0.25))
+        .children(rows)
+        .into_any_element()
+}
+
+/// An item's first row: its marker or task box, then its text.
+fn item_row(
+    content: AnyElement,
+    list: &ListTree,
+    item: &ItemTree,
+    ix: usize,
+    depth: usize,
+    lists: &ListContext<'_>,
+) -> gpui::Div {
+    let indent = lists.body_size * 1.4;
+    let colors = lists.colors;
+    let row = div()
+        .flex()
+        .flex_row()
+        .w_full()
+        .min_w_0()
+        .relative()
+        .items_start();
+    let row = match item.checked {
+        None => row.child(
+            // The marker hangs in an indent column, right-aligned against the text, and steps
+            // back in colour so the text leads.
+            div()
+                .flex_none()
+                .min_w(indent)
+                .pr(indent * 0.3)
+                .text_right()
+                .text_size(lists.body_size)
+                .line_height(lists.body_line)
+                .text_color(colors.muted)
+                .child(list_marker(ix, list.start, list.ordered, depth)),
+        ),
+        Some(checked) => {
+            let check = if lists.dark {
+                CHECK_SVG_DARK
+            } else {
+                CHECK_SVG_LIGHT
+            };
+            row.child(
+                div()
+                    .flex()
+                    .mr_2()
+                    .h(lists.body_line)
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .flex()
+                            .size(gpui::rems(0.9375))
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.))
+                            .border(px(1.5))
+                            .border_color(colors.muted)
+                            .when(checked, |d| {
+                                d.bg(colors.link).border_color(colors.link).child(
+                                    gpui::img(std::sync::Arc::new(gpui::Image::from_bytes(
+                                        gpui::ImageFormat::Svg,
+                                        check.to_vec(),
+                                    )))
+                                    .size(gpui::rems(0.75)),
+                                )
+                            }),
+                    ),
+            )
+        }
+    };
+    row.child(div().flex_auto().min_w_0().overflow_hidden().child(content))
 }
