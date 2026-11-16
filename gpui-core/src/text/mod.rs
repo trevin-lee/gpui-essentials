@@ -6,7 +6,7 @@ pub mod paragraph;
 mod view;
 
 pub use markdown::{Align, Block, Item, parse as parse_markdown};
-pub use view::{TextView, TextViewStyle};
+pub use view::{InlineCodeStyle, TextView, TextViewColors, TextViewStyle};
 
 pub(crate) fn init(cx: &mut gpui::App) {
     view::init(cx);
