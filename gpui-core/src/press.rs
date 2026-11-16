@@ -107,11 +107,12 @@ impl Press {
         self
     }
 
-    /// Draws the focus ring in this colour instead of the theme's (for a host with a palette of
-    /// its own). It's drawn as given: pass it at the strength it should show.
-    /// Takes presses in a square at least `side` each way, centred on it, without changing its
-    /// layout: a finger's 44 points around a small control. Where the square reaches past it,
-    /// it's laid over what's around it.
+    /// Takes presses in an area at least `side` each way, centred on it, without changing its
+    /// layout: a finger's 44 points around a small control. Each axis grows only if it's
+    /// shorter than `side`, across the whole control: a 138 by 40 button takes presses 138 by
+    /// 44. Where the area reaches past it, it's laid over what's around it, so don't use it on
+    /// controls stacked flush against each other (a list of options): it would take their
+    /// neighbours' presses.
     pub fn min_hit(mut self, side: Pixels) -> Self {
         self.min_hit = Some(side);
         self
@@ -124,6 +125,8 @@ impl Press {
         self
     }
 
+    /// Draws the focus ring in this colour instead of the theme's (for a host with a palette of
+    /// its own). It's drawn as given: pass it at the strength it should show.
     pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
         self.ring_color = Some(color.into());
         self
@@ -217,33 +220,61 @@ impl RenderOnce for Press {
         } else {
             // The hit square, if it's to be bigger than what's drawn: an invisible square
             // centred on it that presses it too.
-            let hit = self.min_hit.map(|side| {
-                let f = self.on_click.clone();
-                div()
-                    .id(ElementId::NamedChild(
-                        std::sync::Arc::new(self.id.clone()),
-                        "hit".into(),
-                    ))
-                    .absolute()
-                    .left(relative(0.5))
-                    .top(relative(0.5))
-                    .ml(-side / 2.)
-                    .mt(-side / 2.)
-                    .size(side)
-                    .when(!host_cursor, |el| el.cursor_pointer())
-                    .when_some(f, |el, f| {
-                        el.on_click(move |event, window, cx| {
-                            cx.stop_propagation();
-                            f(event, window, cx)
+            // The hit area, where it's to be bigger than what's drawn: max(width, side) by
+            // max(height, side), centred. Its size isn't known here, so it's three invisible
+            // centred rectangles whose union is exactly that: the full width by `side`, `side` by
+            // the full height, and `side` by `side`.
+            let hit: Vec<_> = self
+                .min_hit
+                .map(|side| {
+                    let f = self.on_click.clone();
+                    let id = self.id.clone();
+                    (0..3)
+                        .map(|i| {
+                            let f = f.clone();
+                            let el = div()
+                                .id(ElementId::NamedChild(
+                                    std::sync::Arc::new(id.clone()),
+                                    format!("hit{i}").into(),
+                                ))
+                                .absolute();
+                            let el = match i {
+                                0 => el
+                                    .left_0()
+                                    .right_0()
+                                    .top(relative(0.5))
+                                    .mt(-side / 2.)
+                                    .h(side),
+                                1 => el
+                                    .top_0()
+                                    .bottom_0()
+                                    .left(relative(0.5))
+                                    .ml(-side / 2.)
+                                    .w(side),
+                                _ => el
+                                    .left(relative(0.5))
+                                    .top(relative(0.5))
+                                    .ml(-side / 2.)
+                                    .mt(-side / 2.)
+                                    .size(side),
+                            };
+                            el.when(!host_cursor, |el| el.cursor_pointer())
+                                .when_some(f, |el, f| {
+                                    el.on_click(move |event, window, cx| {
+                                        cx.stop_propagation();
+                                        f(event, window, cx)
+                                    })
+                                })
                         })
-                    })
-            });
+                        .collect()
+                })
+                .unwrap_or_default();
             el.track_focus(&focus.tab_stop(self.tab_stop))
                 .when(!self.focus_on_press, |el| {
                     // A press doesn't move the focus here (GPUI's own focus-on-press checks it).
                     el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
                 })
-                .when_some(hit, |el, hit| el.relative().child(hit))
+                .when(!hit.is_empty(), |el| el.relative().children(hit))
                 .when(!host_cursor, |el| el.cursor_pointer())
                 .when(self.ring, |el| {
                     el.focus_visible(move |s| s.shadow(vec![ring]))
