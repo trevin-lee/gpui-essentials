@@ -30,13 +30,15 @@
 //! ```
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, ContentMask, Element, ElementId, FocusHandle, GlobalElementId, Hsla,
-    InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding, LayoutId, ParentElement,
-    Pixels, Point, Position, Rems, RenderOnce, Role, Stateful, StatefulInteractiveElement as _,
-    Style, StyleRefinement, Styled, Window, actions, div, point, px, rems,
+    AnyElement, App, Bounds, ContentMask, Element, ElementId, FocusHandle, GlobalElementId, Hitbox,
+    HitboxBehavior, Hsla, InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding,
+    LayoutId, ParentElement, Pixels, Point, Position, Rems, RenderOnce, Role, Stateful,
+    StatefulInteractiveElement as _, Style, StyleRefinement, Styled, Window, WindowId, actions,
+    div, point, px, rems,
 };
 
 use crate::theme::{ActiveTheme as _, Theme};
@@ -371,6 +373,10 @@ impl Popover {
                 if anchor.get().is_some_and(|a| a.contains(&e.position)) {
                     return;
                 }
+                // A press on a submenu drawn beside the panel isn't outside it.
+                if claimed(e.position, window, cx) {
+                    return;
+                }
                 if let Some(f) = &on_dismiss {
                     f(&DismissReason::ClickOutside, window, cx);
                 }
@@ -380,6 +386,96 @@ impl Popover {
             panel = panel.aria_label(label);
         }
         panel
+    }
+}
+
+/// The areas drawn from inside a popover but outside its panel (submenus), by window and
+/// element: a press on one isn't a press outside the popover. Each is a hitbox from the frame
+/// that drew it, so one no longer drawn is never hit.
+#[derive(Default)]
+struct Claims(HashMap<(WindowId, ElementId), Hitbox>);
+
+impl gpui::Global for Claims {}
+
+fn claimed(at: Point<Pixels>, window: &Window, cx: &App) -> bool {
+    let id = window.window_handle().window_id();
+    cx.try_global::<Claims>().is_some_and(|c| {
+        c.0.iter()
+            .any(|((w, _), hitbox)| *w == id && hitbox.is_hovered_at(at, window))
+    })
+}
+
+/// Draws `child` and claims the area it covers for the popover it was drawn from inside, so a
+/// press on it isn't taken for a press outside that popover.
+pub(crate) struct ClaimArea {
+    key: ElementId,
+    child: AnyElement,
+}
+
+impl ClaimArea {
+    pub(crate) fn new(key: ElementId, child: AnyElement) -> Self {
+        Self { key, child }
+    }
+}
+
+impl IntoElement for ClaimArea {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for ClaimArea {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.prepaint(window, cx);
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let id = window.window_handle().window_id();
+        cx.default_global::<Claims>()
+            .0
+            .insert((id, self.key.clone()), hitbox);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
     }
 }
 
