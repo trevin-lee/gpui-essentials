@@ -176,13 +176,18 @@ impl RenderOnce for BlockEditor {
         };
         let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
         let own_extensions = self.state.read(cx).model.doc.ext.clone();
-        let list_cx = super::draw::ListContext {
+        let draw_cx = super::draw::DrawCx {
             base: &typography,
             body_size,
             body_line,
+            paragraph_gap,
             colors: &text_colors,
             dark: text_style.is_dark(),
             bands: &backgrounds,
+            leaves: super::draw::LeafContext {
+                extensions: &own_extensions,
+                leaves: &own_leaves,
+            },
         };
         let mut children: Vec<AnyElement> = Vec::new();
         {
@@ -342,21 +347,17 @@ impl RenderOnce for BlockEditor {
                             flow.first(false)
                         };
                         if let Some(tree) = tree {
-                            super::draw::top_level_list(
-                                &tree,
+                            super::draw::draw(
+                                &super::draw::Tree::List(tree),
                                 super::draw::Place {
                                     first: node_ix == 0 && range.start == 0,
                                     // Inner chunks drop the list's bottom gap.
                                     last: !last_chunk || is_last_node,
                                     prev: None,
-                                    body_size,
-                                    paragraph_gap,
+                                    depth: 0,
                                 },
-                                &list_cx,
-                                &super::draw::LeafContext {
-                                    extensions: &own_extensions,
-                                    leaves: &own_leaves,
-                                },
+                                None,
+                                &draw_cx,
                                 window,
                                 cx,
                             )
@@ -383,83 +384,21 @@ impl RenderOnce for BlockEditor {
                                 _ => super::draw::Prev::Other,
                             }
                         });
-                        use super::draw::Own;
-                        let own = {
-                            let state = self.state.read(cx);
-                            let doc = &state.model.doc;
-                            use super::document::{AtomData, BlockContent};
-                            use super::kind::BlockKindData as K;
-                            match (doc.kind(block_id), doc.get(block_id).map(|e| &e.content)) {
-                                (Some(K::Paragraph), Some(BlockContent::Inline(inline)))
-                                    if super::draw::draws(inline) =>
-                                {
-                                    Some(Own::Text(None, inline.clone()))
-                                }
-                                (
-                                    Some(K::Heading { level }),
-                                    Some(BlockContent::Inline(inline)),
-                                ) if super::draw::draws(inline) => {
-                                    Some(Own::Text(Some(*level), inline.clone()))
-                                }
-                                (Some(K::HorizontalRule), _) => Some(Own::Rule),
-                                (Some(K::List { .. }), _) => {
-                                    super::draw::list_tree(doc, block_id, None).map(Own::List)
-                                }
-                                (
-                                    Some(K::Custom),
-                                    Some(BlockContent::Atom(AtomData::Custom(node))),
-                                ) => Some(Own::Custom(node.clone())),
-                                (Some(K::Break { .. } | K::Definition { .. } | K::Unknown), _) => {
-                                    Some(Own::Nothing)
-                                }
-                                _ => None,
-                            }
-                        };
-                        let place = super::draw::Place {
-                            first: node_ix == 0,
-                            last: is_last_node,
-                            prev,
-                            body_size,
-                            paragraph_gap,
-                        };
+                        let own = super::draw::tree(&self.state.read(cx).model.doc, block_id);
                         match own {
-                            Some(Own::Text(level, inline)) => super::draw::top_level_text(
-                                super::draw::TopLevel {
-                                    key: block_id.as_u64(),
-                                    level,
-                                    inline: &inline,
-                                    place,
-                                    bands: backgrounds
-                                        .get(&block_id.as_u64())
-                                        .cloned()
-                                        .unwrap_or_default(),
-                                    base: &typography,
-                                    body_line,
-                                    colors: &text_colors,
-                                },
-                                &super::draw::LeafContext {
-                                    extensions: &own_extensions,
-                                    leaves: &own_leaves,
-                                },
-                                window,
-                                cx,
-                            ),
-                            Some(Own::Rule) => super::draw::rule(place, &text_colors),
-                            Some(Own::List(tree)) => super::draw::top_level_list(
+                            Some(tree) => super::draw::draw(
                                 &tree,
-                                place,
-                                &list_cx,
-                                &super::draw::LeafContext {
-                                    extensions: &own_extensions,
-                                    leaves: &own_leaves,
+                                super::draw::Place {
+                                    first: node_ix == 0,
+                                    last: is_last_node,
+                                    prev,
+                                    depth: 0,
                                 },
+                                None,
+                                &draw_cx,
                                 window,
                                 cx,
                             ),
-                            Some(Own::Custom(node)) => {
-                                super::draw::custom_block(&node, place, &own_extensions, window, cx)
-                            }
-                            Some(Own::Nothing) => div().into_any_element(),
                             None => {
                                 node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx)
                             }
