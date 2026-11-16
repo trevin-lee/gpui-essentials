@@ -129,6 +129,8 @@ pub enum Kind {
         doc: String,
         title: String,
     },
+    /// A table of contents: the document's headings, listed where it is.
+    Toc,
     /// A widget (see [`crate::widget`]): its name, the rest of its info string, and its body.
     Widget {
         name: String,
@@ -386,7 +388,7 @@ fn same_kind(b: BlockRef<'_>, kind: &Kind) -> bool {
             | (BlockKind::TableCell, Kind::Cell { .. })
             | (
                 BlockKind::Custom,
-                Kind::Page { .. } | Kind::Widget { .. } | Kind::Markdown { .. }
+                Kind::Page { .. } | Kind::Toc | Kind::Widget { .. } | Kind::Markdown { .. }
             )
             | (_, Kind::Markdown { .. })
     )
@@ -492,6 +494,9 @@ fn block(b: BlockRef<'_>, ids: &mut Ids, seen: &mut HashSet<BlockId>) -> Block {
 
 /// A custom block from its Markdown: a sub-page, a widget, or kept as Markdown.
 fn custom(markdown: &str) -> Kind {
+    if markdown == crate::toc::MARKDOWN {
+        return Kind::Toc;
+    }
     if let Some(page) = page_of(markdown) {
         return page;
     }
@@ -649,6 +654,7 @@ fn markdown(b: &Block) -> String {
             code_fence(&line(&info).replace('`', ""), code)
         }
         Kind::Divider => "---".into(),
+        Kind::Toc => crate::toc::MARKDOWN.into(),
         Kind::Table { align } => table(b, align),
         Kind::Row | Kind::Cell { .. } => String::new(),
         Kind::Page { doc, title } => match docs::doc_id(&format!("{}{doc}", docs::SCHEME)) {
@@ -830,6 +836,7 @@ mod tests {
             "```rust title=x\nfn main() {}\n```",
             "````\n```\n````",
             "---",
+            "[TOC]\n\n# Heading",
             "| a | b | c |\n| :--- | :---: | --- |\n| 1 | \\| | 3 |",
             "[Notes](doc:9c1e \"page\")",
             "See [Roadmap](doc:4f2a) and ![alt](https://example.com/a.png).",
