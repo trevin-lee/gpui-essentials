@@ -668,3 +668,68 @@ fn the_event_panel_fits_at_every_width() {
         assert!(found.is_empty(), "{}", found.join("\n"));
     }
 }
+
+/// With the mini month beside it, the calendar's own text still fits, the month stays in the
+/// window and left of the calendar, and its dots are the days the host's events fall on.
+#[test]
+fn the_mini_month_fits_beside_the_calendar() {
+    let views = [CalendarView::Day, CalendarView::Week, CalendarView::Month];
+    check_widths_with(&views, &[720., 1024., 1280., 2200.], 820., |o| {
+        o.mini_month = true
+    });
+
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| {
+                o.time_zone = TZ;
+                o.mini_month = true;
+            })
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_events(worst_week())
+    });
+    for w in [1024., 1280., 2200.] {
+        vcx.simulate_resize(size(px(w), px(820.)));
+        for _ in 0..2 {
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+        }
+        let mini = vcx
+            .debug_bounds("calendar-mini")
+            .unwrap_or_else(|| panic!("no mini month at {w}"));
+        let canvas = calendar
+            .read_with(vcx, |c, _| c.shared.geo.get())
+            .expect("drawn")
+            .bounds;
+        assert!(
+            mini.left() >= px(0.) && mini.bottom() <= px(820.),
+            "{w}: {mini:?}"
+        );
+        assert!(
+            mini.right() <= canvas.left() + px(0.5),
+            "{w}: {mini:?} over {canvas:?}"
+        );
+        let title = vcx.debug_bounds("calendar-title").expect("a title");
+        let controls = vcx.debug_bounds("calendar-controls").expect("controls");
+        assert!(
+            title.left() >= mini.right() - px(0.5),
+            "{w}: title {title:?}"
+        );
+        assert!(
+            controls.right() <= px(w) + px(0.5),
+            "{w}: controls {controls:?}"
+        );
+    }
+    // The dots: every day an event in worst_week covers, and none it doesn't.
+    calendar.read_with(vcx, |c, _| {
+        let busy = c.busy_days(day(2));
+        assert!(busy.contains(&day(0)) && busy.contains(&day(3)) && busy.contains(&day(6)));
+        // The all-day week-long event covers Sunday; the month around has filler every day,
+        // so only past the filler is empty.
+        assert!(!busy.contains(&(day(0) + chrono::Duration::days(60))));
+    });
+}

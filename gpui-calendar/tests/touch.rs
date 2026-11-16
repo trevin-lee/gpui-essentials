@@ -403,3 +403,23 @@ fn on_touch_the_event_panel_is_a_sheet_with_44_point_rows(cx: &mut TestAppContex
     tap(cx, point(sheet.center().x, sheet.top() - px(30.)));
     assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
 }
+
+#[gpui::test]
+fn on_touch_the_mini_month_is_a_sheet_of_44_point_days(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    c.update(cx, |c, cx| c.set_options(|o| o.mini_month = true, cx));
+    draw(cx);
+    // Touch keeps it behind the title, whatever the width.
+    assert!(cx.debug_bounds("calendar-mini").is_none());
+    let title = cx.debug_bounds("calendar-title").expect("a title");
+    tap(cx, title.center());
+    assert!(cx.debug_bounds("calendar-sheet").is_some());
+    let d = NaiveDate::from_ymd_opt(2026, 11, 24).unwrap();
+    let cell = cx
+        .debug_bounds(Box::leak(format!("day-{d}").into_boxed_str()))
+        .expect("the 24th");
+    assert!(cell.size.height >= px(44.), "{:?}", cell.size);
+    tap(cx, cell.center());
+    assert_eq!(c.read_with(cx, |c, _| c.date()), d);
+    assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
+}

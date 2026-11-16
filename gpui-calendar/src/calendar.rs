@@ -13,7 +13,8 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariants as _, IconName, Press, Selectable as _, Sizable as _, Theme,
+    Button, ButtonGroup, ButtonVariants as _, DatePickerState, IconName, Press, Selectable as _,
+    Sizable as _, Theme,
 };
 
 use crate::find::Query;
@@ -21,6 +22,7 @@ use crate::layout::{self, Column};
 use crate::model::*;
 use crate::overlay::{Popover, Sheet};
 
+mod mini;
 mod panel;
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
 use crate::theme::{CalendarColors, palette_color};
@@ -56,6 +58,8 @@ actions!(
         Cancel,
         /// Asks the host to focus its search field ([`CalendarEvent::Find`]).
         Find,
+        /// Opens the mini month to jump to a date (where it's behind the title).
+        GoToDate,
     ]
 );
 
@@ -83,6 +87,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("backspace", DeleteSelected, c),
         KeyBinding::new("delete", DeleteSelected, c),
         KeyBinding::new("escape", Cancel, c),
+        KeyBinding::new("g", GoToDate, c),
         KeyBinding::new(
             if cfg!(any(target_os = "macos", target_os = "ios")) {
                 "cmd-f"
@@ -416,6 +421,14 @@ pub struct Calendar {
     last_point: Point<Pixels>,
     /// What the events are filtered by, if anything.
     query: Option<Rc<Query>>,
+    /// The mini month: its state (made on first use), the anchor it was last shown, its week
+    /// start, whether it's open behind the title, and the subscription to its picks.
+    mini: Option<Entity<DatePickerState>>,
+    mini_shown: Option<(NaiveDate, chrono::Weekday)>,
+    mini_open: bool,
+    /// Whether the mini month was beside the calendar in the last frame.
+    mini_side: bool,
+    _mini_sub: Option<Subscription>,
     /// Typing goes into the query: the host asked for it with `type_query`.
     typing: bool,
 }
@@ -493,6 +506,11 @@ impl Calendar {
             panel: None,
             last_point: Point::default(),
             query: None,
+            mini: None,
+            mini_shown: None,
+            mini_open: false,
+            mini_side: false,
+            _mini_sub: None,
             typing: false,
         }
     }
@@ -1971,7 +1989,10 @@ impl Calendar {
     // The keyboard.
 
     fn cancel(&mut self, cx: &mut Context<Self>) {
-        if self.asking.is_some() {
+        if self.mini_open {
+            self.mini_open = false;
+            cx.notify();
+        } else if self.asking.is_some() {
             self.dismiss_question(cx);
         } else if self.panel.is_some() {
             self.close_panel(cx);
@@ -2585,6 +2606,16 @@ impl Calendar {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors.text)
                     .debug_selector(|| "calendar-title".into())
+                    .when(self.options.mini_month, |d| {
+                        // The mini month is behind the title here.
+                        d.cursor_pointer().on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|c, _, window, cx| {
+                                cx.stop_propagation();
+                                c.toggle_mini_month(window, cx);
+                            }),
+                        )
+                    })
                     .child(SharedString::from(title)),
             )
             .child(
@@ -2794,11 +2825,11 @@ impl Render for Calendar {
         let question = self.render_question(cx);
         let query = self.render_query(colors, cx);
         let panel = self.render_panel(window, cx);
+        let (aside, mini) = self.render_mini(window, cx);
         div()
             .id("calendar")
             .relative()
             .flex()
-            .flex_col()
             .size_full()
             .bg(colors.background)
             .text_color(colors.text)
@@ -2842,27 +2873,38 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
             .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
             .on_action(cx.listener(|_, _: &Find, _, cx| cx.emit(CalendarEvent::Find)))
-            .when(self.header, |d| {
-                let narrow = self.is_narrow(window);
-                if narrow || self.options.touch {
-                    d.child(self.render_compact_header(narrow, colors, cx))
-                } else {
-                    d.child(self.render_header(cx).into_any_element())
-                }
-            })
+            .on_action(cx.listener(|c, _: &GoToDate, window, cx| c.toggle_mini_month(window, cx)))
+            .children(aside)
             .child(
                 div()
-                    .id("calendar-body")
-                    .relative()
+                    .flex()
+                    .flex_col()
                     .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
-                    .on_scroll(cx.listener(|c, e, _, cx| c.scroll(e, cx)))
-                    .child(body)
-                    .children(query),
+                    .min_w_0()
+                    .h_full()
+                    .when(self.header, |d| {
+                        let narrow = self.is_narrow(window);
+                        if narrow || self.options.touch {
+                            d.child(self.render_compact_header(narrow, colors, cx))
+                        } else {
+                            d.child(self.render_header(cx).into_any_element())
+                        }
+                    })
+                    .child(
+                        div()
+                            .id("calendar-body")
+                            .relative()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
+                            .on_scroll(cx.listener(|c, e, _, cx| c.scroll(e, cx)))
+                            .child(body)
+                            .children(query),
+                    ),
             )
             .children(panel)
+            .children(mini)
             .children(question)
     }
 }
