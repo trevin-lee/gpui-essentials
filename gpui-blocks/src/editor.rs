@@ -115,6 +115,7 @@ pub struct Options {
     items: Vec<SlashItem>,
     image_link: Option<ImageLink>,
     images: Option<markdown_editor::ImageSourceFn>,
+    highlighter: Option<markdown_editor::CodeHighlightFn>,
     docs: Option<Arc<dyn Docs>>,
     embeds: Option<Arc<EmbedFn>>,
 }
@@ -126,6 +127,7 @@ impl Default for Options {
             items: slash::default_items(),
             image_link: None,
             images: None,
+            highlighter: None,
             docs: None,
             embeds: None,
         }
@@ -146,6 +148,7 @@ impl std::fmt::Debug for Options {
             .field("items", &self.items)
             .field("image_link", &self.image_link.is_some())
             .field("images", &self.images.is_some())
+            .field("highlighter", &self.highlighter.is_some())
             .field("docs", &self.docs.is_some())
             .field("embeds", &self.embeds.is_some())
             .finish()
@@ -188,6 +191,23 @@ impl Options {
     /// reads a file or fetches an address a document names.
     pub fn images(mut self, load: impl Fn(&str) -> ImageSource + Send + Sync + 'static) -> Self {
         self.images = Some(Arc::new(move |uri: &SharedUri| load(uri.as_ref())));
+        self
+    }
+
+    /// How code blocks are highlighted: `highlight` gets a block's language (the first word of
+    /// its fence's info, possibly empty) and its code, and returns the styles of byte ranges of
+    /// the code, sorted. gpui-core's `highlight` feature makes one
+    /// (`Highlighter::new().into_fn(theme)`). It's asked again only when a block's code or
+    /// language changes; pass a new one when the theme changes. Without it, code blocks keep
+    /// GPUI Kit's highlighting.
+    pub fn code_highlighter(
+        mut self,
+        highlight: impl Fn(&str, &str) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.highlighter = Some(Arc::new(highlight));
         self
     }
 
@@ -340,6 +360,7 @@ impl Editor {
             })),
         };
         let images = options.images.clone();
+        let highlighter = options.highlighter.clone();
         let embed_heights: docs::Heights = Arc::default();
         let this = cx.entity().downgrade();
         let that = this.clone();
@@ -375,6 +396,9 @@ impl Editor {
                 Some(load) => state.with_image_source(load),
                 None => state.with_image_policy(markdown_editor::ImagePolicy::Placeholder),
             };
+            if let Some(highlighter) = highlighter {
+                state = state.with_code_highlighter(highlighter);
+            }
             state.set_scroll_handle(scroll.clone());
             state
         });

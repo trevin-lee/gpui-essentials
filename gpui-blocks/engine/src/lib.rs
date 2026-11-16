@@ -98,7 +98,8 @@ pub use kind::ColumnAlign;
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;
 pub use state::{
-    BlockEditorEvent, BlockEditorState, ClipboardPolicy, ImageSourceFn, PasteRequest, SubmitPolicy,
+    BlockEditorEvent, BlockEditorState, ClipboardPolicy, CodeHighlightFn, ImageSourceFn,
+    PasteRequest, SubmitPolicy,
 };
 /// The editor's clipboard and selection actions, for a host's own menu (an edit menu over a touch
 /// selection, say) to dispatch to the focused editor.

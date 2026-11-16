@@ -179,6 +179,52 @@ impl TextLeaf {
         }
     }
 
+    /// A code block's leaf: `code` in `style`, coloured by `highlights` (sorted byte ranges;
+    /// where they overlap, the earlier one wins).
+    pub(crate) fn code(
+        key: u64,
+        code: &str,
+        highlights: &[(Range<usize>, gpui::HighlightStyle)],
+        style: ParagraphStyle,
+        bands: Vec<(Range<usize>, Hsla)>,
+        cx: &LeafContext<'_>,
+    ) -> Self {
+        let mut runs = Vec::new();
+        let mut at = 0;
+        let push = |runs: &mut Vec<Run>, range: Range<usize>, marks: Marks| {
+            if range.start < range.end {
+                runs.push(Run::Text(code[range].to_string(), marks));
+            }
+        };
+        for (range, highlight) in highlights {
+            let start = range.start.max(at).min(code.len());
+            let end = range.end.min(code.len());
+            if start >= end || !code.is_char_boundary(start) || !code.is_char_boundary(end) {
+                continue;
+            }
+            push(&mut runs, at..start, Marks::default());
+            let marks = Marks {
+                bold: highlight
+                    .font_weight
+                    .is_some_and(|w| w >= gpui::FontWeight::SEMIBOLD),
+                italic: highlight.font_style == Some(gpui::FontStyle::Italic),
+                color: highlight.color,
+                ..Marks::default()
+            };
+            push(&mut runs, start..end, marks);
+            at = end;
+        }
+        push(&mut runs, at..code.len(), Marks::default());
+        Self {
+            key,
+            runs,
+            style,
+            bands,
+            leaves: cx.leaves.clone(),
+            built: None,
+        }
+    }
+
     /// Its paragraph and inline boxes, built from its runs once (the boxes are laid out then).
     fn build(&mut self, window: &mut Window, app: &mut App) -> Rc<Paragraph> {
         if let Some(built) = &self.built {
@@ -581,6 +627,24 @@ pub(crate) struct DrawCx<'a> {
     pub(crate) dark: bool,
     pub(crate) bands: &'a HashMap<u64, Vec<(Range<usize>, Hsla)>>,
     pub(crate) leaves: LeafContext<'a>,
+    pub(crate) code: &'a CodeLook,
+}
+
+/// How code blocks look: GPUI Kit's code block, in the editor's theme.
+pub(crate) struct CodeLook {
+    /// The code's size; its line is 1.6 times that.
+    pub(crate) size: Pixels,
+    /// The language label's family and size.
+    pub(crate) label_family: gpui::SharedString,
+    pub(crate) label_size: Pixels,
+    /// The editor style's refinement of code blocks (their corners, say).
+    pub(crate) refinement: gpui::StyleRefinement,
+}
+
+/// The host's highlighter and the highlights it made, for the code blocks the engine draws.
+pub(crate) struct Highlighting {
+    pub(crate) highlighter: crate::CodeHighlightFn,
+    pub(crate) cache: crate::state::HighlightCache,
 }
 
 /// A block as the engine draws it, copied out of the document first, since drawing needs the
@@ -599,6 +663,13 @@ pub(crate) enum Tree {
     /// A toggle: its summary, then its body when open.
     Toggle(bool, Vec<Tree>),
     Rule,
+    /// A code block: its leaf's key, its language, its code and the code's highlights.
+    Code {
+        key: u64,
+        lang: gpui::SharedString,
+        code: String,
+        highlights: Rc<[(Range<usize>, gpui::HighlightStyle)]>,
+    },
     Custom(gpui_kit::base::text::MarkdownNode),
     /// A break, a link definition or an unknown block: nothing to see.
     Nothing,
@@ -622,15 +693,20 @@ pub(crate) struct TableTree {
 }
 
 /// `block` as a tree the engine can draw: `None` when something in it is still drawn by GPUI
-/// Kit (code).
+/// Kit (a code block, when the host gave no highlighter).
 pub(crate) fn tree(
     doc: &super::document::EditorDocument,
     block: super::id::BlockId,
+    code: Option<&Highlighting>,
 ) -> Option<Tree> {
     use super::document::{AtomData, BlockContent};
     use super::kind::BlockKindData as K;
-    let children =
-        |id| -> Option<Vec<Tree>> { doc.children(id).iter().map(|c| tree(doc, *c)).collect() };
+    let children = |id| -> Option<Vec<Tree>> {
+        doc.children(id)
+            .iter()
+            .map(|c| tree(doc, *c, code))
+            .collect()
+    };
     Some(
         match (doc.kind(block)?, doc.get(block).map(|e| &e.content)) {
             (K::Paragraph, Some(BlockContent::Inline(inline))) => Tree::Text {
@@ -643,7 +719,7 @@ pub(crate) fn tree(
                 level: Some(*level),
                 inline: inline.clone(),
             },
-            (K::List { .. }, _) => Tree::List(list_tree(doc, block, None)?),
+            (K::List { .. }, _) => Tree::List(list_tree(doc, block, None, code)?),
             (K::Table { aligns }, _) => Tree::Table(TableTree {
                 aligns: aligns.clone(),
                 rows: doc
@@ -670,10 +746,29 @@ pub(crate) fn tree(
                 let shown = if *open { ids } else { &ids[..ids.len().min(1)] };
                 Tree::Toggle(
                     *open,
-                    shown.iter().map(|c| tree(doc, *c)).collect::<Option<_>>()?,
+                    shown
+                        .iter()
+                        .map(|c| tree(doc, *c, code))
+                        .collect::<Option<_>>()?,
                 )
             }
             (K::HorizontalRule, _) => Tree::Rule,
+            (K::CodeBlock { lang, .. }, Some(BlockContent::Plain(text))) => {
+                let code = code?;
+                let lang = lang.clone().unwrap_or_default();
+                Tree::Code {
+                    key: block.as_u64(),
+                    highlights: crate::state::highlights(
+                        &code.cache,
+                        &code.highlighter,
+                        block,
+                        &lang,
+                        text,
+                    ),
+                    lang,
+                    code: text.clone(),
+                }
+            }
             (K::Custom, Some(BlockContent::Atom(AtomData::Custom(node)))) => {
                 Tree::Custom(node.clone())
             }
@@ -688,6 +783,7 @@ pub(crate) fn list_tree(
     doc: &super::document::EditorDocument,
     list: super::id::BlockId,
     items: Option<Range<usize>>,
+    code: Option<&Highlighting>,
 ) -> Option<ListTree> {
     use super::kind::BlockKindData as K;
     let Some(K::List { ordered, start }) = doc.kind(list) else {
@@ -705,7 +801,7 @@ pub(crate) fn list_tree(
             children: doc
                 .children(*item)
                 .iter()
-                .map(|c| tree(doc, *c))
+                .map(|c| tree(doc, *c, code))
                 .collect::<Option<_>>()?,
         });
     }
@@ -813,6 +909,16 @@ pub(crate) fn draw(
             let leaf = TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app);
             div().pt(top).pb(bottom).child(leaf).into_any_element()
         }
+        Tree::Code {
+            key,
+            lang,
+            code,
+            highlights,
+        } => div()
+            .pb(gap)
+            .w_full()
+            .child(code_element(*key, lang, code, highlights, d, window))
+            .into_any_element(),
         Tree::Table(table) => div()
             .pb(gap)
             .w_full()
@@ -1228,4 +1334,44 @@ fn table_element(
         .border_color(border)
         .children(rows)
         .into_any_element()
+}
+
+/// A code block as GPUI Kit draws one: monospaced on the code background, in a border, with its
+/// language in the top right corner.
+fn code_element(
+    key: u64,
+    lang: &gpui::SharedString,
+    code: &str,
+    highlights: &[(Range<usize>, gpui::HighlightStyle)],
+    d: &DrawCx<'_>,
+    window: &Window,
+) -> AnyElement {
+    let size = d.code.size;
+    let mut style = paragraph_style(d.base, size, device_line(size * 1.6, window), d.colors);
+    style.font.family = d.colors.mono.clone();
+    let bands = d.bands.get(&key).cloned().unwrap_or_default();
+    let leaf = TextLeaf::code(key, code, highlights, style, bands, &d.leaves);
+    let label = (!lang.is_empty()).then(|| {
+        div()
+            .absolute()
+            .top(px(7.))
+            .right(px(12.))
+            .font_family(d.code.label_family.clone())
+            .text_size(d.code.label_size)
+            .line_height(px(16.))
+            .text_color(d.colors.muted)
+            .child(lang.clone())
+    });
+    let mut block = div()
+        .w_full()
+        .min_w_0()
+        .px(px(16.))
+        .pt(px(if label.is_some() { 28. } else { 14. }))
+        .pb(px(14.))
+        .bg(d.colors.code_background)
+        .border_1()
+        .border_color(d.colors.border)
+        .relative();
+    gpui::Refineable::refine(block.style(), &d.code.refinement);
+    block.child(leaf).children(label).into_any_element()
 }

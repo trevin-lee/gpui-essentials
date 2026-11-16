@@ -32,6 +32,22 @@ pub(crate) const CONTEXT: &str = "BlockEditor";
 /// A host's image loader: a picture's address to the image to draw.
 pub type ImageSourceFn =
     std::sync::Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>;
+/// A host's syntax highlighter: a code block's language (the first word of its fence's info,
+/// possibly empty) and its code to the styles of byte ranges of the code, sorted. With one, the
+/// editor draws code blocks itself; without, GPUI Kit's own highlighting applies.
+pub type CodeHighlightFn =
+    std::sync::Arc<dyn Fn(&str, &str) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync>;
+
+/// A code block's highlights, kept until its code, its language or the highlighter changes.
+pub(crate) type HighlightCache = Rc<RefCell<std::collections::HashMap<BlockId, CachedHighlights>>>;
+
+pub(crate) struct CachedHighlights {
+    highlighter: CodeHighlightFn,
+    lang: String,
+    code: String,
+    pub(crate) styles: Rc<[(Range<usize>, gpui::HighlightStyle)]>,
+}
+
 /// Side of the whole-table corner handle, in px.
 pub(crate) const TABLE_HANDLE_SIZE: f32 = 14.;
 /// How far the handle sits up and left of the table frame's corner; the
@@ -436,6 +452,8 @@ pub struct BlockEditorState {
     readonly: bool,
     image_policy: super::ImagePolicy,
     image_source: Option<ImageSourceFn>,
+    code_highlighter: Option<CodeHighlightFn>,
+    pub(crate) highlights: HighlightCache,
     submit_policy: SubmitPolicy,
     clipboard_policy: ClipboardPolicy,
     paste_sequence: u64,
@@ -509,6 +527,8 @@ impl BlockEditorState {
             toolbar_hidden: false,
             image_policy: super::ImagePolicy::default(),
             image_source: None,
+            code_highlighter: None,
+            highlights: Rc::default(),
             submit_policy: SubmitPolicy::default(),
             clipboard_policy: ClipboardPolicy::default(),
             paste_sequence: 0,
@@ -708,6 +728,27 @@ impl BlockEditorState {
     }
     pub(crate) fn image_source(&self) -> Option<ImageSourceFn> {
         self.image_source.clone()
+    }
+
+    /// Highlights code blocks with the host's highlighter (see [`CodeHighlightFn`]).
+    pub fn with_code_highlighter(mut self, highlighter: CodeHighlightFn) -> Self {
+        self.code_highlighter = Some(highlighter);
+        self
+    }
+    /// Sets or clears the host's highlighter (see [`Self::with_code_highlighter`]), and draws
+    /// the code blocks again.
+    pub fn set_code_highlighter(
+        &mut self,
+        highlighter: Option<CodeHighlightFn>,
+        cx: &mut Context<Self>,
+    ) {
+        self.code_highlighter = highlighter;
+        self.highlights.borrow_mut().clear();
+        self.projection.invalidate();
+        cx.notify();
+    }
+    pub(crate) fn code_highlighter(&self) -> Option<CodeHighlightFn> {
+        self.code_highlighter.clone()
     }
 
     pub fn caret_prefix_snapshot(&self) -> Option<SharedString> {
@@ -3298,4 +3339,33 @@ fn opening_pair(text: &str, open: Range<usize>, delim: &str) -> Option<Range<usi
         return None;
     }
     Some(close)
+}
+
+/// `block`'s highlights for `lang` and `code`: the cached ones while nothing changed, else
+/// `highlighter`'s, kept for the next frame.
+pub(crate) fn highlights(
+    cache: &HighlightCache,
+    highlighter: &CodeHighlightFn,
+    block: BlockId,
+    lang: &str,
+    code: &str,
+) -> Rc<[(Range<usize>, gpui::HighlightStyle)]> {
+    if let Some(cached) = cache.borrow().get(&block)
+        && Arc::ptr_eq(&cached.highlighter, highlighter)
+        && cached.lang == lang
+        && cached.code == code
+    {
+        return cached.styles.clone();
+    }
+    let styles: Rc<[_]> = highlighter(lang, code).into();
+    cache.borrow_mut().insert(
+        block,
+        CachedHighlights {
+            highlighter: highlighter.clone(),
+            lang: lang.to_string(),
+            code: code.to_string(),
+            styles: styles.clone(),
+        },
+    );
+    styles
 }
