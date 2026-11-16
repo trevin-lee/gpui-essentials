@@ -450,3 +450,38 @@ fn with_reduce_motion_a_swipe_lands_at_once(cx: &mut TestAppContext) {
     let still = spot(&c, cx, day(16), 13, 0);
     assert_eq!(still, landed);
 }
+
+#[gpui::test]
+fn on_touch_columns_stay_a_finger_wide_and_the_rest_open_in_a_sheet(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    // Ten at once on Wednesday afternoon.
+    let ids: Vec<EventId> = (0..10).map(|i| format!("pile-{i}").into()).collect();
+    let mut events = c.read_with(cx, |c, _| c.events().to_vec());
+    for (i, id) in ids.iter().enumerate() {
+        events.push(Event::timed(
+            id.clone(),
+            format!("Pile {i}"),
+            at(day(2), 15, 0),
+            at(day(2), 16, 0),
+        ));
+    }
+    c.update(cx, |c, cx| c.set_events(events, cx));
+    draw(cx);
+    draw(cx);
+    let shown: Vec<_> = ids
+        .iter()
+        .filter_map(|id| c.read_with(cx, |c, _| c.event_bounds(id)))
+        .collect();
+    assert!(!shown.is_empty() && shown.len() < ids.len());
+    assert!(shown.iter().all(|b| b.size.width >= px(43.5)), "{shown:?}");
+    let hidden = ids
+        .iter()
+        .find(|id| c.read_with(cx, |c, _| c.event_bounds(id)).is_none())
+        .unwrap();
+    let more = c.read_with(cx, |c, _| c.hidden_bounds(hidden)).unwrap();
+    tap(cx, more.center());
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_some()));
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
+    let row = cx.debug_bounds("crowd-row-0").expect("a row");
+    assert!(row.size.height >= px(44.), "{row:?}");
+}

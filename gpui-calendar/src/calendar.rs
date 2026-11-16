@@ -21,6 +21,7 @@ use crate::find::Query;
 use crate::layout::{self, Column};
 use crate::model::*;
 
+mod crowd;
 mod mini;
 mod panel;
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
@@ -418,6 +419,8 @@ pub struct Calendar {
     asking: Option<Asking>,
     /// The event whose details the panel shows, and where it hangs from.
     panel: Option<Panel>,
+    /// The list of side-by-side events that didn't fit, open from their "+N".
+    crowd: Option<crowd::Crowd>,
     /// Where the pointer or finger last was in a drag.
     last_point: Point<Pixels>,
     /// What the events are filtered by, if anything.
@@ -508,6 +511,7 @@ impl Calendar {
             neighbour: None,
             asking: None,
             panel: None,
+            crowd: None,
             last_point: Point::default(),
             query: None,
             mini: None,
@@ -1444,6 +1448,10 @@ impl Calendar {
             return;
         };
         let target = paint::target_at(&geo, &self.shared, event.position);
+        // A press outside the list closes it; one on its "+N" toggles it.
+        let reopen = matches!(&target, Target::Crowd(ids, _)
+            if self.crowd.as_ref().is_none_or(|c| &c.ids != ids));
+        self.close_crowd(cx);
         let double = event.click_count >= 2;
         match &target {
             Target::Event { id, .. } => {
@@ -1458,6 +1466,12 @@ impl Calendar {
             Target::Expand => {
                 self.all_day_expanded = true;
                 cx.notify();
+                return;
+            }
+            Target::Crowd(ids, anchor) => {
+                if reopen {
+                    self.open_crowd(ids.clone(), *anchor, cx);
+                }
                 return;
             }
             Target::More(date) | Target::Date(date) => {
@@ -1527,6 +1541,8 @@ impl Calendar {
                 if moved < threshold && !now {
                     return;
                 }
+                // A drag from the list of what didn't fit: the list gives way to it.
+                self.crowd = None;
                 let target = match target {
                     Target::Link {
                         id,
@@ -2008,6 +2024,8 @@ impl Calendar {
             cx.notify();
         } else if self.asking.is_some() {
             self.dismiss_question(cx);
+        } else if self.crowd.is_some() {
+            self.close_crowd(cx);
         } else if self.panel.is_some() {
             self.close_panel(cx);
         } else if self.drag.take().is_some() {
@@ -2890,6 +2908,7 @@ impl Render for Calendar {
         let question = self.render_question(cx);
         let query = self.render_query(colors, cx);
         let panel = self.render_panel(window, cx);
+        let crowd = self.render_crowd(window, cx);
         let (aside, mini) = self.render_mini(window, cx);
         let ring = self.focus.is_focused(window) && window.last_input_was_keyboard();
         div()
@@ -2984,6 +3003,7 @@ impl Render for Calendar {
                     ),
             )
             .children(panel)
+            .children(crowd)
             .children(mini)
             .children(question)
     }
