@@ -14,6 +14,7 @@
 //!   with the title and icon the app gives them.
 //! - **JSON** ([`json`]): the document as a tree of blocks with ids that last, for storing
 //!   and indexing.
+//! - **Import** ([`import`]): notes exported from Notion or kept in Obsidian, as documents.
 //! - Markdown shortcuts as you type (`# `, `- `, `1. `, `[ ] `, `> `, three backticks, `---`,
 //!   `**bold**`), undo and redo, selection across blocks, and copy and paste as Markdown.
 //!
@@ -39,6 +40,7 @@
 
 pub mod docs;
 mod editor;
+pub mod import;
 pub mod json;
 pub mod slash;
 pub mod toc;
