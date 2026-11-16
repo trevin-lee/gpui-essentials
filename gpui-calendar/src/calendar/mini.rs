@@ -134,6 +134,9 @@ impl Calendar {
         let c = Theme::global(cx).colors;
         if beside {
             let aside = div()
+                // After the header, before the days, for Tab.
+                .tab_group()
+                .tab_index(1)
                 .flex_none()
                 .w(rems(SIDE / 15.))
                 .h_full()
@@ -159,6 +162,7 @@ impl Calendar {
             .child(grid);
         let open = if self.options.touch {
             Sheet::new("calendar-mini-sheet")
+                .accessibility_label("Go to a date")
                 .open(true)
                 .take_focus(false)
                 .on_dismiss(dismiss)
@@ -173,6 +177,7 @@ impl Calendar {
                 )
             });
             Popover::new("calendar-mini-popover")
+                .accessibility_label("Go to a date")
                 .open(true)
                 .anchor(anchor)
                 .take_focus(false)

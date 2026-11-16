@@ -199,15 +199,15 @@ impl Geo {
         (f32::from(x - self.left) / f32::from(self.col_w)).floor() as i32
     }
 
-    fn col_x(&self, col: i32) -> Pixels {
+    pub(crate) fn col_x(&self, col: i32) -> Pixels {
         self.left + self.col_w * col as f32
     }
 
-    fn date(&self, col: i32) -> NaiveDate {
+    pub(crate) fn date(&self, col: i32) -> NaiveDate {
         self.first + Duration::days(col as i64)
     }
 
-    fn row_top(&self, row: u32) -> Pixels {
+    pub(crate) fn row_top(&self, row: u32) -> Pixels {
         self.head_bottom + self.row_h * row as f32
     }
 
@@ -624,6 +624,7 @@ pub(crate) fn body(
     scene: Scene,
     shared: Rc<Shared>,
     this: WeakEntity<Calendar>,
+    a11y: Rc<crate::a11y::A11yFrame>,
 ) -> impl IntoElement {
     let prepaint_shared = shared.clone();
     let prepaint_this = this.clone();
@@ -644,81 +645,25 @@ pub(crate) fn body(
                     this.update(cx, |_, cx| cx.notify()).ok();
                 });
             }
+            // With a screen reader on, the frame is laid out here first, without paint, so
+            // what it's told (built from where things go) is this frame's, not the last's.
+            // Without one, nothing extra runs.
+            if window.is_a11y_active() || crate::a11y::forced() {
+                draw(window, cx, &scene, &geo, bounds, &prepaint_shared, true);
+                let items = prepaint_this
+                    .upgrade()
+                    .map(|c| c.read(cx).accessibility_items())
+                    .unwrap_or_default();
+                a11y.set(items, window.scale_factor());
+            } else {
+                a11y.set(Vec::new(), window.scale_factor());
+            }
             let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
             (scene, geo, hitbox)
         },
         move |bounds, (scene, geo, hitbox), window, cx| {
             window.set_cursor_style(scene.cursor, &hitbox);
-            shared.hits.borrow_mut().clear();
-            shared.links.borrow_mut().clear();
-            shared.mores.borrow_mut().clear();
-            shared.dates.borrow_mut().clear();
-            shared.expand.borrow_mut().clear();
-            shared.ghost.set(None);
-            window.with_content_mask(Some(ContentMask { bounds }), |window| {
-                let mut ink = Ink {
-                    window,
-                    cx,
-                    s: geo.s,
-                    family: scene.family.clone(),
-                    mark: None,
-                };
-                // Days are drawn right of the gutter only, and the gutter after them, still.
-                let days_area =
-                    Bounds::from_corners(point(geo.gutter, bounds.top()), bounds.bottom_right());
-                ink.window
-                    .with_content_mask(Some(ContentMask { bounds: days_area }), |window| {
-                        let mut ink = Ink {
-                            window,
-                            cx: ink.cx,
-                            s: ink.s,
-                            family: ink.family.clone(),
-                            mark: ink.mark.clone(),
-                        };
-                        // The period a swipe brings in, beside this one. Drawn first: what
-                        // it leaves in the shared hit lists is replaced by this period's
-                        // below, and nothing takes a press while a swipe moves.
-                        if let Some(n) = &scene.neighbour {
-                            let mut beside = scene.clone();
-                            beside.first = n.first;
-                            beside.days = n.days;
-                            beside.month = n.month;
-                            beside.laid = n.laid.clone();
-                            beside.selection = None;
-                            beside.ghost = None;
-                            beside.neighbour = None;
-                            beside.lanes = Some(scene.all_day_lanes());
-                            // Beside this period's days: a day area's width along for the grid, a
-                            // whole width for the month.
-                            let along = (bounds.right() - geo.gutter) * n.dir as f32;
-                            let beside_geo = geometry(
-                                &beside,
-                                bounds,
-                                px(scene.swipe) + along,
-                                ink.window.rem_size(),
-                                &shared,
-                            );
-                            match beside.kind {
-                                Kind::Grid => paint_grid(&mut ink, &beside, &beside_geo, &shared),
-                                Kind::Month => paint_month(&mut ink, &beside, &beside_geo, &shared),
-                                Kind::Agenda => {}
-                            }
-                            shared.hits.borrow_mut().clear();
-                            shared.links.borrow_mut().clear();
-                            shared.mores.borrow_mut().clear();
-                            shared.dates.borrow_mut().clear();
-                            shared.expand.borrow_mut().clear();
-                        }
-                        match scene.kind {
-                            Kind::Grid => paint_grid(&mut ink, &scene, &geo, &shared),
-                            Kind::Month => paint_month(&mut ink, &scene, &geo, &shared),
-                            Kind::Agenda => paint_agenda(&mut ink, &scene, &geo, &shared),
-                        }
-                    });
-                if scene.kind == Kind::Grid {
-                    paint_gutter(&mut ink, &scene, &geo);
-                }
-            });
+            draw(window, cx, &scene, &geo, bounds, &shared, false);
             // Touch: a long press, and a drag claimed as the finger lands.
             let (on_long, on_drag) = (this.clone(), this.clone());
             window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
@@ -755,6 +700,91 @@ pub(crate) fn body(
         },
     )
     .size_full()
+}
+
+/// Draws a frame's days (and the gutter), noting where everything went in `shared` for the
+/// mouse and for assistive technology; `dry`, it only notes where things go.
+fn draw(
+    window: &mut Window,
+    cx: &mut App,
+    scene: &Scene,
+    geo: &Geo,
+    bounds: Bounds<Pixels>,
+    shared: &Shared,
+    dry: bool,
+) {
+    shared.hits.borrow_mut().clear();
+    shared.links.borrow_mut().clear();
+    shared.mores.borrow_mut().clear();
+    shared.dates.borrow_mut().clear();
+    shared.expand.borrow_mut().clear();
+    shared.ghost.set(None);
+    window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        let mut ink = Ink {
+            window,
+            cx,
+            s: geo.s,
+            family: scene.family.clone(),
+            mark: None,
+            dry,
+        };
+        // Days are drawn right of the gutter only, and the gutter after them, still.
+        let days_area =
+            Bounds::from_corners(point(geo.gutter, bounds.top()), bounds.bottom_right());
+        ink.window
+            .with_content_mask(Some(ContentMask { bounds: days_area }), |window| {
+                let mut ink = Ink {
+                    window,
+                    cx: ink.cx,
+                    s: ink.s,
+                    family: ink.family.clone(),
+                    mark: ink.mark.clone(),
+                    dry: ink.dry,
+                };
+                // The period a swipe brings in, beside this one. Drawn first: what
+                // it leaves in the shared hit lists is replaced by this period's
+                // below, and nothing takes a press while a swipe moves.
+                if let Some(n) = &scene.neighbour {
+                    let mut beside = scene.clone();
+                    beside.first = n.first;
+                    beside.days = n.days;
+                    beside.month = n.month;
+                    beside.laid = n.laid.clone();
+                    beside.selection = None;
+                    beside.ghost = None;
+                    beside.neighbour = None;
+                    beside.lanes = Some(scene.all_day_lanes());
+                    // Beside this period's days: a day area's width along for the grid, a
+                    // whole width for the month.
+                    let along = (bounds.right() - geo.gutter) * n.dir as f32;
+                    let beside_geo = geometry(
+                        &beside,
+                        bounds,
+                        px(scene.swipe) + along,
+                        ink.window.rem_size(),
+                        shared,
+                    );
+                    match beside.kind {
+                        Kind::Grid => paint_grid(&mut ink, &beside, &beside_geo, shared),
+                        Kind::Month => paint_month(&mut ink, &beside, &beside_geo, shared),
+                        Kind::Agenda => {}
+                    }
+                    shared.hits.borrow_mut().clear();
+                    shared.links.borrow_mut().clear();
+                    shared.mores.borrow_mut().clear();
+                    shared.dates.borrow_mut().clear();
+                    shared.expand.borrow_mut().clear();
+                }
+                match scene.kind {
+                    Kind::Grid => paint_grid(&mut ink, scene, geo, shared),
+                    Kind::Month => paint_month(&mut ink, scene, geo, shared),
+                    Kind::Agenda => paint_agenda(&mut ink, scene, geo, shared),
+                }
+            });
+        if scene.kind == Kind::Grid {
+            paint_gutter(&mut ink, scene, geo);
+        }
+    });
 }
 
 /// Every line of text a frame draws, kept by the overflow tests.
@@ -803,6 +833,9 @@ struct Ink<'a> {
     family: SharedString,
     /// While set, text is drawn with what the query finds in it marked in this colour.
     mark: Option<(Rc<Query>, Hsla)>,
+    /// Lays the frame out without drawing it: where things go (the hit lists) without any
+    /// paint, for assistive technology, which needs them before the frame is painted.
+    dry: bool,
 }
 
 impl Ink<'_> {
@@ -813,6 +846,10 @@ impl Ink<'_> {
     /// Notes a line of text for the overflow tests; nothing outside them.
     #[cfg_attr(not(test), allow(unused_variables))]
     fn note(&self, text: &str, at: Point<Pixels>, width: Pixels, height: Pixels) {
+        #[cfg(test)]
+        if self.dry {
+            return;
+        }
         #[cfg(test)]
         drawn::TEXTS.with(|t| {
             if let Some(log) = t.borrow_mut().as_mut() {
@@ -826,10 +863,16 @@ impl Ink<'_> {
     }
 
     fn fill(&mut self, b: Bounds<Pixels>, color: Hsla) {
+        if self.dry {
+            return;
+        }
         self.window.paint_quad(fill(b, color));
     }
 
     fn rounded(&mut self, b: Bounds<Pixels>, radius: impl Into<Corners<Pixels>>, color: Hsla) {
+        if self.dry {
+            return;
+        }
         self.window.paint_quad(quad(
             b,
             radius,
@@ -848,6 +891,9 @@ impl Ink<'_> {
         width: Pixels,
         border: Hsla,
     ) {
+        if self.dry {
+            return;
+        }
         self.window
             .paint_quad(quad(b, radius, fill, width, border, BorderStyle::default()));
     }
@@ -970,6 +1016,9 @@ impl Ink<'_> {
         let width = shaped.width;
         let leading = self.u(leading);
         self.note(&shaped.text.clone(), at, width, leading);
+        if self.dry {
+            return width;
+        }
         if self.mark.is_some() {
             let _ =
                 shaped.paint_background(at, leading, TextAlign::Left, None, self.window, self.cx);
@@ -1001,6 +1050,9 @@ impl Ink<'_> {
             width,
             leading,
         );
+        if self.dry {
+            return width;
+        }
         let _ = shaped.paint(
             point(right - width, top),
             leading,
@@ -1055,7 +1107,7 @@ impl Ink<'_> {
                 line.width(),
                 line.size(leading).height,
             );
-            if self.mark.is_some() {
+            if self.mark.is_some() && !self.dry {
                 let _ = line.paint_background(
                     point(at.x, y),
                     leading,
@@ -1065,14 +1117,16 @@ impl Ink<'_> {
                     self.cx,
                 );
             }
-            let _ = line.paint(
-                point(at.x, y),
-                leading,
-                TextAlign::Left,
-                None,
-                self.window,
-                self.cx,
-            );
+            if !self.dry {
+                let _ = line.paint(
+                    point(at.x, y),
+                    leading,
+                    TextAlign::Left,
+                    None,
+                    self.window,
+                    self.cx,
+                );
+            }
             let n = line.wrap_boundaries.len() + 1;
             used += n;
             y += leading * n as f32;
@@ -1237,6 +1291,7 @@ fn paint_timed_chip(
                 s: ink.s,
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
+                dry: ink.dry,
             };
             let pad = ink.u(3.);
             let links = text.links;
@@ -1498,6 +1553,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 s: ink.s,
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
+                dry: ink.dry,
             };
             // The hours the clocks skip or repeat.
             for (col, change) in &scene.laid.dst {
@@ -1576,6 +1632,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 s: ink.s,
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
+                dry: ink.dry,
             };
             let mut hits = shared.hits.borrow_mut();
             for piece in &scene.laid.timed {
@@ -1974,6 +2031,7 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 s: ink.s,
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
+                dry: ink.dry,
             };
             // The hours, out of the way of the time now.
             for h in 1..24 {
@@ -2633,6 +2691,7 @@ fn paint_agenda(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     s: ink.s,
                     family: ink.family.clone(),
                     mark: ink.mark.clone(),
+                    dry: ink.dry,
                 };
                 ink.mark = scene.mark(&scene.laid.chips[row.chip]);
                 paint_agenda_row(&mut ink, scene, shared, &cols, row, place, top, rows_area);

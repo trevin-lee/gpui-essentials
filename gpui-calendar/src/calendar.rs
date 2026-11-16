@@ -397,6 +397,8 @@ pub struct Calendar {
     last_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
 
     focus: FocusHandle,
+    /// What the canvas tells assistive technology, frame by frame.
+    pub(crate) a11y: Rc<crate::a11y::A11yFrame>,
     pub(crate) shared: Rc<Shared>,
     _tick: Option<Task<()>>,
     clock: Clock,
@@ -422,7 +424,7 @@ pub struct Calendar {
     query: Option<Rc<Query>>,
     /// The mini month: its state (made on first use), the anchor it was last shown, its week
     /// start, whether it's open behind the title, and the subscription to its picks.
-    mini: Option<Entity<DatePickerState>>,
+    pub(crate) mini: Option<Entity<DatePickerState>>,
     mini_shown: Option<(NaiveDate, chrono::Weekday)>,
     mini_open: bool,
     /// Whether the mini month was beside the calendar in the last frame.
@@ -490,7 +492,10 @@ impl Calendar {
             now_override: None,
             laid: None,
             last_range: None,
-            focus: cx.focus_handle(),
+            // Tab reaches the header's controls, the mini month, then the calendar (its grid,
+            // its month, its list), then an open panel.
+            focus: cx.focus_handle().tab_stop(true).tab_index(2),
+            a11y: Rc::default(),
             shared: Rc::default(),
             _tick: Some(tick),
             clock,
@@ -1955,13 +1960,19 @@ impl Calendar {
     }
 
     /// Moves a settling swipe on to where it is at this frame, asking for the next frame while
-    /// it moves. At rest it asks for none.
+    /// it moves. At rest it asks for none. With Reduce Motion on (`App::reduce_motion`, which
+    /// the host sets from the system's setting) it lands at once, the new period with it.
     fn advance_settle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(settle) = self.settle else {
             return;
         };
         let now = cx.background_executor().now();
-        let t = (now.duration_since(settle.start).as_secs_f32() / SETTLE.as_secs_f32()).min(1.);
+        let still = cx.reduce_motion();
+        let t = if still {
+            1.
+        } else {
+            (now.duration_since(settle.start).as_secs_f32() / SETTLE.as_secs_f32()).min(1.)
+        };
         let eased = 1. - (1. - t).powi(3);
         self.swipe = settle.from + (settle.to - settle.from) * eased;
         if t < 1. {
@@ -1972,6 +1983,10 @@ impl Calendar {
         if let Some(dir) = settle.turn {
             // The new period comes in from the side the finger pushed from.
             self.go_to(time::step(self.view, self.anchor, dir), cx);
+            if still {
+                self.swipe = 0.;
+                return;
+            }
             let from = dir as f32 * settle.width;
             self.swipe = from;
             self.settle = Some(Settle {
@@ -2301,7 +2316,7 @@ impl Calendar {
     // The event panel.
 
     /// What opening an event does: tells the host, and shows the panel if it's on.
-    fn open_event(&mut self, id: EventId, cx: &mut Context<Self>) {
+    pub(crate) fn open_event(&mut self, id: EventId, cx: &mut Context<Self>) {
         cx.emit(CalendarEvent::Open(id.clone()));
         if self.options.event_panel {
             self.open_panel(id, cx);
@@ -2427,6 +2442,8 @@ impl Calendar {
                 })
                 .child(div().truncate().child(scope.label()))
         });
+        // Drawn over the window, outside the calendar's place in Tab's order: put after it.
+        let rows = after_calendar(div().flex().flex_col().children(rows));
         let heading = div()
             .px(rems(10. / 15.))
             .pt(rems(6. / 15.))
@@ -2461,11 +2478,12 @@ impl Calendar {
                     .child("Cancel")
             };
             Sheet::new("calendar-question")
+                .accessibility_label(title)
                 .open(true)
                 .take_focus(false)
                 .on_dismiss(dismiss)
                 .child(heading)
-                .child(div().flex().flex_col().children(rows))
+                .child(rows)
                 .child(cancel)
                 .into_any_element()
         } else {
@@ -2473,6 +2491,7 @@ impl Calendar {
             // a ghost across a week doesn't make the question as wide.
             let a = asking.anchor;
             Popover::new("calendar-question")
+                .accessibility_label(title)
                 .open(true)
                 .anchor(Bounds::new(
                     a.origin,
@@ -2484,7 +2503,7 @@ impl Calendar {
                 .min_w(rems(14.))
                 .max_w(rems(20.))
                 .child(heading)
-                .child(div().flex().flex_col().children(rows))
+                .child(rows)
                 .into_any_element()
         })
     }
@@ -2555,9 +2574,13 @@ impl Calendar {
                 .ok();
             }
         };
-        let control = |id: ElementId, label: SharedString, selected: bool| {
-            div()
-                .id(id)
+        // Each a button to assistive technology, with a name where its text is a glyph, and
+        // reached by Tab; a press leaves the keyboard with the calendar.
+        let control = |id: ElementId, label: SharedString, name: &str, selected: bool| {
+            Press::new(id)
+                .accessibility_label(SharedString::from(name.to_string()))
+                .selected(selected)
+                .focus_on_press(false)
                 .flex()
                 .flex_none()
                 .items_center()
@@ -2606,27 +2629,46 @@ impl Calendar {
             .px(rems(12. / 15.))
             .border_b_1()
             .border_color(colors.line)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(rems(1.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors.text)
-                    .debug_selector(|| "calendar-title".into())
-                    .when(self.options.mini_month, |d| {
-                        // The mini month is behind the title here.
-                        d.cursor_pointer().on_mouse_down(
+            .child({
+                fn style<E: Styled>(e: E, colors: CalendarColors) -> E {
+                    e.flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(rems(1.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors.text)
+                }
+                if self.options.mini_month {
+                    // The mini month is behind the title here: a press opens it (on the way
+                    // down, so a press that closes it doesn't open it again), and so do Enter
+                    // and Space when Tab has brought the keyboard here.
+                    let toggle = cx.listener(|c, e: &ClickEvent, window, cx| {
+                        if e.is_keyboard() {
+                            c.toggle_mini_month(window, cx);
+                        }
+                    });
+                    style(Press::new("calendar-title"), colors)
+                        .accessibility_label(SharedString::from(format!("{title}, go to a date")))
+                        .focus_on_press(false)
+                        .debug_selector(|| "calendar-title".into())
+                        .cursor_pointer()
+                        .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|c, _, window, cx| {
                                 cx.stop_propagation();
                                 c.toggle_mini_month(window, cx);
                             }),
                         )
-                    })
-                    .child(SharedString::from(title)),
-            )
+                        .on_click(toggle)
+                        .child(SharedString::from(title))
+                        .into_any_element()
+                } else {
+                    style(div(), colors)
+                        .debug_selector(|| "calendar-title".into())
+                        .child(SharedString::from(title))
+                        .into_any_element()
+                }
+            })
             .child(
                 div()
                     .flex()
@@ -2635,16 +2677,16 @@ impl Calendar {
                     .gap(rems(2. / 15.))
                     .debug_selector(|| "calendar-controls".into())
                     .child(
-                        control("today".into(), "Today".into(), false)
+                        control("today".into(), "Today".into(), "Today", false)
                             .on_click(on(Rc::new(|c, cx| c.go_to_today(cx)))),
                     )
                     .when(!touch, |d| {
                         d.child(
-                            control("previous".into(), "‹".into(), false)
+                            control("previous".into(), "‹".into(), "Previous", false)
                                 .on_click(on(Rc::new(|c, cx| c.previous(cx)))),
                         )
                         .child(
-                            control("next".into(), "›".into(), false)
+                            control("next".into(), "›".into(), "Next", false)
                                 .on_click(on(Rc::new(|c, cx| c.next(cx)))),
                         )
                     })
@@ -2664,7 +2706,7 @@ impl Calendar {
                                     (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
                                     _ => v == view,
                                 };
-                                control(("view", i).into(), label.into(), on_view)
+                                control(("view", i).into(), label.into(), label, on_view)
                                     .on_click(on(Rc::new(move |c, cx| c.set_view(v, cx))))
                             })),
                     ),
@@ -2781,6 +2823,15 @@ impl Calendar {
     }
 }
 
+/// An overlay's content (drawn over the window, so out of the calendar's own place in Tab's
+/// order), put after the calendar's other stops: in the window's first group, after the
+/// calendar's (header 0, mini month 1, days 2).
+pub(crate) fn after_calendar(content: impl IntoElement) -> Div {
+    div()
+        .tab_group()
+        .child(div().tab_group().tab_index(3).child(content))
+}
+
 impl Render for Calendar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self
@@ -2830,13 +2881,20 @@ impl Render for Calendar {
             find: self.query.clone().map(|q| (q, colors.find.opacity(0.38))),
         };
         let this = cx.entity().downgrade();
-        let body = paint::body(scene, self.shared.clone(), this);
+        let body = crate::a11y::Accessible::new(
+            paint::body(scene, self.shared.clone(), this.clone(), self.a11y.clone()).into_element(),
+            this,
+            self.accessibility_label(),
+            self.a11y.clone(),
+        );
         let question = self.render_question(cx);
         let query = self.render_query(colors, cx);
         let panel = self.render_panel(window, cx);
         let (aside, mini) = self.render_mini(window, cx);
+        let ring = self.focus.is_focused(window) && window.last_input_was_keyboard();
         div()
             .id("calendar")
+            .tab_group()
             .relative()
             .flex()
             .size_full()
@@ -2893,11 +2951,13 @@ impl Render for Calendar {
                     .h_full()
                     .when(self.header, |d| {
                         let narrow = self.is_narrow(window);
-                        if narrow || self.options.touch {
-                            d.child(self.render_compact_header(narrow, colors, cx))
+                        // First in the order Tab goes in.
+                        let header = div().flex_none().tab_group().tab_index(0);
+                        d.child(if narrow || self.options.touch {
+                            header.child(self.render_compact_header(narrow, colors, cx))
                         } else {
-                            d.child(self.render_header(cx).into_any_element())
-                        }
+                            header.child(self.render_header(cx).into_any_element())
+                        })
                     })
                     .child(
                         div()
@@ -2909,7 +2969,18 @@ impl Render for Calendar {
                             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
                             .on_scroll(cx.listener(|c, e, _, cx| c.scroll(e, cx)))
                             .child(body)
-                            .children(query),
+                            .children(query)
+                            .when(ring, |d| {
+                                // Where the keyboard is, when Tab brought it: a ring inside the
+                                // days, in the theme's focus colour.
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .border_2()
+                                        .border_color(Theme::global(cx).focus_ring()),
+                                )
+                            }),
                     ),
             )
             .children(panel)

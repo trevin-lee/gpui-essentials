@@ -278,6 +278,7 @@ impl Calendar {
                 .when(can_move, |d| {
                     d.child(
                         Press::new("panel-change-calendar")
+                            .accessibility_label("Change calendar")
                             .debug_selector(|| "panel-change".into())
                             .flex_none()
                             .flex()
@@ -550,8 +551,10 @@ impl Calendar {
                 this.update(cx, |c, cx| c.close_panel(cx)).ok();
             }
         };
+        let content = super::after_calendar(content);
         Some(if sheet {
             Sheet::new("calendar-panel")
+                .accessibility_label(e.title.clone())
                 .open(true)
                 .take_focus(false)
                 .on_dismiss(dismiss)
@@ -573,6 +576,7 @@ impl Calendar {
                 }
             };
             Popover::new("calendar-panel")
+                .accessibility_label(e.title.clone())
                 .open(true)
                 .anchor(anchor)
                 .take_focus(false)
