@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use gpui_kit::component::Theme;
-use gpui_kit::{Bounds, Pixels, TestAppContext, TestDispatcher, px, size};
+use gpui::{Bounds, Pixels, TestAppContext, TestDispatcher, px, size};
+use gpui_core::Theme;
 
 use crate::paint::drawn;
 use crate::*;
@@ -92,7 +92,7 @@ fn context() -> TestAppContext {
         Arc::new(gpui_apple::AppleTextSystem::new()),
     );
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        gpui_core::init(cx);
         crate::init(cx);
         let _ = cx.text_system().add_fonts(vec![
             std::borrow::Cow::Borrowed(

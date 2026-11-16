@@ -10,10 +10,11 @@ use std::rc::Rc;
 use std::time::{Duration as StdDuration, Instant};
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
-use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants as _};
-use gpui_kit::component::{IconName, Selectable as _, Sizable as _, Theme};
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
+use gpui_core::{
+    Button, ButtonGroup, ButtonVariants as _, IconName, Selectable as _, Sizable as _, Theme,
+};
 
 use crate::layout::{self, Column};
 use crate::model::*;
@@ -1937,7 +1938,7 @@ impl Calendar {
 
     /// The header for a narrow calendar or one taken by touch: the title (a short one when
     /// narrow), Today, the period arrows (not on touch, where a swipe changes the period), and
-    /// the views (Day, Month and List when narrow). Drawn with plain elements, not GPUI Kit's
+    /// the views (Day, Month and List when narrow). Drawn with plain elements, not gpui-core's
     /// buttons; on touch each control is 44 points tall.
     fn render_compact_header(
         &self,
@@ -2134,6 +2135,7 @@ impl Calendar {
                     .child(
                         Button::new("previous")
                             .icon(IconName::ChevronLeft)
+                            .accessibility_label("Previous")
                             .ghost()
                             .small()
                             .on_click(on(|c, _, cx| c.previous(cx))),
@@ -2141,6 +2143,7 @@ impl Calendar {
                     .child(
                         Button::new("next")
                             .icon(IconName::ChevronRight)
+                            .accessibility_label("Next")
                             .ghost()
                             .small()
                             .on_click(on(|c, _, cx| c.next(cx))),

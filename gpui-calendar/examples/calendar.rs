@@ -18,10 +18,10 @@ use std::time::Instant;
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc, Weekday};
 use chrono_tz::Tz;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_calendar::*;
-use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui_core::Theme;
 
 const TZ: Tz = chrono_tz::America::Los_Angeles;
 
@@ -68,34 +68,13 @@ fn load_fonts(cx: &mut App) {
     ]);
 }
 
-/// A charcoal dark theme for GPUI Kit, the one the pictures are drawn in.
+/// The Mac app's charcoal theme, the one the pictures are drawn in, set in Inter (loaded
+/// first: a family that isn't loaded draws no text), with its hover wash (the foreground at 5%).
 fn apply_theme(cx: &mut App) {
-    Theme::change(ThemeMode::Dark, None, cx);
-    let t = Theme::global_mut(cx);
+    let mut t = Theme::dark();
     t.font_family = "Inter".into();
-    t.font_size = px(15.);
-    t.radius = px(8.);
-    t.radius_lg = px(10.);
-    let c = &mut t.colors;
-    let hover: Hsla = rgba(0xededef0d).into();
-    c.background = rgb(0x0f0f11).into();
-    c.foreground = rgb(0xededef).into();
-    c.border = rgb(0x28282d).into();
-    c.input = rgb(0x3a3a41).into();
-    c.muted = rgb(0x1f1f23).into();
-    c.muted_foreground = rgb(0x8b8b93).into();
-    c.secondary = rgb(0x1f1f23).into();
-    c.secondary_foreground = rgb(0xededef).into();
-    c.primary = rgb(0xededef).into();
-    c.primary_foreground = rgb(0x0f0f11).into();
-    c.popover = rgb(0x18181b).into();
-    c.popover_foreground = rgb(0xededef).into();
-    c.accent = hover;
-    c.accent_foreground = rgb(0xededef).into();
-    c.list_hover = hover;
-    c.list_active = hover;
-    c.ring = rgb(0xededef).into();
-    c.danger = rgb(0xe5665b).into();
+    t.accent = rgba(0xededef0d).into();
+    Theme::set(t, cx);
 }
 
 /// The moment pictures pretend it is: Wednesday 18 November 2026, 10:40 in Los Angeles.
@@ -812,12 +791,12 @@ actions!(calendar_example, [Quit]);
 
 fn main() {
     let args = args();
-    // GPUI Kit's icons (the header's chevrons) come from the host's assets.
-    gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets::new(""))
+    // gpui-core's bundled icons: the header's chevrons.
+    gpui_platform::application()
+        .with_assets(gpui_core::Icons)
         .run(move |cx| {
             load_fonts(cx);
-            gpui_kit::init(cx);
+            gpui_core::init(cx);
             gpui_calendar::init(cx);
             apply_theme(cx);
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
@@ -841,7 +820,7 @@ fn main() {
                 show: !offscreen,
                 ..Default::default()
             };
-            let (window, root) = gpui_kit::open_window(options, cx, {
+            let (window, root) = gpui_core::open_window(options, cx, {
                 let args = &args;
                 move |_, cx| cx.new(|cx| Root::new(args, cx))
             })

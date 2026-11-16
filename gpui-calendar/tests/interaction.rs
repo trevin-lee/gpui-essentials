@@ -5,11 +5,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use gpui_calendar::*;
-use gpui_kit::{
+use gpui::{
     Entity, Focusable as _, Modifiers, MouseButton, MouseDownEvent, Pixels, Point, TestAppContext,
     VisualTestContext, point, px,
 };
+use gpui_calendar::*;
 
 const TZ: chrono_tz::Tz = chrono_tz::America::Los_Angeles;
 type Seen = Rc<RefCell<Vec<CalendarEvent>>>;
@@ -79,7 +79,7 @@ fn open_with(
     f: impl FnOnce(Calendar) -> Calendar,
 ) -> (Entity<Calendar>, Seen, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        gpui_core::init(cx);
         gpui_calendar::init(cx);
     });
     let (calendar, cx) = cx.add_window_view(|_, cx| {
@@ -157,7 +157,7 @@ fn unchanged(c: &Entity<Calendar>, cx: &VisualTestContext) {
     c.read_with(cx, |c, _| assert_eq!(c.events(), events().as_slice()));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn dragging_empty_time_proposes_an_event_snapped_outward(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let (from, to) = (spot(&c, cx, day(0), 13, 5), spot(&c, cx, day(0), 14, 20));
@@ -179,7 +179,7 @@ fn dragging_empty_time_proposes_an_event_snapped_outward(cx: &mut TestAppContext
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn dragging_an_event_proposes_a_move_across_days(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     // Grabbed at 11:15 on Wednesday, let go at 12:45 on Thursday: a day and an hour and a half
@@ -201,7 +201,7 @@ fn dragging_an_event_proposes_a_move_across_days(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn dragging_the_bottom_edge_proposes_a_new_end(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let b = c.read_with(cx, |c, _| c.event_bounds("a")).expect("drawn");
@@ -218,7 +218,7 @@ fn dragging_the_bottom_edge_proposes_a_new_end(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn escape_drops_a_drag(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let (from, to) = (spot(&c, cx, day(2), 11, 15), spot(&c, cx, day(4), 15, 0));
@@ -245,7 +245,7 @@ fn escape_drops_a_drag(cx: &mut TestAppContext) {
     assert_eq!(c.read_with(cx, |c, _| c.selected_event().cloned()), None);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_click_selects_and_a_double_click_opens(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let p = spot(&c, cx, day(2), 11, 30);
@@ -268,7 +268,7 @@ fn a_click_selects_and_a_double_click_opens(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_read_only_event_is_selected_but_not_moved_or_deleted(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     drag(cx, spot(&c, cx, day(3), 9, 30), spot(&c, cx, day(4), 14, 0));
@@ -288,7 +288,7 @@ fn a_read_only_event_is_selected_but_not_moved_or_deleted(cx: &mut TestAppContex
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_keys_change_the_view_and_the_period(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let state =
@@ -328,7 +328,7 @@ fn the_keys_change_the_view_and_the_period(cx: &mut TestAppContext) {
     assert_eq!(state(&c, cx).1, day(2));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_arrows_move_a_slot_and_enter_makes_an_event_there(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     // The first arrow selects the slot now is in.
@@ -364,7 +364,7 @@ fn the_arrows_move_a_slot_and_enter_makes_an_event_there(cx: &mut TestAppContext
     assert_eq!(c.read_with(cx, |c, _| c.visible_days().0), day(7));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn an_all_day_event_moves_by_weeks_in_the_month(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     cx.simulate_keystrokes("m");
@@ -386,7 +386,7 @@ fn an_all_day_event_moves_by_weeks_in_the_month(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_host_applies_a_proposal_by_setting_the_event(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     drag(
@@ -420,7 +420,7 @@ fn proposed_edit(seen: &Seen) -> bool {
     })
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn events_take_their_calendars_colour(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     c.read_with(cx, |c, _| {
@@ -437,7 +437,7 @@ fn events_take_their_calendars_colour(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_hidden_calendars_events_are_not_drawn(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     assert!(c.read_with(cx, |c, _| c.event_bounds("hidden")).is_none());
@@ -468,7 +468,7 @@ fn a_hidden_calendars_events_are_not_drawn(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_read_only_calendar_refuses_moves_resizes_and_deletes(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     // Move.
@@ -499,7 +499,7 @@ fn a_read_only_calendar_refuses_moves_resizes_and_deletes(cx: &mut TestAppContex
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn an_edit_to_an_occurrence_names_it_and_its_series(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     c.update(cx, |c, _| c.scroll_to_minute(14. * 60.));
@@ -533,7 +533,7 @@ fn an_edit_to_an_occurrence_names_it_and_its_series(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn new_events_go_in_the_default_calendar_or_nowhere(cx: &mut TestAppContext) {
     let (_, seen, cx) = open_with(cx, |c| {
         c.with_options(|o| o.default_calendar = Some("home".into()))
@@ -545,7 +545,7 @@ fn new_events_go_in_the_default_calendar_or_nowhere(cx: &mut TestAppContext) {
     )));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_hidden_default_calendar_is_passed_over(cx: &mut TestAppContext) {
     // "old" can be edited but isn't shown: an event made there would vanish.
     let (_, seen, cx) = open_with(cx, |c| {
@@ -563,7 +563,7 @@ fn a_hidden_default_calendar_is_passed_over(cx: &mut TestAppContext) {
     assert_eq!(made, vec![Some("work".into())]);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn nothing_is_made_when_every_calendar_is_read_only(cx: &mut TestAppContext) {
     let (c, seen, cx) = open_with(cx, |c| {
         c.with_calendars(
@@ -605,7 +605,7 @@ fn opened_links(seen: &Seen) -> Vec<(EventId, EventLink)> {
         .collect()
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_click_on_a_listed_link_asks_the_host_to_open_it(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     c.update(cx, |c, _| c.scroll_to_minute(12. * 60.));
@@ -626,7 +626,7 @@ fn a_click_on_a_listed_link_asks_the_host_to_open_it(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_small_chip_shows_its_one_link_as_a_mark_and_several_as_a_count(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     // An hour is too short to list a link: the mark by the title stands for it.
@@ -646,7 +646,7 @@ fn a_small_chip_shows_its_one_link_as_a_mark_and_several_as_a_count(cx: &mut Tes
     assert!(c.read_with(cx, |c, _| c.link_bounds("many", 0)).is_none());
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_drag_that_starts_on_a_link_moves_its_event(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     c.update(cx, |c, _| c.scroll_to_minute(12. * 60.));
@@ -668,7 +668,7 @@ fn a_drag_that_starts_on_a_link_moves_its_event(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_agenda_lists_events_by_day_and_the_arrows_walk_it(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     cx.simulate_keystrokes("a");
@@ -707,7 +707,7 @@ fn the_agenda_lists_events_by_day_and_the_arrows_walk_it(cx: &mut TestAppContext
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_agenda_opens_links_and_moves_nothing(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     cx.simulate_keystrokes("a");
@@ -720,9 +720,9 @@ fn the_agenda_opens_links_and_moves_nothing(cx: &mut TestAppContext) {
     assert!(has(&seen, &CalendarEvent::Select(Some("a".into()))));
     // Every link is a pill in the list.
     for _ in 0..3 {
-        cx.simulate_event(gpui_kit::ScrollEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: a.center(),
-            delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-200.))),
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-200.))),
             ..Default::default()
         });
         draw(cx);

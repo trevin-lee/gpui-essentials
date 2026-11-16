@@ -15,30 +15,34 @@ include = ["/src", "/examples", "/README.md"]
 name = "gpui_calendar"
 
 [dependencies]
-# Pinned exactly: GPUI comes as GPUI Kit, which pins a snapshot of Zed's GPUI (gpui-pre 0.3.12).
-gpui-kit = { workspace = true }
-# Dates and times. chrono is the version GPUI Kit's own date picker already uses; chrono-tz
-# carries the IANA database, so the display zone and its DST days don't depend on the machine's.
+# GPUI under its own name, pinned exactly in the workspace (gpui-pre 0.3.12), and gpui-core for
+# the theme the calendar takes its colours and font from and the header's buttons.
+gpui = { workspace = true }
+gpui-core = { path = "../gpui-core" }
+# Dates and times. chrono-tz carries the IANA database, so the display zone and its DST days
+# don't depend on the machine's.
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10"
-# Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
-# GPUI's version of the image crate to save the picture.
-gpui-pre = { workspace = true, features = ["test-support"], optional = true }
+# Only for the shots feature: the macOS platform with its test support (offscreen rendering)
+# on, and GPUI's version of the image crate to save the picture.
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [features]
 # Pictures of the example's window rendered offscreen (`--shot`).
-shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
+shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 
 [[example]]
 name = "calendar"
 
 [dev-dependencies]
-gpui-kit = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+# The example's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
 
 # The overflow test lays text out with Core Text and Inter, as on screen, rather than with the
 # test platform's stand-in widths. runtime_shaders: no Metal toolchain needed to build; tests
-# never draw with Metal.
+# and the example compile their shaders when a window opens.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }
+gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
