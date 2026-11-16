@@ -122,8 +122,8 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
    - The fork's Markdown import moves to `markdown` (mdast) directly. That's the gpui-blocks
      session's work and needs nothing from gpui-core.
    The blocks session will write the fork's needs as tests against the layer's API.
-8. **A host app**, last. It needs 1–5 and Switch, and moves in one PR in host-app
-   that Main merges.
+8. **A host app**, last. It needs 1–5 and Switch, and moves in a few small PRs in
+   host-app, one area each, that Main merges: see "A host app's switch" below.
 
 ## After the kit: Popover, Menu, Picker
 
@@ -172,6 +172,50 @@ Rules for all three, beyond the crate's:
 
 A crate switches only when gpui-core covers all of its use and the crate's own tests, overflow
 test and clippy all pass. Each switch is its own PR.
+
+## A host app's switch
+
+Inventory of `host-app/clients/desktop/app` at `4d4ca666` (2026-11-16), from `rg` over
+its sources. It already links gpui-core (pinned by rev) next to GPUI Kit 0.9.1, and draws
+Popover-like and menu-like things itself, so the kit use left is small.
+
+| Kit item | Uses | Files | gpui-core |
+|---|---:|---:|---|
+| `use gpui_kit::*` (GPUI re-exported) | 44 | 44 | `use gpui::*` (the `gpui-pre` crate) |
+| `gpui_kit::prelude::FluentBuilder` | 33 | 33 | `gpui::prelude::FluentBuilder` |
+| `gpui_kit::px`, `actions`, `Keystroke`, `RenderImage`, `canvas`, `Bounds`, `Window` | ~60 | – | GPUI's own |
+| `InputState::new` (+ `.placeholder` 23, `.masked` 2) | 34 | 21 | `InputState::new`, same builders |
+| `Input::new` / `Input as Field` (+ `.appearance(false)` 10) | 10 | 9 | `Input::new(..).appearance(..)` |
+| `TextareaState::new(..).auto_grow(1, 6).submit_on_enter(true).autocorrect(..).autocapitalize(..)` | 6 | 6 | `InputState::textarea(..).auto_grow(..).submit_on_enter(..)`; a textarea's default keyboard is already sentence case with suggestions (`.keyboard(..)` otherwise) |
+| `Textarea::new` | 6 | 6 | `Input::new` |
+| `InputEvent::{PressEnter, Change, Blur, Focus}` | 25 / 17 / 4 / 2 | – | the same, `PressEnter { secondary }` |
+| state `value`, `set_value(text, window, cx)`, `focus`, `is_focused`, `set_placeholder` | – | – | the same |
+| state `select_all(window, cx)` | 5 | 5 | #130 |
+| state `set_masked(bool, window, cx)` | 1 | 1 | #130 |
+| `OutdentInline` (the composer's Shift-Tab steps its permission mode) | 1 | 1 | capture `gpui_core::FocusPrev`, Shift-Tab's action under Root |
+| `component::tooltip::Tooltip::new(..).build(window, cx)` | 14 | 9 | `Tooltip::new(..).build(window, cx)` |
+| `component::switch::Switch::new(..).checked(..)` (+ `Disableable` 4) | 11 | 6 | `Switch`, `Disableable` |
+| `component::text::{TextView, TextViewStyle}` (the chat's Markdown) | 1 | 1 | `TextView::markdown(..).style(..).selectable(..)`; `heading_base_font_size` takes `Some(..)` |
+| `component::{Theme, ThemeMode}` (the kit's theme, set in `theme.rs`) | 1 fn | 1 | deleted with the kit; `gpui_core::Theme` is set there already |
+| `gpui_kit::init` / `open_window` / `application` | 4 / 1 / 1 | 3 | `gpui_core::init` / `open_window` / `gpui_platform::application` |
+| `gpui_kit::assets::Assets` (the kit's icons, last in `AppAssets`) | 1 | 1 | dropped: nothing draws a kit icon once its components are gone |
+
+Not used at all: the kit's Root (beyond `open_window`), Button, Icon, popovers, menus, lists,
+scroll areas, `h_flex`/`v_flex`, `StyledExt`, `Sizable`. Everything is covered once #130 lands.
+
+The switch, one area per PR, each bumping the app's gpui-core pin, with the app's own tests,
+clippy and pictures checked before and after:
+
+1. **The composer** onto `InputState::textarea` (`composer.rs`): the field the GPUI phone app's
+   keyboard work shares.
+2. **The forms**: the settings, rules, vault and other one-line fields, with `select_all` and
+   `set_masked`.
+3. **Switches and tooltips.**
+4. **The chat's Markdown** onto gpui-core's TextView, its pictures compared.
+5. **The rest and the dependency**: `init`, `open_window`, `application`, the assets fallback,
+   the kit's theme, `gpui_kit::*` → `gpui::*`, and `gpui-kit` out of `Cargo.toml`.
+
+Until 5, both libraries are linked and both themes set, as below.
 
 ## Coexistence during the migration
 
