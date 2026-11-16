@@ -20,6 +20,8 @@ gpui = { workspace = true }
 markdown = "1.0.0"
 # Grapheme and word boundaries for the caret, the arrow keys and double-clicks.
 unicode-segmentation = "1.12"
+# Dates for DatePicker: the version the workspace's calendar and cards use.
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 
 # Only for the shots feature: the macOS platform with its test support (offscreen rendering)
 # on, and GPUI's version of the image crate to save the picture.

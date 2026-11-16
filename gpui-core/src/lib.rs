@@ -35,6 +35,7 @@ struct ReadmeDoctests;
 
 mod a11y;
 mod button;
+mod date_picker;
 pub mod icon;
 pub mod input;
 mod press;
@@ -47,6 +48,7 @@ pub mod theme;
 mod tooltip;
 
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
+pub use date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateValue, MonthGrid};
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
 pub use press::{Press, focus_ring};
@@ -74,6 +76,7 @@ pub fn init(cx: &mut App) {
         Theme::set(Theme::dark(), cx);
     }
     root::init(cx);
+    date_picker::init(cx);
     input::init(cx);
     text::init(cx);
 }
