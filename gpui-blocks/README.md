@@ -92,6 +92,11 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   to draw, from your app's files, cache or storage, under your rules about the network. Without
   it a picture is drawn as its description, and the editor never reads a file or fetches an
   address a document names. The example loads image files from the open document's folder.
+- **Code:** `Options::code_highlighter(..)` colours code blocks: it gets a block's language (the
+  first word of its fence's info) and its code, and returns the styles of byte ranges of the
+  code. gpui-core's `highlight` feature makes one. It's asked again only when a block's code or
+  language changes; pass a new one when the theme changes. Without it, code blocks keep GPUI
+  Kit's highlighting.
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor

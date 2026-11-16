@@ -22,7 +22,9 @@ the editor working after every step.
    - lists, with their markers and task boxes (done);
    - tables, with the grips (done);
    - pictures, inline and alone (through the host's image loader) (done);
-   - code blocks, once syntax highlighting has a home outside GPUI Kit.
+   - code blocks, when the host gives a highlighter (`with_code_highlighter`; gpui-core's
+     `highlight` feature makes one) (done). Without one they still go through GPUI Kit, for
+     its highlighting; once every host passes one, that path goes too.
 3. **The projection goes.** When nothing is drawn through GPUI Kit, `direct.rs`' projection to
    `BlockNode`, the projection cache and `collect_leaf_geometry` go with it.
 

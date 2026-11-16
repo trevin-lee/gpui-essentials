@@ -177,6 +177,24 @@ impl RenderOnce for BlockEditor {
             surface: theme.tokens.colors.surface,
         };
         let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
+        let code_look = super::draw::CodeLook {
+            size: theme.tokens.typography.mono_md.size,
+            label_family: theme.tokens.typography.sans.clone(),
+            label_size: theme.tokens.typography.xs.size,
+            refinement: text_style.code_block().clone(),
+        };
+        // Code blocks are the engine's to draw when the host gave a highlighter; their
+        // highlights are kept for blocks still in the document.
+        let highlighting = {
+            let state = self.state.read(cx);
+            let cache = state.highlights.clone();
+            cache
+                .borrow_mut()
+                .retain(|block, _| state.model.doc.get(*block).is_some());
+            state
+                .code_highlighter()
+                .map(|highlighter| super::draw::Highlighting { highlighter, cache })
+        };
         let own_extensions = self.state.read(cx).model.doc.ext.clone();
         let draw_cx = super::draw::DrawCx {
             base: &typography,
@@ -191,6 +209,7 @@ impl RenderOnce for BlockEditor {
                 leaves: &own_leaves,
                 images: image_source.as_ref(),
             },
+            code: &code_look,
         };
         let mut children: Vec<AnyElement> = Vec::new();
         {
@@ -333,6 +352,7 @@ impl RenderOnce for BlockEditor {
                             &self.state.read(cx).model.doc,
                             block_id,
                             Some(range.clone()),
+                            highlighting.as_ref(),
                         );
                         let chunk = BlockNode::List {
                             children: items[range.clone()].to_vec(),
@@ -387,7 +407,11 @@ impl RenderOnce for BlockEditor {
                                 _ => super::draw::Prev::Other,
                             }
                         });
-                        let own = super::draw::tree(&self.state.read(cx).model.doc, block_id);
+                        let own = super::draw::tree(
+                            &self.state.read(cx).model.doc,
+                            block_id,
+                            highlighting.as_ref(),
+                        );
                         match own {
                             Some(tree) => super::draw::draw(
                                 &tree,

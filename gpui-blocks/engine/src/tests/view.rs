@@ -1142,6 +1142,69 @@ fn code_block_highlighter_is_applied(cx: &mut TestAppContext) {
     assert!(seen.lock().unwrap().iter().any(|c| c == "fn a()"));
 }
 
+/// With the host's highlighter the engine draws code blocks itself: the highlighter sees the
+/// language and the code, runs again only when they change, and the caret and clicks land in
+/// the code it drew.
+#[gpui::test]
+fn the_hosts_highlighter_highlights_code_blocks(cx: &mut TestAppContext) {
+    use std::sync::{Arc, Mutex};
+    let seen: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let (editor, cx) = open(cx, "```rust\nfn a\n```\n\nafter");
+    let log = seen.clone();
+    let highlighter: crate::CodeHighlightFn = Arc::new(move |lang: &str, code: &str| {
+        log.lock()
+            .unwrap()
+            .push((lang.to_string(), code.to_string()));
+        vec![(
+            0..2,
+            gpui::HighlightStyle {
+                color: Some(gpui::red()),
+                ..Default::default()
+            },
+        )]
+    });
+    editor.update(cx, |e, cx| e.set_code_highlighter(Some(highlighter), cx));
+    draw(cx);
+    draw(cx);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![("rust".to_string(), "fn a".to_string())],
+        "asked once for the block, not again for an unchanged frame"
+    );
+    // The caret moves along the code the engine drew, and a click lands in it.
+    let id = editor.read_with(cx, |e, _| {
+        e.model().document().leaves().next().unwrap().id()
+    });
+    let (start, end) = editor.read_with(cx, |e, _| {
+        let f = e.frame.borrow();
+        let leaf = f.leaf(id).expect("the code block is laid out");
+        (leaf.caret_point(0), leaf.caret_point(4))
+    });
+    assert!(end.x > start.x && end.y == start.y, "{start:?} {end:?}");
+    let at = gpui::point(end.x - px(1.), end.y + px(2.));
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    let caret = editor.read_with(cx, |e, _| e.model().caret().unwrap());
+    assert_eq!((caret.block, caret.offset), (id, 4));
+    // An edit re-highlights the new code; frames with nothing new don't.
+    type_text(cx, "()");
+    let calls = seen.lock().unwrap().len();
+    draw(cx);
+    draw(cx);
+    let seen_now = seen.lock().unwrap().clone();
+    assert_eq!(
+        seen_now.last().cloned(),
+        Some(("rust".to_string(), "fn a()".to_string()))
+    );
+    assert_eq!(seen_now.len(), calls, "{seen_now:?}");
+    // Cleared, the highlighter isn't asked again, and the block is still laid out.
+    editor.update(cx, |e, cx| e.set_code_highlighter(None, cx));
+    type_text(cx, "x");
+    draw(cx);
+    assert_eq!(seen.lock().unwrap().len(), calls);
+    assert!(editor.read_with(cx, |e, _| e.frame.borrow().leaf(id).is_some()));
+}
+
 #[gpui::test]
 fn code_fence_with_space_converts(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, "");
