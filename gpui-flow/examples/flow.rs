@@ -350,6 +350,11 @@ impl Root {
                 FlowEvent::Delete { nodes, edges } => {
                     format!("Deleted {} nodes and {} edges", nodes.len(), edges.len())
                 }
+                FlowEvent::ContextMenu { target, .. } => match target {
+                    ContextTarget::Node(id) => format!("Menu for {id}"),
+                    ContextTarget::Edge(id) => format!("Menu for edge {id}"),
+                    ContextTarget::Pane => "Menu for the pane".into(),
+                },
                 FlowEvent::ConnectEnd {
                     connected: false, ..
                 } => "No connection made".into(),

@@ -44,11 +44,15 @@ pub type NodeRenderer = Rc<dyn Fn(&Node, &NodeContext, &Flow, &mut Window, &mut 
 /// Flow's `nodrag` and `nowheel` classes do.
 ///
 /// A child of a node that takes presses itself (a button, a text field, a slider) should be
-/// `nodrag`: pressing it then neither selects nor drags the node, nor takes the focus from it.
-/// One that scrolls should be `nowheel`, so scrolling over it doesn't zoom or pan the canvas.
+/// `nodrag`: pressing it then neither selects nor drags the node, nor takes the focus from it,
+/// and a finger on it taps it rather than dragging the node. One that scrolls should be
+/// `nowheel`, so scrolling over it doesn't zoom or pan the canvas.
 pub trait NodeInput: InteractiveElement + Sized {
     fn nodrag(self) -> Self {
-        self.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        // Blocking the pointer for what's behind keeps the node's touch target from claiming a
+        // touch that starts here, so it ends as an ordinary tap.
+        self.block_mouse_except_scroll()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
     }
 
     fn nowheel(self) -> Self {
@@ -57,6 +61,108 @@ pub trait NodeInput: InteractiveElement + Sized {
 }
 
 impl<E: InteractiveElement + Sized> NodeInput for E {}
+
+/// What a touch that starts on part of the canvas takes hold of.
+#[derive(Clone, Debug)]
+pub(crate) enum TouchTarget {
+    /// The pane, or an edge or a node drawn as a box on it.
+    Pane,
+    Node(NodeId),
+    Handle {
+        node: NodeId,
+        handle: Option<SharedString>,
+        kind: HandleKind,
+    },
+    Resize {
+        node: NodeId,
+        corner: ResizeCorner,
+        min: (f32, f32),
+    },
+}
+
+/// Which way a touch target may grow past its element to reach its least size.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Reach {
+    /// Every way.
+    Around,
+    /// Away from the node only, for a handle on this side: grown into the node, it would
+    /// take touches meant for the node itself, which may be no taller than the target.
+    Out(Side),
+    /// Out of this corner only, for a resizer's grip.
+    Corner(ResizeCorner),
+}
+
+/// An area, at least `min` points across around its parent (as `reach` allows), where a touch
+/// that starts is offered to the flow for `target`: one the flow takes is a drag of the node,
+/// a connection or a resize, rather than a pan of the canvas.
+pub(crate) fn touch_target(
+    flow: WeakEntity<Flow>,
+    target: TouchTarget,
+    min: Pixels,
+    reach: Reach,
+) -> impl IntoElement {
+    canvas(
+        move |bounds, window, _| {
+            let (w, h) = (bounds.size.width.max(min), bounds.size.height.max(min));
+            let c = bounds.center();
+            let (mut left, mut top) = (c.x - w / 2., c.y - h / 2.);
+            let (mut right, mut bottom) = (left + w, top + h);
+            let inner = |side: Side,
+                         left: &mut Pixels,
+                         top: &mut Pixels,
+                         right: &mut Pixels,
+                         bottom: &mut Pixels| {
+                match side {
+                    Side::Top => *bottom = (*bottom).min(bounds.bottom()),
+                    Side::Bottom => *top = (*top).max(bounds.top()),
+                    Side::Left => *right = (*right).min(bounds.right()),
+                    Side::Right => *left = (*left).max(bounds.left()),
+                }
+            };
+            match reach {
+                Reach::Around => {}
+                Reach::Out(side) => inner(side, &mut left, &mut top, &mut right, &mut bottom),
+                Reach::Corner(corner) => {
+                    let (h, v) = match corner {
+                        ResizeCorner::TopLeft => (Side::Left, Side::Top),
+                        ResizeCorner::TopRight => (Side::Right, Side::Top),
+                        ResizeCorner::BottomLeft => (Side::Left, Side::Bottom),
+                        ResizeCorner::BottomRight => (Side::Right, Side::Bottom),
+                    };
+                    inner(h, &mut left, &mut top, &mut right, &mut bottom);
+                    inner(v, &mut left, &mut top, &mut right, &mut bottom);
+                }
+            }
+            let area = Bounds::from_corners(point(left, top), point(right, bottom));
+            window.insert_hitbox(area, HitboxBehavior::Normal)
+        },
+        move |_, hitbox, window, _| {
+            let (hitbox, flow, target) = (hitbox.clone(), flow.clone(), target.clone());
+            window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
+                if !phase.bubble()
+                    || event.phase != TouchPhase::Started
+                    || window.default_prevented()
+                    || !hitbox.is_hovered(window)
+                {
+                    return;
+                }
+                let claimed = flow
+                    .update(cx, |flow, cx| {
+                        flow.touch_start(&target, event.start_position, window, cx)
+                    })
+                    .unwrap_or(false);
+                if claimed {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
 
 /// A handle as it was last laid out, relative to its node's top left corner.
 #[derive(Clone, Debug)]
@@ -126,6 +232,9 @@ pub(crate) struct Shared {
     pub press_focus: RefCell<Option<Option<FocusHandle>>>,
     /// The canvas transform last handed to the host's listener.
     pub transform: Cell<Option<crate::flow::CanvasTransform>>,
+    /// Whether the last input was a touch rather than the mouse: presses near edges reach
+    /// further for a finger.
+    pub touch: Cell<bool>,
     /// Whether the last frame drew an animated edge, and whether the one before did.
     pub animating: Cell<bool>,
     pub was_animating: Cell<bool>,
@@ -165,6 +274,8 @@ pub struct NodeContext {
     pub connectable: bool,
     pub zoom: f32,
     pub colors: FlowColors,
+    /// How large (in points) the area a finger can take a handle or a grip by is, at least.
+    pub(crate) touch_size: Pixels,
 }
 
 impl NodeContext {
@@ -224,23 +335,35 @@ impl NodeContext {
                     .right(out)
                     .cursor(CursorStyle::ResizeUpLeftDownRight),
             };
-            placed.on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                let took = flow
-                    .update(cx, |flow, cx| {
-                        flow.resize_mouse_down(
-                            &id,
-                            corner,
-                            (min_width, min_height),
-                            event,
-                            window,
-                            cx,
-                        )
-                    })
-                    .unwrap_or(false);
-                if took {
-                    cx.stop_propagation();
-                }
-            })
+            let touch = touch_target(
+                flow.clone(),
+                TouchTarget::Resize {
+                    node: id.clone(),
+                    corner,
+                    min: (min_width, min_height),
+                },
+                self.touch_size,
+                Reach::Corner(corner),
+            );
+            placed
+                .child(touch)
+                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                    let took = flow
+                        .update(cx, |flow, cx| {
+                            flow.resize_mouse_down(
+                                &id,
+                                corner,
+                                (min_width, min_height),
+                                event,
+                                window,
+                                cx,
+                            )
+                        })
+                        .unwrap_or(false);
+                    if took {
+                        cx.stop_propagation();
+                    }
+                })
         };
         div()
             .absolute()
@@ -368,7 +491,18 @@ impl RenderOnce for Handle {
             .size_full()
         };
 
+        let touch = touch_target(
+            ctx.flow.clone(),
+            TouchTarget::Handle {
+                node: ctx.id.clone(),
+                handle: id.clone(),
+                kind,
+            },
+            ctx.touch_size,
+            Reach::Out(position),
+        );
         placed
+            .when(connectable, |d| d.child(touch))
             .when(connectable, |d| {
                 let flow = ctx.flow.clone();
                 let node = ctx.id.clone();

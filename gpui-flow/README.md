@@ -70,6 +70,19 @@ Run the example with `cargo run --release --example flow` from this folder.
   - `Navigate`: a drag anywhere only pans, and scrolling and pinching zoom, so fingers move
     the canvas while the pen draws;
   - `Off`: the canvas takes no presses, scrolling or pinches at all.
+- **Touch.** On iPhone and iPad, GPUI turns fingers into gestures and the flow takes them as
+  React Flow does on a touchscreen, with Apple's sizes.
+  - A finger on a node drags it, and a tap selects it; two taps make a double tap.
+  - A finger on a handle drags out a connection, and one on a resizer's grip resizes.
+  - Anywhere else a finger pans, in any direction, and a tap on an edge selects it.
+  - Held still for half a second, a finger asks for a context menu (`FlowEvent::ContextMenu`,
+    for a node, an edge or the pane, as a right click does on a Mac). The host shows the
+    menu.
+  - Handles and grips take a finger from a 44-point area (`touch_target_size`) that grows
+    outward but not into the node, and edges take one from 22 points away.
+  - A `nodrag` child, such as a button, gets an ordinary tap.
+  - GPUI doesn't recognise a two-finger pinch on iOS yet, so the host recognises it natively
+    and calls `zoom_by` (or dispatches `PinchEvent`s).
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in
