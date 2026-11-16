@@ -4,16 +4,22 @@ use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, ElementId, Entity, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement as _, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    Modifiers, ParentElement as _, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     Styled as _, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
 use crate::icon::{Icon, IconName};
 use crate::input::{Input, InputState};
-use crate::menu::{Entry, OnSelect, PopupMenuColors, PopupMenuItem, rows, step};
+use crate::menu::{
+    Entry, MenuSelect, MoveHighlight, OnHighlight, OnSelect, PopupMenuColors, PopupMenuItem, rows,
+    secondary, shift, step,
+};
 use crate::theme::ActiveTheme as _;
 
-actions!(gpui_core_picker, [Previous, Next, Choose]);
+actions!(
+    gpui_core_picker,
+    [Previous, Next, Choose, ChooseShift, ChooseSecondary]
+);
 
 /// The picker's field: its keys over the field's own (a one-line field's Up and Down would
 /// otherwise go to its start and end, and Enter would submit it).
@@ -25,6 +31,16 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("up", Previous, c),
         KeyBinding::new("down", Next, c),
         KeyBinding::new("enter", Choose, c),
+        KeyBinding::new("shift-enter", ChooseShift, c),
+        KeyBinding::new(
+            if cfg!(any(target_os = "macos", target_os = "ios")) {
+                "cmd-enter"
+            } else {
+                "ctrl-enter"
+            },
+            ChooseSecondary,
+            c,
+        ),
     ]);
 }
 
@@ -38,7 +54,7 @@ pub(crate) fn init(cx: &mut App) {
 ///
 /// ```no_run
 /// # use gpui::*;
-/// # use gpui_core::{Picker, PopupMenuItem, Popover, Button};
+/// # use gpui_core::{Button, MenuSelect, Picker, PopupMenuItem, Popover};
 /// # struct Panel { open: bool, tag: SharedString }
 /// # impl Render for Panel {
 /// fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -60,8 +76,8 @@ pub(crate) fn init(cx: &mut App) {
 ///                 .items(["Work", "Home", "Errands"].map(|t| {
 ///                     PopupMenuItem::new(t, t).checked(self.tag.as_ref() == t)
 ///                 }))
-///                 .on_select(cx.listener(|this, id: &SharedString, _, cx| {
-///                     this.tag = id.clone();
+///                 .on_select(cx.listener(|this, pick: &MenuSelect, _, cx| {
+///                     this.tag = pick.id.clone();
 ///                     this.open = false;
 ///                     cx.notify();
 ///                 })),
@@ -76,6 +92,8 @@ pub struct Picker {
     placeholder: SharedString,
     empty: SharedString,
     on_select: Option<OnSelect>,
+    on_highlight: Option<OnHighlight>,
+    highlight: Option<SharedString>,
     touch: bool,
     colors: PopupMenuColors,
 }
@@ -88,6 +106,8 @@ impl Picker {
             placeholder: "Search".into(),
             empty: "No matches".into(),
             on_select: None,
+            on_highlight: None,
+            highlight: None,
             touch: false,
             colors: PopupMenuColors::default(),
         }
@@ -116,8 +136,22 @@ impl Picker {
     }
 
     /// Runs with the picked entry's id.
-    pub fn on_select(mut self, f: impl Fn(&SharedString, &mut Window, &mut App) + 'static) -> Self {
+    pub fn on_select(mut self, f: impl Fn(&MenuSelect, &mut Window, &mut App) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
+        self
+    }
+
+    /// The entry highlighted when it opens (the checked one, else the first match, unless
+    /// given).
+    pub fn highlight(mut self, id: impl Into<SharedString>) -> Self {
+        self.highlight = Some(id.into());
+        self
+    }
+
+    /// Told the highlighted entry's id when the keys, the pointer or a new query move the
+    /// highlight (not when it opens).
+    pub fn on_highlight(mut self, f: impl Fn(Option<&SharedString>, &mut App) + 'static) -> Self {
+        self.on_highlight = Some(Rc::new(f));
         self
     }
 
@@ -176,53 +210,88 @@ impl RenderOnce for Picker {
             .filter(|i| matches(&i.label, &text))
             .collect();
         let pickable: Rc<Vec<bool>> = Rc::new(shown.iter().map(|i| !i.disabled).collect());
-        // Where it opens: on the current option (the checked one), else on the first match.
-        let current = shown
-            .iter()
-            .position(|i| i.checked == Some(true) && !i.disabled);
+        // Where it opens: on the host's entry, else the current option (the checked one), else
+        // the first match.
+        let given = self
+            .highlight
+            .as_ref()
+            .and_then(|want| shown.iter().position(|i| &i.id == want && !i.disabled));
+        let current = given.or_else(|| {
+            shown
+                .iter()
+                .position(|i| i.checked == Some(true) && !i.disabled)
+        });
         let ids: Rc<Vec<SharedString>> = Rc::new(shown.iter().map(|i| i.id.clone()).collect());
 
         // Opening highlights the current option, a new query the first match; the pointer and
         // the keys move it from there.
-        let highlighted = state.update(cx, |s, _| {
+        let (highlighted, requeried) = state.update(cx, |s, _| {
+            let mut requeried = false;
             if s.seen.is_none() {
                 s.seen = Some(text.clone());
                 s.highlighted = current.or_else(|| step(&pickable, None, 1));
             } else if s.seen.as_ref() != Some(&text) {
                 s.seen = Some(text.clone());
                 s.highlighted = step(&pickable, None, 1);
+                requeried = true;
             }
-            s.highlighted.filter(|i| *i < pickable.len())
+            (s.highlighted.filter(|i| *i < pickable.len()), requeried)
+        });
+        // A new query moved it: tell the host after this frame (not in the middle of a draw).
+        if requeried && let Some(f) = self.on_highlight.clone() {
+            let id = highlighted.map(|i| ids[i].clone());
+            cx.defer(move |cx| f(id.as_ref(), cx));
+        }
+        // Moves the highlight to `to`, and tells the host if it moved.
+        let set: MoveHighlight = Rc::new({
+            let state = state.clone();
+            let ids = ids.clone();
+            let on_highlight = self.on_highlight.clone();
+            move |to, cx: &mut App| {
+                let moved = state.update(cx, |s, cx| {
+                    let moved = to != s.highlighted;
+                    if moved {
+                        s.highlighted = to;
+                        cx.notify();
+                    }
+                    moved
+                });
+                if moved && let Some(f) = &on_highlight {
+                    f(to.and_then(|i| ids.get(i)), cx);
+                }
+            }
         });
 
         let mover = |delta: isize| {
             let state = state.clone();
             let pickable = pickable.clone();
+            let set = set.clone();
             move |_: &mut Window, cx: &mut App| {
-                state.update(cx, |s, cx| {
-                    let to = step(&pickable, s.highlighted, delta);
-                    if to != s.highlighted {
-                        s.highlighted = to;
-                        cx.notify();
-                    }
-                })
+                let from = state.read(cx).highlighted;
+                set(step(&pickable, from, delta), cx)
             }
         };
         let (prev, next) = (mover(-1), mover(1));
-        let choose = {
+        let choose = Rc::new({
             let state = state.clone();
             let on_select = self.on_select.clone();
             let pickable = pickable.clone();
-            move |window: &mut Window, cx: &mut App| {
+            let ids = ids.clone();
+            move |modifiers: Modifiers, window: &mut Window, cx: &mut App| {
                 let at = state.read(cx).highlighted;
                 if let (Some(i), Some(f)) = (at, &on_select)
                     && pickable.get(i) == Some(&true)
                     && let Some(id) = ids.get(i)
                 {
-                    f(id, window, cx);
+                    let pick = MenuSelect {
+                        id: id.clone(),
+                        modifiers,
+                    };
+                    f(&pick, window, cx);
                 }
             }
-        };
+        });
+        let (choose_shift, choose_secondary) = (choose.clone(), choose.clone());
 
         let theme = cx.theme().clone();
         let muted = self.colors.muted.unwrap_or(theme.muted_foreground);
@@ -233,17 +302,7 @@ impl RenderOnce for Picker {
             highlighted,
             self.touch,
             self.colors,
-            Rc::new({
-                let state = state.clone();
-                move |i, cx: &mut App| {
-                    state.update(cx, |s, cx| {
-                        if s.highlighted != Some(i) {
-                            s.highlighted = Some(i);
-                            cx.notify();
-                        }
-                    })
-                }
-            }),
+            Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
             self.on_select.clone(),
             cx,
         );
@@ -256,7 +315,9 @@ impl RenderOnce for Picker {
             .min_w_0()
             .on_action(move |_: &Previous, w, cx| prev(w, cx))
             .on_action(move |_: &Next, w, cx| next(w, cx))
-            .on_action(move |_: &Choose, w, cx| choose(w, cx))
+            .on_action(move |_: &Choose, w, cx| choose(Modifiers::none(), w, cx))
+            .on_action(move |_: &ChooseShift, w, cx| choose_shift(shift(), w, cx))
+            .on_action(move |_: &ChooseSecondary, w, cx| choose_secondary(secondary(cx), w, cx))
             .child(
                 div()
                     .flex()

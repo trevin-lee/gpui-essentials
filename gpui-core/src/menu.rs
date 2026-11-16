@@ -30,8 +30,8 @@
 //!                 .item(PopupMenuItem::new("copy", "Copy").icon(IconName::Copy).shortcut("⌘C"))
 //!                 .separator()
 //!                 .item(PopupMenuItem::new("wrap", "Wrap lines").checked(self.wrap))
-//!                 .on_select(move |id, window, cx| {
-//!                     // `id` is the entry's: "copy" or "wrap".
+//!                 .on_select(move |pick, window, cx| {
+//!                     // `pick.id` is the entry's: "copy" or "wrap"; `pick.modifiers` what's held.
 //!                     close(&(), window, cx)
 //!                 }),
 //!         )
@@ -42,8 +42,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ElementId, FocusHandle, Hsla, InteractiveElement as _, IntoElement,
-    KeyBinding, ParentElement as _, Rems, RenderOnce, Role, SharedString,
+    AnyElement, App, ClickEvent, ElementId, FocusHandle, Hsla, InteractiveElement as _,
+    IntoElement, KeyBinding, Modifiers, ParentElement as _, Rems, RenderOnce, Role, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, actions, div,
     prelude::FluentBuilder as _, rems,
 };
@@ -53,7 +53,18 @@ use crate::press::Press;
 use crate::size::{Disableable as _, Selectable as _};
 use crate::theme::{ActiveTheme as _, Theme};
 
-actions!(gpui_core_menu, [Previous, Next, First, Last, Choose]);
+actions!(
+    gpui_core_menu,
+    [
+        Previous,
+        Next,
+        First,
+        Last,
+        Choose,
+        ChooseShift,
+        ChooseSecondary
+    ]
+);
 
 const CONTEXT: &str = "GpuiCoreMenu";
 
@@ -66,7 +77,35 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("end", Last, c),
         KeyBinding::new("enter", Choose, c),
         KeyBinding::new("space", Choose, c),
+        KeyBinding::new("shift-enter", ChooseShift, c),
+        KeyBinding::new(
+            if cfg!(any(target_os = "macos", target_os = "ios")) {
+                "cmd-enter"
+            } else {
+                "ctrl-enter"
+            },
+            ChooseSecondary,
+            c,
+        ),
     ]);
+}
+
+/// A pick: the entry's id, and the modifiers held (Shift-Enter or a Shift-click to add rather
+/// than replace, say). From the keyboard, Shift-Enter and Cmd-Enter (Ctrl-Enter off the Mac)
+/// come with those.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuSelect {
+    pub id: SharedString,
+    pub modifiers: Modifiers,
+}
+
+/// The modifiers a keyboard pick comes with.
+pub(crate) fn shift() -> Modifiers {
+    Modifiers::shift()
+}
+
+pub(crate) fn secondary(cx: &App) -> Modifiers {
+    Modifiers::secondary_key(cx)
 }
 
 /// One entry: a label, and optionally an icon, a check, a shortcut's text and a chip the host
@@ -144,10 +183,16 @@ pub struct PopupMenuColors {
     pub separator: Option<Hsla>,
 }
 
+/// Moves the highlight to an index, or clears it.
+pub(crate) type MoveHighlight = Rc<dyn Fn(Option<usize>, &mut App)>;
+
 /// Highlights the entry at an index.
 pub(crate) type SetHighlight = Rc<dyn Fn(usize, &mut App)>;
 
-pub(crate) type OnSelect = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+pub(crate) type OnSelect = Rc<dyn Fn(&MenuSelect, &mut Window, &mut App)>;
+
+/// Told the highlighted entry's id when the keys or the pointer move the highlight.
+pub(crate) type OnHighlight = Rc<dyn Fn(Option<&SharedString>, &mut App)>;
 
 /// A list of [`PopupMenuItem`]s and separators. Up and Down move a highlight over the entries that
 /// can be picked (the pointer moves it too), Home and End go to the ends, Enter or Space picks,
@@ -158,6 +203,8 @@ pub struct PopupMenu {
     id: ElementId,
     entries: Vec<Entry>,
     on_select: Option<OnSelect>,
+    on_highlight: Option<OnHighlight>,
+    highlight: Option<SharedString>,
     touch: bool,
     take_focus: bool,
     colors: PopupMenuColors,
@@ -169,6 +216,8 @@ impl PopupMenu {
             id: id.into(),
             entries: Vec::new(),
             on_select: None,
+            on_highlight: None,
+            highlight: None,
             touch: false,
             take_focus: true,
             colors: PopupMenuColors::default(),
@@ -190,9 +239,24 @@ impl PopupMenu {
         self
     }
 
-    /// Runs with the picked entry's id. A host whose menu is in a popover closes it here.
-    pub fn on_select(mut self, f: impl Fn(&SharedString, &mut Window, &mut App) + 'static) -> Self {
+    /// Runs with the pick: the entry's id and the modifiers held. A host whose menu is in a
+    /// popover closes it here.
+    pub fn on_select(mut self, f: impl Fn(&MenuSelect, &mut Window, &mut App) + 'static) -> Self {
         self.on_select = Some(Rc::new(f));
+        self
+    }
+
+    /// The entry highlighted when it opens (the first that can be picked unless given): the
+    /// current option, say.
+    pub fn highlight(mut self, id: impl Into<SharedString>) -> Self {
+        self.highlight = Some(id.into());
+        self
+    }
+
+    /// Told the highlighted entry's id when the keys or the pointer move the highlight (not
+    /// when it opens: that's [`highlight`](Self::highlight)'s, or the first entry).
+    pub fn on_highlight(mut self, f: impl Fn(Option<&SharedString>, &mut App) + 'static) -> Self {
+        self.on_highlight = Some(Rc::new(f));
         self
     }
 
@@ -220,6 +284,8 @@ struct MenuState {
     focus: FocusHandle,
     highlighted: Option<usize>,
     focused_once: bool,
+    /// Whether it has set its first highlight.
+    opened: bool,
 }
 
 /// The next entry from `from` in `step`'s direction that can be picked, wrapping.
@@ -252,10 +318,11 @@ impl RenderOnce for PopupMenu {
             focus: cx.focus_handle(),
             highlighted: None,
             focused_once: false,
+            opened: false,
         });
-        let (focus, highlighted, focused_once) = {
+        let (focus, focused_once) = {
             let s = state.read(cx);
-            (s.focus.clone(), s.highlighted, s.focused_once)
+            (s.focus.clone(), s.focused_once)
         };
         if self.take_focus && !focused_once {
             state.update(cx, |s, _| s.focused_once = true);
@@ -277,42 +344,75 @@ impl RenderOnce for PopupMenu {
                 })
                 .collect(),
         );
+        // Where it opens: the host's entry, else the first that can be picked.
+        let highlighted = state.update(cx, |s, _| {
+            if !s.opened {
+                s.opened = true;
+                let given = self.highlight.as_ref().and_then(|want| {
+                    ids.iter()
+                        .position(|id| id.as_ref() == Some(want))
+                        .filter(|i| pickable[*i])
+                });
+                s.highlighted = given.or_else(|| step(&pickable, None, 1));
+            }
+            s.highlighted
+        });
         let on_select = self.on_select.clone();
+        // Moves the highlight to `to`, and tells the host if it moved.
+        let set: MoveHighlight = Rc::new({
+            let state = state.clone();
+            let ids = ids.clone();
+            let on_highlight = self.on_highlight.clone();
+            move |to, cx: &mut App| {
+                let moved = state.update(cx, |s, cx| {
+                    let moved = to != s.highlighted;
+                    if moved {
+                        s.highlighted = to;
+                        cx.notify();
+                    }
+                    moved
+                });
+                if moved && let Some(f) = &on_highlight {
+                    f(to.and_then(|i| ids.get(i)).and_then(|id| id.as_ref()), cx);
+                }
+            }
+        });
 
         let mover = |delta: isize| {
             let state = state.clone();
             let pickable = pickable.clone();
-            move |window: &mut Window, cx: &mut App| {
-                let _ = window;
-                state.update(cx, |s, cx| {
-                    let to = match delta {
-                        isize::MIN => step(&pickable, None, 1),
-                        isize::MAX => step(&pickable, None, -1),
-                        d => step(&pickable, s.highlighted, d),
-                    };
-                    if to != s.highlighted {
-                        s.highlighted = to;
-                        cx.notify();
-                    }
-                })
+            let set = set.clone();
+            move |_: &mut Window, cx: &mut App| {
+                let from = state.read(cx).highlighted;
+                let to = match delta {
+                    isize::MIN => step(&pickable, None, 1),
+                    isize::MAX => step(&pickable, None, -1),
+                    d => step(&pickable, from, d),
+                };
+                set(to, cx)
             }
         };
         let (prev, next, first, last) = (mover(-1), mover(1), mover(isize::MIN), mover(isize::MAX));
-        let choose = {
+        let choose = Rc::new({
             let state = state.clone();
             let ids = ids.clone();
             let pickable = pickable.clone();
             let on_select = on_select.clone();
-            move |window: &mut Window, cx: &mut App| {
+            move |modifiers: Modifiers, window: &mut Window, cx: &mut App| {
                 let at = state.read(cx).highlighted;
                 if let (Some(i), Some(f)) = (at, &on_select)
                     && pickable.get(i) == Some(&true)
                     && let Some(Some(id)) = ids.get(i)
                 {
-                    f(id, window, cx);
+                    let pick = MenuSelect {
+                        id: id.clone(),
+                        modifiers,
+                    };
+                    f(&pick, window, cx);
                 }
             }
-        };
+        });
+        let (choose_shift, choose_secondary) = (choose.clone(), choose.clone());
 
         let rows = rows(
             &self.id,
@@ -320,17 +420,7 @@ impl RenderOnce for PopupMenu {
             highlighted,
             self.touch,
             self.colors,
-            Rc::new({
-                let state = state.clone();
-                move |i, cx: &mut App| {
-                    state.update(cx, |s, cx| {
-                        if s.highlighted != Some(i) {
-                            s.highlighted = Some(i);
-                            cx.notify();
-                        }
-                    })
-                }
-            }),
+            Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
             on_select,
             cx,
         );
@@ -347,7 +437,9 @@ impl RenderOnce for PopupMenu {
             .on_action(move |_: &Next, w, cx| next(w, cx))
             .on_action(move |_: &First, w, cx| first(w, cx))
             .on_action(move |_: &Last, w, cx| last(w, cx))
-            .on_action(move |_: &Choose, w, cx| choose(w, cx))
+            .on_action(move |_: &Choose, w, cx| choose(Modifiers::none(), w, cx))
+            .on_action(move |_: &ChooseShift, w, cx| choose_shift(shift(), w, cx))
+            .on_action(move |_: &ChooseSecondary, w, cx| choose_secondary(secondary(cx), w, cx))
             .children(rows)
     }
 }
@@ -429,9 +521,13 @@ pub(crate) fn rows(
                         set_highlight(i, cx);
                     }
                 })
-                .on_click(move |_, window, cx| {
+                .on_click(move |e: &ClickEvent, window, cx| {
                     if let Some(f) = &on_select {
-                        f(&id, window, cx);
+                        let pick = MenuSelect {
+                            id: id.clone(),
+                            modifiers: e.modifiers(),
+                        };
+                        f(&pick, window, cx);
                     }
                 });
             if let Some(checked) = item.checked {

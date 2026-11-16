@@ -57,7 +57,7 @@ pub use date_picker::{
 };
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
-pub use menu::{PopupMenu, PopupMenuColors, PopupMenuItem};
+pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem};
 pub use picker::Picker;
 pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
 pub use press::{Press, focus_ring};

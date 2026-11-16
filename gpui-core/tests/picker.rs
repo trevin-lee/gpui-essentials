@@ -14,19 +14,22 @@ use gpui::{
     Keystroke, ParentElement as _, Render, SharedString, Styled as _, TestAppContext,
     TestDispatcher, VisualTestContext, Window, div, px,
 };
-use gpui_core::{Picker, Popover, PopupMenuItem, Press, Root};
+use gpui_core::{MenuSelect, Picker, Popover, PopupMenuItem, Press, Root};
 
 struct Panel {
     open: bool,
     /// Whether Home is the current option.
     current: bool,
     trigger: FocusHandle,
-    picked: Rc<RefCell<Vec<SharedString>>>,
+    picked: Rc<RefCell<Vec<(SharedString, gpui::Modifiers)>>>,
+    /// What `on_highlight` was told.
+    highlights: Rc<RefCell<Vec<Option<String>>>>,
 }
 
 impl Render for Panel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let picked = self.picked.clone();
+        let highlights = self.highlights.clone();
         div().size_full().p(px(20.)).child(
             Popover::new("pop")
                 .open(self.open)
@@ -49,13 +52,16 @@ impl Render for Panel {
                 .p(px(4.))
                 .child(
                     Picker::new("picker")
+                        .on_highlight(move |id, _| {
+                            highlights.borrow_mut().push(id.map(|s| s.to_string()))
+                        })
                         .placeholder("Find a tag")
                         .item(PopupMenuItem::new("work", "Work"))
                         .item(PopupMenuItem::new("home", "Home").checked(self.current))
                         .item(PopupMenuItem::new("archived", "Archived").disabled(true))
                         .item(PopupMenuItem::new("errands", "Errands and shopping"))
-                        .on_select(cx.listener(move |this, id: &SharedString, _, cx| {
-                            picked.borrow_mut().push(id.clone());
+                        .on_select(cx.listener(move |this, pick: &MenuSelect, _, cx| {
+                            picked.borrow_mut().push((pick.id.clone(), pick.modifiers));
                             this.open = false;
                             cx.notify();
                         })),
@@ -66,7 +72,7 @@ impl Render for Panel {
 
 struct Opened<'a> {
     panel: Entity<Panel>,
-    picked: Rc<RefCell<Vec<SharedString>>>,
+    picked: Rc<RefCell<Vec<(SharedString, gpui::Modifiers)>>>,
     vcx: &'a mut VisualTestContext,
 }
 
@@ -76,7 +82,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
 
 fn open_with(cx: &mut TestAppContext, current: bool) -> Opened<'_> {
     cx.update(gpui_core::init);
-    let picked: Rc<RefCell<Vec<SharedString>>> = Rc::default();
+    let picked: Rc<RefCell<Vec<(SharedString, gpui::Modifiers)>>> = Rc::default();
     let p = picked.clone();
     let made = Rc::new(RefCell::new(None));
     let m = made.clone();
@@ -86,6 +92,7 @@ fn open_with(cx: &mut TestAppContext, current: bool) -> Opened<'_> {
             current,
             trigger: cx.focus_handle(),
             picked: p,
+            highlights: Rc::default(),
         });
         *m.borrow_mut() = Some(panel.clone());
         Root::new(panel, window, cx)
@@ -134,7 +141,7 @@ fn shown(vcx: &mut VisualTestContext) -> Vec<&'static str> {
 }
 
 fn picked(o: &Opened<'_>) -> Vec<String> {
-    o.picked.borrow().iter().map(|s| s.to_string()).collect()
+    o.picked.borrow().iter().map(|s| s.0.to_string()).collect()
 }
 
 #[test]
@@ -199,4 +206,29 @@ fn it_opens_on_the_current_option() {
     let o = open_with(&mut cx, true);
     keys(o.vcx, "enter");
     assert_eq!(picked(&o), ["home"]);
+}
+
+#[test]
+fn shift_enter_picks_with_shift() {
+    let mut cx = app();
+    let o = open(&mut cx);
+    keys(o.vcx, "shift-enter");
+    let got = o.picked.borrow().clone();
+    assert_eq!(got.len(), 1);
+    assert!(got[0].1.shift && got[0].0.as_ref() == "work", "{got:?}");
+}
+
+#[test]
+fn the_host_is_told_when_a_query_or_the_keys_move_the_highlight() {
+    let mut cx = app();
+    let o = open(&mut cx);
+    o.vcx.simulate_input("HOM");
+    keys(o.vcx, "up");
+    let seen = o
+        .panel
+        .read_with(o.vcx, |p, _| p.highlights.borrow().clone());
+    // Typing moved it to Home (the first match as the query grows), and Up wrapped to it again
+    // with nothing else matching: no move, so nothing more.
+    assert_eq!(seen.last(), Some(&Some("home".to_string())), "{seen:?}");
+    assert!(seen.iter().all(|h| h.is_some()));
 }
