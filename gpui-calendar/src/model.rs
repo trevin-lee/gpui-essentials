@@ -1,13 +1,64 @@
-//! What the host hands the calendar: events, the view to show, and how to show it.
-
-use std::collections::HashMap;
+//! What the host hands the calendar: its calendars, their events, the view to show, and how
+//! to show it.
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc, Weekday};
 use chrono_tz::Tz;
 use gpui_kit::SharedString;
 
-/// An event's id: whatever the host uses to find it again.
+/// An event's id: whatever the host uses to find it again. For a recurring event it names one
+/// occurrence (an instance id), and [`Event::series`] names the series.
 pub type EventId = SharedString;
+
+/// A calendar's id, as the host knows it.
+pub type CalendarId = SharedString;
+
+/// One of the host's calendars: a list of them comes with the events, and each event names the
+/// one it belongs to. The calendar's colour is its events' colour.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CalendarSource {
+    pub id: CalendarId,
+    pub name: SharedString,
+    /// As 0xRRGGBB.
+    pub color: u32,
+    /// Hidden calendars' events aren't drawn, selected or counted.
+    pub visible: bool,
+    /// Its events can be selected and opened, but not moved, resized or deleted, and nothing is
+    /// made in it.
+    pub read_only: bool,
+}
+
+impl CalendarSource {
+    /// A visible calendar that can be edited.
+    pub fn new(id: impl Into<CalendarId>, name: impl Into<SharedString>, rgb: u32) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            color: rgb,
+            visible: true,
+            read_only: false,
+        }
+    }
+
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    pub fn read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
+    }
+}
+
+/// Which event an edit is about: the occurrence's id, its series if it's one of a recurring
+/// event's, and its calendar. The host decides whether a change to an occurrence changes that
+/// one only or the whole series.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EventRef {
+    pub id: EventId,
+    pub series: Option<EventId>,
+    pub calendar: CalendarId,
+}
 
 /// When an event happens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -44,18 +95,25 @@ impl EventTime {
     }
 }
 
-/// One event, as the host supplies it for the range on screen.
+/// One event, as the host supplies it for the range on screen. A recurring event comes
+/// expanded: one `Event` per occurrence, each with an id of its own and the series' id.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
+    /// The occurrence's own id, unique among the events.
     pub id: EventId,
+    /// The recurring series it's an occurrence of, if it is one.
+    pub series: Option<EventId>,
     pub title: SharedString,
     pub time: EventTime,
-    /// The calendar it belongs to, which picks its colour unless it has its own.
-    pub calendar: SharedString,
-    /// Its own colour, as 0xRRGGBB, over its calendar's.
+    /// The id of the [`CalendarSource`] it belongs to, which gives its colour, whether it's
+    /// shown and whether it can be edited.
+    pub calendar: CalendarId,
+    /// A colour of its own, as 0xRRGGBB, over its calendar's (Google Calendar lets one event
+    /// have its own). Usually none.
     pub color: Option<u32>,
     pub location: Option<SharedString>,
-    /// Can't be moved or resized by dragging (it can still be selected and opened).
+    /// This one event can't be moved, resized or deleted, whatever its calendar allows (it can
+    /// still be selected and opened).
     pub read_only: bool,
 }
 
@@ -83,18 +141,34 @@ impl Event {
     pub fn new(id: impl Into<EventId>, title: impl Into<SharedString>, time: EventTime) -> Self {
         Self {
             id: id.into(),
+            series: None,
             title: title.into(),
             time,
-            calendar: SharedString::default(),
+            calendar: CalendarId::default(),
             color: None,
             location: None,
             read_only: false,
         }
     }
 
-    pub fn calendar(mut self, calendar: impl Into<SharedString>) -> Self {
+    pub fn calendar(mut self, calendar: impl Into<CalendarId>) -> Self {
         self.calendar = calendar.into();
         self
+    }
+
+    /// Marks it an occurrence of a recurring series.
+    pub fn series(mut self, series: impl Into<EventId>) -> Self {
+        self.series = Some(series.into());
+        self
+    }
+
+    /// The reference edits to it carry.
+    pub fn to_ref(&self) -> EventRef {
+        EventRef {
+            id: self.id.clone(),
+            series: self.series.clone(),
+            calendar: self.calendar.clone(),
+        }
     }
 
     pub fn color(mut self, rgb: u32) -> Self {
@@ -161,9 +235,9 @@ pub struct CalendarOptions {
     /// Where the time grid opens when today isn't on screen. With today on screen it opens
     /// with the current time about a third of the way down.
     pub scroll_time: NaiveTime,
-    /// Colours per calendar id, as 0xRRGGBB. A calendar without one gets one of the palette's,
-    /// chosen by its id, so it keeps it from one launch to the next.
-    pub calendar_colors: HashMap<SharedString, u32>,
+    /// The calendar new events are proposed in. Without one, or if it can't be edited, it's the
+    /// first visible calendar that can.
+    pub default_calendar: Option<CalendarId>,
     /// Draws events that have ended a little quieter.
     pub dim_past: bool,
     /// The most rows of all-day events the time grid shows before it says "+N".
@@ -181,7 +255,7 @@ impl Default for CalendarOptions {
             default_duration: Duration::hours(1),
             hour_height: 48.,
             scroll_time: NaiveTime::from_hms_opt(8, 0, 0).expect("8:00"),
-            calendar_colors: HashMap::new(),
+            default_calendar: None,
             dim_past: true,
             all_day_rows: 3,
         }

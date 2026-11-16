@@ -320,6 +320,10 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         .read_only(true),
     );
     out.iter_mut().find(|e| e.id == "design").unwrap().location = Some("Room 4".into());
+    // The standups are one recurring series, expanded by the host as a real one is.
+    for e in out.iter_mut().filter(|e| e.id.starts_with("standup-")) {
+        e.series = Some("standup".into());
+    }
 
     out.push(Event::all_day("rustconf", "RustConf", day(0), day(3)).calendar("work"));
     out.push(
@@ -329,7 +333,22 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
     out.push(Event::all_day("birthday", "Mom's birthday", day(4), day(5)).calendar("personal"));
     out.push(Event::all_day("rent", "Rent due", day(2), day(3)).calendar("finances"));
     out.push(Event::all_day("move-out", "Lab move-out", day(2), day(4)).calendar("school"));
+    // A subscribed calendar: shown, never editable.
+    out.push(Event::all_day("thanksgiving", "Thanksgiving", day(10), day(11)).calendar("holidays"));
     out
+}
+
+/// The host's calendars, as its server would list them.
+fn calendars() -> Vec<CalendarSource> {
+    vec![
+        CalendarSource::new("work", "Work", 0x5b8def),
+        CalendarSource::new("personal", "Personal", 0x4cc38a),
+        CalendarSource::new("school", "School", 0x9b7cf0),
+        CalendarSource::new("health", "Health", 0x3fb6c4),
+        CalendarSource::new("agents", "Agents", 0xe2a336),
+        CalendarSource::new("finances", "Finances", 0xe06fa8),
+        CalendarSource::new("holidays", "Holidays", 0x8b8b93).read_only(true),
+    ]
 }
 
 /// A small deterministic random number generator, so pictures and the bench repeat exactly.
@@ -597,12 +616,7 @@ impl Root {
                     o.time_zone = TZ;
                     o.week_start = week_start;
                 })
-                .with_calendar_color("work", 0x5b8def)
-                .with_calendar_color("personal", 0x4cc38a)
-                .with_calendar_color("school", 0x9b7cf0)
-                .with_calendar_color("health", 0x3fb6c4)
-                .with_calendar_color("agents", 0xe2a336)
-                .with_calendar_color("finances", 0xe06fa8)
+                .with_calendars(calendars())
                 .with_events(events)
                 .with_view(view)
                 .with_date(date);
@@ -659,28 +673,34 @@ impl Root {
             CalendarEvent::Select(Some(id)) => format!("Selected {}", title(id, cx)),
             CalendarEvent::Select(None) => "Nothing selected".into(),
             CalendarEvent::Open(id) => format!("Open {}", title(id, cx)),
-            CalendarEvent::Create(time) => {
+            CalendarEvent::Create {
+                calendar: cal,
+                time,
+            } => {
                 self.added += 1;
                 let id = format!("new-{}", self.added);
                 let said = format!("Added an event, {}", words(time));
+                let cal = cal.clone().unwrap_or_else(|| "work".into());
                 calendar.update(cx, |c, cx| {
-                    c.upsert_event(Event::new(id, "New event", *time).calendar("work"), cx)
+                    c.upsert_event(Event::new(id, "New event", *time).calendar(cal), cx)
                 });
                 said
             }
-            CalendarEvent::Move { id, time } | CalendarEvent::Resize { id, time } => {
-                let said = format!("{} → {}", title(id, cx), words(time));
+            // A real host would ask whether a change to an occurrence of a recurring event is
+            // for that one or the whole series; this one changes the occurrence.
+            CalendarEvent::Move { event, time } | CalendarEvent::Resize { event, time } => {
+                let said = format!("{} → {}", title(&event.id, cx), words(time));
                 calendar.update(cx, |c, cx| {
-                    if let Some(mut e) = c.event(id).cloned() {
+                    if let Some(mut e) = c.event(&event.id).cloned() {
                         e.time = *time;
                         c.upsert_event(e, cx);
                     }
                 });
                 said
             }
-            CalendarEvent::Delete(id) => {
-                let said = format!("Deleted {}", title(id, cx));
-                calendar.update(cx, |c, cx| c.remove_event(id, cx));
+            CalendarEvent::Delete(event) => {
+                let said = format!("Deleted {}", title(&event.id, cx));
+                calendar.update(cx, |c, cx| c.remove_event(&event.id, cx));
                 said
             }
         }
@@ -1078,6 +1098,7 @@ fn names_dont_clash(
         Selection,
         Area,
     ),
+    _: (CalendarSource, CalendarId, EventRef),
     _: NaiveTime,
 ) {
 }
