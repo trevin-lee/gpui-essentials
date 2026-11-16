@@ -37,6 +37,8 @@ pub enum A11yTarget {
     Day(NaiveDate),
     /// "+N more" on a day: shows that day.
     More(NaiveDate),
+    /// "+N" beside side-by-side events, for those that didn't fit: opens their list.
+    Crowd(Vec<EventId>),
     /// An hour of a day on the grid, or a day of the month: selects it (Enter then makes an
     /// event there).
     Slot { date: NaiveDate, minute: u32 },
@@ -140,6 +142,35 @@ impl Calendar {
         Some(out)
     }
 
+    /// What a screen reader says for a "+N": how many events it stands for and when they are,
+    /// "12 more events, 2 to 5 PM".
+    pub(crate) fn describe_crowd(&self, ids: &[EventId]) -> String {
+        let tz = self.options.time_zone;
+        let mut span: Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> = None;
+        for e in ids.iter().filter_map(|id| self.event(id)) {
+            if let EventTime::Timed { start, end } = e.time {
+                span = Some(span.map_or((start, end), |(a, z)| (a.min(start), z.max(end))));
+            }
+        }
+        let count = if ids.len() == 1 {
+            "1 more event".to_string()
+        } else {
+            format!("{} more events", ids.len())
+        };
+        match span {
+            Some((a, z)) => format!(
+                "{count}, {}",
+                time::format_range(
+                    a.with_timezone(&tz).time(),
+                    z.with_timezone(&tz).time(),
+                    self.options.hour12
+                )
+                .replace(" – ", " to ")
+            ),
+            None => count,
+        }
+    }
+
     /// What the canvas is called as a whole: "Calendar, November 2026".
     pub fn accessibility_label(&self) -> String {
         format!("Calendar, {}", self.title())
@@ -207,6 +238,17 @@ impl Calendar {
                 selected: false,
                 read_only: false,
                 target: A11yTarget::More(*date),
+            });
+        }
+        // "+N" for side-by-side events that didn't fit: "12 more events, 2 to 5 PM".
+        for (b, ids) in shared.crowds.borrow().iter() {
+            out.push(A11yItem {
+                role: Role::Button,
+                label: self.describe_crowd(ids),
+                bounds: *b,
+                selected: false,
+                read_only: false,
+                target: A11yTarget::Crowd(ids.clone()),
             });
         }
         match geo.kind {
@@ -278,6 +320,11 @@ impl Calendar {
             A11yTarget::Day(date) | A11yTarget::More(date) => {
                 self.set_view(CalendarView::Day, cx);
                 self.go_to(*date, cx);
+            }
+            A11yTarget::Crowd(ids) => {
+                if let Some(id) = ids.first() {
+                    self.open_hidden(id, cx);
+                }
             }
             A11yTarget::Slot { date, minute } => self.select(
                 Some(Selection::Slot {

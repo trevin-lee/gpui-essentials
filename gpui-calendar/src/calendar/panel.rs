@@ -26,7 +26,7 @@ const WIDTH: f32 = 284.;
 /// of it, top-aligned with it and moved up as far as it must to end inside the window (never
 /// above its top). None where neither side has room. The point is for gpui-core's `Popover`,
 /// which puts the panel `gap` below it.
-fn beside(
+pub(super) fn beside(
     event: Bounds<Pixels>,
     width: Pixels,
     tall: Pixels,

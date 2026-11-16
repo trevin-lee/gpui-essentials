@@ -33,6 +33,10 @@ const SECOND_NARROW: f32 = 50.;
 pub(crate) const NARROW: f32 = 600.;
 const HEAD: f32 = 40.;
 const LANE: f32 = 22.;
+/// The narrowest a column of side-by-side events gets, in CSS pixels (44 points on touch);
+/// and the narrowest the strip for "+N" beside them is.
+const MIN_COLUMN: f32 = 36.;
+const MIN_STRIP: f32 = 18.;
 const MONTH_HEAD: f32 = 28.;
 const MONTH_LANE: f32 = 20.;
 const MONTH_DATE: f32 = 28.;
@@ -79,6 +83,9 @@ pub(crate) enum Target {
     Date(NaiveDate),
     /// "+N" in the all-day row, which opens the row to show everything.
     Expand,
+    /// "+N" beside side-by-side events, for those that didn't fit: which they are, and where
+    /// it was drawn.
+    Crowd(Vec<EventId>, Bounds<Pixels>),
     /// One of an event's links.
     Link {
         id: EventId,
@@ -130,6 +137,8 @@ pub(crate) struct Shared {
     pub mores: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub dates: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub expand: RefCell<Vec<Bounds<Pixels>>>,
+    /// "+N" for side-by-side events that didn't fit, and which they are.
+    pub crowds: RefCell<Vec<(Bounds<Pixels>, Vec<EventId>)>>,
     /// Where the drag's ghost was drawn in the last frame.
     pub ghost: Cell<Option<Bounds<Pixels>>>,
     /// How far the agenda is scrolled, in pixels; none until a frame places it (at today).
@@ -530,6 +539,18 @@ pub(crate) fn target_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> Target 
     if let Some(link) = link_at(true) {
         return link;
     }
+    // So is "+N" in a day too narrow for a strip beside its events.
+    let crowd_at = |exact: bool| {
+        shared
+            .crowds
+            .borrow()
+            .iter()
+            .find(|(b, _)| near(b, exact))
+            .map(|(b, ids)| Target::Crowd(ids.clone(), *b))
+    };
+    if let Some(crowd) = crowd_at(true) {
+        return crowd;
+    }
     let event_at = |exact: bool| {
         let hits = shared.hits.borrow();
         let found = if exact {
@@ -556,6 +577,9 @@ pub(crate) fn target_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> Target 
     for exact in [true, false] {
         if !exact && !geo.touch {
             break;
+        }
+        if !exact && let Some(crowd) = crowd_at(false) {
+            return crowd;
         }
         if let Some((_, date)) = shared.mores.borrow().iter().find(|(b, _)| near(b, exact)) {
             return Target::More(*date);
@@ -613,7 +637,8 @@ pub(crate) fn cursor_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> CursorS
         | Target::Link { .. }
         | Target::More(_)
         | Target::Date(_)
-        | Target::Expand => CursorStyle::PointingHand,
+        | Target::Expand
+        | Target::Crowd(..) => CursorStyle::PointingHand,
         _ => CursorStyle::Arrow,
     }
 }
@@ -718,6 +743,7 @@ fn draw(
     shared.mores.borrow_mut().clear();
     shared.dates.borrow_mut().clear();
     shared.expand.borrow_mut().clear();
+    shared.crowds.borrow_mut().clear();
     shared.ghost.set(None);
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
         let mut ink = Ink {
@@ -774,6 +800,7 @@ fn draw(
                     shared.mores.borrow_mut().clear();
                     shared.dates.borrow_mut().clear();
                     shared.expand.borrow_mut().clear();
+                    shared.crowds.borrow_mut().clear();
                 }
                 match scene.kind {
                     Kind::Grid => paint_grid(&mut ink, scene, geo, shared),
@@ -1635,6 +1662,20 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 dry: ink.dry,
             };
             let mut hits = shared.hits.borrow_mut();
+            // No column narrower than a readable minimum: a group needing more shows those
+            // that fit, and "+N" for the rest.
+            let avail = geo.col_w - margin;
+            let narrowest = ink.u(if geo.touch { TOUCH_TARGET } else { MIN_COLUMN });
+            let strip = ink.u(MIN_STRIP);
+            let squeeze = |columns: usize| {
+                layout::squeeze(
+                    columns,
+                    f32::from(avail),
+                    f32::from(narrowest),
+                    f32::from(strip),
+                )
+            };
+            let mut hidden: Vec<HiddenPiece> = Vec::new();
             for piece in &scene.laid.timed {
                 let top = geo.y_of(piece.top);
                 let bottom = geo.y_of(piece.bottom.max(piece.top + min));
@@ -1643,13 +1684,20 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 }
                 let chip = &scene.laid.chips[piece.chip];
                 let x0 = geo.col_x(piece.col as i32);
-                let avail = geo.col_w - margin;
-                let rect = Bounds::from_corners(
-                    point(x0 + avail * piece.place.left(), top),
-                    point(
-                        x0 + avail * (piece.place.left() + piece.place.width()),
+                let fit = squeeze(piece.place.columns);
+                let Some((left, width)) = fit.place(piece.place) else {
+                    hidden.push(HiddenPiece {
+                        col: piece.col,
+                        top,
                         bottom,
-                    ),
+                        id: chip.id.clone(),
+                        fit,
+                    });
+                    continue;
+                };
+                let rect = Bounds::from_corners(
+                    point(x0 + px(left), top),
+                    point(x0 + px(left + width), bottom),
                 );
                 let selected = scene.selected(&chip.id);
                 let faded = scene.moving(&chip.id) || scene.dimmed(chip);
@@ -1696,6 +1744,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 });
             }
             drop(hits);
+            paint_crowds(&mut ink, scene, geo, shared, hidden);
 
             // The ghost, a piece per day it touches, full width.
             if let Some(ghost) = &scene.ghost
@@ -1886,6 +1935,80 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
     ink.hline(geo.left, geo.col_x(days), geo.grid_top - px(1.), c.line);
 }
 
+/// A timed event that didn't fit beside the others it overlaps.
+struct HiddenPiece {
+    col: u32,
+    top: Pixels,
+    bottom: Pixels,
+    id: EventId,
+    fit: layout::Squeeze,
+}
+
+/// "+N" for the events that didn't fit, one for each run of them on a day: in the strip at the
+/// right of the columns that show, from the first one's start to the last one's end.
+fn paint_crowds(
+    ink: &mut Ink,
+    scene: &Scene,
+    geo: &Geo,
+    shared: &Shared,
+    mut hidden: Vec<HiddenPiece>,
+) {
+    let c = &scene.colors;
+    hidden.sort_by(|a, b| {
+        a.col
+            .cmp(&b.col)
+            .then(f32::from(a.top).total_cmp(&f32::from(b.top)))
+    });
+    let mut runs: Vec<(u32, Pixels, Pixels, Vec<EventId>, layout::Squeeze)> = Vec::new();
+    for h in hidden {
+        match runs.last_mut() {
+            // Runs closer than a label's height are one: "+N"s don't stack.
+            Some(run) if run.0 == h.col && h.top < run.2 + ink.u(18.) => {
+                run.2 = run.2.max(h.bottom);
+                if !run.3.contains(&h.id) {
+                    run.3.push(h.id);
+                }
+            }
+            _ => runs.push((h.col, h.top, h.bottom, vec![h.id], h.fit)),
+        }
+    }
+    let gap = ink.u(2.);
+    let pill_h = ink.u(18.);
+    for (col, top, bottom, ids, fit) in runs {
+        let x0 = geo.col_x(col as i32);
+        let left = x0 + px(fit.events) + gap;
+        let rect = Bounds::new(
+            point(left, top),
+            size(
+                (x0 + px(fit.events + fit.chip) - left).max(px(1.)),
+                (bottom - top).max(pill_h),
+            ),
+        );
+        // "+3", or just "+" in a strip too narrow for the count.
+        let mut label = format!("+{}", ids.len());
+        let mut w = ink.measure(&label, SMALL, FontWeight::SEMIBOLD);
+        if w > rect.size.width - ink.u(2.) {
+            label = "+".into();
+            w = ink.measure(&label, SMALL, FontWeight::SEMIBOLD);
+        }
+        ink.rounded(rect, ink.u(4.), c.highlight);
+        ink.outlined(rect, ink.u(4.), transparent_black(), px(1.), c.line);
+        ink.text(
+            &label,
+            SMALL,
+            SMALL_LEADING,
+            FontWeight::SEMIBOLD,
+            c.text,
+            point(
+                rect.left() + ((rect.size.width - w) / 2.).max(px(0.)),
+                rect.top() + ink.u(2.),
+            ),
+            Some(rect.size.width),
+        );
+        shared.crowds.borrow_mut().push((rect, ids));
+    }
+}
+
 /// A day's name over its number, centred in its column, for narrow columns.
 fn paint_stacked_head(
     ink: &mut Ink,
@@ -2040,7 +2163,8 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 if top < geo.grid_top || y > b.bottom() + ink.u(10.) {
                     continue;
                 }
-                if now_shown && (y - now_y).abs() < ink.u(12.) {
+                // Far enough that the two labels (the time now's the taller) don't touch.
+                if now_shown && (y - now_y).abs() < ink.u(16.) {
                     continue;
                 }
                 ink.text_right(
