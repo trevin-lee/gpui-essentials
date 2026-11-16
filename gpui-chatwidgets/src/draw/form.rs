@@ -27,7 +27,8 @@ pub(crate) fn field_key(path: &str, i: usize) -> String {
 }
 
 /// A choice row's press: what it is to assistive technology (a check box, a radio button or a
-/// switch), its label, and whether it's checked, which it reports as toggled.
+/// switch), its label, and whether it's checked, which it reports as toggled. A tap picks
+/// without taking the focus (from the chat's text field, say); Tab still stops on it.
 fn choice_press(
     id: ElementId,
     t: &crate::theme::CardTheme,
@@ -41,6 +42,7 @@ fn choice_press(
         .accessibility_label(label.to_string())
         .selected(checked)
         .disabled(disabled)
+        .focus_on_press(false)
 }
 
 /// What a press in a form carries along: the form's name and its fields, to check first.
@@ -378,6 +380,7 @@ impl Draw<'_, '_> {
                         .accessibility_label(o.label.clone())
                         .disabled(o.disabled)
                         .selected(on)
+                        .focus_on_press(false)
                         .flex_none()
                         .max_w_full()
                         .min_w_0()
@@ -409,7 +412,7 @@ impl Draw<'_, '_> {
                             t.colors.text,
                             self.regular(),
                         ));
-                    row = row.child(self.on_press(chip, !o.disabled, pick));
+                    row = row.child(self.on_press(chip, pick));
                 }
                 row.into_any_element()
             }
@@ -467,7 +470,7 @@ impl Draw<'_, '_> {
                         ))
                     }),
             );
-        self.on_press(press, !disabled, choose).into_any_element()
+        self.on_press(press, choose).into_any_element()
     }
 
     fn checkboxes(
@@ -652,6 +655,7 @@ impl Draw<'_, '_> {
                 .accessibility_label(o.label.clone())
                 .disabled(o.disabled)
                 .selected(on)
+                .focus_on_press(false)
                 .flex_basis(self.px(140.))
                 .flex_grow(1.)
                 .flex_shrink(1.)
@@ -760,7 +764,7 @@ impl Draw<'_, '_> {
                 .flex_1(),
             )
             .child(self.glyph(Glyph::ChevronDown, 14., t.colors.text_muted));
-        let trigger = self.on_press(trigger, true, toggle);
+        let trigger = self.on_press(trigger, toggle);
         let mut el = div().relative().w_full().min_w_0().child(trigger);
         if open {
             let mut list = div()
@@ -811,7 +815,9 @@ impl Draw<'_, '_> {
                     .when(on, |b| {
                         b.child(self.glyph(Glyph::Check, 14., t.colors.text))
                     });
-                list = list.child(self.on_press(option, true, choose));
+                // No touch square: the options touch, so it would only take the edge of the
+                // one above or below.
+                list = list.child(option.on_click(choose));
             }
             el = el.child(
                 deferred(
@@ -922,7 +928,7 @@ impl Draw<'_, '_> {
                 move || sel
             })
             .child(label);
-        let press = self.on_press(press, true, go);
+        let press = self.on_press(press, go);
         div()
             .id(self.id(&format!("{path}.wrap")))
             .flex_none()
@@ -984,7 +990,7 @@ impl Draw<'_, '_> {
                 move || sel
             })
             .child(self.icon_element(&b.icon.name, 16., fg));
-        let press = self.on_press(press, true, go);
+        let press = self.on_press(press, go);
         // Its name, for the people the icon says nothing to: on hover with a mouse, and with a
         // long press on touch (GPUI shows an element's tooltip for one).
         let name = b.name.clone();

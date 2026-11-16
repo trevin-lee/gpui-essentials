@@ -202,6 +202,7 @@ impl Draw<'_, '_> {
             .listener(move |this, _, _, cx| this.copy(&key, &source, cx));
         let copy = pressable(self.id(&format!("{path}.copy")), self.t)
             .accessibility_label("Copy")
+            .focus_on_press(false)
             .flex_none()
             .h(self.px(26.))
             .px(self.px(8.))
@@ -234,7 +235,7 @@ impl Draw<'_, '_> {
                 colors.text,
                 self.regular(),
             ));
-        let copy = self.on_press(copy, true, copy_it);
+        let copy = self.on_press(copy, copy_it);
         let (scroller, handle) = self.scroll_x(&format!("{path}.scroll"), &format!("{path}.code"));
         // The code takes its own width (at least the box's): what a scroller can scroll is what
         // its children take.
