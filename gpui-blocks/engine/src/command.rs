@@ -84,6 +84,13 @@ pub enum EditorCommand {
     /// new one when they end with no text to type in), as a slash menu's
     /// divider or widget does; elsewhere it's a paste.
     InsertMarkdown(String),
+    /// Replace `block`, at any depth, with the blocks `markdown` parses to, in its place, as
+    /// one undo step: for a host block whose Markdown changed, such as an embed resized. A
+    /// selection of the block moves to the new blocks; any other selection stays.
+    ReplaceBlock {
+        block: BlockId,
+        markdown: String,
+    },
 }
 
 #[non_exhaustive]
@@ -1025,6 +1032,46 @@ impl BlockEditorModel {
         })
     }
 
+    fn replace_block(&mut self, block: BlockId, markdown: &str) -> Result<bool, CommandError> {
+        if block == self.doc.root || self.doc.get(block).is_none() {
+            return Err(PositionError::UnknownBlock(block).into());
+        }
+        let Ok(parsed) = gpui_kit::base::text::editor_host::parse_markdown(
+            markdown,
+            self.doc.extensions.clone(),
+        ) else {
+            return Ok(false);
+        };
+        let mut defs =
+            super::import::Defs::with_source(markdown).with_extensions(self.doc.extensions.clone());
+        super::import::collect_definitions(&parsed, &mut defs);
+        let mut blocks = Vec::new();
+        for node in parsed.iter() {
+            super::import::import_block(node, &defs, &mut blocks);
+        }
+        let blocks = super::import::group_toggles(blocks, &defs);
+        let (Some(first), Some(last)) = (blocks.first().map(|b| b.id), blocks.last().map(|b| b.id))
+        else {
+            return Ok(false);
+        };
+        let selected = matches!(
+            &self.selection,
+            BlockSelection::Blocks { anchor, head } if *anchor == block || *head == block
+        );
+        self.transact(EditOrigin::Command("replace_block"), |tx| {
+            let (parent, index) = tx
+                .doc
+                .index_in_parent(block)
+                .ok_or(PositionError::UnknownBlock(block))?;
+            tx.remove_block(block)?;
+            tx.insert(parent, index, blocks)?;
+            Ok(selected.then_some(BlockSelection::Blocks {
+                anchor: first,
+                head: last,
+            }))
+        })
+    }
+
     /// The toggle whose summary `block` is.
     fn toggle_of_summary(&self, block: BlockId) -> Option<BlockId> {
         let (toggle, index) = self.doc.index_in_parent(block)?;
@@ -1652,6 +1699,7 @@ impl BlockEditorModel {
             EditorCommand::SetCallout(name) => self.set_callout(name),
             EditorCommand::WrapInToggle => self.wrap_in_toggle(),
             EditorCommand::InsertMarkdown(markdown) => self.insert_markdown(&markdown),
+            EditorCommand::ReplaceBlock { block, markdown } => self.replace_block(block, &markdown),
             EditorCommand::InsertParagraphAfter(block) => {
                 let root = self.doc.root;
                 let Some((parent, index)) = self.doc.index_in_parent(block) else {

@@ -2941,6 +2941,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::Unwrap => "unwrap",
         EditorCommand::InsertParagraphAfter(_) => "insert_paragraph",
         EditorCommand::InsertMarkdown(_) => "insert_markdown",
+        EditorCommand::ReplaceBlock { .. } => "replace_block",
         EditorCommand::SetTaskChecked(_) => "set_task_checked",
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",
