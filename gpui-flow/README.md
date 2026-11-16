@@ -102,6 +102,12 @@ Run the example with `cargo run --release --example flow` from this folder.
   - **Delete** takes a node's subtree and selects its parent.
   - **Topics.** The built-in `topic` kind is a label without handles, larger for a root.
   - The example has one: `--mindmap`.
+- **Links.** A node can link to something of the host's by id (`Node::link`, saved as
+  `"link"`), such as a document in Docs. The built-in kinds then show a small ↗ button
+  after their label, and `NodeContext::link_button()` puts the same button into a kind of
+  your own. Pressing it, or ⌘↩ with the node selected, sends `FlowEvent::OpenLink`. The
+  host decides what the id means and opens it; the flow never opens or follows anything
+  itself, so a hostile file can't make it.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

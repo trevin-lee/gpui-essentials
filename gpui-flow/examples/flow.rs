@@ -268,6 +268,12 @@ fn mind_map() -> (Vec<Node>, Vec<Edge>) {
         .iter()
         .map(|(id, label, _)| {
             let n = Node::new(*id, xy(0., 0.)).kind("topic").label(*label);
+            // A topic can link to a document of the host's; the flow only reports the press.
+            let n = if *id == "ryokan" {
+                n.link("doc:ryokan-booking")
+            } else {
+                n
+            };
             if *id == "get" { n.collapsed(true) } else { n }
         })
         .collect();
@@ -397,6 +403,7 @@ impl Root {
                 FlowEvent::Delete { nodes, edges } => {
                     format!("Deleted {} nodes and {} edges", nodes.len(), edges.len())
                 }
+                FlowEvent::OpenLink { link, .. } => format!("Open {link}"),
                 FlowEvent::ContextMenu { target, .. } => match target {
                     ContextTarget::Node(id) => format!("Menu for {id}"),
                     ContextTarget::Edge(id) => format!("Menu for edge {id}"),

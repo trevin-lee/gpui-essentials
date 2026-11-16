@@ -40,6 +40,8 @@ actions!(
         MoveRight,
         MoveUp,
         MoveDown,
+        /// Asks the host to open the selected node's link.
+        OpenLink,
         /// In a tree layout, adds a child to the selected node.
         AddChild,
         /// In a tree layout, adds a sibling after the selected node.
@@ -75,6 +77,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", MoveRight, c),
         KeyBinding::new("up", MoveUp, c),
         KeyBinding::new("down", MoveDown, c),
+        KeyBinding::new("cmd-enter", OpenLink, c),
         KeyBinding::new("tab", AddChild, c),
         KeyBinding::new("enter", AddSibling, c),
         KeyBinding::new("shift-left", MoveLeftFar, c),
@@ -323,6 +326,12 @@ pub enum FlowEvent {
     },
     /// The viewport moved or zoomed.
     ViewportChange(Viewport),
+    /// Someone pressed a node's link button, or ⌘↩ with it selected: the host opens what
+    /// `link` names, if it will. The flow never opens anything itself.
+    OpenLink {
+        node: NodeId,
+        link: SharedString,
+    },
     /// A node was added with tab or enter in a tree layout, and selected: where the host starts
     /// editing its text.
     NodeAdd {
@@ -1169,6 +1178,21 @@ impl Flow {
         cx.emit(FlowEvent::NodeAdd { node: id, parent });
         self.selection_changed(cx);
         cx.notify();
+    }
+
+    /// Asks the host to open a node's link. Says whether it has one.
+    pub fn open_link(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(node) = self.node(id) else {
+            return false;
+        };
+        let Some(link) = node.link.clone() else {
+            return false;
+        };
+        cx.emit(FlowEvent::OpenLink {
+            node: node.id.clone(),
+            link,
+        });
+        true
     }
 
     /// The one selected node, if exactly one is.
@@ -3187,6 +3211,7 @@ impl Flow {
             depth: self.tree_layout().map(|_| self.tree.depth(&node.id)),
             children: self.tree.children_of(&node.id).len(),
             collapsed: node.collapsed,
+            link: node.link.clone(),
         };
         let renderer = self
             .node_kinds
@@ -3995,6 +4020,14 @@ impl Render for Flow {
             .on_action(cx.listener(|flow, _: &ZoomOut, _, cx| flow.zoom_out(cx)))
             .on_action(cx.listener(|flow, _: &ZoomReset, _, cx| flow.zoom_to(1., cx)))
             .on_action(cx.listener(|flow, _: &FitView, _, cx| flow.fit_view(cx)))
+            .on_action(cx.listener(|flow, _: &OpenLink, _, cx| {
+                let opened = flow
+                    .only_selected()
+                    .is_some_and(|id| flow.open_link(&id, cx));
+                if !opened {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|flow, _: &AddChild, _, cx| {
                 if !flow.add_child(cx) {
                     cx.propagate();
