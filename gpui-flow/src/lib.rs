@@ -51,8 +51,8 @@ pub use flow::{
     ZoomReset, bind_keys,
 };
 pub use node::{
-    HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, frame_node, group_node,
-    labeled_node, shape_node, topic_node, units,
+    HANDLE_SIZE, Handle, ImageLoader, NodeContext, NodeInput, NodeRenderer, font_size, frame_node,
+    group_node, image_node, labeled_node, link_node, shape_node, topic_node, units,
 };
 pub use paint::{BackgroundVariant, FlowBackground};
 pub use theme::{FlowColors, Palette, Pencil};

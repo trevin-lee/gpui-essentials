@@ -80,6 +80,8 @@ pub(crate) enum TouchTarget {
         node: NodeId,
         corner: ResizeCorner,
         min: (f32, f32),
+        /// Whether the node keeps its proportions.
+        keep: bool,
     },
 }
 
@@ -302,7 +304,12 @@ pub struct NodeContext {
     pub collapsed: bool,
     /// What the node links to, if anything.
     pub link: Option<SharedString>,
+    pub(crate) images: Option<ImageLoader>,
 }
+
+/// Turns a picture's `src` into something GPUI can draw, as the host fetches or reads it. The
+/// flow only ever asks this: it fetches nothing itself.
+pub type ImageLoader = Rc<dyn Fn(&str, &mut Window, &mut App) -> Option<ImageSource>>;
 
 impl NodeContext {
     /// The flow this node is in, for event handlers to update later. While the node is being
@@ -340,6 +347,14 @@ impl NodeContext {
         )
     }
 
+    /// The picture the host's loader gives for `src`, or none: no loader, or nothing for it.
+    pub fn image(&self, src: &str, window: &mut Window, cx: &mut App) -> Option<ImageSource> {
+        if src.trim().is_empty() {
+            return None;
+        }
+        self.images.as_ref().and_then(|load| load(src, window, cx))
+    }
+
     /// The size for text of `n` flow units in this node: use it rather than [`units`] for
     /// `text_size`, so zooming stays cheap (see [`font_size`]).
     pub fn font_size(&self, n: f32) -> Pixels {
@@ -366,6 +381,24 @@ impl NodeContext {
     /// ResizeCorner grips that resize the node while it's selected. Add it as a child of the node's
     /// outermost box, and let that box fill the node (`size_full`) so it follows the new size.
     pub fn resizer(&self, min_width: f32, min_height: f32) -> impl IntoElement + use<> {
+        self.resizer_with(min_width, min_height, false)
+    }
+
+    /// Like [`NodeContext::resizer`], but the node keeps the proportions it has: a picture's.
+    pub fn resizer_keeping_proportions(
+        &self,
+        min_width: f32,
+        min_height: f32,
+    ) -> impl IntoElement + use<> {
+        self.resizer_with(min_width, min_height, true)
+    }
+
+    fn resizer_with(
+        &self,
+        min_width: f32,
+        min_height: f32,
+        keep: bool,
+    ) -> impl IntoElement + use<> {
         let grip = units(8.);
         let out = units(-4.);
         let color = self.colors.selected;
@@ -397,6 +430,7 @@ impl NodeContext {
                     node: id.clone(),
                     corner,
                     min: (min_width, min_height),
+                    keep,
                 },
                 self.touch_size,
                 Reach::Corner(corner),
@@ -410,6 +444,7 @@ impl NodeContext {
                                 &id,
                                 corner,
                                 (min_width, min_height),
+                                keep,
                                 event,
                                 window,
                                 cx,
@@ -1020,6 +1055,226 @@ pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .into_any_element()
 }
 
+/// How tall an `image` node's caption is, in flow units.
+const CAPTION: f32 = 26.;
+
+/// The built-in `image` kind: the picture the host's loader gives for its `media.src`, scaled
+/// to fit, its caption (the label) under it, and its alt text in its place until it loads (or
+/// when there's no loader). It keeps its proportions when resized.
+pub fn image_node(node: &Node, ctx: &NodeContext, window: &mut Window, cx: &mut App) -> AnyElement {
+    let media = node.media.clone().unwrap_or_default();
+    let caption = node.label_text();
+    let strip = if caption.is_empty() { 0. } else { CAPTION };
+    // The picture's own proportions, at most 320 wide, unless the node has a size.
+    let (pw, ph) = match (media.width, media.height) {
+        (Some(w), Some(h)) if w > 0. && h > 0. => {
+            let k = (320. / w).min(1.);
+            (w * k, h * k)
+        }
+        _ => (320., 240.),
+    };
+    let (w, h) = (node.width.unwrap_or(pw), node.height.unwrap_or(ph + strip));
+    let placeholder = {
+        let (alt, muted, panel) = (media.alt.clone(), ctx.colors.muted_text, ctx.colors.group);
+        let font = ctx.font_size(11.);
+        move || {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(units(6.))
+                .p(units(10.))
+                .bg(panel)
+                .text_size(font)
+                .text_color(muted)
+                .overflow_hidden()
+                .child(
+                    gpui_core::Icon::new(gpui_core::IconName::named("image").unwrap_or_else(
+                        || {
+                            gpui_core::IconName::all()
+                                .next()
+                                .expect("gpui-core bundles icons")
+                        },
+                    ))
+                    .size(units(20.))
+                    .color(muted),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .max_h_full()
+                        .overflow_hidden()
+                        .text_center()
+                        .child(alt.clone()),
+                )
+                .into_any_element()
+        }
+    };
+    let picture = match ctx.image(&media.src, window, cx) {
+        Some(source) => img(source)
+            .size_full()
+            .object_fit(ObjectFit::Contain)
+            .with_fallback(placeholder.clone())
+            .with_loading(placeholder.clone())
+            .into_any_element(),
+        None => placeholder(),
+    };
+    div()
+        .relative()
+        .w(units(w))
+        .h(units(h))
+        .flex()
+        .flex_col()
+        .rounded(units(6.))
+        .border_1()
+        .border_color(if ctx.selected {
+            ctx.colors.selected
+        } else {
+            ctx.colors.node_border
+        })
+        .bg(ctx.colors.node)
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .rounded_t(units(6.))
+                .overflow_hidden()
+                .child(picture),
+        )
+        .when(strip > 0., |d| {
+            d.child(
+                div()
+                    .flex_none()
+                    .h(units(CAPTION))
+                    .px(units(8.))
+                    .flex()
+                    .items_center()
+                    .overflow_hidden()
+                    .text_size(ctx.font_size(11.))
+                    .text_color(ctx.colors.muted_text)
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(caption),
+                    ),
+            )
+        })
+        .child(ctx.resizer_keeping_proportions(60., 40.))
+        .into_any_element()
+}
+
+/// The built-in `link` kind: a card for an address, showing what the host filled in (its
+/// site, title, description and preview picture; the address alone until then), and a button
+/// that asks the host to open it (`FlowEvent::OpenUrl`). The flow never opens or fetches it.
+pub fn link_node(node: &Node, ctx: &NodeContext, window: &mut Window, cx: &mut App) -> AnyElement {
+    let card = node.card.clone().unwrap_or_default();
+    let w = node.width.unwrap_or(280.);
+    let muted = ctx.colors.muted_text;
+    let preview = card
+        .image
+        .as_deref()
+        .and_then(|src| ctx.image(src, window, cx))
+        .map(|source| {
+            div()
+                .flex_none()
+                .h(units(120.))
+                .overflow_hidden()
+                .rounded_t(units(6.))
+                .child(img(source).size_full().object_fit(ObjectFit::Cover))
+        });
+    let line = |text: SharedString, size: f32, lines: usize| {
+        div()
+            .min_w_0()
+            .overflow_hidden()
+            .text_size(ctx.font_size(size))
+            .line_clamp(lines)
+            .child(text)
+    };
+    let open = {
+        let (flow, id) = (ctx.flow.clone(), ctx.id.clone());
+        div()
+            .id(SharedString::from(format!("open-{}", ctx.id)))
+            .flex_none()
+            .px(units(8.))
+            .py(units(3.))
+            .rounded(units(4.))
+            .border_1()
+            .border_color(ctx.colors.node_border)
+            .text_size(ctx.font_size(10.))
+            .text_color(muted)
+            .cursor(CursorStyle::PointingHand)
+            .hover(|s| s.bg(ctx.colors.panel_hover))
+            .nodrag()
+            .child("Open ↗")
+            .on_click(move |_, _, cx| {
+                flow.update(cx, |flow, cx| flow.open_url(&id, cx)).ok();
+            })
+    };
+    div()
+        .relative()
+        .w(units(w))
+        .when_some(node.height, |d, h| d.h(units(h)).overflow_hidden())
+        .flex()
+        .flex_col()
+        .rounded(units(6.))
+        .border_1()
+        .border_color(if ctx.selected {
+            ctx.colors.selected
+        } else {
+            ctx.colors.node_border
+        })
+        .bg(ctx.colors.node)
+        .children(preview)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(units(4.))
+                .px(units(12.))
+                .py(units(10.))
+                .min_w_0()
+                .children(card.site.map(|s| line(s, 10., 1).text_color(muted)))
+                .child(
+                    line(card.title.unwrap_or_else(|| card.url.clone()), 13., 2)
+                        .font_weight(FontWeight::SEMIBOLD),
+                )
+                .children(card.description.map(|d| line(d, 11., 3).text_color(muted)))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(units(8.))
+                        .min_w_0()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_size(ctx.font_size(10.))
+                                .text_color(muted)
+                                .child(card.url.clone()),
+                        )
+                        .child(open),
+                ),
+        )
+        .child(
+            ctx.handle(HandleKind::Target, Side::Left)
+                .hidden(!ctx.selected),
+        )
+        .child(
+            ctx.handle(HandleKind::Source, Side::Right)
+                .hidden(!ctx.selected),
+        )
+        .into_any_element()
+}
+
 /// The renderers every flow starts with.
 pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     let mut kinds: HashMap<SharedString, NodeRenderer> = HashMap::new();
@@ -1039,5 +1294,13 @@ pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     kinds.insert("topic".into(), Rc::new(|n, c, _, _, _| topic_node(n, c)));
     kinds.insert("shape".into(), Rc::new(|n, c, _, _, _| shape_node(n, c)));
     kinds.insert("frame".into(), Rc::new(|n, c, _, _, _| frame_node(n, c)));
+    kinds.insert(
+        "image".into(),
+        Rc::new(|n, c, _, w, cx| image_node(n, c, w, cx)),
+    );
+    kinds.insert(
+        "link".into(),
+        Rc::new(|n, c, _, w, cx| link_node(n, c, w, cx)),
+    );
     kinds
 }
