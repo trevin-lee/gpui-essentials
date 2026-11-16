@@ -21,7 +21,7 @@ the editor working after every step.
    - quotes, callouts and toggles (with `surfaces.rs`' containers) (done);
    - lists, with their markers and task boxes (done);
    - tables, with the grips (done);
-   - pictures, inline and alone (through the host's image loader);
+   - pictures, inline and alone (through the host's image loader) (done);
    - code blocks, once syntax highlighting has a home outside GPUI Kit.
 3. **The projection goes.** When nothing is drawn through GPUI Kit, `direct.rs`' projection to
    `BlockNode`, the projection cache and `collect_leaf_geometry` go with it.
@@ -44,6 +44,7 @@ Sizes are relative to the body font size (the editor's inherited text size).
 | Inline code | mono family, 0.875 × size, the inline code background and style |
 | Highlight (`<mark>`) | its colour behind, the text in a readable colour on it |
 | Quote | muted text, a 2 px left border, padding 0.9 × body |
+| Picture | its own size, narrowed to the line in its ratio; a square 0.75 × the line height while it loads; centred on the text's middle; without the host's loader, its description (or "Image") in the line's style |
 | Table | 1 px rules and frame on the surface colour, the header row on the code background; cells padded 12 px sides and 7 px top and bottom; a column is as wide as its widest line (at least 48 px), and when the table is short of room its text wraps down to 4 rem; room left over goes beside each cell by its alignment |
 | Rule | 1.6 × body above and below |
 | Code block | mono, line height 1.6, padding 16 px sides, 14 px top (28 with a language label) and bottom, the code background and a border |

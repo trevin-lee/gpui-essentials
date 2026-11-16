@@ -4876,3 +4876,40 @@ fn pictures_load_through_the_hosts_loader(cx: &mut TestAppContext) {
     draw(cx);
     assert!(asked.lock().unwrap().is_empty());
 }
+
+/// A picture wider than the page is narrowed to it, keeping its ratio.
+#[gpui::test]
+fn a_wide_picture_is_narrowed_to_the_page(cx: &mut TestAppContext) {
+    use std::sync::Arc;
+    cx.update(crate::init_for_tests);
+    let source: crate::ImageSourceFn = Arc::new(|_: &gpui::SharedUri| {
+        gpui::ImageSource::Image(Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Svg,
+            b"<svg xmlns='http://www.w3.org/2000/svg' width='8000' height='2000'/>".to_vec(),
+        )))
+    });
+    let (root, cx) = cx.add_window_view(move |window, cx| {
+        Root(cx.new(|cx| {
+            BlockEditorState::new(window, cx)
+                .with_image_source(source)
+                .with_source("![wide](w.png)")
+        }))
+    });
+    // The first frame starts the load; the next draws it at its size.
+    draw(cx);
+    draw(cx);
+    let editor = root.read_with(cx, |root, _| root.0.clone());
+    let bounds = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.frame.borrow().leaf(id).unwrap().bounds()
+    });
+    let (w, h) = (bounds.size.width, bounds.size.height);
+    assert!(
+        w < px(8000.),
+        "the page is narrower than the picture: {bounds:?}"
+    );
+    assert!(
+        (h - w / 4.).abs() < px(1.),
+        "4:1 at the page's width: {bounds:?}"
+    );
+}
