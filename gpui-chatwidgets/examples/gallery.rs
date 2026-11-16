@@ -388,6 +388,18 @@ impl Render for Gallery {
 
 actions!(gallery, [Quit]);
 
+/// GPUI Kit's desktop application. On iOS and Android an app brings GPUI's platform itself
+/// (`Application::with_platform`), so there the gallery builds but doesn't run.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn application() -> Application {
+    gpui_kit::application()
+}
+
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn application() -> Application {
+    panic!("the gallery runs on a desktop; an iOS or Android app hands GPUI its platform")
+}
+
 fn main() {
     let shots: Option<PathBuf> = {
         let mut it = std::env::args().skip(1);
@@ -399,7 +411,7 @@ fn main() {
         }
         out
     };
-    gpui_kit::application()
+    application()
         .with_assets(gpui_kit::assets::AllAssets::new(""))
         .run(move |cx| {
             load_fonts(cx);

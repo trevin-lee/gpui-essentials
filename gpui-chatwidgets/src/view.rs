@@ -89,6 +89,25 @@ pub(crate) struct Slide {
     pub index: usize,
     pub from: usize,
     pub moves: u32,
+    /// Where a swipe that didn't turn the slide let go of it, in window pixels: the slide
+    /// eases back from there.
+    pub back: f32,
+    pub swipe: Swipe,
+}
+
+/// A finger's pan over a carousel, as GPUI hands it over (scroll events from a touch).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum Swipe {
+    #[default]
+    Idle,
+    /// A finger is down and hasn't moved yet.
+    Fresh,
+    /// A sideways pan, this far (window pixels, left negative): the slide follows it.
+    Dragging(f32),
+    /// The momentum GPUI sends after a sideways pan lets go, kept from the chat around.
+    Coasting,
+    /// An up-and-down pan, left to the chat.
+    Ignoring,
 }
 
 /// What the drawing remembers between frames.

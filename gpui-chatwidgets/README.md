@@ -177,6 +177,57 @@ The same presses and changes are also `CardEvent`s (`Send`, `Open`, `Changed`) f
 subscribed to the card. Every host call comes after the card's own update has finished, so a host
 may update the card from inside one.
 
+## iOS
+
+The renderer builds for iOS (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) with no change to
+your dependencies: GPUI Kit pulls in no platform there, and your app hands GPUI its iOS platform
+itself (`Application::with_platform(gpui_pre_ios::current_platform(false))`, from `gpui-pre-ios`
+0.3.12, the same GPUI snapshot). CI builds it for the simulator. `tests/touch.rs` drives cards
+with real touch events on macOS, with the touch settings forced, through the same recognizer.
+
+GPUI turns touches into what a card already listens to: a tap is a mouse press and release, and
+a pan is scroll events locked to the way it started, with momentum after a flick. So on iOS:
+
+- **Every control the crate draws can be hit across 44 points each way**, Apple's minimum
+  touch target. A smaller one (a carousel's arrows, a modal's close, a small button, a chip, a
+  checkbox row) also takes taps in an invisible margin around it, so it looks and lays out as
+  on the Mac.
+- **Sideways scrolling follows the finger.** A wide table or a code block moves with a sideways
+  pan and keeps it from the chat; an up-and-down pan over it scrolls the chat instead.
+- **A carousel turns with a swipe.** The slide follows the finger and turns past 40 points, or
+  eases back; the arrows still work. A swipe that starts on a wide table in a slide scrolls the
+  table first.
+- **Nothing needs hover.** GPUI drops hover styles after a touch, and they only ever shade what
+  can also be tapped. An icon button's name, a tooltip on the Mac, shows on a long press.
+- **Text fields** focus on a tap and raise the keyboard: they're GPUI Kit's, and GPUI's iOS
+  backend shows the keyboard for whichever field has the focus. The slider follows a finger's
+  drag (GPUI Kit claims it).
+
+The 44-point targets and the sideways-only scrolling come from the theme, which defaults by
+platform:
+
+```rust
+use gpui_chatwidgets::CardTheme;
+
+// On iOS and Android: min_hit 44 and touch on. Elsewhere: 0 and off.
+let theme = CardTheme::dark();
+// Forced either way, say for an iPad with a trackpad, or a test on the Mac.
+let theme = CardTheme::dark().with_touch(true);
+// Or each on its own: min_hit is in points (it doesn't zoom with rem_base).
+let theme = CardTheme { min_hit: 48., touch: true, ..CardTheme::dark() };
+```
+
+Known gaps:
+
+- Where two small controls sit closer than 44 points (icon buttons in a tight row), the one drawn
+  later takes the strip between them.
+- GPUI Kit's own controls (the date picker and its calendar, the slider's thumb) have GPUI
+  Kit's sizes, not `min_hit`.
+- GPUI's text input has no keyboard type yet, so an email or number field shows the ordinary
+  keyboard. Keeping a focused field above the keyboard is the host's: GPUI reports the
+  keyboard's height in the window's insets.
+- The gallery example is a desktop app: on iOS it builds but doesn't run.
+
 ## Security
 
 Every string in a card comes from an agent, and an agent's context can be injected, so the crate

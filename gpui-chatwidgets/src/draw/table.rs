@@ -91,7 +91,13 @@ impl Draw<'_, '_> {
                 self.regular(),
             )));
         }
-        let mut body = div().w_full().flex().flex_col().child(head);
+        // As wide as its columns: what a scroller can scroll is what its children take.
+        let mut body = div()
+            .w_full()
+            .min_w(self.px(total))
+            .flex()
+            .flex_col()
+            .child(head);
         for (r, row) in rows.iter().enumerate() {
             let mut line = div()
                 .w_full()
@@ -129,16 +135,8 @@ impl Draw<'_, '_> {
             }
             body = body.child(line);
         }
-        let scroller = self
-            .sideways(
-                div()
-                    .id(self.id(&format!("{path}.scroll")))
-                    .w_full()
-                    .min_w_0()
-                    .overflow_x_scroll(),
-                &format!("{path}.table"),
-            )
-            .child(body);
+        let (scroller, handle) = self.scroll_x(&format!("{path}.scroll"), &format!("{path}.table"));
+        let scroller = scroller.child(body);
         let boxed = div()
             .w_full()
             .min_w_0()
@@ -147,6 +145,7 @@ impl Draw<'_, '_> {
             .border_color(t.colors.line)
             .overflow_hidden()
             .child(scroller);
+        let boxed = self.keep_sideways(boxed, handle);
         let more = table.rows.len().saturating_sub(rows.len());
         div()
             .w_full()
@@ -232,7 +231,13 @@ impl Draw<'_, '_> {
                     .child(self.body_line(label, font, t.colors.text_muted, self.regular())),
             );
         }
-        let mut body = div().w_full().flex().flex_col().child(head);
+        // As wide as its columns: what a scroller can scroll is what its children take.
+        let mut body = div()
+            .w_full()
+            .min_w(self.px(total))
+            .flex()
+            .flex_col()
+            .child(head);
         let editing = state
             .editing
             .as_ref()
@@ -288,7 +293,10 @@ impl Draw<'_, '_> {
                         } else {
                             text.clone()
                         };
-                        Press::new(self.id(&format!("{path}.c{r}.{c}")))
+                        let edit = self.cx.listener(move |this, _, window, cx| {
+                            this.edit_cell(&key, r, c, window, cx)
+                        });
+                        let press = Press::new(self.id(&format!("{path}.c{r}.{c}")))
                             .accessibility_label(format!("{}: {text}", col.header))
                             .w_full()
                             .min_w_0()
@@ -309,27 +317,16 @@ impl Draw<'_, '_> {
                                     t.colors.text
                                 },
                                 self.regular(),
-                            ))
-                            .on_click(self.cx.listener(move |this, _, window, cx| {
-                                this.edit_cell(&key, r, c, window, cx)
-                            }))
-                            .into_any_element()
+                            ));
+                        self.on_press(press, true, edit).into_any_element()
                     }
                 };
                 line = line.child(cell(self, c).child(content));
             }
             body = body.child(line);
         }
-        let scroller = self
-            .sideways(
-                div()
-                    .id(self.id(&format!("{path}.scroll")))
-                    .w_full()
-                    .min_w_0()
-                    .overflow_x_scroll(),
-                &format!("{path}.table"),
-            )
-            .child(body);
+        let (scroller, handle) = self.scroll_x(&format!("{path}.scroll"), &format!("{path}.table"));
+        let scroller = scroller.child(body);
         let boxed = div()
             .w_full()
             .min_w_0()
@@ -338,8 +335,12 @@ impl Draw<'_, '_> {
             .border_color(t.colors.line)
             .overflow_hidden()
             .child(scroller);
+        let boxed = self.keep_sideways(boxed, handle);
         let dirty = state.dirty;
         let (key, tbl) = (path.to_string(), table.clone());
+        let save_it = self
+            .cx
+            .listener(move |this, _, window, cx| this.save_table(&key, &tbl, window, cx));
         let save = Press::new(self.id(&format!("{path}.save")))
             .accessibility_label("Save Changes")
             .disabled(!dirty)
@@ -371,11 +372,8 @@ impl Draw<'_, '_> {
                     t.colors.text_faint
                 },
                 self.regular(),
-            ))
-            .on_click(
-                self.cx
-                    .listener(move |this, _, window, cx| this.save_table(&key, &tbl, window, cx)),
-            );
+            ));
+        let save = self.on_press(save, dirty, save_it);
         let more = state.rows.len().saturating_sub(rows.len());
         div()
             .w_full()
