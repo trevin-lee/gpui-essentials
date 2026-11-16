@@ -251,6 +251,9 @@ pub struct Editor {
     hovered: Option<BlockId>,
     /// The blocks' ids in [`Editor::document`].
     ids: crate::json::Ids,
+    /// A selection handle being dragged by touch: the selection's other end, which stays, and
+    /// how far the finger is from the end it moves.
+    touch_drag: Option<(BlockPosition, Point<Pixels>)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -322,6 +325,7 @@ impl Editor {
             open_on_next_change: false,
             hovered: None,
             ids: Default::default(),
+            touch_drag: None,
             _subscriptions: vec![subscription],
         }
     }
@@ -975,10 +979,168 @@ impl Focusable for Editor {
     }
 }
 
+impl Editor {
+    /// On a touch screen, a handle at each end of a text selection: a touch drag from one moves
+    /// that end. Shown while the selection was last made or changed by touch.
+    fn selection_handles(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let state = self.state.read(cx);
+        let BlockSelection::Text { anchor, head } = *state.model().selection() else {
+            return None;
+        };
+        let dragging = self.touch_drag.is_some();
+        if anchor == head
+            || state.is_composing()
+            || !(dragging || window.last_input_was_touch())
+            || !state.focus_handle(cx).is_focused(window)
+        {
+            return None;
+        }
+        let (a, h) = (state.position_bounds(anchor)?, state.position_bounds(head)?);
+        // Which end comes first on the page: the start's knob sits above the line, the end's
+        // below, as on iOS.
+        let anchor_first = (a.top(), a.left()) <= (h.top(), h.left());
+        let ends = if anchor_first {
+            [(anchor, a, head, true), (head, h, anchor, false)]
+        } else {
+            [(head, h, anchor, true), (anchor, a, head, false)]
+        };
+        let color = cx.theme().primary;
+        let knob = px(11.);
+        let reach = px(44.);
+        let targets: Vec<(Bounds<Pixels>, Point<Pixels>, BlockPosition)> = ends
+            .iter()
+            .map(|(_, b, other, start)| {
+                let knob_center = if *start {
+                    point(b.center().x, b.top() - knob / 2.)
+                } else {
+                    point(b.center().x, b.bottom() + knob / 2.)
+                };
+                let target = Bounds::centered_at(knob_center, size(reach, reach));
+                (target, b.center(), *other)
+            })
+            .collect();
+        let this = cx.entity().downgrade();
+        let state_entity = self.state.clone();
+        let handles = ends.map(|(_, b, _, start)| {
+            let top = if start { b.top() - knob } else { b.top() };
+            // In window coordinates, as the bounds are.
+            anchored()
+                .position(point(b.center().x - knob / 2., top))
+                .child(
+                    div()
+                        .w(knob)
+                        .h(b.size.height + knob)
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .when(start, |d| {
+                            d.child(div().size(knob).rounded_full().bg(color))
+                        })
+                        .child(div().w(px(2.)).h(b.size.height).bg(color))
+                        .when(!start, |d| {
+                            d.child(div().size(knob).rounded_full().bg(color))
+                        })
+                        .debug_selector(move || {
+                            if start {
+                                "blocks-handle-start".into()
+                            } else {
+                                "blocks-handle-end".into()
+                            }
+                        }),
+                )
+        });
+        Some(
+            deferred(
+                div()
+                    .children(handles)
+                    // Touch drags are offered to the whole window; this takes those that start on
+                    // a handle.
+                    .child(
+                        canvas(
+                            |_, _, _| {},
+                            move |_, _, window, _| {
+                                let this = this.clone();
+                                let state = state_entity.clone();
+                                let targets = targets.clone();
+                                window.on_mouse_event(
+                                    move |event: &TouchDragEvent, phase, window, cx| {
+                                        if phase != DispatchPhase::Bubble {
+                                            return;
+                                        }
+                                        let _ = this.update(cx, |this, cx| {
+                                            this.touch_handle(event, &targets, &state, window, cx)
+                                        });
+                                    },
+                                );
+                            },
+                        )
+                        .size_0(),
+                    ),
+            )
+            .with_priority(2),
+        )
+    }
+
+    fn touch_handle(
+        &mut self,
+        event: &TouchDragEvent,
+        targets: &[(Bounds<Pixels>, Point<Pixels>, BlockPosition)],
+        state: &Entity<BlockEditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.phase {
+            TouchPhase::Started => {
+                let Some((_, end, other)) = targets
+                    .iter()
+                    .find(|(target, ..)| target.contains(&event.start_position))
+                else {
+                    return;
+                };
+                // Claimed: the touch moves the handle rather than scrolling.
+                window.prevent_default();
+                cx.stop_propagation();
+                self.touch_drag = Some((*other, event.start_position - *end));
+                cx.notify();
+            }
+            TouchPhase::Moved => {
+                let Some((other, offset)) = self.touch_drag else {
+                    return;
+                };
+                cx.stop_propagation();
+                let aim = event.position - offset;
+                state.update(cx, |state, cx| {
+                    if let Some(at) = state.position_at(aim)
+                        && at != other
+                    {
+                        let _ = state.set_selection(
+                            BlockSelection::Text {
+                                anchor: other,
+                                head: at,
+                            },
+                            cx,
+                        );
+                    }
+                });
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if self.touch_drag.take().is_some() {
+                    cx.notify();
+                }
+            }
+        }
+    }
+}
+
 impl Render for Editor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let side_menu = self.side_menu(cx);
         let slash_menu = self.slash_menu(cx);
+        let handles = self.selection_handles(window, cx);
         div()
             .id("gpui-blocks")
             .size_full()
@@ -1022,6 +1184,7 @@ impl Render for Editor {
             )
             .children(side_menu)
             .children(slash_menu)
+            .children(handles)
     }
 }
 
@@ -1214,6 +1377,111 @@ mod tests {
         let doc = crate::json::Document::from_json(&stored).unwrap();
         editor.update(cx, |e, cx| e.set_document(&doc, cx));
         assert_eq!(ids(&editor, cx), added);
+    }
+
+    /// The middle of the caret box at `offset` in the first leaf.
+    fn point_at(
+        editor: &Entity<Editor>,
+        cx: &mut VisualTestContext,
+        offset: usize,
+    ) -> gpui_kit::Point<gpui_kit::Pixels> {
+        editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            let id = state.model().document().leaves().next().unwrap().id();
+            state
+                .position_bounds(BlockPosition::new(id, offset))
+                .expect("laid out")
+                .center()
+        })
+    }
+
+    fn selected(editor: &Entity<Editor>, cx: &mut VisualTestContext) -> (usize, usize) {
+        editor.update(cx, |e, cx| match e.state().read(cx).selection() {
+            BlockSelection::Text { anchor, head } => (anchor.offset, head.offset),
+            other => panic!("{other:?}"),
+        })
+    }
+
+    fn touch(
+        cx: &mut VisualTestContext,
+        phase: gpui_kit::TouchPhase,
+        at: gpui_kit::Point<gpui_kit::Pixels>,
+    ) {
+        cx.simulate_event(gpui_kit::TouchEvent {
+            id: gpui_kit::TouchId(7),
+            phase,
+            position: at,
+            predicted_position: None,
+            force: None,
+        });
+        draw(cx);
+    }
+
+    /// Drags the selection handle `name` by touch to `to`, from its knob.
+    fn drag_handle(
+        cx: &mut VisualTestContext,
+        name: &'static str,
+        to: gpui_kit::Point<gpui_kit::Pixels>,
+    ) {
+        use gpui_kit::TouchPhase::*;
+        let handle = cx.debug_bounds(name).expect("the handle is drawn");
+        let knob = if name.ends_with("start") {
+            gpui_kit::point(handle.center().x, handle.top() + gpui_kit::px(5.))
+        } else {
+            gpui_kit::point(handle.center().x, handle.bottom() - gpui_kit::px(5.))
+        };
+        let offset = knob - handle.center();
+        touch(cx, Started, knob);
+        let halfway = gpui_kit::point((knob.x + to.x + offset.x) / 2., knob.y);
+        touch(cx, Moved, halfway);
+        touch(cx, Moved, to + offset);
+        touch(cx, Ended, to + offset);
+    }
+
+    #[gpui_kit::test]
+    fn touch_handles_move_the_ends_of_a_selection(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world again");
+        let word = point_at(&editor, cx, 8);
+        // A finger held on a word: GPUI recognizes the long press after a moment.
+        touch(cx, gpui_kit::TouchPhase::Started, word);
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        draw(cx);
+        touch(cx, gpui_kit::TouchPhase::Ended, word);
+        assert_eq!(selected(&editor, cx), (6, 11));
+        assert!(cx.debug_bounds("blocks-handle-start").is_some());
+        // The end's handle out to the end of the line.
+        let end = point_at(&editor, cx, 17);
+        drag_handle(cx, "blocks-handle-end", end);
+        assert_eq!(selected(&editor, cx), (6, 17));
+        // The start's back to the start.
+        let start = point_at(&editor, cx, 0);
+        drag_handle(cx, "blocks-handle-start", start);
+        assert_eq!(selected(&editor, cx), (17, 0));
+        assert_eq!(markdown(&editor, cx), "hello world again");
+    }
+
+    #[gpui_kit::test]
+    fn a_selection_made_with_a_mouse_has_no_handles(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world");
+        let word = point_at(&editor, cx, 8);
+        cx.simulate_click(word, gpui_kit::Modifiers::none());
+        cx.simulate_event(gpui_kit::MouseDownEvent {
+            button: gpui_kit::MouseButton::Left,
+            position: word,
+            modifiers: gpui_kit::Modifiers::none(),
+            click_count: 2,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui_kit::MouseUpEvent {
+            button: gpui_kit::MouseButton::Left,
+            position: word,
+            modifiers: gpui_kit::Modifiers::none(),
+            click_count: 2,
+        });
+        draw(cx);
+        assert_eq!(selected(&editor, cx), (6, 11));
+        assert!(cx.debug_bounds("blocks-handle-start").is_none());
     }
 
     #[gpui_kit::test]

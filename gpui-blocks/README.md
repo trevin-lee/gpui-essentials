@@ -26,6 +26,8 @@ it works in GPUI Kit apps but not with Zed's own `gpui` crate.
   `~~strike~~`, `` `code` `` and `[text](url)`, and three backticks, `---` or `| a | b |`
   followed by Enter.
 - **Editing:** undo and redo, selection across blocks, IME, and copy and paste as Markdown.
+- **Touch:** on an iPhone or iPad, a tap puts the caret there and brings up the keyboard, a long
+  press selects a word, and handles at the selection's ends move them.
 - **Widgets:** blocks your app draws itself, such as a chart, kept in the file as fenced code.
 - **Links to other documents:** mentions inside text and sub-page blocks, drawn with the title
   and icon your app gives them.
@@ -266,7 +268,8 @@ menu, the side menu, the widget API and the example.
 
 ## Status
 
-Early, and used for one app so far. It's tested on macOS. GPUI also runs on Linux and Windows,
+Early, and used for one app so far. It's tested on macOS, and CI builds it for iOS, where its
+touch input is tested headlessly but not yet on a device. GPUI also runs on Linux and Windows,
 but this crate hasn't been tried there.
 
 It isn't on crates.io yet. It depends on the fork by git commit, and crates.io won't accept a git
