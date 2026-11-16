@@ -26,6 +26,7 @@ README is the design for all of it.
 - [Table view](#table-view)
 - [Board view](#board-view)
 - [List view](#list-view)
+- [Changing properties](#changing-properties)
 - [Databases and rows are docs](#databases-and-rows-are-docs)
 - [Properties and values](#properties-and-values)
 - [Views](#views)
@@ -150,7 +151,7 @@ rendered offscreen).
 
 | | |
 |---|---|
-| ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: sort, filter by an option, move, hide, with room for checks before the labels](docs/table-menu.png) |
+| ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: its property (rename, change type, edit options), then sort, filter by an option, move, hide, with room for checks before the labels](docs/table-menu.png) |
 | ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked and today ringed, with Today and Clear](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
 | ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | |
@@ -160,7 +161,7 @@ rendered offscreen).
 - **The host's part.** `TableHost` gives the theme (`TableTheme`: colours, the ten option
   colours, fonts, sizes, the rem base, and touch), names for people (`person_name`) and related
   rows (`row_title`), the choices of the person and relation pickers (`people`,
-  `relation_rows`), the time now and the viewer's zone, and the limits, and may give a text
+  `relation_rows`), the databases a relation can point at (`databases`), the time now and the viewer's zone, and the limits, and may give a text
   field of its own (`edit_text`). It receives every `TableEvent` in `event`. Both are called after the table's own update, so the host can hand
   the table its new docs from there.
 - **Rows.** Only the rows on screen are drawn (GPUI's `uniform_list`; group headers and New
@@ -177,10 +178,12 @@ rendered offscreen).
   an `openRow`.
 - **Columns.** Drag a column's edge to resize it and its header to move it; both are a
   `viewChanged` with the whole view, its columns written out with fresh order keys. The header's
-  menu sorts (shift adds a sort to the others), filters by the column (an option, checked or
-  not, a person, a related row, a span of dates, empty or not, or a typed value), clears the
-  filter, moves the column left or right, and hides it. The + after the last column shows and
-  hides any property.
+  menu changes its property (renames it, changes its type, edits its options, number format,
+  date's time, relation or people, deletes it: [Changing properties](#changing-properties)),
+  sorts (shift adds a sort to the others), filters by the column (an option, checked or not, a
+  person, a related row, a span of dates, empty or not, or a typed value), clears the filter,
+  moves the column left or right, hides it, shows and hides any property, and adds one. The +
+  after the last column adds a property.
 - **Editing.** A press focuses a cell and a second press edits it (Enter and F2 do too). A
   checkbox toggles at once. Selects, multi-selects, people and relations open a picker; a
   relation's change comes with its `relationChanged`, and a new option made in a select's or
@@ -219,7 +222,8 @@ rendered offscreen).
   closes a menu and then lets go of the cell; ⌥↓ opens the column's menu. While a value is
   typed in place the keys are the field's: the arrows move its caret, never the focused cell,
   and Delete and Backspace delete text, not the cell's value. Menus take the keyboard while
-  open and open on their first entry: Up and Down move the highlight, Home and End go to the
+  open and open on their first entry (a column's menu on Sort ascending, under its property's
+  entries): Up and Down move the highlight, Home and End go to the
   ends, Enter picks, Shift-Enter picks adding a sort to the others (as a Shift-click does), and
   Escape or a press elsewhere closes them and hands the keyboard back to the table, on the same
   cell. A picker opens on the current value with its search field focused: typing searches,
@@ -257,7 +261,7 @@ rendered offscreen).
 - **Nothing redraws while nothing changes,** and the table keeps no timers.
 
 Not in this first table: dragging rows to reorder them, deleting rows, making and editing
-properties and views (beyond a new option from a picker), picking ranges and times in the month
+views, picking ranges and times in the month
 (it shows a range, and keeps a value's time of day and the length of its range), long-press column drags on touch (the menu's Move left and Move right do
 it), and showing the engine's `Issue`s beside the view.
 
@@ -372,6 +376,86 @@ A view of type `list` draws as a list: again the same `TableView` entity, `Table
 Not in this first list: dragging several rows at once, a row's Open button and inline editing
 (a press opens the row), and showing the view's sorts and filters above it.
 
+## Changing properties
+
+A database's properties are added, changed and deleted from the table, as in Notion. Every
+change is a batch of edits for the host ([Edits and events](#edits-and-events)), shown at once
+(as a view's change is) and kept until the host hands the table new docs.
+
+| | |
+|---|---|
+| ![The + menu: a new property's name typed over the fifteen types it can have](docs/table-columns.png) | ![Stage's options as their pills, each opening its page to rename, recolour, move or delete it; Add an option and Back under them](docs/table-options.png) |
+
+- **Adding.** The + after the last column (or Add a property in a column's menu) opens a field
+  for the name over the types: every type but the title. Typing names it, Up and Down move
+  through the types while the field keeps the keyboard, Enter or a press on a type makes it.
+  Nothing typed names it for its type ("Number", then "Number 2"). It's a `propertyCreated` with a
+  new id, `PropertyConfig::default_for` its type (a number plain, a select with no options, a date
+  without its time, a person allowing the owner and agents) and an `order` after every
+  property's (`order::between`), then a `viewChanged` adding its column at the end of the view
+  shown, in one batch. The table scrolls to it. A relation asks for its database and whether it's
+  two-way first (below).
+- **The column's menu** starts with its property's entries:
+  - **Rename** opens a field with the name selected: Enter (or Save) is a `propertyChanged`.
+  - **Change type** lists the types, the current one checked: a pick is a `propertyChanged` with
+    the new type and `Property::retyped`'s config (below). The title's menu has no Change type.
+  - **Edit options** (selects and multi-selects) lists the options as their pills. Each opens its
+    page: Rename, the ten colours, Move up, Move down, Delete option. Add an option opens a field.
+    Every change is a `propertyChanged` with the whole property: options are placed by their
+    order in the list. A deleted option's rows keep naming it and show empty, as any value
+    naming an option the property hasn't does.
+  - **Number format**: Number, Percent or Currency, the currency on a page of its own (USD, EUR,
+    GBP, JPY, CNY, INR, KRW, CAD, AUD, CHF), and decimal places (default, or 0 to 4).
+  - **Include time** (dates) toggles `includeTime`: what a new value gets. A value keeps its own
+    `includeTime`; one picked in an empty cell then holds the day's start in the viewer's zone.
+  - **Relation**: the database it relates to (the host's `databases`, and this one), and **Show
+    on** that database, which makes it two-way or one-way.
+  - **People**: whether it allows the owner, agents or both (not neither).
+  - **Delete property** asks first, opening on Cancel: Delete property is a `propertyDeleted`.
+    The title can't be deleted.
+- **Two-way relations** are both databases' properties, written in one batch:
+  - A new two-way relation is two `propertyCreated`s: this database's, then the related one's
+    (`relation::two_way_pair`), each naming the other as `backPropertyId` with `twoWay` set. The
+    other side is named for this database (unlike the other's property names: "People 2" if it
+    has a People), goes after its properties, and the batch ends with the `viewChanged` adding this
+    side's column. A relation to its own database makes both in it.
+  - Turning **Show on** on for a one-way relation is its `propertyChanged`, the other side's
+    `propertyCreated`, and a `relationChanged` for every row it already lists (`added` its ids),
+    which the host's `relation::back_edits` writes on the other side as for any change.
+  - Turning it off, picking another database, changing the type, or deleting the property, also
+    deletes the other side: a `propertyDeleted` in the other database, in the same batch.
+- **Changing type never rewrites rows.** The new config is the type's default, keeping the
+  options it had (so a select becomes a multi-select with them, and a select changed to text and
+  back finds them again) and config keys this version doesn't know. Values stay as stored and are
+  read as the new type reads them, as Notion keeps and reinterprets them:
+  - Text, URL, email and phone share strings, so their values carry over.
+  - A select and a multi-select read each other's: a select's one option as a list of one, a
+    multi-select's first option as a select (`Value::option_ids`, `Value::option_id`), in
+    cells, filters, sorts, groups and pickers. The first edit writes the new shape.
+  - A select or multi-select changed to text (or a URL, email or phone) shows its option's name
+    (`Property::shown_text`), and its field opens on it; sorts and filters see the stored id
+    until the value is edited.
+  - A value of another shape (text under a number, a number under a date, option ids under a
+    relation) shows empty and stays stored, so changing back shows it again. A relation pointed
+    at another database keeps its row ids, which show as untitled rows.
+  - Filters, sorts and groups that no longer fit the type are left out and reported as
+    `Issue`s, as for any view.
+- **Limits** are kept in the menus, each refused with a note in the menu: no new property past
+  `properties` (the + menu's types are shown but can't be picked; a two-way relation needs room
+  in both databases, and its other side can't be turned on while that database is full), no
+  option past `options`, names typed up to `name_chars` (options' to `option_name_chars`), with a
+  note at the limit. A name another property (or option) has, case aside, or an empty name, is
+  refused too.
+- **Keys and touch.** Everything is in menus the keyboard drives (⌥↓ opens a column's menu; Up,
+  Down, Home, End and Enter move and pick; Escape closes), with Back on every page. Fields take
+  Enter to save. On touch every entry, field and the + are at least 44 points tall.
+- **Pages, not submenus.** gpui-core has no submenu, so a property's menu is one popover whose
+  content changes page by page, each page gpui-core's `PopupMenu` (or a field in its `Input`).
+- **For a host's own control**, `TableView::open_add_property_menu` and
+  `TableView::open_property_menu(property_id, PropertyMenu::Options, ..)` open the same menus.
+- **Boards and lists** have no column headers, so they have no property menus yet; their
+  properties change from a table view of the same database.
+
 ## Databases and rows are docs
 
 Everything is a doc in the host's tree, the same shape for pages, databases and rows:
@@ -465,6 +549,8 @@ by, so renaming a property changes no row. The value's JSON depends on the type:
   stable: rows that tie keep the database's manual order.
 - **Missing and malformed values** are empty: a select whose option was deleted, a number stored
   as text, a shape the crate doesn't read. They're kept as they are, and never break a view.
+  After a type change, values are read as the new type reads them, never rewritten
+  ([Changing properties](#changing-properties)).
 
 ## Views
 
@@ -586,6 +672,17 @@ How the host writes them to the server:
 - **One action, one batch.** Dropping a card in another board column is a `rowsMoved` and a
   `rowValueChanged`; changing a two-way relation is a `rowValueChanged` and a `relationChanged`.
   The host applies a batch together, and can undo it by applying the inverse.
+- **Properties changed from the table** ([Changing properties](#changing-properties)):
+  - Adding one: `propertyCreated`, then `viewChanged` with its column at the end of the view.
+  - Adding a two-way relation: `propertyCreated` here, `propertyCreated` in the related
+    database (each naming the other), then the `viewChanged`.
+  - Renaming, changing the type, options, number format, `includeTime`, a relation's database or
+    a person's kinds: one `propertyChanged` with the whole property.
+  - Making a relation two-way: its `propertyChanged`, the other side's `propertyCreated`, and a
+    `relationChanged` for each row it lists. Making it one-way (or retargeting, retyping or
+    deleting it): its `propertyChanged` (or `propertyDeleted`) and the other side's
+    `propertyDeleted`.
+  - Deleting one: `propertyDeleted`.
 - **A new option** made in a select's or multi-select's picker (Create “text”) is a
   `propertyChanged` with the whole property, the new option after the others (a new id, the
   typed name cut to its limit, the `default` colour), then the row's `rowValueChanged` naming
@@ -712,7 +809,10 @@ The host is the app around the views. It:
   grouping need.
 - **Gives the theme.** Colours (text, lines, fills, the ten option colours, the accent), fonts,
   sizes and row heights, scaled by the window's rem, as gpui-chatwidgets' `CardTheme` does.
-- **Writes both sides of relations** in one batch, with `relation::back_edits`.
+- **Writes both sides of relations** in one batch, with `relation::back_edits`, and both
+  databases' properties for a two-way relation made or unmade from a table.
+- **Lists the databases a relation can point at**, with their properties
+  (`TableHost::databases`), for the relation menu and a two-way relation's other side.
 - **Checks agents' writes** against `Limits`.
 
 ## Performance
@@ -854,8 +954,17 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   on headers and New lines, sorted lists refusing reorder, multi-select swaps, new rows with
   their group's and filter's values, a long press carrying a row while a pan scrolls, 44-point
   targets on touch, no frames while idle, and no icon drawn for an `asset:` or invalid one.
-- `tests/overflow.rs`: worst-case text in every cell, header, group and menu at 360, 700 and
-  1400 wide (and in each typed value's field open in place, which stays in its cell, a text
+- `tests/properties.rs`: properties changed from the table: a column added of each type (its
+  `propertyCreated` and `viewChanged` in one batch), from the keyboard, named for its type when
+  nothing's typed; renaming; changing type (rows untouched, a select and a multi-select reading
+  each other's values, option names under text); options renamed, recoloured, moved, added and
+  deleted; a number's format, currency and decimal places; a date's `includeTime`; a person's
+  kinds; a two-way relation made in both databases at once and one turned two-way with its rows
+  written back; deleting after a confirm (a two-way relation's other side too); the title
+  refused; every limit refused with a note; 44-point targets on touch.
+- `tests/overflow.rs`: worst-case text in every cell, header, group and menu (the property
+  menus too: the + menu, options, an option's page, number format, relation, delete, rename)
+  at 360, 700 and 1400 wide (and in each typed value's field open in place, which stays in its cell, a text
   value's in the window), columns at their widths and their narrowest, on a board's cards, columns and
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
   (grouped or not, focused, with a finger's sizes, and the worst valid icons), laid out with

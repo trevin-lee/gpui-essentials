@@ -35,6 +35,12 @@ fn value_edit(e: &Edit) -> (&str, &str, Option<&Value>) {
     }
 }
 
+/// Opens the Columns menu (show and hide properties) from the title's column menu.
+fn columns_menu(cx: &mut VisualTestContext) {
+    menu(cx, "Name");
+    click(cx, "menu-item-Show and hide properties");
+}
+
 /// Opens a column's menu by pressing its header.
 fn menu(cx: &mut VisualTestContext, name: &str) {
     let at = rect(cx, format!("header:{name}")).center();
@@ -334,7 +340,7 @@ fn columns_hide_and_show_and_move_from_the_menu(cx: &mut TestAppContext) {
             .any(|c| c.property_id == ROLE && c.hidden)
     );
     assert!(!drawn(cx, "header:Role"));
-    click(cx, "columns-button");
+    columns_menu(cx);
     click(cx, "menu-item-Role");
     assert!(
         host.last_view()
@@ -510,7 +516,7 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
         (ANA, PROFILE, Some(&Value::text("https://example.com/ana")))
     );
     // (Phone is hidden in this view: shown first.)
-    click(cx, "columns-button");
+    columns_menu(cx);
     click(cx, "menu-item-Phone");
     keys(cx, "escape");
     table.update(cx, |t, cx| t.focus_cell(ANA, PHONE, cx));
@@ -1168,7 +1174,7 @@ fn checks_lead_the_labels_in_menus_and_pickers() {
     // The Columns menu: a shown column checked, a hidden one not.
     menu(cx, "Role");
     click(cx, "menu-item-Hide");
-    click(cx, "columns-button");
+    columns_menu(cx);
     let on = check_leads(cx, "Stage", true);
     let off = check_leads(cx, "Role", false);
     assert!(
@@ -1521,7 +1527,7 @@ fn touch_targets_are_44_points(cx: &mut TestAppContext) {
     check(cx, format!("group:option:{WARM}"), true);
     check(cx, format!("new:option:{WARM}"), true);
     check(cx, cell(IMANI, NAME), true);
-    check(cx, "columns-button".into(), true);
+    check(cx, "add-property".into(), true);
     // The Open button shows without hover on touch, and a tap on it opens the row.
     let at = rect(cx, format!("open:{IMANI}")).center();
     tap(cx, at);

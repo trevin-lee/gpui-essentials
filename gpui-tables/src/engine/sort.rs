@@ -104,11 +104,14 @@ impl<'p> Sorter<'p> {
             Cell::Value(v) => v,
         };
         match (self.kind, value) {
-            (PropertyType::Select, Value::Text(id)) => self
-                .places
-                .get(id.as_str())
+            // Read leniently across the two: a select's id under a multi-select, a
+            // multi-select's first under a select.
+            (PropertyType::Select, v) if v.option_id().is_some() => v
+                .option_id()
+                .and_then(|id| self.places.get(id))
                 .map_or(Key::Empty, |&i| Key::Seq(vec![i])),
-            (PropertyType::MultiSelect, Value::Ids(ids)) => {
+            (PropertyType::MultiSelect, v) if v.option_ids().is_some() => {
+                let ids = v.option_ids().unwrap_or(&[]);
                 let mut places: Vec<u32> = ids
                     .iter()
                     .filter_map(|id| self.places.get(id.as_str()).copied())

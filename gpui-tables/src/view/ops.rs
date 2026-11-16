@@ -138,6 +138,25 @@ pub fn resize(db: &DatabaseFields, view: &View, property_id: &str, width: f32) -
     with_columns(view, cols, None)
 }
 
+/// The view with a column for `property_id` (a property just added to `db`) shown after every
+/// other, the view's columns written out with order keys.
+pub fn add_column(db: &DatabaseFields, view: &View, property_id: &str) -> View {
+    let (view, mut cols) = materialized(db, view);
+    let mut col = match cols.iter().position(|c| c.property_id == property_id) {
+        Some(i) => cols.remove(i),
+        None => Column {
+            property_id: property_id.to_owned(),
+            width: None,
+            hidden: false,
+            order: String::new(),
+        },
+    };
+    col.hidden = false;
+    cols.push(col);
+    let last = cols.len() - 1;
+    with_columns(view, cols, Some(last))
+}
+
 /// The view with `property_id`'s column hidden or shown. The title's can't be hidden.
 pub fn set_hidden(db: &DatabaseFields, view: &View, property_id: &str, hidden: bool) -> View {
     if hidden && db.title_property().is_some_and(|p| p.id == property_id) {
@@ -447,7 +466,7 @@ pub fn moved_value(
             GroupKey::Empty,
         ) => Some(None),
         (PropertyType::MultiSelect, GroupKey::Option(b)) => {
-            let mut ids = old.and_then(Value::as_ids).unwrap_or(&[]).to_vec();
+            let mut ids = old.and_then(Value::option_ids).unwrap_or(&[]).to_vec();
             let a = match from {
                 GroupKey::Option(a) => ids.iter().position(|x| x == a),
                 _ => None,

@@ -43,12 +43,14 @@ mod host;
 mod list;
 mod list_render;
 pub mod ops;
+mod properties;
 mod render;
 mod table;
 mod theme;
 
 pub use board::{BoardColumn, BoardSpot, CardGhost};
-pub use host::{RelatedRow, TableHost, TextEdit, TextReply, TextTarget};
+pub use host::{RelatedDatabase, RelatedRow, TableHost, TextEdit, TextReply, TextTarget};
+pub use properties::PropertyMenu;
 pub use table::{CellRef, Item, TableView};
 pub use theme::{ChipColors, OptionColors, TableColors, TableFonts, TableSizes, TableTheme};
 
@@ -87,14 +89,25 @@ actions!(
         PageUp,
         /// A page down.
         PageDown,
+        /// In the field of the add-property menu (or another menu with a field over a list):
+        /// the list's entry above.
+        FieldUp,
+        /// In such a field: the list's entry below.
+        FieldDown,
     ]
 );
 
 /// The key context the table's bindings apply in.
 pub const CONTEXT: &str = "GpuiTablesTable";
 
+/// The key context of a menu's field that moves through a list under it (the add-property
+/// menu's name over its types): Up and Down move the list's highlight while typing goes to
+/// the field.
+pub const MENU_FIELD: &str = "GpuiTablesMenuField";
+
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
-/// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down.
+/// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; and Up and Down in a menu's
+/// field over a list ([`MENU_FIELD`]).
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -113,5 +126,11 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("alt-down", ColumnMenu, c),
         KeyBinding::new("pageup", PageUp, c),
         KeyBinding::new("pagedown", PageDown, c),
+    ]);
+    // Over the field's own Up and Down (which would go to its start and end).
+    let f = Some("GpuiTablesMenuField > GpuiCoreInput");
+    cx.bind_keys([
+        KeyBinding::new("up", FieldUp, f),
+        KeyBinding::new("down", FieldDown, f),
     ]);
 }

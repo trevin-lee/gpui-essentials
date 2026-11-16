@@ -207,12 +207,14 @@ pub fn group(
             let mut seen = Vec::new();
             for &i in indexes {
                 seen.clear();
+                // Read leniently across the two types: a select's one id under a
+                // multi-select, a multi-select's first under a select.
                 match Cell::read(&rows[i], field) {
-                    Cell::Value(Value::Text(id)) if p.kind == PropertyType::Select => {
-                        seen.extend(place.get(id.as_str()).copied());
+                    Cell::Value(v) if p.kind == PropertyType::Select => {
+                        seen.extend(v.option_id().and_then(|id| place.get(id)).copied());
                     }
-                    Cell::Value(Value::Ids(ids)) if p.kind == PropertyType::MultiSelect => {
-                        for id in ids {
+                    Cell::Value(v) => {
+                        for id in v.option_ids().unwrap_or(&[]) {
                             if let Some(&g) = place.get(id.as_str())
                                 && !seen.contains(&g)
                             {
