@@ -27,6 +27,8 @@ it works in GPUI Kit apps but not with Zed's own `gpui` crate.
   followed by Enter.
 - **Editing:** undo and redo, selection across blocks, IME, and copy and paste as Markdown.
 - **Widgets:** blocks your app draws itself, such as a chart, kept in the file as fenced code.
+- **Links to other documents:** mentions inside text and sub-page blocks, drawn with the title
+  and icon your app gives them.
 
 | The slash menu | The side menu | Dragging a block |
 |---|---|---|
@@ -81,7 +83,8 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   `editor.set_readonly(true, cx)` blocks edits and hides the side menu.
 - **Events** (`EditorEvent`): `Changed` after every edit. `EditLinkRequested { url }` on ⌘K: show
   a field for the link, then call `set_link` on `editor.state()`. `LinkClicked { url }` on
-  ⌘-click: the editor never opens links itself.
+  ⌘-click: the editor never opens links itself. The events for links to other documents are
+  under [Links to other documents](#links-to-other-documents).
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor
@@ -135,6 +138,63 @@ A widget draws from its body alone: it gets no block id and can't write a new bo
 widgets with the same body look the same to it. The example's `answer` card
 (`examples/editor.rs`) is a complete one.
 
+## Links to other documents
+
+An app that keeps many documents links them by id. Both kinds of link are ordinary Markdown
+links whose destination is `doc:` and the id:
+
+```markdown
+The plan is in [Roadmap](doc:4f2a), and last week has a page of its own:
+
+[Last week](doc:9c1e "page")
+```
+
+- A **mention** is a `doc:` link inside text. It's drawn as the document's icon and title, and
+  edited as one unit.
+- A **sub-page** is a line holding only a `doc:` link titled `page`. It's a block, moved and
+  deleted whole.
+
+The editor asks your app for each document's current title and icon, so a link never goes stale
+when its document is renamed. The text in the file is the title when the link was written, shown
+only while your app has no title for the id. An id is 1 to 128 of `A-Z a-z 0-9 - _ . ~`; any
+other `doc:` link stays a plain link.
+
+```rust,no_run
+use gpui_blocks::docs::{DocInfo, Docs};
+use gpui_blocks::{Editor, EditorEvent, Options};
+use gpui_kit::*;
+
+struct MyDocs;
+
+impl Docs for MyDocs {
+    fn info(&self, id: &str, _cx: &App) -> Option<DocInfo> {
+        // From the app's own cache. None for a document that's gone.
+        (id == "4f2a").then(|| DocInfo::new("Roadmap").icon("🗺"))
+    }
+}
+
+fn editor(markdown: &str, window: &mut Window, cx: &mut App) -> Entity<Editor> {
+    let editor =
+        cx.new(|cx| Editor::with_options(markdown, Options::default().docs(MyDocs), window, cx));
+    cx.subscribe(&editor, |editor, event, cx| match event {
+        EditorEvent::DocClicked { id } => { /* open the document */ }
+        EditorEvent::NewPageRequested => {
+            // Make the document, then put it in this one.
+            editor.update(cx, |e, cx| e.insert_page("new-id", "Untitled", cx));
+        }
+        EditorEvent::DocLinkRequested => { /* show a picker, then call insert_mention */ }
+        _ => {}
+    })
+    .detach();
+    editor
+}
+```
+
+`Options::docs` also adds Page and Link to page to the slash menu, which send
+`NewPageRequested` and `DocLinkRequested`. A click on a link sends `DocClicked`, and the editor
+never opens anything itself. After your documents change, call `editor.refresh_docs(cx)` to
+draw the links again.
+
 ## The Markdown it writes
 
 CommonMark, with GitHub's tables and task lists:
@@ -144,6 +204,7 @@ CommonMark, with GitHub's tables and task lists:
 - **Toggles** are HTML's `<details>` with a `<summary>`. The body is written at the toggle's own
   level between blank lines, so it stays Markdown, and an open toggle says `open`.
 - **Widgets** are fenced blocks, as above.
+- **Links to other documents** are links to `doc:` and an id, as above.
 
 Saving writes the editor's own form of Markdown, so a file it didn't write can change in how
 it's written, though not in what it says:
@@ -198,6 +259,8 @@ Not done yet:
 - A menu on the drag handle (turn into, duplicate, delete), and Esc to select a block.
 - Pasting or dropping pictures.
 - A link field for ⌘K. The editor sends `EditLinkRequested`, and the app shows the field.
+- Typing `@` to search for a document to mention. For now that's the slash menu's Link to page,
+  and the app's own picker.
 - Table grips in centred and right-aligned columns land slightly off.
 
 ## License

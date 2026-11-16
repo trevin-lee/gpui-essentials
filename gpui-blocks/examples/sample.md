@@ -4,6 +4,10 @@ Type `/` at the start of a line or after a space for blocks, or start a line wit
 
 ## This week
 
+The plan is in [Roadmap](doc:roadmap), and last week has a page of its own:
+
+[Last week](doc:last-week "page")
+
 - [x] Send the lease renewal
 - [ ] Book the dentist
   - [ ] Ask about the Saturday slots

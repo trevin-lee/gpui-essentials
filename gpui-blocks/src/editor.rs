@@ -20,6 +20,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::actions::*;
+use crate::docs::{self, DocHooks, Docs, MentionPlugin, PagePlugin};
 use crate::slash::{self, SlashAction, SlashItem};
 use crate::widget::{Widget, WidgetPlugin};
 
@@ -73,13 +74,21 @@ pub(crate) fn bind_keys(cx: &mut App) {
 }
 
 /// The Markdown extensions the editor parses and draws with: the toggles' and callouts'
-/// containers, and the widgets.
+/// containers, document links (see [`crate::docs`]) and the widgets.
 pub fn extensions(widgets: &[Arc<dyn Widget>]) -> gpui_kit::base::text::MarkdownExtensions {
+    extensions_with(widgets, DocHooks::default())
+}
+
+fn extensions_with(
+    widgets: &[Arc<dyn Widget>],
+    hooks: DocHooks,
+) -> gpui_kit::base::text::MarkdownExtensions {
+    let ext = with_default_surfaces(Default::default())
+        .plugin(PagePlugin(hooks.clone()))
+        .plugin(MentionPlugin(hooks));
     widgets
         .iter()
-        .fold(with_default_surfaces(Default::default()), |ext, widget| {
-            ext.plugin(WidgetPlugin(widget.clone()))
-        })
+        .fold(ext, |ext, widget| ext.plugin(WidgetPlugin(widget.clone())))
 }
 
 /// Turns a picture picked from the slash menu's Image item into the Markdown destination to
@@ -92,6 +101,7 @@ pub struct Options {
     widgets: Vec<Arc<dyn Widget>>,
     items: Vec<SlashItem>,
     image_link: Option<ImageLink>,
+    docs: Option<Arc<dyn Docs>>,
 }
 
 impl Default for Options {
@@ -100,6 +110,7 @@ impl Default for Options {
             widgets: Vec::new(),
             items: slash::default_items(),
             image_link: None,
+            docs: None,
         }
     }
 }
@@ -117,6 +128,7 @@ impl std::fmt::Debug for Options {
             )
             .field("items", &self.items)
             .field("image_link", &self.image_link.is_some())
+            .field("docs", &self.docs.is_some())
             .finish()
     }
 }
@@ -140,6 +152,14 @@ impl Options {
     /// absolute path is written, which only works on this computer.
     pub fn image_link(mut self, link: impl Fn(&Path) -> Option<String> + 'static) -> Self {
         self.image_link = Some(Arc::new(link));
+        self
+    }
+
+    /// The app's documents, for the titles and icons of links to them (see [`crate::docs`]).
+    /// Adds Page and Link to page to the end of the slash menu.
+    pub fn docs(mut self, docs: impl Docs) -> Self {
+        self.docs = Some(Arc::new(docs));
+        self.items.extend(slash::doc_items());
         self
     }
 
@@ -167,6 +187,14 @@ pub enum EditorEvent {
     EditLinkRequested { url: Option<SharedString> },
     /// ⌘-click (Ctrl-click) on a link. The editor never opens links itself.
     LinkClicked { url: SharedString },
+    /// A click on a mention or a sub-page (see [`crate::docs`]): the app opens the document.
+    DocClicked { id: SharedString },
+    /// The slash menu's Page: the app makes a document inside this one, then calls
+    /// [`Editor::insert_page`].
+    NewPageRequested,
+    /// The slash menu's Link to page: the app asks which document, then calls
+    /// [`Editor::insert_mention`].
+    DocLinkRequested,
 }
 
 /// Splits YAML front matter (between `---` lines at the very top) from the document, so the
@@ -242,9 +270,17 @@ impl Editor {
         let scroll = ScrollHandle::new();
         let widgets = options.widgets.clone();
         let (front_matter, body) = split_front_matter(markdown);
+        let this = cx.entity().downgrade();
+        let hooks = DocHooks {
+            docs: options.docs.clone(),
+            on_click: Some(Arc::new(move |id: &str, _: &mut Window, cx: &mut App| {
+                let id = SharedString::from(id.to_string());
+                let _ = this.update(cx, |_, cx| cx.emit(EditorEvent::DocClicked { id }));
+            })),
+        };
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
-                .with_markdown_extensions(extensions(&widgets))
+                .with_markdown_extensions(extensions_with(&widgets, hooks))
                 .with_source(body);
             state.set_scroll_handle(scroll.clone());
             state
@@ -331,6 +367,59 @@ impl Editor {
         self.slash = None;
         self.hovered = None;
         cx.notify();
+    }
+
+    /// Inserts a sub-page block for the document `id` at the caret (see [`crate::docs`]): on an
+    /// empty line in its place, elsewhere after the caret's block. `title` is written as the
+    /// link's text, shown while the app has no title for `id`. Does nothing for an invalid id
+    /// or a read-only document.
+    pub fn insert_page(&mut self, id: &str, title: &str, cx: &mut Context<Self>) {
+        self.insert_doc(id, docs::page(id, title), true, cx);
+    }
+
+    /// Inserts a mention of the document `id` at the caret, replacing any selection (see
+    /// [`crate::docs`]).
+    pub fn insert_mention(&mut self, id: &str, title: &str, cx: &mut Context<Self>) {
+        self.insert_doc(id, docs::mention(id, title), false, cx);
+    }
+
+    fn insert_doc(&mut self, id: &str, markdown: String, block: bool, cx: &mut Context<Self>) {
+        if docs::doc_id(&format!("{}{id}", docs::SCHEME)).is_none() {
+            return;
+        }
+        self.state.update(cx, |state, cx| {
+            if state.is_readonly() {
+                return;
+            }
+            state.group_edits(cx, |state, cx| {
+                if !state.model().selection().is_collapsed() {
+                    let _ = state.run(EditorCommand::DeleteSelection, cx);
+                }
+                // A page goes on a line of its own: this one when it's empty, else a new one
+                // after the caret's top-level block.
+                if block && !on_empty_line(state) {
+                    let Some(top) = state
+                        .model()
+                        .caret()
+                        .and_then(|c| top_level(state, c.block))
+                    else {
+                        return;
+                    };
+                    let _ = state.run(EditorCommand::InsertParagraphAfter(top), cx);
+                }
+                let _ = state.run(EditorCommand::InsertMarkdown(markdown), cx);
+            });
+        });
+    }
+
+    /// Draws the document links again, after the app's documents have changed: renamed, given a
+    /// new icon, deleted or shared.
+    pub fn refresh_docs(&mut self, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            // Setting the policy rebuilds every block's drawing, links included.
+            let policy = state.image_policy();
+            state.set_image_policy(policy, cx);
+        });
     }
 
     /// Gives the editor the keyboard.
@@ -496,6 +585,11 @@ impl Editor {
             return false;
         };
         let typed = slash.query.len() + 1;
+        let request = match action {
+            SlashAction::NewPage => Some(EditorEvent::NewPageRequested),
+            SlashAction::LinkToPage => Some(EditorEvent::DocLinkRequested),
+            _ => None,
+        };
         let image_at = self.state.update(cx, |state, cx| {
             let Ok(mut range) = state.capture_suffix(typed) else {
                 return None;
@@ -514,12 +608,17 @@ impl Editor {
                         let _ = state.run(EditorCommand::InsertMarkdown(markdown.to_string()), cx);
                     }
                     SlashAction::Image => return state.model().caret(),
+                    // The app answers with insert_page or insert_mention.
+                    SlashAction::NewPage | SlashAction::LinkToPage => {}
                 }
                 None
             })
         });
         if let Some(at) = image_at {
             self.insert_image(at, window, cx);
+        }
+        if let Some(request) = request {
+            cx.emit(request);
         }
         self.focus(window, cx);
         true
@@ -790,6 +889,30 @@ impl Editor {
 }
 
 /// `Some(ordered)` when the caret's line is a plain (not to-do) list item's first line.
+/// Whether the caret is on an empty paragraph, which a block inserted there replaces.
+fn on_empty_line(state: &BlockEditorState) -> bool {
+    let model = state.model();
+    model.block_kind_at_caret() == Some(BlockKind::Paragraph)
+        && model
+            .caret()
+            .and_then(|c| model.document().block(c.block))
+            .and_then(|b| b.text())
+            == Some("")
+}
+
+/// The top-level block `block` is in, or itself.
+fn top_level(state: &BlockEditorState, block: BlockId) -> Option<BlockId> {
+    let doc = state.model().document();
+    let mut at = doc.block(block)?;
+    while let Some(parent) = at.parent() {
+        if parent.kind() == BlockKind::Root {
+            return Some(at.id());
+        }
+        at = parent;
+    }
+    None
+}
+
 fn list_at_caret(state: &BlockEditorState) -> Option<bool> {
     let model = state.model();
     let line = model.document().block(model.caret()?.block)?;
