@@ -414,7 +414,7 @@ pub(crate) fn device_line(line: Pixels, window: &Window) -> Pixels {
     px((f32::from(line) * scale).round() / scale)
 }
 
-/// What came before a top-level block, for the gap above a heading.
+/// What came before a block among its siblings, for the gap above a heading or a rule.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Prev {
     Heading(u8),
@@ -422,38 +422,154 @@ pub(crate) enum Prev {
     Other,
 }
 
-/// A top-level block the engine draws itself.
-pub(crate) enum Own {
-    /// A paragraph (no level) or a heading.
-    Text(Option<u8>, InlineText),
-    Rule,
-    List(ListTree),
-    Custom(gpui_kit::base::text::MarkdownNode),
-    /// A break, a link definition or an unknown block: nothing to see.
-    Nothing,
-}
-
-/// Where a top-level block stands among the others, for the gaps around it.
+/// Where a block stands among its siblings, for the gaps around it.
 #[derive(Clone, Copy)]
 pub(crate) struct Place {
     pub(crate) first: bool,
     pub(crate) last: bool,
     pub(crate) prev: Option<Prev>,
-    pub(crate) body_size: Pixels,
-    pub(crate) paragraph_gap: Pixels,
+    /// How many list items it's inside, as GPUI Kit counts depth: quotes, callouts and toggles
+    /// don't add to it. A nested heading or rule sits flush; a list's markers follow it.
+    pub(crate) depth: usize,
 }
 
-/// A top-level paragraph or heading.
-pub(crate) struct TopLevel<'a> {
-    pub(crate) key: u64,
-    /// A heading's level; `None` for a paragraph.
-    pub(crate) level: Option<u8>,
-    pub(crate) inline: &'a InlineText,
-    pub(crate) place: Place,
-    pub(crate) bands: Vec<(Range<usize>, Hsla)>,
+/// What drawing a block needs besides the block.
+pub(crate) struct DrawCx<'a> {
     pub(crate) base: &'a gpui::TextStyle,
+    pub(crate) body_size: Pixels,
     pub(crate) body_line: Pixels,
+    pub(crate) paragraph_gap: Pixels,
     pub(crate) colors: &'a Colors,
+    pub(crate) dark: bool,
+    pub(crate) bands: &'a HashMap<u64, Vec<(Range<usize>, Hsla)>>,
+    pub(crate) leaves: LeafContext<'a>,
+}
+
+/// A block as the engine draws it, copied out of the document first, since drawing needs the
+/// app.
+pub(crate) enum Tree {
+    /// A paragraph (no level) or a heading.
+    Text {
+        key: u64,
+        level: Option<u8>,
+        inline: InlineText,
+    },
+    List(ListTree),
+    Quote(Vec<Tree>),
+    Callout(gpui::SharedString, Vec<Tree>),
+    /// A toggle: its summary, then its body when open.
+    Toggle(bool, Vec<Tree>),
+    Rule,
+    Custom(gpui_kit::base::text::MarkdownNode),
+    /// A break, a link definition or an unknown block: nothing to see.
+    Nothing,
+}
+
+pub(crate) struct ListTree {
+    ordered: bool,
+    start: Option<u32>,
+    items: Vec<ItemTree>,
+}
+
+struct ItemTree {
+    checked: Option<bool>,
+    children: Vec<Tree>,
+}
+
+/// `block` as a tree the engine can draw: `None` when something in it is still drawn by GPUI
+/// Kit (code, tables, pictures).
+pub(crate) fn tree(
+    doc: &super::document::EditorDocument,
+    block: super::id::BlockId,
+) -> Option<Tree> {
+    use super::document::{AtomData, BlockContent};
+    use super::kind::BlockKindData as K;
+    let children =
+        |id| -> Option<Vec<Tree>> { doc.children(id).iter().map(|c| tree(doc, *c)).collect() };
+    Some(
+        match (doc.kind(block)?, doc.get(block).map(|e| &e.content)) {
+            (K::Paragraph, Some(BlockContent::Inline(inline))) if draws(inline) => Tree::Text {
+                key: block.as_u64(),
+                level: None,
+                inline: inline.clone(),
+            },
+            (K::Heading { level }, Some(BlockContent::Inline(inline))) if draws(inline) => {
+                Tree::Text {
+                    key: block.as_u64(),
+                    level: Some(*level),
+                    inline: inline.clone(),
+                }
+            }
+            (K::List { .. }, _) => Tree::List(list_tree(doc, block, None)?),
+            (K::Blockquote, _) => Tree::Quote(children(block)?),
+            (K::Callout { name }, _) => Tree::Callout(name.clone(), children(block)?),
+            (K::Toggle { open }, _) => {
+                let ids = doc.children(block);
+                // A closed toggle draws only its summary.
+                let shown = if *open { ids } else { &ids[..ids.len().min(1)] };
+                Tree::Toggle(
+                    *open,
+                    shown.iter().map(|c| tree(doc, *c)).collect::<Option<_>>()?,
+                )
+            }
+            (K::HorizontalRule, _) => Tree::Rule,
+            (K::Custom, Some(BlockContent::Atom(AtomData::Custom(node)))) => {
+                Tree::Custom(node.clone())
+            }
+            (K::Break { .. } | K::Definition { .. } | K::Unknown, _) => Tree::Nothing,
+            _ => return None,
+        },
+    )
+}
+
+/// `list` (or `items` of it, for a chunk of a long list) as a tree, or `None` as for [`tree`].
+pub(crate) fn list_tree(
+    doc: &super::document::EditorDocument,
+    list: super::id::BlockId,
+    items: Option<Range<usize>>,
+) -> Option<ListTree> {
+    use super::kind::BlockKindData as K;
+    let Some(K::List { ordered, start }) = doc.kind(list) else {
+        return None;
+    };
+    let all = doc.children(list);
+    let range = items.unwrap_or(0..all.len());
+    let mut out = Vec::with_capacity(range.len());
+    for item in &all[range.clone()] {
+        let Some(K::ListItem { checked, .. }) = doc.kind(*item) else {
+            return None;
+        };
+        out.push(ItemTree {
+            checked: *checked,
+            children: doc
+                .children(*item)
+                .iter()
+                .map(|c| tree(doc, *c))
+                .collect::<Option<_>>()?,
+        });
+    }
+    Some(ListTree {
+        ordered: *ordered,
+        // A chunk of a long list carries on its numbering.
+        start: if *ordered && range.start > 0 {
+            Some(start.unwrap_or(1) + range.start as u32)
+        } else {
+            *start
+        },
+        items: out,
+    })
+}
+
+impl Tree {
+    fn prev(&self) -> Prev {
+        match self {
+            Tree::Text {
+                level: Some(level), ..
+            } => Prev::Heading(*level),
+            Tree::Rule => Prev::Rule,
+            _ => Prev::Other,
+        }
+    }
 }
 
 /// A heading's size relative to the body text, its line height, and the gap above it relative
@@ -472,186 +588,165 @@ fn heading_metrics(level: u8) -> (f32, f32, f32) {
 /// The gap below a heading, relative to its size.
 const HEADING_BOTTOM_GAP: f32 = 0.35;
 
-/// A top-level paragraph or heading, with the gaps around it.
-pub(crate) fn top_level_text(
-    block: TopLevel<'_>,
-    cx: &LeafContext<'_>,
-    window: &mut Window,
-    app: &mut App,
-) -> AnyElement {
-    match block.level {
-        None => {
-            let style = paragraph_style(
-                block.base,
-                block.place.body_size,
-                block.body_line,
-                block.colors,
-            );
-            let leaf = TextLeaf::new(block.key, block.inline, style, block.bands, cx, window, app);
-            let gap = if block.place.last {
-                px(0.)
-            } else {
-                block.place.paragraph_gap
-            };
-            div().pb(gap).child(leaf).into_any_element()
-        }
-        Some(level) => {
-            let (scale, line, section) = heading_metrics(level);
-            let size = block.place.body_size * scale;
-            let mut style = paragraph_style(
-                block.base,
-                size,
-                device_line(size * line, window),
-                block.colors,
-            );
-            style.font.weight = gpui::FontWeight::SEMIBOLD;
-            if level >= 6 {
-                style.color = block.colors.muted;
-            }
-            // The previous block already leaves a gap below itself, so only the rest of the
-            // section gap goes above; a heading right after another stays close.
-            let top = match (block.place.first, block.place.prev) {
-                (true, _) | (_, None) => px(0.),
-                (false, Some(Prev::Heading(_))) => size * 0.25,
-                (false, Some(Prev::Rule)) => {
-                    (size * section - block.place.body_size * 1.6).max(px(0.))
-                }
-                (false, Some(Prev::Other)) => {
-                    (size * section - block.place.paragraph_gap).max(px(0.))
-                }
-            };
-            let bottom = if block.place.last {
-                px(0.)
-            } else {
-                size * HEADING_BOTTOM_GAP
-            };
-            let leaf = TextLeaf::new(block.key, block.inline, style, block.bands, cx, window, app);
-            div().pt(top).pb(bottom).child(leaf).into_any_element()
-        }
-    }
-}
-
 /// The room above and below a rule.
 fn rule_space(body_size: Pixels) -> Pixels {
     body_size * 1.6
 }
 
-/// A top-level rule: a hairline with more room around it than a paragraph gap. The previous
-/// block's own gap counts toward the space above.
-pub(crate) fn rule(place: Place, colors: &Colors) -> AnyElement {
-    let space = rule_space(place.body_size);
-    let top = if place.first {
-        px(0.)
-    } else {
-        let above = match place.prev {
-            None => px(0.),
-            Some(Prev::Rule) => space,
-            Some(Prev::Heading(level)) => {
-                place.body_size * heading_metrics(level).0 * HEADING_BOTTOM_GAP
+/// A block, with the gaps around it. `color` is the text's, when a container sets it (a quote's
+/// muted text, a done task's).
+pub(crate) fn draw(
+    block: &Tree,
+    place: Place,
+    color: Option<Hsla>,
+    d: &DrawCx<'_>,
+    window: &mut Window,
+    app: &mut App,
+) -> AnyElement {
+    let gap = if place.last { px(0.) } else { d.paragraph_gap };
+    match block {
+        Tree::Text {
+            key,
+            level: None,
+            inline,
+        } => {
+            let mut style = paragraph_style(d.base, d.body_size, d.body_line, d.colors);
+            if let Some(color) = color {
+                style.color = color;
             }
-            Some(Prev::Other) => place.paragraph_gap,
-        };
-        (space - above).max(px(0.))
-    };
-    let bottom = if place.last { px(0.) } else { space };
-    div()
-        .pt(top)
-        .pb(bottom)
-        .child(div().bg(colors.border).h(px(1.)))
-        .into_any_element()
+            let bands = d.bands.get(key).cloned().unwrap_or_default();
+            let leaf = TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app);
+            div().pb(gap).child(leaf).into_any_element()
+        }
+        Tree::Text {
+            key,
+            level: Some(level),
+            inline,
+        } => {
+            let (scale, line, section) = heading_metrics(*level);
+            let size = d.body_size * scale;
+            let mut style =
+                paragraph_style(d.base, size, device_line(size * line, window), d.colors);
+            style.font.weight = gpui::FontWeight::SEMIBOLD;
+            if let Some(color) = color {
+                style.color = color;
+            }
+            if *level >= 6 {
+                style.color = d.colors.muted;
+            }
+            // The previous block already leaves a gap below itself, so only the rest of the
+            // section gap goes above; a heading right after another stays close; nested, it
+            // sits flush.
+            let top = match (place.first || place.depth > 0, place.prev) {
+                (true, _) | (_, None) => px(0.),
+                (false, Some(Prev::Heading(_))) => size * 0.25,
+                (false, Some(Prev::Rule)) => (size * section - rule_space(d.body_size)).max(px(0.)),
+                (false, Some(Prev::Other)) => (size * section - d.paragraph_gap).max(px(0.)),
+            };
+            let bottom = if place.last {
+                px(0.)
+            } else {
+                size * HEADING_BOTTOM_GAP
+            };
+            let bands = d.bands.get(key).cloned().unwrap_or_default();
+            let leaf = TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app);
+            div().pt(top).pb(bottom).child(leaf).into_any_element()
+        }
+        Tree::Rule => {
+            // A hairline with more room around it than a paragraph gap. The previous block's
+            // own gap counts toward the space above.
+            let space = rule_space(d.body_size);
+            let top = if place.first || place.depth > 0 {
+                px(0.)
+            } else {
+                let above = match place.prev {
+                    None => px(0.),
+                    Some(Prev::Rule) => space,
+                    Some(Prev::Heading(level)) => {
+                        d.body_size * heading_metrics(level).0 * HEADING_BOTTOM_GAP
+                    }
+                    Some(Prev::Other) => d.paragraph_gap,
+                };
+                (space - above).max(px(0.))
+            };
+            let bottom = if place.last { px(0.) } else { space };
+            div()
+                .pt(top)
+                .pb(bottom)
+                .child(div().bg(d.colors.border).h(px(1.)))
+                .into_any_element()
+        }
+        Tree::Custom(node) => {
+            let drawn = node.data::<CustomNode>().and_then(|custom| {
+                d.leaves
+                    .extensions
+                    .iter()
+                    .find(|e| e.name() == custom.name())
+                    .map(|e| e.render(custom, window, app))
+            });
+            let content =
+                drawn.unwrap_or_else(|| div().child(node.as_text().to_string()).into_any_element());
+            div().pb(gap).child(content).into_any_element()
+        }
+        Tree::Nothing => div().into_any_element(),
+        Tree::List(list) => list_element(list, place.depth, color, d, window, app)
+            .pb(gap)
+            .into_any_element(),
+        Tree::Quote(children) => {
+            let body = children_of(children, place.depth, Some(d.colors.muted), d, window, app);
+            div()
+                .w_full()
+                .min_w_0()
+                .border_l_2()
+                .border_color(d.colors.border)
+                .pl(d.body_size * 0.9)
+                .children(body)
+                .pb(gap)
+                .into_any_element()
+        }
+        Tree::Callout(name, children) => {
+            let body = children_of(children, place.depth, color, d, window, app);
+            let container = super::surfaces::callout_container(name, app);
+            div()
+                .pb(gap)
+                .child(container.w_full().min_w_0().children(body))
+                .into_any_element()
+        }
+        Tree::Toggle(open, children) => {
+            let body = children_of(children, place.depth, color, d, window, app);
+            let container = super::surfaces::toggle_container(*open, window, app);
+            div()
+                .pb(gap)
+                .child(container.w_full().min_w_0().children(body))
+                .into_any_element()
+        }
+    }
 }
 
-/// A top-level custom block: what its extension draws, or its text.
-pub(crate) fn custom_block(
-    node: &gpui_kit::base::text::MarkdownNode,
-    place: Place,
-    extensions: &Extensions,
+/// A container's blocks, each placed among the others.
+fn children_of(
+    children: &[Tree],
+    depth: usize,
+    color: Option<Hsla>,
+    d: &DrawCx<'_>,
     window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    let drawn = node.data::<CustomNode>().and_then(|custom| {
-        extensions
-            .iter()
-            .find(|e| e.name() == custom.name())
-            .map(|e| e.render(custom, window, cx))
-    });
-    let content =
-        drawn.unwrap_or_else(|| div().child(node.as_text().to_string()).into_any_element());
-    let gap = if place.last {
-        px(0.)
-    } else {
-        place.paragraph_gap
-    };
-    div().pb(gap).child(content).into_any_element()
+    app: &mut App,
+) -> Vec<AnyElement> {
+    let n = children.len();
+    let mut out = Vec::with_capacity(n);
+    for (ix, child) in children.iter().enumerate() {
+        let place = Place {
+            first: ix == 0,
+            last: ix + 1 == n,
+            prev: ix.checked_sub(1).map(|p| children[p].prev()),
+            depth,
+        };
+        out.push(draw(child, place, color, d, window, app));
+    }
+    out
 }
 
 // Lists.
-
-/// A list as the engine draws it: copied out of the document first, since drawing needs the
-/// app.
-pub(crate) struct ListTree {
-    ordered: bool,
-    start: Option<u32>,
-    items: Vec<ItemTree>,
-}
-
-struct ItemTree {
-    checked: Option<bool>,
-    children: Vec<ItemChild>,
-}
-
-enum ItemChild {
-    Paragraph(u64, InlineText),
-    List(ListTree),
-}
-
-/// `list` (or `items` of it, for a chunk of a long list) as a tree the engine can draw: `None`
-/// when something in it is still drawn by GPUI Kit.
-pub(crate) fn list_tree(
-    doc: &super::document::EditorDocument,
-    list: super::id::BlockId,
-    items: Option<Range<usize>>,
-) -> Option<ListTree> {
-    use super::document::BlockContent;
-    use super::kind::BlockKindData as K;
-    let Some(K::List { ordered, start }) = doc.kind(list) else {
-        return None;
-    };
-    let all = doc.children(list);
-    let range = items.unwrap_or(0..all.len());
-    let mut out = Vec::with_capacity(range.len());
-    for item in &all[range.clone()] {
-        let Some(K::ListItem { checked, .. }) = doc.kind(*item) else {
-            return None;
-        };
-        let mut children = Vec::new();
-        for child in doc.children(*item) {
-            match (doc.kind(*child), doc.get(*child).map(|e| &e.content)) {
-                (Some(K::Paragraph), Some(BlockContent::Inline(inline))) if draws(inline) => {
-                    children.push(ItemChild::Paragraph(child.as_u64(), inline.clone()))
-                }
-                (Some(K::List { .. }), _) => {
-                    children.push(ItemChild::List(list_tree(doc, *child, None)?))
-                }
-                _ => return None,
-            }
-        }
-        out.push(ItemTree {
-            checked: *checked,
-            children,
-        });
-    }
-    Some(ListTree {
-        ordered: *ordered,
-        // A chunk of a long list carries on its numbering.
-        start: if *ordered && range.start > 0 {
-            Some(start.unwrap_or(1) + range.start as u32)
-        } else {
-            *start
-        },
-        items: out,
-    })
-}
 
 const BULLETS: [&str; 5] = ["•", "◦", "▪", "‣", "⁃"];
 
@@ -681,46 +776,18 @@ fn list_marker(ix: usize, start: Option<u32>, ordered: bool, depth: usize) -> St
 const CHECK_SVG_LIGHT: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
 const CHECK_SVG_DARK: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="black" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
 
-/// What drawing a list needs besides the list.
-pub(crate) struct ListContext<'a> {
-    pub(crate) base: &'a gpui::TextStyle,
-    pub(crate) body_size: Pixels,
-    pub(crate) body_line: Pixels,
-    pub(crate) colors: &'a Colors,
-    pub(crate) dark: bool,
-    pub(crate) bands: &'a HashMap<u64, Vec<(Range<usize>, Hsla)>>,
-}
-
-/// A top-level list, with the paragraph gap below it.
-pub(crate) fn top_level_list(
-    list: &ListTree,
-    place: Place,
-    lists: &ListContext<'_>,
-    cx: &LeafContext<'_>,
-    window: &mut Window,
-    app: &mut App,
-) -> AnyElement {
-    let gap = if place.last {
-        px(0.)
-    } else {
-        place.paragraph_gap
-    };
-    list_element(list, 0, lists, cx, window, app)
-        .pb(gap)
-        .into_any_element()
-}
-
+/// A list at `depth` (how many lists it's nested in).
 fn list_element(
     list: &ListTree,
     depth: usize,
-    lists: &ListContext<'_>,
-    cx: &LeafContext<'_>,
+    color: Option<Hsla>,
+    d: &DrawCx<'_>,
     window: &mut Window,
     app: &mut App,
 ) -> gpui::Div {
     let mut items = Vec::with_capacity(list.items.len());
     for (ix, item) in list.items.iter().enumerate() {
-        items.push(item_element(list, item, ix, depth, lists, cx, window, app));
+        items.push(item_element(list, item, ix, depth, color, d, window, app));
     }
     div().w_full().min_w_0().children(items)
 }
@@ -731,76 +798,77 @@ fn item_element(
     item: &ItemTree,
     ix: usize,
     depth: usize,
-    lists: &ListContext<'_>,
-    cx: &LeafContext<'_>,
+    color: Option<Hsla>,
+    d: &DrawCx<'_>,
     window: &mut Window,
     app: &mut App,
 ) -> AnyElement {
-    let indent = lists.body_size * 1.4;
+    let indent = d.body_size * 1.4;
+    // A done task steps back so the open ones stand out.
+    let color = if item.checked == Some(true) {
+        Some(d.colors.muted)
+    } else {
+        color
+    };
     let mut rows: Vec<gpui::Div> = Vec::new();
-    let mut after_list = false;
     for (child_ix, child) in item.children.iter().enumerate() {
+        let place = Place {
+            first: child_ix == 0,
+            // Blocks in an item sit close: no gap below them.
+            last: true,
+            prev: None,
+            depth: depth + 1,
+        };
         match child {
-            ItemChild::Paragraph(key, inline) => {
-                let mut style =
-                    paragraph_style(lists.base, lists.body_size, lists.body_line, lists.colors);
-                // A done task steps back so the open ones stand out.
-                if item.checked == Some(true) {
-                    style.color = lists.colors.muted;
-                }
-                let bands = lists.bands.get(key).cloned().unwrap_or_default();
-                let leaf = TextLeaf::new(*key, inline, style, bands, cx, window, app);
-                if child_ix > 0 && !after_list {
+            Tree::List(nested) => {
+                let element = list_element(nested, depth + 1, color, d, window, app);
+                rows.push(div().ml(indent).child(element));
+            }
+            _ => {
+                let element = draw(child, place, color, d, window, app);
+                let after_list =
+                    child_ix > 0 && matches!(item.children[child_ix - 1], Tree::List(_));
+                if child_ix == 0 {
+                    rows.push(item_row(element, list, item, ix, depth, d));
+                } else if matches!(child, Tree::Text { level: None, .. }) && !after_list {
                     // A later paragraph lines up with the item's text.
-                    let continued = div().w_full().pl(indent).overflow_hidden().child(leaf);
+                    let continued = div().w_full().pl(indent).overflow_hidden().child(element);
                     match rows.pop() {
                         Some(row) => rows.push(div().child(row).child(continued)),
                         None => rows.push(continued),
                     }
                 } else {
-                    rows.push(item_row(
-                        leaf.into_any_element(),
-                        list,
-                        item,
-                        ix,
-                        depth,
-                        lists,
-                    ));
+                    rows.push(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .pl(indent)
+                            .overflow_hidden()
+                            .child(element),
+                    );
                 }
-                after_list = false;
-            }
-            ItemChild::List(nested) => {
-                rows.push(div().ml(indent).child(list_element(
-                    nested,
-                    depth + 1,
-                    lists,
-                    cx,
-                    window,
-                    app,
-                )));
-                after_list = true;
             }
         }
     }
     div()
         .w_full()
         .min_w_0()
-        .when(ix > 0, |d| d.pt(lists.body_size * 0.25))
+        .when(ix > 0, |el| el.pt(d.body_size * 0.25))
         .children(rows)
         .into_any_element()
 }
 
-/// An item's first row: its marker or task box, then its text.
+/// An item's first row: its marker or task box, then its first block.
 fn item_row(
     content: AnyElement,
     list: &ListTree,
     item: &ItemTree,
     ix: usize,
     depth: usize,
-    lists: &ListContext<'_>,
+    d: &DrawCx<'_>,
 ) -> gpui::Div {
-    let indent = lists.body_size * 1.4;
-    let colors = lists.colors;
+    let indent = d.body_size * 1.4;
+    let colors = d.colors;
     let row = div()
         .flex()
         .flex_row()
@@ -817,13 +885,13 @@ fn item_row(
                 .min_w(indent)
                 .pr(indent * 0.3)
                 .text_right()
-                .text_size(lists.body_size)
-                .line_height(lists.body_line)
+                .text_size(d.body_size)
+                .line_height(d.body_line)
                 .text_color(colors.muted)
                 .child(list_marker(ix, list.start, list.ordered, depth)),
         ),
         Some(checked) => {
-            let check = if lists.dark {
+            let check = if d.dark {
                 CHECK_SVG_DARK
             } else {
                 CHECK_SVG_LIGHT
@@ -832,7 +900,7 @@ fn item_row(
                 div()
                     .flex()
                     .mr_2()
-                    .h(lists.body_line)
+                    .h(d.body_line)
                     .flex_none()
                     .items_center()
                     .justify_center()
@@ -845,8 +913,8 @@ fn item_row(
                             .rounded(px(4.))
                             .border(px(1.5))
                             .border_color(colors.muted)
-                            .when(checked, |d| {
-                                d.bg(colors.link).border_color(colors.link).child(
+                            .when(checked, |el| {
+                                el.bg(colors.link).border_color(colors.link).child(
                                     gpui::img(std::sync::Arc::new(gpui::Image::from_bytes(
                                         gpui::ImageFormat::Svg,
                                         check.to_vec(),
