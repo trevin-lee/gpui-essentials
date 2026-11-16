@@ -5,9 +5,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FocusHandle, InteractiveElement,
-    Interactivity, IntoElement, ParentElement, RenderOnce, Role, SharedString, Stateful,
-    StatefulInteractiveElement, StyleRefinement, Styled, Toggled, Window, div, point,
+    AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FocusHandle, Hsla, InteractiveElement,
+    Interactivity, IntoElement, MouseButton, ParentElement, RenderOnce, Role, SharedString,
+    Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Toggled, Window, div, point,
     prelude::FluentBuilder as _, px,
 };
 
@@ -44,6 +44,7 @@ pub struct Press {
     focus: Option<FocusHandle>,
     tab_stop: bool,
     ring: bool,
+    ring_color: Option<Hsla>,
 }
 
 impl Press {
@@ -60,6 +61,7 @@ impl Press {
             focus: None,
             tab_stop: true,
             ring: true,
+            ring_color: None,
         }
     }
 
@@ -98,6 +100,13 @@ impl Press {
     /// draws its own).
     pub fn focus_ring(mut self, ring: bool) -> Self {
         self.ring = ring;
+        self
+    }
+
+    /// Draws the focus ring in this colour instead of the theme's (for a host with a palette of
+    /// its own). It's drawn as given: pass it at the strength it should show.
+    pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.ring_color = Some(color.into());
         self
     }
 }
@@ -148,9 +157,19 @@ impl RenderOnce for Press {
                 .read(cx)
                 .clone()
         });
-        let ring = focus_ring(cx);
+        let ring = match self.ring_color {
+            Some(color) => BoxShadow {
+                color,
+                ..focus_ring(cx)
+            },
+            None => focus_ring(cx),
+        };
         let toggles = matches!(self.role, Role::CheckBox | Role::Switch | Role::RadioButton);
-        let mut el = self.base.role(self.role);
+        let disabled = self.disabled;
+        let mut el = self.base;
+        // The host's cursor, if it chose one; otherwise a pointing hand while it can be pressed.
+        let host_cursor = el.style().mouse_cursor.is_some();
+        el = el.role(self.role);
         if let Some(label) = self.label {
             el = el.aria_label(label);
         }
@@ -165,20 +184,30 @@ impl RenderOnce for Press {
                 el.aria_selected(selected)
             };
         }
-        if self.disabled {
-            // Not focusable, no pointer, no presses. A focus it held moves on with Tab.
-            return el;
-        }
-        el.track_focus(&focus.tab_stop(self.tab_stop))
-            .cursor_pointer()
-            .when(self.ring, |el| {
-                el.focus_visible(move |s| s.shadow(vec![ring]))
-            })
-            .when_some(self.on_click, |el, f| {
-                el.on_click(move |event, window, cx| {
+        let el = if disabled {
+            // No presses, and a press doesn't fall through to what's behind it. It isn't a tab
+            // stop; but if it had the focus when it was disabled (a keyboard press on the last
+            // Next), it keeps it until Tab moves on from here, as a browser's button does.
+            let focused = focus.is_focused(window);
+            el.when(focused, |el| el.track_focus(&focus.clone().tab_stop(false)))
+                .block_mouse_except_scroll()
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
                     cx.stop_propagation();
-                    f(event, window, cx)
                 })
-            })
+        } else {
+            el.track_focus(&focus.tab_stop(self.tab_stop))
+                .when(!host_cursor, |el| el.cursor_pointer())
+                .when(self.ring, |el| {
+                    el.focus_visible(move |s| s.shadow(vec![ring]))
+                })
+                .when_some(self.on_click, |el, f| {
+                    el.on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        f(event, window, cx)
+                    })
+                })
+        };
+        crate::a11y::Disabled::new(el, disabled)
     }
 }
