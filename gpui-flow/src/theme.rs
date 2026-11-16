@@ -37,6 +37,8 @@ pub struct FlowColors {
     pub minimap_mask: Hsla,
     /// The outline of the part the pane is showing.
     pub minimap_view: Hsla,
+    /// The lines that show what a dragged node lines up with.
+    pub guide: Hsla,
     /// The colors a node or an edge can be given by name (`Node::color`), as strokes.
     pub palette: Palette,
 }
@@ -141,6 +143,7 @@ impl FlowColors {
             minimap_node: c.muted_foreground.opacity(0.5),
             minimap_mask: c.background.opacity(0.7),
             minimap_view: c.muted_foreground.opacity(0.6),
+            guide: rgb(0xdb61a2).into(),
             palette: Palette::default(),
         }
     }
