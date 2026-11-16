@@ -72,11 +72,11 @@ pub(crate) fn init(cx: &mut App) {
 /// One entry: a label, and optionally an icon, a check, a shortcut's text and a chip the host
 /// draws (a select option's colour).
 pub struct PopupMenuItem {
-    id: SharedString,
-    label: SharedString,
+    pub(crate) id: SharedString,
+    pub(crate) label: SharedString,
     icon: Option<IconName>,
-    checked: Option<bool>,
-    disabled: bool,
+    pub(crate) checked: Option<bool>,
+    pub(crate) disabled: bool,
     shortcut: Option<SharedString>,
     chip: Option<AnyElement>,
 }
@@ -126,7 +126,7 @@ impl PopupMenuItem {
     }
 }
 
-enum Entry {
+pub(crate) enum Entry {
     Item(PopupMenuItem),
     Separator,
 }
@@ -144,7 +144,10 @@ pub struct PopupMenuColors {
     pub separator: Option<Hsla>,
 }
 
-type OnSelect = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+/// Highlights the entry at an index.
+pub(crate) type SetHighlight = Rc<dyn Fn(usize, &mut App)>;
+
+pub(crate) type OnSelect = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 
 /// A list of [`PopupMenuItem`]s and separators. Up and Down move a highlight over the entries that
 /// can be picked (the pointer moves it too), Home and End go to the ends, Enter or Space picks,
@@ -220,7 +223,7 @@ struct MenuState {
 }
 
 /// The next entry from `from` in `step`'s direction that can be picked, wrapping.
-fn step(pickable: &[bool], from: Option<usize>, step: isize) -> Option<usize> {
+pub(crate) fn step(pickable: &[bool], from: Option<usize>, step: isize) -> Option<usize> {
     let n = pickable.len() as isize;
     if !pickable.iter().any(|p| *p) {
         return None;
@@ -274,17 +277,6 @@ impl RenderOnce for PopupMenu {
                 })
                 .collect(),
         );
-        let theme: Theme = cx.theme().clone();
-        let colors = self.colors;
-        let highlight = colors.highlight.unwrap_or(theme.accent);
-        let highlight_text = colors.highlight_text.unwrap_or(theme.accent_foreground);
-        let muted = colors.muted.unwrap_or(theme.muted_foreground);
-        let separator = colors.separator.unwrap_or(theme.border);
-        let row_h: gpui::DefiniteLength = if self.touch {
-            theme.touch_target.into()
-        } else {
-            css(32.).into()
-        };
         let on_select = self.on_select.clone();
 
         let mover = |delta: isize| {
@@ -322,105 +314,26 @@ impl RenderOnce for PopupMenu {
             }
         };
 
-        let menu_id = std::sync::Arc::new(self.id.clone());
-        let rows: Vec<AnyElement> = self
-            .entries
-            .into_iter()
-            .enumerate()
-            .map(|(i, e)| {
-                let item = match e {
-                    Entry::Separator => {
-                        return div()
-                            .flex_none()
-                            .h(gpui::px(1.))
-                            .my(css(4.))
-                            .mx(css(-4.))
-                            .bg(separator)
-                            .into_any_element();
-                    }
-                    Entry::Item(item) => item,
-                };
-                let on = highlighted == Some(i);
-                let id = item.id.clone();
-                let role = match item.checked {
-                    Some(_) => Role::MenuItemCheckBox,
-                    None => Role::MenuItem,
-                };
-                let state_hover = state.clone();
-                // A disabled entry can't be highlighted, so Enter can't pick it.
-                let disabled = item.disabled;
-                let on_select = on_select.clone();
-                let mut row = Press::new(ElementId::NamedChild(menu_id.clone(), id.clone()))
-                    .role(role)
-                    .tab_stop(false)
-                    .focus_on_press(false)
-                    .focus_ring(false)
-                    .disabled(item.disabled)
-                    .accessibility_label(item.label.clone())
-                    .debug_selector({
-                        let id = id.clone();
-                        move || format!("menu-item-{id}")
-                    })
-                    .flex()
-                    .items_center()
-                    .gap(css(8.))
-                    .w_full()
-                    .min_w_0()
-                    .min_h(row_h)
-                    .px(css(8.))
-                    .rounded(theme.radius_sm())
-                    .text_size(theme.text.sm)
-                    .when(on, |r| r.bg(highlight).text_color(highlight_text))
-                    .when(item.disabled, |r| r.text_color(muted).opacity(0.6))
-                    .on_hover(move |hovered, _, cx| {
-                        if *hovered && !disabled {
-                            state_hover.update(cx, |s, cx| {
-                                if s.highlighted != Some(i) {
-                                    s.highlighted = Some(i);
-                                    cx.notify();
-                                }
-                            });
+        let rows = rows(
+            &self.id,
+            self.entries,
+            highlighted,
+            self.touch,
+            self.colors,
+            Rc::new({
+                let state = state.clone();
+                move |i, cx: &mut App| {
+                    state.update(cx, |s, cx| {
+                        if s.highlighted != Some(i) {
+                            s.highlighted = Some(i);
+                            cx.notify();
                         }
                     })
-                    .on_click(move |_, window, cx| {
-                        if let Some(f) = &on_select {
-                            f(&id, window, cx);
-                        }
-                    });
-                if let Some(checked) = item.checked {
-                    row = row.selected(checked);
                 }
-                row.when_some(item.chip, |r, chip| r.child(chip))
-                    .when_some(item.icon, |r, icon| {
-                        r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            // Room either side for ink past a glyph's advance.
-                            .px(css(3.))
-                            .mx(css(-3.))
-                            .child(item.label),
-                    )
-                    .when_some(item.shortcut, |r, s| {
-                        r.child(
-                            div()
-                                .flex_none()
-                                .text_xs()
-                                .text_color(if on { highlight_text } else { muted })
-                                .child(s),
-                        )
-                    })
-                    .when(item.checked == Some(true), |r| {
-                        r.child(Icon::new(IconName::Check))
-                    })
-                    .into_any_element()
-            })
-            .collect();
+            }),
+            on_select,
+            cx,
+        );
 
         div()
             .id(self.id)
@@ -437,4 +350,122 @@ impl RenderOnce for PopupMenu {
             .on_action(move |_: &Choose, w, cx| choose(w, cx))
             .children(rows)
     }
+}
+
+/// A menu's entries drawn as rows: `highlighted` filled, the pointer highlighting what it's
+/// over through `set_highlight`, a press picking through `on_select`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rows(
+    menu_id: &ElementId,
+    entries: Vec<Entry>,
+    highlighted: Option<usize>,
+    touch: bool,
+    colors: PopupMenuColors,
+    set_highlight: SetHighlight,
+    on_select: Option<OnSelect>,
+    cx: &App,
+) -> Vec<AnyElement> {
+    let theme: Theme = cx.theme().clone();
+    let highlight = colors.highlight.unwrap_or(theme.accent);
+    let highlight_text = colors.highlight_text.unwrap_or(theme.accent_foreground);
+    let muted = colors.muted.unwrap_or(theme.muted_foreground);
+    let separator = colors.separator.unwrap_or(theme.border);
+    let row_h: gpui::DefiniteLength = if touch {
+        theme.touch_target.into()
+    } else {
+        css(32.).into()
+    };
+    let menu_id = std::sync::Arc::new(menu_id.clone());
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let item = match e {
+                Entry::Separator => {
+                    return div()
+                        .flex_none()
+                        .h(gpui::px(1.))
+                        .my(css(4.))
+                        .mx(css(-4.))
+                        .bg(separator)
+                        .into_any_element();
+                }
+                Entry::Item(item) => item,
+            };
+            let on = highlighted == Some(i);
+            let id = item.id.clone();
+            let role = match item.checked {
+                Some(_) => Role::MenuItemCheckBox,
+                None => Role::MenuItem,
+            };
+            let set_highlight = set_highlight.clone();
+            // A disabled entry can't be highlighted, so Enter can't pick it.
+            let disabled = item.disabled;
+            let on_select = on_select.clone();
+            let mut row = Press::new(ElementId::NamedChild(menu_id.clone(), id.clone()))
+                .role(role)
+                .tab_stop(false)
+                .focus_on_press(false)
+                .focus_ring(false)
+                .disabled(item.disabled)
+                .accessibility_label(item.label.clone())
+                .debug_selector({
+                    let id = id.clone();
+                    move || format!("menu-item-{id}")
+                })
+                .flex()
+                .items_center()
+                .gap(css(8.))
+                .w_full()
+                .min_w_0()
+                .min_h(row_h)
+                .px(css(8.))
+                .rounded(theme.radius_sm())
+                .text_size(theme.text.sm)
+                .when(on, |r| r.bg(highlight).text_color(highlight_text))
+                .when(item.disabled, |r| r.text_color(muted).opacity(0.6))
+                .on_hover(move |hovered, _, cx| {
+                    if *hovered && !disabled {
+                        set_highlight(i, cx);
+                    }
+                })
+                .on_click(move |_, window, cx| {
+                    if let Some(f) = &on_select {
+                        f(&id, window, cx);
+                    }
+                });
+            if let Some(checked) = item.checked {
+                row = row.selected(checked);
+            }
+            row.when_some(item.chip, |r, chip| r.child(chip))
+                .when_some(item.icon, |r, icon| {
+                    r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
+                })
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        // Room either side for ink past a glyph's advance.
+                        .px(css(3.))
+                        .mx(css(-3.))
+                        .child(item.label),
+                )
+                .when_some(item.shortcut, |r, s| {
+                    r.child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(if on { highlight_text } else { muted })
+                            .child(s),
+                    )
+                })
+                .when(item.checked == Some(true), |r| {
+                    r.child(Icon::new(IconName::Check))
+                })
+                .into_any_element()
+        })
+        .collect()
 }
