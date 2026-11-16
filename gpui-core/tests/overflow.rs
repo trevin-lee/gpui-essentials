@@ -15,8 +15,8 @@ use gpui::{
     Styled as _, TestAppContext, TestDispatcher, Window, div, px, size,
 };
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariant, ButtonVariants as _, ControlSize, IconName, Root,
-    Sizable as _, Theme, Tooltip,
+    Button, ButtonGroup, ButtonVariant, ButtonVariants as _, ControlSize, IconName, Input,
+    InputState, Root, Sizable as _, Theme, Tooltip,
 };
 
 const WORD: &str = "Pneumonoultramicroscopicsilicovolcanoconiosis-Antidisestablishmentarianism";
@@ -42,6 +42,42 @@ type Make = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 /// Every component that shows text, in every variant and size, with each worst text.
 fn components() -> Vec<(String, Make)> {
     let mut out: Vec<(String, Make)> = Vec::new();
+    for (t, text) in texts().into_iter().enumerate() {
+        for (kind, multi) in [("one-line", false), ("textarea", true)] {
+            let value = text.clone();
+            out.push((
+                format!("Input {kind} text {t}"),
+                Rc::new(move |window, cx| {
+                    let value = value.clone();
+                    let state = cx.new(|cx| {
+                        let s = if multi {
+                            InputState::textarea(window, cx)
+                        } else {
+                            InputState::new(window, cx)
+                        };
+                        s.default_value(value)
+                    });
+                    Input::new(&state).into_any_element()
+                }),
+            ));
+            let placeholder = text.clone();
+            out.push((
+                format!("Input {kind} placeholder {t}"),
+                Rc::new(move |window, cx| {
+                    let placeholder = placeholder.clone();
+                    let state = cx.new(|cx| {
+                        let s = if multi {
+                            InputState::textarea(window, cx)
+                        } else {
+                            InputState::new(window, cx)
+                        };
+                        s.placeholder(placeholder)
+                    });
+                    Input::new(&state).into_any_element()
+                }),
+            ));
+        }
+    }
     let variants = [
         ButtonVariant::Primary,
         ButtonVariant::Outline,
@@ -126,7 +162,13 @@ fn app_with_text() -> TestAppContext {
 
 /// Every glyph or icon drawn past what clips it, or past `width` from the window's left edge
 /// (where every box starts).
-fn overflows(cx: &mut TestAppContext, width: f32, zoom: f32, items: Vec<Make>) -> Vec<String> {
+fn overflows(
+    cx: &mut TestAppContext,
+    width: f32,
+    zoom: f32,
+    items: Vec<Make>,
+    scrolls: bool,
+) -> Vec<String> {
     cx.update(|cx| {
         gpui_core::init(cx);
         let mut t = Theme::dark();
@@ -177,7 +219,9 @@ fn overflows(cx: &mut TestAppContext, width: f32, zoom: f32, items: Vec<Make>) -
             // A slot narrower than one glyph (a label squeezed to nothing) cuts its ellipsis, as
             // browsers do; any other glyph crossing its clip is text cut off.
             let squeezed = clip_right - clip_left < right - left;
-            let cut = !squeezed && (left < clip_left - slack || right > clip_right + slack);
+            // A field that scrolls sideways clips its text at its edge on purpose.
+            let cut =
+                !scrolls && !squeezed && (left < clip_left - slack || right > clip_right + slack);
             // What shows of it must stay in the box.
             let shown_right = right.min(clip_right);
             if cut || shown_right > limit + slack {
@@ -206,8 +250,14 @@ fn every_component_keeps_its_text_in_its_box() {
                 if name.starts_with("Tooltip") && width < 160. {
                     continue;
                 }
+                // A field's padding and border take 26 CSS pixels: narrower than 60 there's no
+                // room for a character at all.
+                if name.starts_with("Input") && width / zoom < 60. {
+                    continue;
+                }
                 let mut cx = app_with_text();
-                let bad = overflows(&mut cx, width, zoom, vec![make]);
+                let scrolls = name.starts_with("Input one-line");
+                let bad = overflows(&mut cx, width, zoom, vec![make], scrolls);
                 if let Some(first) = bad.first() {
                     found.push(format!(
                         "{name} at {width} wide, {}%: {} glyphs out, first {first}",

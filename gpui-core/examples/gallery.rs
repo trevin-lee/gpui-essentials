@@ -50,6 +50,8 @@ struct Gallery {
     view: usize,
     on: bool,
     level: Entity<SliderState>,
+    name: Entity<InputState>,
+    note: Entity<InputState>,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -248,6 +250,14 @@ impl Render for Gallery {
                             .child(format!("{}", self.level.read(cx).value())),
                     ),
             )
+            .child(heading("Fields", &theme))
+            .child(
+                div()
+                    .flex()
+                    .gap(rems(1.))
+                    .child(div().w(rems(14.)).child(Input::new(&self.name)))
+                    .child(div().w(rems(22.)).child(Input::new(&self.note))),
+            )
             .child(heading("Press, with a host's own look", &theme))
             .child(
                 Press::new("press")
@@ -312,7 +322,13 @@ fn main() {
                 show: args.shot.is_none(),
                 ..Default::default()
             };
-            let (window, _) = gpui_core::open_window(options, cx, |_, cx| {
+            let (window, _) = gpui_core::open_window(options, cx, |window, cx| {
+                let name = cx.new(|cx| InputState::new(window, cx).placeholder("Your name"));
+                let note = cx.new(|cx| {
+                    InputState::textarea(window, cx)
+                        .auto_grow(2, 6)
+                        .default_value("A textarea grows with its text, from two rows to six, and wraps a long line rather than running out of its box.")
+                });
                 cx.new(|cx| Gallery {
                     pressed: "nothing yet".into(),
                     on: true,
@@ -324,6 +340,8 @@ fn main() {
                             .default_value(40.)
                     }),
                     view: 1,
+                    name,
+                    note,
                 })
             })
             .expect("the window");
