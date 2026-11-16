@@ -53,6 +53,24 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
   asks to delete the selected event, and Escape drops a drag or the selection.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
   database, so a DST day doesn't depend on the machine's zone files.
+- **Touch** (`touch`, on by default on iOS and Android): GPUI turns touches into taps, long
+  presses and pans, the same on every platform, and the calendar takes them so:
+  - A tap selects, and a tap on the selected event opens it.
+  - A long press on empty time makes an event of the usual length there (or a day, in the
+    all-day row and the month), and a long press on an event picks it up; either then follows
+    the finger, and lifting it proposes the change.
+  - A finger on the selected event drags it at once, and its handle (a dot at its end) changes
+    its end. The end follows the finger's travel, so it doesn't jump to the finger.
+  - A pan up and down scrolls, with GPUI's momentum. A swipe sideways carries the days with
+    the finger (the hours in the gutter stay), with the next or previous period drawn beside
+    them. Past a fifth of the width, or flicked at 500 points a second or more over its last
+    80 ms, that period slides in; otherwise it eases back. The easing takes 200 ms by GPUI's
+    clock, a frame at a time at whatever rate the display draws, and nothing is drawn at
+    rest.
+  - Small things (short events, link marks, "+N more", dates) take taps in a 44-point square
+    round them, the nearest winning.
+  - The header is the plain one, with 44-point controls and no arrows: the swipe changes the
+    period.
 - **Narrow widths:** below 600 pixels the calendar lays itself out for a phone. The header is a
   compact one, drawn without GPUI Kit: a short title ("Wed, Nov 18", "Nov 2026"), Today, the
   arrows, and Day, Month and List. The gutter narrows, days too narrow for "Mon 16" show the name
@@ -164,7 +182,7 @@ fn main() {
   of them.
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
-  `scroll_time`, `default_calendar`, `dim_past` and `all_day_rows`.
+  `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.
 - **The header:** the title, Today, previous and next, and Day / Week / Month are GPUI Kit's
   buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
@@ -194,7 +212,7 @@ that skips midnight itself (America/Santiago), and moves across a change.
 ```sh
 export CARGO_TARGET_DIR=$TMPDIR/gpui-calendar-target   # or anywhere you like
 cargo test
-cargo run --release --example calendar
+cargo run --release --example calendar [-- --touch]   # --touch: as a phone takes it
 cargo run --release --example calendar -- --bench [--events 2000] [--packed]
 cargo run --release --features shots --example calendar -- --shot out.png --scene week
 ```
@@ -210,8 +228,10 @@ happened at the bottom of the window. For pictures and the bench it pretends it'
 November 2026, 10:40 in Los Angeles. Pictures and the bench draw a window that's never shown and
 never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `drag-create`,
 `drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag`, `links`, `agenda` (drawn
-720 pixels wide) and, at an iPhone's 390 by 844, `compact`, `compact-week` and
-`compact-agenda`.
+720 pixels wide) and, at an iPhone's 390 by 844 and taken by touch, `compact` (with an event
+selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger halfway
+through a swipe to the next day) and `compact-hold` (a long press on empty time, drawn down). `tests/touch.rs` drives the
+calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from GPUI
@@ -228,6 +248,8 @@ Kit's theme.
 | ![Design review listing its notes; shorter events with a link's mark or a count](docs/links.png) | ![Tuesday's events listed with their times, colours and links](docs/agenda.png) |
 | **A day on a phone** | **The agenda on a phone** |
 | ![Wednesday at 390 pixels wide, with the compact header](docs/compact.png) | ![Tuesday's list at 390 pixels wide](docs/compact-agenda.png) |
+| **A swipe under way** | **A long press on empty time, drawn down** |
+| ![Wednesday carried left by a finger, Thursday coming in beside it](docs/compact-swipe.png) | ![A new event from 5:30 to 7:15 under a finger](docs/compact-hold.png) |
 
 ## Performance
 
