@@ -237,12 +237,16 @@ pub(crate) struct MinimapMap {
 
 /// What the flow's elements tell the flow while they're laid out and painted, and what its
 /// event handlers read back.
+/// A map looked up for every node on every frame: hashed fast, and seeded at random so no
+/// document can pick ids that collide.
+pub(crate) type FastMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
+
 #[derive(Default)]
 pub(crate) struct Shared {
     /// The pane's bounds in the window.
     pub pane: Cell<Bounds<Pixels>>,
     pub viewport: Cell<Viewport>,
-    pub measured: RefCell<HashMap<NodeId, Measured>>,
+    pub measured: RefCell<FastMap<NodeId, Measured>>,
     /// Each edge's line as it was last painted, bottom first.
     pub edges: RefCell<Vec<EdgeLine>>,
     pub minimap: Cell<Option<MinimapMap>>,
@@ -262,6 +266,11 @@ pub(crate) struct Shared {
     pub was_animating: Cell<bool>,
     /// Each ink node's stroke, read once for as long as its stored form stays the same.
     pub ink: RefCell<HashMap<NodeId, InkCache>>,
+    /// The window's size when last drawn: what the pane is taken to be before its first
+    /// layout, so even the first frame draws only what's in view.
+    pub window: Cell<(f32, f32)>,
+    /// How many nodes out of view have yet to be drawn for the first time.
+    pub unmeasured: Cell<usize>,
 }
 
 /// An ink node's stroke as read, and what it was read from: the points by where their text is
