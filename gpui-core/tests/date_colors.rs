@@ -208,3 +208,32 @@ fn without_colours_the_theme_draws_it() {
         assert!(!d.fills.iter().chain(&d.glyphs).any(|x| near(*x, c)));
     }
 }
+
+struct Shown(Entity<DatePickerState>);
+
+impl Render for Shown {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let a = NaiveDate::from_ymd_opt(2030, 6, 10).unwrap();
+        let b = NaiveDate::from_ymd_opt(2030, 6, 14).unwrap();
+        div().child(MonthGrid::new(&self.0).colors(COLORS).shown_range(b, a))
+    }
+}
+
+#[test]
+fn a_single_pickers_month_shows_a_range_kept_elsewhere() {
+    let mut cx = app();
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let state = cx.new(|cx| {
+            let mut s = DatePickerState::new(window, cx);
+            s.show_month(NaiveDate::from_ymd_opt(2030, 6, 1).unwrap(), cx);
+            s
+        });
+        let v = cx.new(|_| Shown(state));
+        Root::new(v, window, cx)
+    });
+    vcx.run_until_parked();
+    let d = draw(vcx);
+    assert!(d.fills.iter().any(|c| near(*c, PINK)), "the days between");
+    assert!(d.fills.iter().any(|c| near(*c, PURPLE)), "its ends");
+}
