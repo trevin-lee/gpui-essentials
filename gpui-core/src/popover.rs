@@ -89,6 +89,37 @@ impl PopoverColors {
     }
 }
 
+/// The colours of the panel being laid out: a submenu drawn from inside it takes them.
+struct PanelColors(PopoverColors);
+
+impl gpui::Global for PanelColors {}
+
+/// Runs `f` (a panel's layout) with `colors` as the panel's, for what's drawn from inside it.
+pub(crate) fn with_panel_colors<R>(
+    colors: PopoverColors,
+    window: &mut Window,
+    cx: &mut App,
+    f: impl FnOnce(&mut Window, &mut App) -> R,
+) -> R {
+    let before = cx.try_global::<PanelColors>().map(|g| g.0);
+    cx.set_global(PanelColors(colors));
+    let out = f(window, cx);
+    match before {
+        Some(c) => cx.set_global(PanelColors(c)),
+        None => {
+            cx.remove_global::<PanelColors>();
+        }
+    }
+    out
+}
+
+/// The colours of the panel being laid out, or the theme's outside one.
+pub(crate) fn panel_colors(cx: &App) -> PopoverColors {
+    cx.try_global::<PanelColors>()
+        .map(|g| g.0)
+        .unwrap_or_else(|| PopoverColors::from_theme(cx.theme()))
+}
+
 /// What a popover hangs from, in window coordinates: a box, or a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PopoverAnchor(Bounds<Pixels>);
@@ -312,8 +343,12 @@ impl RenderOnce for Popover {
         );
 
         let anchor = Rc::new(Cell::new(self.anchor.map(|a| a.0)));
+        let colors = self
+            .colors
+            .unwrap_or_else(|| PopoverColors::from_theme(cx.theme()));
         let panel = self.open.then(|| self.panel(&focus, anchor.clone(), cx));
         PopoverElement {
+            colors,
             trigger: self.trigger,
             anchor,
             panel,
@@ -517,6 +552,8 @@ fn hold_inside(b: Bounds<Pixels>, inside: Bounds<Pixels>) -> Bounds<Pixels> {
 /// Draws the trigger in place, and the open panel over everything, placed from where the
 /// trigger (or the anchor) is this frame.
 struct PopoverElement {
+    /// The panel's colours, which a submenu inside it takes.
+    colors: PopoverColors,
     trigger: Option<AnyElement>,
     anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     panel: Option<Stateful<gpui::Div>>,
@@ -635,14 +672,16 @@ impl Element for PopoverElement {
             .min_w(narrowest)
             .into_any_element();
         // Laid out on its own, now that what it hangs from has been placed this frame.
-        let size = panel.layout_as_root(
-            gpui::size(
-                gpui::AvailableSpace::MaxContent,
-                gpui::AvailableSpace::MaxContent,
-            ),
-            window,
-            cx,
-        );
+        let size = with_panel_colors(self.colors, window, cx, |window, cx| {
+            panel.layout_as_root(
+                gpui::size(
+                    gpui::AvailableSpace::MaxContent,
+                    gpui::AvailableSpace::MaxContent,
+                ),
+                window,
+                cx,
+            )
+        });
         let origin = place(anchor, size, view, edge, gap);
         window.defer_draw(panel, origin, PRIORITY, None::<ContentMask<Pixels>>);
     }
