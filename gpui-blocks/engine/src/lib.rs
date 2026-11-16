@@ -1,4 +1,5 @@
-// Changed in Trevin Lee's fork (2026): the reorder and surfaces modules, toggle surface names.
+// Changed in Trevin Lee's fork (2026): the reorder and surfaces modules, toggle surface names,
+// the clipboard actions exported.
 //! A block-based WYSIWYG Markdown editor for GPUI, built on gpui-kit's
 //! public editor host API (`gpui_kit::base::text::editor_host`).
 //!
@@ -93,6 +94,11 @@ pub use input_rule::InputRule;
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;
 pub use state::{BlockEditorEvent, BlockEditorState, ClipboardPolicy, PasteRequest, SubmitPolicy};
+/// The editor's clipboard and selection actions, for a host's own menu (an edit menu over a touch
+/// selection, say) to dispatch to the focused editor.
+pub mod actions {
+    pub use crate::state::{Copy, Cut, Paste, PastePlain, SelectAll};
+}
 pub use style::BlockEditorStyle;
 pub use table::{TableEdit, TableLine};
 pub use toolbar::EditorToolbar;
