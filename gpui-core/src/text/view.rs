@@ -117,6 +117,8 @@ pub struct TextViewStyle {
     pub table_radius: Option<Pixels>,
     /// The space round a table cell's text (half a rem unless given).
     pub table_cell_padding: Option<Pixels>,
+    /// A table's text size (the body's unless given): the web's 14px tables in 16px Markdown.
+    pub table_text_size: Option<Pixels>,
     /// A table's header row's weight (semibold unless given).
     pub table_header_weight: Option<FontWeight>,
     /// The space between two blocks by their kinds, over every rule above: the web's margins
@@ -195,6 +197,7 @@ impl Default for TextViewStyle {
             heading_line_height: None,
             table_radius: None,
             table_cell_padding: None,
+            table_text_size: None,
             table_header_weight: None,
             block_gap: None,
             inline_code: InlineCodeStyle::default(),
@@ -607,8 +610,9 @@ fn lay(
                         });
                         out.decos.len() - 1
                     });
+                    let size_ = cx.style.table_text_size.unwrap_or(cx.base.size);
                     let s = if ri == 0 {
-                        let mut s = cx.with_size(cx.base.size, true);
+                        let mut s = cx.with_size(size_, true);
                         if let Some(w) = cx.style.table_header_weight {
                             s.font.weight = w;
                         }
@@ -617,7 +621,7 @@ fn lay(
                         }
                         s
                     } else {
-                        cx.base.clone()
+                        cx.with_size(size_, false)
                     };
                     for c in 0..cols {
                         let p = row.get(c).cloned().unwrap_or_default();
@@ -1086,16 +1090,17 @@ impl Element for ViewElement {
                 layout.paint(o + *origin, window, cx);
             }
         }
-        // Each paragraph is clipped to the width it was laid out in, with three pixels' room
-        // either side for ink past a glyph's advance: a character wider than a narrow table
-        // cell is cut there rather than drawn over its neighbour.
+        // Each paragraph is clipped to the width it was laid out in, with room all round for
+        // ink past a glyph's advance and its line: a character wider than a narrow table cell
+        // is cut there rather than drawn over its neighbour, while an inline code box taller
+        // than its line (padded, bordered) keeps its top and bottom on the first and last lines.
         for leaf in &l.leaves {
             // Ink reaches further past the advance the bigger the text (a large emoji's most),
             // so the room is a share of the paragraph's line.
             let ink = (window.rem_size() * 0.2).max(leaf.layout.line_height * 0.3);
             let clip = Bounds::new(
-                o + leaf.origin - point(ink, px(0.)),
-                size(leaf.layout.width + ink * 2., leaf.layout.height),
+                o + leaf.origin - point(ink, ink),
+                size(leaf.layout.width + ink * 2., leaf.layout.height + ink * 2.),
             );
             window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
                 leaf.layout.paint(o + leaf.origin, window, cx)
