@@ -27,7 +27,8 @@ it works in GPUI Kit apps but not with Zed's own `gpui` crate.
   followed by Enter.
 - **Editing:** undo and redo, selection across blocks, IME, and copy and paste as Markdown.
 - **Touch:** on an iPhone or iPad, a tap puts the caret there and brings up the keyboard, a long
-  press selects a word, and handles at the selection's ends move them.
+  press selects a word, handles at the selection's ends move them, and a menu over the
+  selection cuts, copies, pastes and selects all.
 - **Widgets:** blocks your app draws itself, such as a chart, kept in the file as fenced code.
 - **Links to other documents:** mentions inside text and sub-page blocks, drawn with the title
   and icon your app gives them.
