@@ -337,7 +337,7 @@ impl RenderOnce for DatePicker {
         let id = s.entity_id().as_u64();
         let c = self.colors;
         let ring = ring_for(c.focus_ring, cx);
-        let ring_border = c.focus_ring.unwrap_or(theme.ring);
+        let ring_border = c.focus_border.or(c.focus_ring).unwrap_or(theme.ring);
         let muted = c.placeholder.unwrap_or(theme.muted_foreground);
         let fill = c
             .field
@@ -503,9 +503,10 @@ pub struct DatePickerColors {
     pub text: Option<Hsla>,
     /// The placeholder and the calendar icon (the theme's muted foreground).
     pub placeholder: Option<Hsla>,
-    /// The keyboard focus ring, drawn as given, and the focused field's border (the theme's
-    /// ring).
+    /// The keyboard focus ring, drawn as given (the theme's ring at half strength).
     pub focus_ring: Option<Hsla>,
+    /// The focused field's border (the focus ring's colour if given, else the theme's ring).
+    pub focus_border: Option<Hsla>,
     /// The month's popover.
     pub popover: Option<PopoverColors>,
     /// A picked day's fill and number (the theme's primary and primary foreground).

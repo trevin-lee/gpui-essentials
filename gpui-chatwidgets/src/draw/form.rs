@@ -1064,6 +1064,7 @@ pub(crate) fn date_colors(t: &crate::theme::CardTheme) -> DatePickerColors {
         today: Some(c.accent),
         muted: Some(c.text_muted),
         cursor: Some(c.focus_ring),
+        ..Default::default()
     }
 }
 

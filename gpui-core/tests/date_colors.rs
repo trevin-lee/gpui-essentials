@@ -83,6 +83,7 @@ const COLORS: DatePickerColors = DatePickerColors {
     text: None,
     placeholder: Some(ORANGE),
     focus_ring: None,
+    focus_border: None,
     popover: Some(PopoverColors {
         background: BLUE,
         foreground: hue(0.0),
@@ -236,4 +237,50 @@ fn a_single_pickers_month_shows_a_range_kept_elsewhere() {
     let d = draw(vcx);
     assert!(d.fills.iter().any(|c| near(*c, PINK)), "the days between");
     assert!(d.fills.iter().any(|c| near(*c, PURPLE)), "its ends");
+}
+
+struct Focused(Entity<DatePickerState>);
+
+impl Render for Focused {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .p(px(20.))
+            .w(px(300.))
+            .child(DatePicker::new(&self.0).colors(DatePickerColors {
+                focus_ring: Some(BLUE),
+                focus_border: Some(GREEN),
+                ..Default::default()
+            }))
+    }
+}
+
+#[test]
+fn the_focused_fields_border_and_ring_take_their_own_colours() {
+    let mut cx = app();
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let state = cx.new(|cx| DatePickerState::new(window, cx));
+        let v = cx.new(|_| Focused(state));
+        Root::new(v, window, cx)
+    });
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    // Focused from the keyboard, as the ring shows only then.
+    vcx.simulate_keystrokes("tab");
+    vcx.run_until_parked();
+    let (borders, shadows) = vcx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+        let scene = window.rendered_scene();
+        let borders: Vec<Hsla> = scene
+            .quads
+            .iter()
+            .filter(|q| q.border_widths.left.0 > 0.)
+            .map(|q| q.border_color)
+            .collect();
+        let shadows: Vec<Hsla> = scene.shadows.iter().map(|s| s.color).collect();
+        (borders, shadows)
+    });
+    assert!(borders.iter().any(|c| near(*c, GREEN)), "the border");
+    assert!(shadows.iter().any(|c| near(*c, BLUE)), "the ring");
 }
