@@ -12,7 +12,8 @@ use gpui::*;
 use crate::geometry::{distance_to_polyline, edge_path};
 use crate::graph;
 use crate::node::{
-    EdgeLine, Measured, NodeContext, NodeRenderer, Shared, Zoomed, built_in, measure_node, units,
+    EdgeLine, Measured, NodeContext, NodeRenderer, Reach, Shared, TouchTarget, Zoomed, built_in,
+    measure_node, touch_target, units,
 };
 use crate::paint::{self, FlowBackground, Icon};
 use crate::theme::FlowColors;
@@ -134,6 +135,9 @@ pub struct FlowOptions {
     /// What presses, scrolling and pinches on the canvas do: edit it, only move about it, or
     /// nothing, leaving them to a view laid over it.
     pub pointer_mode: PointerMode,
+    /// How large (in points) the area is that a finger can take a handle or a resizer's grip
+    /// by, at least: Apple's 44 by default. A finger takes an edge from up to half that away.
+    pub touch_target_size: f32,
     /// How far (in points on screen) a pressed node must move before it counts as a drag.
     pub node_drag_threshold: f32,
     /// How long the viewport takes to get where the controls, a fit or a double click send it.
@@ -170,6 +174,7 @@ impl Default for FlowOptions {
             only_render_visible: true,
             simplify_below_zoom: 0.3,
             pointer_mode: PointerMode::Edit,
+            touch_target_size: 44.,
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
             fit_padding: 0.1,
@@ -230,6 +235,14 @@ impl CanvasTransform {
     pub fn translation(&self) -> Point<Pixels> {
         self.flow_to_window(xy(0., 0.))
     }
+}
+
+/// What a context menu was asked for on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContextTarget {
+    Node(NodeId),
+    Edge(EdgeId),
+    Pane,
 }
 
 /// One handle of one node.
@@ -297,6 +310,14 @@ pub enum FlowEvent {
     },
     /// The viewport moved or zoomed.
     ViewportChange(Viewport),
+    /// A right click, or a long press of a finger, on a node, an edge or the pane, at
+    /// `position` in the flow and `window_position` in the window: where the host shows its
+    /// menu. The flow shows none itself.
+    ContextMenu {
+        target: ContextTarget,
+        position: XY,
+        window_position: Point<Pixels>,
+    },
 }
 
 /// Where a panel sits in the pane.
@@ -378,6 +399,30 @@ enum Drag {
     Minimap,
 }
 
+/// A finger the flow took, until it lifts.
+struct TouchPress {
+    /// The node it took hold of (by itself, a handle or a grip); none on the pane.
+    node: Option<NodeId>,
+    /// On the pane, the edge under it: a tap selects it, a drag pans.
+    edge: Option<EdgeId>,
+    /// Where it touched down, in the window.
+    start: Point<Pixels>,
+    /// Whether it has gone further than a tap may.
+    moved: bool,
+    /// Shows the node's context menu if the finger stays put long enough.
+    hold: Option<Task<()>>,
+    /// The context menu was shown: the rest of the touch does nothing.
+    held: bool,
+}
+
+/// How far (in points) a finger may move and still tap, and how long it must stay put for a
+/// context menu: UIKit's.
+const TOUCH_SLOP: f32 = 8.;
+const LONG_PRESS: Duration = Duration::from_millis(500);
+/// How soon a second tap must follow the first, and how near, to be a double tap.
+const DOUBLE_TAP: Duration = Duration::from_millis(350);
+const DOUBLE_TAP_SLOP: f32 = 22.;
+
 struct Transition {
     from: Viewport,
     to: Viewport,
@@ -419,6 +464,9 @@ pub struct Flow {
     ticker: Option<Task<()>>,
     started: Instant,
     last_selection: (Vec<NodeId>, Vec<EdgeId>),
+    touch: Option<TouchPress>,
+    /// The last tap: when, where, and on which node (none for the pane), for a double tap.
+    last_tap: Option<(Instant, Point<Pixels>, Option<NodeId>)>,
 }
 
 impl EventEmitter<FlowEvent> for Flow {}
@@ -512,6 +560,8 @@ impl Flow {
             ticker: None,
             started: Instant::now(),
             last_selection: Default::default(),
+            touch: None,
+            last_tap: None,
         }
     }
 
@@ -1290,6 +1340,20 @@ impl Flow {
         self.go_to(to, cx);
     }
 
+    /// Zooms by `factor` about this point of the window, at once, as a pinch does. GPUI doesn't
+    /// recognise a two-finger pinch on iOS yet: a host that recognises one natively (a
+    /// `UIPinchGestureRecognizer`) calls this with each step's change of scale, or dispatches
+    /// `PinchEvent`s into the window, which the flow takes the same way.
+    pub fn zoom_by(&mut self, factor: f32, about: Point<Pixels>, cx: &mut Context<Self>) {
+        if !(factor.is_finite() && factor > 0.) {
+            return;
+        }
+        self.transition = None;
+        let pane = self.shared.pane_point(about);
+        let zoom = self.clamp_zoom(self.viewport.zoom * factor);
+        self.move_viewport(self.viewport.zoomed_about(pane, zoom), cx);
+    }
+
     pub fn zoom_in(&mut self, cx: &mut Context<Self>) {
         self.zoom_to(self.target_viewport().zoom * 1.2, cx);
     }
@@ -1588,7 +1652,14 @@ impl Flow {
             .iter()
             .rev()
             .filter(|line| above.is_none_or(|z| line.z > z))
-            .find(|line| distance_to_polyline(pane, &line.points) <= line.reach)
+            .find(|line| {
+                let reach = if self.shared.touch.get() {
+                    line.reach.max(self.options.touch_target_size / 2.)
+                } else {
+                    line.reach
+                };
+                distance_to_polyline(pane, &line.points) <= reach
+            })
             .map(|line| line.id.clone())
     }
 
@@ -1635,6 +1706,231 @@ impl Flow {
             before,
         });
         cx.notify();
+    }
+
+    // Touch.
+
+    /// A finger touched down on part of the canvas (`target`) and offers itself. Taken, it acts
+    /// as the mouse would there (a press, drags, a release), except that on the pane and edges
+    /// it pans in any direction (GPUI's own touch scrolling keeps to one axis), a tap on an edge
+    /// selects it, and held still it asks for a context menu. Says whether it was taken.
+    pub(crate) fn touch_start(
+        &mut self,
+        target: &TouchTarget,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.shared.touch.set(true);
+        let mode = self.options.pointer_mode;
+        if mode == PointerMode::Off || self.drag.is_some() || self.touch.is_some() {
+            return false;
+        }
+        let pane = self.shared.pane_point(position);
+        // A node drawn as a plain box is touched through the pane.
+        let target = match target {
+            TouchTarget::Pane if mode == PointerMode::Edit => match self.simple_node_at(pane) {
+                Some(id) => TouchTarget::Node(id),
+                None => TouchTarget::Pane,
+            },
+            other => other.clone(),
+        };
+        // Only moving about: the pane takes every finger, and pans.
+        if mode == PointerMode::Navigate && !matches!(target, TouchTarget::Pane) {
+            return false;
+        }
+        let node = match &target {
+            TouchTarget::Pane => None,
+            TouchTarget::Node(id) => Some(id.clone()),
+            TouchTarget::Handle { node, .. } | TouchTarget::Resize { node, .. } => {
+                Some(node.clone())
+            }
+        };
+        if let Some(id) = &node {
+            let Some(n) = self.node(id) else {
+                return false;
+            };
+            let wants = match &target {
+                TouchTarget::Node(_) => self.draggable(n) || self.selectable(n),
+                TouchTarget::Handle { .. } => self.connectable(n),
+                _ => true,
+            };
+            if !wants {
+                return false;
+            }
+        }
+        let double = self.last_tap.as_ref().is_some_and(|(at, p, on)| {
+            matches!(target, TouchTarget::Pane | TouchTarget::Node(_))
+                && *on == node
+                && at.elapsed() <= DOUBLE_TAP
+                && distance(*p, position) <= DOUBLE_TAP_SLOP
+        });
+        let down = MouseDownEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: if double { 2 } else { 1 },
+            first_mouse: false,
+        };
+        // A touch passes no capture phase for the mouse: what has the focus now is what had
+        // it before the press.
+        *self.shared.press_focus.borrow_mut() = Some(window.focused(cx));
+        let mut edge = None;
+        let took = match &target {
+            TouchTarget::Pane => {
+                window.focus(&self.focus, cx);
+                self.transition = None;
+                if mode == PointerMode::Edit {
+                    edge = self.edge_at(pane, None);
+                }
+                self.start_pan(pane, &down, cx);
+                true
+            }
+            TouchTarget::Node(id) => self.node_mouse_down(id, &down, window, cx),
+            TouchTarget::Handle { node, handle, kind } => {
+                self.handle_mouse_down(node, handle.clone(), *kind, &down, window, cx)
+            }
+            TouchTarget::Resize { node, corner, min } => {
+                self.resize_mouse_down(node, *corner, *min, &down, window, cx)
+            }
+        };
+        if !took || self.drag.is_none() {
+            return false;
+        }
+        // Held still on a node, an edge or the pane, a finger asks for a context menu; on a
+        // handle or a grip it's only waiting to drag.
+        let hold = matches!(target, TouchTarget::Pane | TouchTarget::Node(_)).then(|| {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(LONG_PRESS).await;
+                this.update(cx, |flow, cx| flow.touch_held(cx)).ok();
+            })
+        });
+        self.touch = Some(TouchPress {
+            node,
+            edge,
+            start: position,
+            moved: false,
+            hold,
+            held: false,
+        });
+        true
+    }
+
+    /// The finger has stayed put: a context menu for what it's on, and no drag.
+    fn touch_held(&mut self, cx: &mut Context<Self>) {
+        let Some(press) = self.touch.as_mut() else {
+            return;
+        };
+        press.hold = None;
+        if press.moved {
+            return;
+        }
+        press.held = true;
+        let at = press.start;
+        let target = match (press.node.clone(), press.edge.clone()) {
+            (Some(node), _) => ContextTarget::Node(node),
+            (None, Some(edge)) => ContextTarget::Edge(edge),
+            (None, None) => ContextTarget::Pane,
+        };
+        self.cancel_drag(cx);
+        self.context_menu(target, at, cx);
+    }
+
+    /// A move, lift or loss of a finger the flow took.
+    fn touch_continue(&mut self, event: &TouchDragEvent, cx: &mut Context<Self>) {
+        let Some(press) = self.touch.as_mut() else {
+            return;
+        };
+        match event.phase {
+            TouchPhase::Started => {}
+            TouchPhase::Moved => {
+                if !press.moved && distance(event.position, press.start) > TOUCH_SLOP {
+                    press.moved = true;
+                    press.hold = None;
+                }
+                // Within the slop it's still a tap, and nothing moves.
+                if press.held || !press.moved {
+                    return;
+                }
+                let moved = MouseMoveEvent {
+                    position: event.position,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                };
+                self.mouse_move(&moved, cx);
+            }
+            TouchPhase::Ended => {
+                let Some(press) = self.touch.take() else {
+                    return;
+                };
+                if press.held {
+                    return;
+                }
+                let clicks = match &self.drag {
+                    Some(Drag::Nodes { clicks, .. } | Drag::Pan { clicks, .. }) => *clicks,
+                    _ => 0,
+                };
+                // A tap: the next one soon after, on the same thing, is a double tap.
+                self.last_tap = (!press.moved && clicks == 1)
+                    .then(|| (Instant::now(), event.position, press.node.clone()));
+                if let (false, Some(edge)) = (press.moved, press.edge) {
+                    self.drag = None;
+                    let down = MouseDownEvent {
+                        button: MouseButton::Left,
+                        position: event.position,
+                        modifiers: Modifiers::default(),
+                        click_count: clicks.max(1),
+                        first_mouse: false,
+                    };
+                    self.edge_press(edge, &down, cx);
+                } else {
+                    self.finish_drag(cx);
+                }
+            }
+            TouchPhase::Cancelled => {
+                self.touch = None;
+                self.cancel_drag(cx);
+            }
+        }
+    }
+
+    /// Asks the host for a context menu here.
+    fn context_menu(&mut self, target: ContextTarget, at: Point<Pixels>, cx: &mut Context<Self>) {
+        cx.emit(FlowEvent::ContextMenu {
+            target,
+            position: self.screen_to_flow(at),
+            window_position: at,
+        });
+        cx.notify();
+    }
+
+    /// A right click on a node.
+    fn node_context_menu(
+        &mut self,
+        id: &NodeId,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.options.pointer_mode == PointerMode::Off {
+            return false;
+        }
+        self.shared.touch.set(false);
+        self.context_menu(ContextTarget::Node(id.clone()), event.position, cx);
+        true
+    }
+
+    /// A right click on the pane: on an edge, or the pane itself.
+    fn pane_context_menu(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        if self.options.pointer_mode == PointerMode::Off || self.drag.is_some() {
+            return;
+        }
+        self.shared.touch.set(false);
+        let pane = self.shared.pane_point(event.position);
+        let target = match self.edge_at(pane, None) {
+            Some(edge) => ContextTarget::Edge(edge),
+            None => ContextTarget::Pane,
+        };
+        self.context_menu(target, event.position, cx);
     }
 
     /// Whether nodes are drawn as plain boxes at the current zoom.
@@ -2178,7 +2474,13 @@ impl Flow {
             ScrollDelta::Lines(l) => (xy(l.x, l.y), true),
         };
         let zoom_key = event.modifiers.platform || event.modifiers.control;
-        if self.options.pan_on_scroll && !zoom_key {
+        if event.source == ScrollSource::Touch {
+            // A finger dragged over the pane: the flow follows it exactly.
+            self.shared.touch.set(true);
+            let v = self.viewport;
+            let to = self.sane_viewport(Viewport::new(v.x + delta.x, v.y + delta.y, v.zoom));
+            self.move_viewport(to, cx);
+        } else if self.options.pan_on_scroll && !zoom_key {
             // React Flow counts a line as 20 points.
             let k = self.options.pan_on_scroll_speed * if lines { 20. } else { 1. };
             let v = self.viewport;
@@ -2198,10 +2500,7 @@ impl Flow {
             return;
         }
         cx.stop_propagation();
-        self.transition = None;
-        let pane = self.shared.pane_point(event.position);
-        let zoom = self.clamp_zoom(self.viewport.zoom * (1. + event.delta));
-        self.move_viewport(self.viewport.zoomed_about(pane, zoom), cx);
+        self.zoom_by(1. + event.delta, event.position, cx);
     }
 
     /// Moves the selected nodes a step (four with `far`), as the arrow keys do: five points, or
@@ -2431,6 +2730,7 @@ impl Flow {
             connectable: self.connectable(node),
             zoom,
             colors,
+            touch_size: px(self.options.touch_target_size.max(0.)),
         };
         let renderer = self
             .node_kinds
@@ -2466,6 +2766,23 @@ impl Flow {
                     cx.stop_propagation();
                 }
             })
+            .on_mouse_down(MouseButton::Right, {
+                let (flow, id) = (this.clone(), node.id.clone());
+                move |event, _, cx| {
+                    let took = flow
+                        .update(cx, |flow, cx| flow.node_context_menu(&id, event, cx))
+                        .unwrap_or(false);
+                    if took {
+                        cx.stop_propagation();
+                    }
+                }
+            })
+            .child(touch_target(
+                this.clone(),
+                TouchTarget::Node(node.id.clone()),
+                px(0.),
+                Reach::Around,
+            ))
             .child(measure_node(
                 self.shared.clone(),
                 this.entity_id(),
@@ -2853,6 +3170,7 @@ impl Render for Flow {
             let shared = shared.clone();
             let background = self.background;
             let (move_flow, up_flow) = (this.clone(), this.clone());
+            let (touch_flow, press_flow) = (this.clone(), this.clone());
             let listener = self.transform_listener.clone();
             canvas(
                 move |bounds, window, cx| {
@@ -2871,9 +3189,10 @@ impl Render for Flow {
                     {
                         listener(transform, window, cx);
                     }
-                    shared
+                    let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+                    (shared, hitbox)
                 },
-                move |bounds, shared, window, _| {
+                move |bounds, (shared, hitbox), window, _| {
                     // The edge canvases, painted after this, say again what they drew.
                     shared.edges.borrow_mut().clear();
                     shared.was_animating.set(shared.animating.replace(false));
@@ -2888,11 +3207,47 @@ impl Render for Flow {
                             *focus_shared.press_focus.borrow_mut() = Some(window.focused(cx));
                         }
                     });
+                    let touch_shared = shared.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                         if phase == DispatchPhase::Bubble {
+                            // The mouse moved, so presses are the mouse's again.
+                            touch_shared.touch.set(false);
                             move_flow
                                 .update(cx, |flow, cx| flow.mouse_move(event, cx))
                                 .ok();
+                        }
+                    });
+                    // A finger that took hold of part of a node, wherever it goes.
+                    let touch_flow = touch_flow.clone();
+                    window.on_mouse_event(move |event: &TouchDragEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble && event.phase != TouchPhase::Started {
+                            touch_flow
+                                .update(cx, |flow, cx| flow.touch_continue(event, cx))
+                                .ok();
+                        }
+                    });
+                    // A finger on the pane, or on a node that didn't take it: the pane's.
+                    let (press_flow, hitbox) = (press_flow.clone(), hitbox.clone());
+                    window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Bubble
+                            && event.phase == TouchPhase::Started
+                            && !window.default_prevented()
+                            && hitbox.is_hovered(window)
+                        {
+                            let claimed = press_flow
+                                .update(cx, |flow, cx| {
+                                    flow.touch_start(
+                                        &TouchTarget::Pane,
+                                        event.start_position,
+                                        window,
+                                        cx,
+                                    )
+                                })
+                                .unwrap_or(false);
+                            if claimed {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            }
                         }
                     });
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
@@ -3121,6 +3476,10 @@ impl Render for Flow {
             })
             .on_mouse_down(MouseButton::Left, cx.listener(Self::pane_mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::pane_mouse_down))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|flow, event, _, cx| flow.pane_context_menu(event, cx)),
+            )
             .on_scroll(cx.listener(|flow, event, _, cx| flow.scroll(event, cx)))
             .on_pinch(cx.listener(|flow, event, _, cx| flow.pinch(event, cx)))
             .child(keys)
@@ -3139,4 +3498,9 @@ impl Flow {
             cx.propagate();
         }
     }
+}
+
+/// The distance between two points of the window, in points.
+fn distance(a: Point<Pixels>, b: Point<Pixels>) -> f32 {
+    (a - b).magnitude() as f32
 }

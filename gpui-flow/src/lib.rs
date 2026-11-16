@@ -41,9 +41,10 @@ mod theme;
 mod types;
 
 pub use flow::{
-    Cancel, CanvasTransform, DeleteSelected, EdgeDefaults, FitView, Flow, FlowEvent, FlowOptions,
-    HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar, MoveUp,
-    MoveUpFar, PanelPosition, PointerMode, SelectAll, ZoomIn, ZoomOut, ZoomReset, bind_keys,
+    Cancel, CanvasTransform, ContextTarget, DeleteSelected, EdgeDefaults, FitView, Flow, FlowEvent,
+    FlowOptions, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar,
+    MoveUp, MoveUpFar, PanelPosition, PointerMode, SelectAll, ZoomIn, ZoomOut, ZoomReset,
+    bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, group_node, labeled_node,
