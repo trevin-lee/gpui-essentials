@@ -102,6 +102,7 @@ struct Built {
 }
 
 /// What a text leaf needs besides its text.
+#[derive(Clone, Copy)]
 pub(crate) struct LeafContext<'a> {
     pub(crate) extensions: &'a Extensions,
     pub(crate) leaves: &'a OwnLeaves,
@@ -618,6 +619,7 @@ pub(crate) struct Place {
 }
 
 /// What drawing a block needs besides the block.
+#[derive(Clone, Copy)]
 pub(crate) struct DrawCx<'a> {
     pub(crate) base: &'a gpui::TextStyle,
     pub(crate) body_size: Pixels,

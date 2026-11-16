@@ -461,9 +461,44 @@ impl RenderOnce for BlockEditor {
                     // after the editor's own geometry is collected, so it reports none.
                     let ghost = (!ghost_drawn).then(|| {
                         ghost_drawn = true;
-                        // Without the margins it has among other blocks.
-                        let copy =
-                            node.render(node_ix, flow.first(true).last(true), &node_cx, window, cx);
+                        // Without the margins it has among other blocks, and reporting no
+                        // geometry and showing no selection: the block keeps both in its place.
+                        let ghost_leaves: super::draw::OwnLeaves = Rc::default();
+                        let no_bands = HashMap::new();
+                        let ghost_cx = super::draw::DrawCx {
+                            bands: &no_bands,
+                            leaves: super::draw::LeafContext {
+                                leaves: &ghost_leaves,
+                                ..draw_cx.leaves
+                            },
+                            ..draw_cx
+                        };
+                        let copy = match super::draw::tree(
+                            &self.state.read(cx).model.doc,
+                            block_id,
+                            highlighting.as_ref(),
+                        ) {
+                            Some(tree) => super::draw::draw(
+                                &tree,
+                                super::draw::Place {
+                                    first: true,
+                                    last: true,
+                                    prev: None,
+                                    depth: 0,
+                                },
+                                None,
+                                &ghost_cx,
+                                window,
+                                cx,
+                            ),
+                            None => node.render(
+                                node_ix,
+                                flow.first(true).last(true),
+                                &node_cx,
+                                window,
+                                cx,
+                            ),
+                        };
                         let theme = gpui_core::Theme::global(cx);
                         deferred(
                             div()
