@@ -518,6 +518,9 @@ pub struct DatePickerColors {
     pub hover: Option<Hsla>,
     /// Today's number (the day's colour, in semibold, unless given).
     pub today: Option<Hsla>,
+    /// A ring round today, as Notion draws it (none unless given). The day the keyboard is on
+    /// keeps its own border.
+    pub today_ring: Option<Hsla>,
     /// Days outside the month, the weekdays' names and the dots (the theme's muted foreground).
     pub muted: Option<Hsla>,
     /// The border of the day the keyboard is on (the theme's ring at half strength).
@@ -712,6 +715,10 @@ fn month_view(
         .when(picked, |b| b.bg(selected).text_color(selected_text))
         .when(!picked, |b| b.hover(move |st| st.bg(hover)))
         .when(on && !picked, |b| b.border_1().border_color(cursor_border))
+        .when_some(
+            c.today_ring.filter(|_| d == today && !picked && !on),
+            |b, ring| b.border_1().border_color(ring),
+        )
         .when(d == today && !picked, |b| {
             b.font_weight(gpui::FontWeight::SEMIBOLD)
                 .when_some(c.today, |b, today| b.text_color(today))
