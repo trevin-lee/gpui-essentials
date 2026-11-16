@@ -234,6 +234,7 @@ impl Draw<'_, '_> {
                 radius: Some(css(4.)),
                 background: Some(t.colors.sunk),
                 color: None,
+                ..Default::default()
             },
             colors: TextViewColors {
                 link: Some(t.colors.text),
@@ -243,7 +244,9 @@ impl Draw<'_, '_> {
                 table_line: Some(t.colors.line),
                 selection: Some(t.colors.accent.opacity(0.3)),
                 muted: Some(t.colors.text_muted),
+                ..Default::default()
             },
+            ..Default::default()
         };
         let view = self.cx.entity().downgrade();
         let text = TextView::markdown(self.id(&format!("{path}.md")), md.to_string())

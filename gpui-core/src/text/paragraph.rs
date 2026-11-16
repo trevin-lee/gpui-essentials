@@ -128,8 +128,11 @@ pub struct ParagraphStyle {
 pub struct CodeStyle {
     /// Its font size (the text's unless given).
     pub size: Option<Pixels>,
-    /// Space either side of it, inside its fill; half as much above and below.
+    /// Space either side of it, inside its fill.
     pub padding: Pixels,
+    /// Space above and below its ink, inside its fill: half the side padding unless given.
+    /// Negative draws the fill inside the font's ascent and descent.
+    pub padding_y: Option<Pixels>,
     /// Its fill's corners.
     pub radius: Pixels,
     /// Its text's colour (the text's unless given).
@@ -619,7 +622,7 @@ impl ParagraphLayout {
             pieces: pieces_by_row,
             code_fill: style.code_background,
             code_radius: style.code.radius,
-            code_pad_y: style.code.padding / 2.,
+            code_pad_y: style.code.padding_y.unwrap_or(style.code.padding / 2.),
             line_height: lh,
             width,
             height: top.max(lh),
