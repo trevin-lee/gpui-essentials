@@ -1,5 +1,5 @@
-//! Finding events by text: a query's words, each of which an event's title, place or link labels
-//! must contain, ignoring case and accents ("cafe" finds "Café", "zurich" finds "Zürich").
+//! Finding events by text: a query's words, each of which an event's title, place, notes or
+//! link labels must contain, ignoring case and accents ("cafe" finds "Café", "zurich" finds "Zürich").
 //! Pure string work, tested on its own.
 
 use std::ops::Range;
@@ -30,6 +30,7 @@ impl Query {
     pub fn matches(&self, event: &Event) -> bool {
         let texts: Vec<String> = std::iter::once(event.title.as_ref())
             .chain(event.location.as_deref())
+            .chain(event.notes.as_deref())
             .chain(event.links.iter().map(|l| l.label.as_ref()))
             .map(|t| fold(t).0)
             .collect();
@@ -149,6 +150,9 @@ mod tests {
         assert!(Query::new("review room").unwrap().matches(&e));
         assert!(Query::new("q4").unwrap().matches(&e));
         assert!(!Query::new("review kitchen").unwrap().matches(&e));
+        // Notes count too, accents and all.
+        let e = e.notes("Bring the résumé");
+        assert!(Query::new("resume review").unwrap().matches(&e));
         assert!(Query::new("   ").is_none());
     }
 

@@ -82,8 +82,18 @@ their look.
   over the number, "+3 more" becomes "+3", and the month's rows drop their times for the
   title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
   to "L…". `short_title()` gives the short title for a header of your own.
-- **Find:** `set_query(text)` filters the events by text: those whose title, place or link
-  labels contain every word, ignoring case and accents ("cafe zurich" finds "Café Zürich").
+- **The event panel** (`event_panel`, off by default): opening an event (a double click, Enter,
+  or a tap on the selected one on touch) shows its details beside it on the Mac, or in a sheet
+  on touch and in a narrow calendar: the title, when, the calendar (with Change, listing the
+  other calendars it can move to), the place, the notes, the links (each opens its link), the
+  guests and how they answered, Yes / Maybe / No for the guest marked `me`, and Edit and
+  Delete. `CalendarEvent::Open` is still sent, panel or not. Every action goes to your app as
+  an event: `Edit`, `Delete`, `ChangeCalendar` and `Rsvp`, the last three asking "this event,
+  following or all?" first for a repeating event. A read-only event's panel has no Edit,
+  Delete or Change. `open_panel(id)`, `close_panel()` and `panel_event()` drive it from your
+  app; Escape or a click outside closes it.
+- **Find:** `set_query(text)` filters the events by text: those whose title, place, notes or
+  link labels contain every word, ignoring case and accents ("cafe zurich" finds "Café Zürich").
   The time grid dims the rest, rings what it found and marks the found words; the month and
   the agenda show only what it found. `found()` lists them, and `query()` gives the query back.
   ⌘F (Ctrl-F elsewhere) sends `CalendarEvent::Find` for your app to focus its own search field.
@@ -182,8 +192,8 @@ fn main() {
   moved, resized or deleted, and new events never go in it. An event whose calendar isn't in
   the list is shown, editable, and gets a palette colour chosen by its calendar id.
 - **Events:** an `Event` has an id, a series id for an occurrence of a recurring event, a title,
-  an `EventTime`, a calendar id, a location, a read-only flag of its own and, rarely, a colour of
-  its own. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
+  an `EventTime`, a calendar id, a location, notes, attendees (`Attendee`: name, email,
+  `Response`, organizer, me), a read-only flag of its own and, rarely, a colour of its own. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
   iCalendar's DTEND: a one-day event on the 14th ends on the 15th. Your app supplies the events
   for the range it's told about in `RangeChange`.
 - **The calendar never changes an event.** Making, moving, resizing and deleting are proposals,
@@ -257,9 +267,10 @@ never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `dra
 selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger
 halfway through a swipe to the next day), `compact-hold` (a long press on empty time, drawn
 down), `compact-zones` (the day with a second zone), `compact-recurring` (the recurring
-question as a sheet) and `compact-find` (the list found by "CS 162"); at the Mac's size, `zones`
-is the week with India's hours beside Los Angeles', `recurring` asks the recurring question in a
-popover, and `find` finds "lunch" while the calendar takes typing. `tests/touch.rs` drives the
+question as a sheet), `compact-find` (the list found by "CS 162") and `compact-panel` (the
+design review's panel as a sheet); at the Mac's size, `zones` is the week with India's hours
+beside Los Angeles', `recurring` asks the recurring question in a popover, `find` finds "lunch"
+while the calendar takes typing, and `panel` opens the design review's panel beside it. `tests/touch.rs` drives the
 calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
@@ -285,6 +296,8 @@ gpui-core's theme.
 | ![Tuesday's standup dragged half an hour later, a popover asking which occurrences](docs/recurring.png) | ![A sheet asking which occurrences, with Cancel](docs/compact-recurring.png) |
 | **Finding "lunch", taking typing** | **Finding "CS 162" on a phone's list** |
 | ![The week with the lunches ringed and marked, the rest dimmed, and a Find pill](docs/find.png) | ![The list showing only CS 162's events](docs/compact-find.png) |
+| **An event's panel, beside it** | **The panel as a sheet on a phone** |
+| ![The design review's time, calendar, place, notes, link, guests, Going? and Edit and Delete](docs/panel.png) | ![The same details in a sheet at 390 pixels wide](docs/compact-panel.png) |
 
 ## Performance
 

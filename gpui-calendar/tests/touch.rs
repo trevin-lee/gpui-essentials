@@ -379,3 +379,27 @@ fn on_touch_the_recurring_question_is_a_sheet_with_44_point_answers(cx: &mut Tes
         .count();
     assert_eq!(moves, 1);
 }
+
+#[gpui::test]
+fn on_touch_the_event_panel_is_a_sheet_with_44_point_rows(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    c.update(cx, |c, cx| {
+        c.set_options(|o| o.event_panel = true, cx);
+        let mut e = c.event("a").unwrap().clone();
+        e.links = vec![EventLink::doc("d", "Plan")];
+        c.upsert_event(e, cx);
+    });
+    draw(cx);
+    // Selected, a tap opens it.
+    let on = spot(&c, cx, day(2), 11, 30);
+    tap(cx, on);
+    tap(cx, on);
+    assert!(has(&seen, &CalendarEvent::Open("a".into())));
+    assert!(cx.debug_bounds("calendar-sheet").is_some());
+    let link = cx.debug_bounds("panel-link-0").expect("the link");
+    assert!(link.size.height >= px(44.), "{:?}", link.size);
+    // A tap above the sheet closes it.
+    let sheet = cx.debug_bounds("calendar-sheet").unwrap();
+    tap(cx, point(sheet.center().x, sheet.top() - px(30.)));
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+}
