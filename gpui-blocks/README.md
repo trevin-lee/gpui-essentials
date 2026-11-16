@@ -95,7 +95,7 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor
-  `BlockEditorState` (see below). Its API follows the fork and can change with it.
+  `BlockEditorState` (see below). Its API is the engine's and can change with it.
 
 ## Widgets
 
@@ -295,8 +295,8 @@ has focus. Blocks being moved draw every frame until they come to rest: most of 
 The document model, input, selection, undo and text drawing come from
 [gpui-kit-markdown-editor](https://github.com/wabzqem/gpui-kit-markdown-editor), which draws
 through GPUI Kit's editor host API. They come through
-[a fork](https://github.com/trevin-lee/gpui-kit-markdown-editor) that adds callouts,
-toggles, block motion, and the hooks this crate needs to draw its menus. This crate adds the slash
+a fork of it in [engine/](engine/) (`gpui-blocks-engine`, not published on its own) that adds
+callouts, toggles, block motion, and the hooks this crate needs to draw its menus. This crate adds the slash
 menu, the side menu, the widget API and the example.
 
 ## Status
@@ -305,8 +305,8 @@ Early, and used for one app so far. It's tested on macOS, and CI builds it for i
 touch input is tested headlessly but not yet on a device. GPUI also runs on Linux and Windows,
 but this crate hasn't been tried there.
 
-It isn't on crates.io yet. It depends on the fork by git commit, and crates.io won't accept a git
-dependency. The fork's changes haven't been offered upstream yet.
+It isn't on crates.io yet; the engine would have to be published with it. The engine's changes
+haven't been offered upstream yet.
 
 Not done yet:
 - Dragging blocks nested inside lists, quotes and toggles.
