@@ -314,14 +314,14 @@ impl TableView {
                 PropertyType::Checkbox => t.sizes.text + 1. + 6. + text_width(&prop.name, small),
                 PropertyType::Select => match r
                     .value(&prop.id)
-                    .and_then(Value::as_str)
+                    .and_then(Value::option_id)
                     .and_then(|id| prop.option(id))
                 {
                     Some(o) => chip(&o.name),
                     None => continue,
                 },
                 PropertyType::MultiSelect => {
-                    let ids = r.value(&prop.id).and_then(Value::as_ids).unwrap_or(&[]);
+                    let ids = r.value(&prop.id).and_then(Value::option_ids).unwrap_or(&[]);
                     let chips: Vec<f32> = ids
                         .iter()
                         .filter_map(|id| prop.option(id))

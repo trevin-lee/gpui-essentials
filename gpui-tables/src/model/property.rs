@@ -60,6 +60,50 @@ impl PropertyType {
         )
     }
 
+    /// The types a person can give a property, in the order the menus list them: every type
+    /// but the title (a database has exactly one, which no other can become).
+    pub const ADDABLE: &'static [PropertyType] = &[
+        Self::Text,
+        Self::Number,
+        Self::Select,
+        Self::MultiSelect,
+        Self::Date,
+        Self::Checkbox,
+        Self::Url,
+        Self::Email,
+        Self::Phone,
+        Self::Person,
+        Self::Relation,
+        Self::CreatedTime,
+        Self::EditedTime,
+        Self::CreatedBy,
+        Self::EditedBy,
+    ];
+
+    /// Its name in menus, and a new property's name until it's given one: "Multi-select",
+    /// "Created time". A type this version doesn't know is named as it's written.
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Title => "Title",
+            Self::Text => "Text",
+            Self::Number => "Number",
+            Self::Select => "Select",
+            Self::MultiSelect => "Multi-select",
+            Self::Date => "Date",
+            Self::Checkbox => "Checkbox",
+            Self::Url => "URL",
+            Self::Email => "Email",
+            Self::Phone => "Phone",
+            Self::Person => "Person",
+            Self::Relation => "Relation",
+            Self::CreatedTime => "Created time",
+            Self::EditedTime => "Edited time",
+            Self::CreatedBy => "Created by",
+            Self::EditedBy => "Edited by",
+            Self::Other(s) => s,
+        }
+    }
+
     /// Whether a view can group by it.
     pub fn can_group(&self) -> bool {
         matches!(
@@ -124,7 +168,8 @@ pub struct SelectOption {
 /// - relation: `databaseId`, `twoWay`, `backPropertyId`
 /// - person: `kinds`
 ///
-/// Keys that don't apply are left out when written. Absent and null mean the same.
+/// Keys that don't apply are left out when written, except `options`, which a property keeps
+/// through a change of type ([`Property::retyped`]). Absent and null mean the same.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PropertyConfig {
@@ -154,6 +199,24 @@ pub struct PropertyConfig {
     pub kinds: Option<Vec<PersonKind>>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+impl PropertyConfig {
+    /// What a new property of `kind` starts with: a number plain, a select or multi-select
+    /// with no options, a date without its time, a person allowing the owner and agents. A
+    /// relation's database (and whether it's two-way) is the maker's to set; every other type
+    /// has nothing to set.
+    pub fn default_for(kind: &PropertyType) -> Self {
+        let mut config = Self::default();
+        match kind {
+            PropertyType::Number => config.format = Some(NumberFormat::Plain),
+            PropertyType::Select | PropertyType::MultiSelect => config.options = Some(Vec::new()),
+            PropertyType::Date => config.include_time = Some(false),
+            PropertyType::Person => config.kinds = Some(vec![PersonKind::Owner, PersonKind::Agent]),
+            _ => {}
+        }
+        config
+    }
 }
 
 /// A database's column: a name, a type and its settings.
@@ -201,6 +264,45 @@ impl Property {
     pub fn with_config(mut self, config: PropertyConfig) -> Self {
         self.config = config;
         self
+    }
+
+    /// The property changed to `kind`, as changing its type from a view does: the new type's
+    /// [`PropertyConfig::default_for`], keeping the options it had (so a select becomes a
+    /// multi-select with the same options, and a select changed to text and back finds them
+    /// again) and the config keys this version doesn't know. Rows are never rewritten: their
+    /// values stay as they were and are read as the new type reads them
+    /// ([`Value::option_ids`](super::Value::option_ids), [`Property::shown_text`]), empty
+    /// where they don't fit. The title can't change type, and nothing can become a title:
+    /// either way the property comes back unchanged.
+    pub fn retyped(&self, kind: PropertyType) -> Property {
+        if self.kind == PropertyType::Title || kind == PropertyType::Title || kind == self.kind {
+            return self.clone();
+        }
+        let mut config = PropertyConfig::default_for(&kind);
+        if let Some(options) = &self.config.options
+            && !options.is_empty()
+        {
+            config.options = Some(options.clone());
+        }
+        config.extra = self.config.extra.clone();
+        Property {
+            kind,
+            config,
+            ..self.clone()
+        }
+    }
+
+    /// Text as a title, text, URL, email or phone cell shows it: the name of the option it
+    /// names, when the property was a select or multi-select and kept its options (its values
+    /// are option ids), else the text itself.
+    pub fn shown_text<'a>(&'a self, text: &'a str) -> &'a str {
+        match self.config.options.as_deref() {
+            Some(options) if !options.is_empty() => options
+                .iter()
+                .find(|o| o.id == text)
+                .map_or(text, |o| o.name.as_str()),
+            _ => text,
+        }
     }
 
     /// A select's or multi-select's options, in their order (empty for other types).
