@@ -1,0 +1,267 @@
+[
+  {
+    "type": "openRow",
+    "rowId": "4fd58dbe-7bdc-468b-bafb-2c68774b15d7"
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowCreated",
+        "rowId": "8b6a2a3e-5f0c-4d55-8d1e-2a9b7c6d5e41",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "order": "a9",
+        "title": "Marisol Quint",
+        "values": {
+          "6b4cb242-4a23-4596-a217-beaddbc496cb": "5affb229-7631-4992-b0ce-583505c6af07",
+          "923a7369-94e3-4f91-9a61-dbe22e44158b": true
+        }
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowTitleChanged",
+        "rowId": "fa529ba3-fe3b-4ada-bcf2-0724d953ee26",
+        "title": "Theo Brandt-Lindqvist"
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowValueChanged",
+        "rowId": "fa529ba3-fe3b-4ada-bcf2-0724d953ee26",
+        "propertyId": "c6f87718-6d76-407e-881e-d162ae2eb154",
+        "value": 3
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowValueChanged",
+        "rowId": "fa529ba3-fe3b-4ada-bcf2-0724d953ee26",
+        "propertyId": "8e81973e-0bec-47b0-b898-d190f9ebdacc",
+        "value": null
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowValueChanged",
+        "rowId": "7a86f7a2-43c7-4b9a-bd87-a86557b6fb7e",
+        "propertyId": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+        "value": {
+          "start": 1794787200000,
+          "end": 1795046400000,
+          "includeTime": false
+        }
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowsMoved",
+        "rowIds": [
+          "fa529ba3-fe3b-4ada-bcf2-0724d953ee26"
+        ],
+        "orders": [
+          "a2V"
+        ]
+      },
+      {
+        "type": "rowValueChanged",
+        "rowId": "fa529ba3-fe3b-4ada-bcf2-0724d953ee26",
+        "propertyId": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+        "value": "7e62aa0a-1df9-4d78-9c65-39382b0537e6"
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowValueChanged",
+        "rowId": "9a2ef80f-58ee-4571-b499-8d7c4093f6de",
+        "propertyId": "7f150524-34b9-45df-9e77-69b10f4205b4",
+        "value": [
+          "c215a82a-06ec-41ad-aa05-75438b0d590b",
+          "80b0c08b-c770-4420-8aa4-248c8857f9a4",
+          "9cfc8652-3919-4242-a2ed-dbbd5464ecc2"
+        ]
+      },
+      {
+        "type": "relationChanged",
+        "rowId": "9a2ef80f-58ee-4571-b499-8d7c4093f6de",
+        "propertyId": "7f150524-34b9-45df-9e77-69b10f4205b4",
+        "databaseId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+        "backPropertyId": "451abd81-f1d6-4ed6-97f5-e837d70820fe",
+        "added": [
+          "9cfc8652-3919-4242-a2ed-dbbd5464ecc2"
+        ],
+        "removed": []
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "rowsDeleted",
+        "rowIds": [
+          "b0a844e5-2587-4e6b-9c9b-cf35873be078"
+        ]
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "propertyCreated",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "property": {
+          "id": "5c1e8f3a-9d2b-4a7e-b6c0-1f2e3d4c5b6a",
+          "name": "Birthday",
+          "type": "date",
+          "config": {
+            "includeTime": false,
+            "range": false
+          },
+          "order": "aF"
+        }
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "propertyChanged",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "property": {
+          "id": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+          "name": "Stage",
+          "type": "select",
+          "config": {
+            "options": [
+              {
+                "id": "5affb229-7631-4992-b0ce-583505c6af07",
+                "name": "Lead",
+                "color": "gray"
+              },
+              {
+                "id": "7e62aa0a-1df9-4d78-9c65-39382b0537e6",
+                "name": "Warm",
+                "color": "yellow"
+              },
+              {
+                "id": "49952399-c4aa-4ac1-b7dc-76fb0f17a300",
+                "name": "Active",
+                "color": "green"
+              },
+              {
+                "id": "65dc9f50-3f63-4f83-bd05-61e6211c70cf",
+                "name": "Dormant",
+                "color": "brown"
+              },
+              {
+                "id": "2d0f4c55-5a3e-4b8e-9c51-7f1f3c2b9a10",
+                "name": "Closed",
+                "color": "red"
+              }
+            ]
+          },
+          "order": "a5"
+        }
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "propertyDeleted",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "propertyId": "907a70c3-1012-4037-b64c-e4228c38fb29"
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "viewCreated",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "view": {
+          "id": "0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b",
+          "name": "Agents' contacts",
+          "type": "table",
+          "order": "a3",
+          "sort": [],
+          "filter": {
+            "propertyId": "18f135d2-5f55-4203-b018-50c5a38fd547",
+            "op": "contains",
+            "value": {
+              "kind": "agent",
+              "agentId": "career-planning"
+            }
+          },
+          "groupBy": null,
+          "columns": [],
+          "cardProperties": [],
+          "collapsedGroups": []
+        }
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "viewChanged",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "view": {
+          "id": "f3aed0b6-c7ac-4491-9ef8-8334e647cb8f",
+          "name": "Pipeline",
+          "type": "board",
+          "order": "a1",
+          "sort": [
+            {
+              "propertyId": "c6f87718-6d76-407e-881e-d162ae2eb154",
+              "direction": "descending"
+            }
+          ],
+          "filter": null,
+          "groupBy": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+          "columns": [],
+          "cardProperties": [
+            "a170b338-3926-4059-b28c-105d1fb17c23",
+            "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+            "18f135d2-5f55-4203-b018-50c5a38fd547"
+          ],
+          "collapsedGroups": []
+        }
+      }
+    ]
+  },
+  {
+    "type": "edits",
+    "edits": [
+      {
+        "type": "viewDeleted",
+        "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+        "viewId": "0e9d8c7b-6a5f-4e3d-8c2b-1a0f9e8d7c6b"
+      }
+    ]
+  }
+]
