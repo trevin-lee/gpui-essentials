@@ -7,11 +7,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, Utc};
-use gpui_calendar::*;
-use gpui_kit::{
+use gpui::{
     Entity, Focusable as _, Pixels, Point, TestAppContext, TouchEvent, TouchId, TouchPhase,
     VisualTestContext, point, px, size,
 };
+use gpui_calendar::*;
 
 const TZ: chrono_tz::Tz = chrono_tz::America::Los_Angeles;
 type Seen = Rc<RefCell<Vec<CalendarEvent>>>;
@@ -38,7 +38,7 @@ fn events() -> Vec<Event> {
 
 fn open(cx: &mut TestAppContext) -> (Entity<Calendar>, Seen, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        gpui_core::init(cx);
         gpui_calendar::init(cx);
     });
     let (calendar, cx) = cx.add_window_view(|_, cx| {
@@ -182,7 +182,7 @@ fn unchanged(c: &Entity<Calendar>, cx: &VisualTestContext) {
     c.read_with(cx, |c, _| assert_eq!(c.events(), events().as_slice()));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_long_press_on_empty_time_proposes_an_hour_there(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let p = spot(&c, cx, day(1), 14, 5);
@@ -197,7 +197,7 @@ fn a_long_press_on_empty_time_proposes_an_hour_there(cx: &mut TestAppContext) {
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_long_press_picks_an_event_up_and_the_finger_moves_it(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     long_press(
@@ -224,7 +224,7 @@ fn a_long_press_picks_an_event_up_and_the_finger_moves_it(cx: &mut TestAppContex
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_selected_event_follows_a_finger_and_a_tap_on_it_opens_it(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let on = spot(&c, cx, day(2), 11, 30);
@@ -246,7 +246,7 @@ fn the_selected_event_follows_a_finger_and_a_tap_on_it_opens_it(cx: &mut TestApp
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_selected_events_handle_takes_a_finger_beside_its_edge(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     tap(cx, spot(&c, cx, day(2), 11, 30));
@@ -267,7 +267,7 @@ fn the_selected_events_handle_takes_a_finger_beside_its_edge(cx: &mut TestAppCon
     unchanged(&c, cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_tap_beside_a_short_event_selects_it(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let b = c
@@ -278,7 +278,7 @@ fn a_tap_beside_a_short_event_selects_it(cx: &mut TestAppContext) {
     assert!(has(&seen, &CalendarEvent::Select(Some("short".into()))));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_swipe_sideways_turns_the_period_and_a_short_one_springs_back(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     let mid = spot(&c, cx, day(2), 13, 0);
@@ -297,7 +297,7 @@ fn a_swipe_sideways_turns_the_period_and_a_short_one_springs_back(cx: &mut TestA
     assert!((again.x - mid.x).abs() < px(1.), "{again:?} vs {mid:?}");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_flick_turns_the_period_at_any_touch_rate(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     let mid = spot(&c, cx, day(2), 13, 0);
@@ -315,7 +315,7 @@ fn a_flick_turns_the_period_at_any_touch_rate(cx: &mut TestAppContext) {
     assert_eq!(date(&c, cx), day(2));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_pan_up_scrolls_the_day(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     let before = c.read_with(cx, |c, _| c.scroll_minute());
@@ -325,7 +325,7 @@ fn a_pan_up_scrolls_the_day(cx: &mut TestAppContext) {
     assert!(after > before + 60., "{before} -> {after}");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_header_on_touch_has_44_point_controls_and_no_arrows(cx: &mut TestAppContext) {
     let (_, _, cx) = open(cx);
     let controls = cx.debug_bounds("calendar-controls").expect("a header");

@@ -39,7 +39,7 @@ pub use theme::{CalendarColors, PALETTE, palette_color};
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
-/// Sets the calendar up: its key bindings. Call once, after `gpui_kit::init`.
-pub fn init(cx: &mut gpui_kit::App) {
+/// Sets the calendar up: its key bindings. Call once, after `gpui_core::init`.
+pub fn init(cx: &mut gpui::App) {
     bind_keys(cx);
 }

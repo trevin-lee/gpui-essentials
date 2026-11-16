@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime, Utc, Weekday};
 use chrono_tz::Tz;
-use gpui_kit::SharedString;
+use gpui::SharedString;
 
 /// An event's id: whatever the host uses to find it again. For a recurring event it names one
 /// occurrence (an instance id), and [`Event::series`] names the series.

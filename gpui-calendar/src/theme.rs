@@ -1,9 +1,9 @@
-//! The calendar's colours. By default they come from the GPUI Kit theme, so the calendar looks
-//! like the GPUI Kit app around it, and events take their calendar's colour from the host or from a
+//! The calendar's colours. By default they come from gpui-core's theme, so the calendar looks
+//! like the app around it, and events take their calendar's colour from the host or from a
 //! palette chosen for the charcoal theme.
 
-use gpui_kit::component::Theme;
-use gpui_kit::{App, Hsla, rgb};
+use gpui::{App, Hsla, rgb};
+use gpui_core::Theme;
 
 /// Every colour the calendar draws with, other than events'.
 #[derive(Clone, Copy, Debug)]
@@ -28,7 +28,7 @@ pub struct CalendarColors {
 }
 
 impl CalendarColors {
-    /// The calendar's colours for the current GPUI Kit theme.
+    /// The calendar's colours for the current gpui-core theme.
     pub fn from_theme(cx: &App) -> Self {
         let c = &Theme::global(cx).colors;
         Self {
@@ -86,7 +86,7 @@ pub struct ChipColors {
 pub fn mix(bottom: Hsla, top: Hsla, alpha: f32) -> Hsla {
     let (a, b) = (bottom.to_rgb(), top.to_rgb());
     let m = |x: f32, y: f32| x + (y - x) * alpha;
-    gpui_kit::Rgba {
+    gpui::Rgba {
         r: m(a.r, b.r),
         g: m(a.g, b.g),
         b: m(a.b, b.b),
