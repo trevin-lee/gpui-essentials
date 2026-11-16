@@ -82,7 +82,8 @@ pub(crate) fn block_role(node: &BlockNode) -> Option<(Role, Option<usize>)> {
 
 impl RenderOnce for BlockEditor {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = gpui_kit::base::Theme::global(cx);
+        // The editor's look: gpui-core's theme, which the host sets.
+        let look = gpui_core::Theme::global(cx).clone();
         // Links are followed by the editor itself (Cmd/Ctrl-click); the shared
         // renderer must never open a URL on its own.
         let mut render_cx = RenderContext::from_app(cx).on_link_click(|_, _, _, _| {});
@@ -92,9 +93,9 @@ impl RenderOnce for BlockEditor {
             render_cx = render_cx.with_image_source(move |uri| source(uri));
         }
         let text_style = render_cx.style().clone();
-        let mut style = self.state.read(cx).style.resolved(&theme.tokens);
+        let mut style = self.state.read(cx).style.resolved(&look);
         if style.selection_is_default() {
-            style = style.with_selection(text_style.selection());
+            style = style.with_selection(look.selection());
         }
         // Read the prior frame before request_layout can reset shared text
         // layouts. Manual scrolling must not become a reflow reveal request.
@@ -169,19 +170,29 @@ impl RenderOnce for BlockEditor {
         let body_size = typography.font_size.to_pixels(rem);
         let body_line = super::draw::device_line(typography.line_height_in_pixels(rem), window);
         let text_colors = super::draw::Colors {
-            muted: text_style.muted_foreground(),
-            link: text_style.link(),
-            code_background: text_style.code_background(),
-            mono: theme.tokens.typography.mono.clone(),
-            border: text_style.border(),
-            surface: theme.tokens.colors.surface,
+            muted: look.muted_foreground,
+            link: look.primary,
+            code_background: look.muted,
+            mono: look.mono_font_family.clone(),
+            border: look.border,
+            surface: look.background,
         };
         let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
+        // The theme's sizes are in rems of its own text size.
+        let in_px = |r: gpui::Rems| look.font_size * r.0;
         let code_look = super::draw::CodeLook {
-            size: theme.tokens.typography.mono_md.size,
-            label_family: theme.tokens.typography.sans.clone(),
-            label_size: theme.tokens.typography.xs.size,
-            refinement: text_style.code_block().clone(),
+            size: in_px(look.text.sm),
+            label_family: look.font_family.clone(),
+            label_size: in_px(look.text.xs),
+            refinement: {
+                let radius: gpui::AbsoluteLength = in_px(look.radius_md()).into();
+                let mut corners = gpui::StyleRefinement::default();
+                corners.corner_radii.top_left = Some(radius);
+                corners.corner_radii.top_right = Some(radius);
+                corners.corner_radii.bottom_left = Some(radius);
+                corners.corner_radii.bottom_right = Some(radius);
+                corners
+            },
         };
         // Code blocks are the engine's to draw when the host gave a highlighter; their
         // highlights are kept for blocks still in the document.
@@ -202,7 +213,7 @@ impl RenderOnce for BlockEditor {
             body_line,
             paragraph_gap,
             colors: &text_colors,
-            dark: text_style.is_dark(),
+            dark: look.mode.is_dark(),
             bands: &backgrounds,
             leaves: super::draw::LeafContext {
                 extensions: &own_extensions,
@@ -453,8 +464,7 @@ impl RenderOnce for BlockEditor {
                         // Without the margins it has among other blocks.
                         let copy =
                             node.render(node_ix, flow.first(true).last(true), &node_cx, window, cx);
-                        use gpui_kit::component::ActiveTheme as _;
-                        let theme = cx.theme();
+                        let theme = gpui_core::Theme::global(cx);
                         deferred(
                             div()
                                 .id(("dragged-block", block_id.as_u64() as usize))
