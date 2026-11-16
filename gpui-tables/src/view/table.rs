@@ -131,6 +131,8 @@ pub(crate) struct PendingText {
     kind: PropertyType,
     label: String,
     text: String,
+    /// The most characters the value may have (the limits'), if it has a limit.
+    max_chars: Option<usize>,
 }
 
 /// A typed value being edited in place, with gpui-core's Input.
@@ -982,18 +984,15 @@ impl TableView {
         // Another field open in place commits first.
         self.finish_editor(true, false, window, cx);
         self.text_token += 1;
+        let max_chars = self.host.limits().text_limit(&p.kind);
         self.pending_text = Some(PendingText {
             token: self.text_token,
             target: target.clone(),
             kind: p.kind.clone(),
             label: p.name.clone(),
             text: text.clone(),
+            max_chars,
         });
-        let limits = self.host.limits();
-        let max_chars = match p.kind {
-            PropertyType::Title => Some(limits.title_chars),
-            _ => limits.text_limit(&p.kind),
-        };
         let edit = TextEdit {
             target,
             kind: p.kind.clone(),
@@ -1039,10 +1038,16 @@ impl TableView {
             } else {
                 InputState::new(window, cx)
             };
-            state
+            let state = state
                 .placeholder(placeholder)
                 .default_value(text)
-                .keyboard(keyboard)
+                .keyboard(keyboard);
+            // Typing stops at the limit and a paste is cut to fit; the value it opens with
+            // isn't cut, so what's committed is cut again (`apply_text`).
+            match pending.max_chars {
+                Some(max) => state.max_chars(max),
+                None => state,
+            }
         });
         let events = cx.subscribe_in(
             &state,
@@ -1213,7 +1218,11 @@ impl TableView {
                     if t.is_empty() {
                         return;
                     }
-                    serde_json::Value::String(t.to_owned())
+                    // Cut to the limit a value of its type has, as a cell's is.
+                    match limits.clamp_value(p, Value::text(t)) {
+                        Value::Text(t) => serde_json::Value::String(t),
+                        _ => serde_json::Value::String(t.to_owned()),
+                    }
                 };
                 if let Some(view) = self.shown.view.clone() {
                     let view = ops::filter(

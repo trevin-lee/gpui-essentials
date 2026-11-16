@@ -190,19 +190,21 @@ rendered offscreen).
   gpui-core's `Input`, so input methods, selection, the clipboard, undo and the platform's
   editing keys work as in any field. Enter, F2, a second press or a double-click opens the field
   holding the value (a title's opens with F2 or a press, as Enter opens its row). A title,
-  number, URL, email or phone is typed on one line inside its cell, sized to it. A text value
+  number, URL, email or phone is typed on one line inside its cell, sized to it, a number at the
+  right as its cell shows it. A text value
   can have several lines: its field is a textarea over the cell, at least a menu's width, that
   grows down over the rows below as lines are added (to eight, then it scrolls), with
   Shift-Enter making a new line. Enter commits, Tab and Shift-Tab commit and move to the next
   or previous cell, a press anywhere else commits (the field losing the focus; the window going
-  to the background doesn't), and Escape closes it with nothing changed. The table reads the
-  text as the property's type (`1,200`, `$1,200`, `25%`), cuts it to the limits and emits the
-  edit (`rowTitleChanged` for a title); text committed unchanged, or that isn't a number for a
-  number, emits nothing. The field is drawn in the theme: the table's text and font, the
+  to the background doesn't), and Escape closes it with nothing changed. Typing stops at the
+  value's limit ([Limits](#limits)) and a paste is cut to fit, as the web's `maxlength`; a value
+  already longer (an agent's) opens whole. The table reads the text as the property's type
+  (`1,200`, `$1,200`, `25%`), cuts it to the limits and emits the edit (`rowTitleChanged` for a
+  title); text committed unchanged, or that isn't a number for a number, emits nothing. The field is drawn in the theme: the table's text and font, the
   accent's caret and selection, faint placeholder text, the focus colour's edge.
 - **Filter values** (a text column's Contains…, a number's Equals…, Greater than… and Less
-  than…) are typed the same way, in a field under the column's header: Enter, Tab or a press
-  elsewhere filters by it, Escape doesn't.
+  than…) are typed the same way, in a field under the column's header, to the limit of a
+  value of the column's type: Enter, Tab or a press elsewhere filters by it, Escape doesn't.
 - **A field of the host's own.** A host that implements `TableHost::edit_text` gets each typed
   value instead (a `TextEdit` with the target, the type, the text, its limit and the cell's
   bounds) and answers with `reply.commit(text)` or `reply.cancel()`; the table reads, limits and
@@ -611,9 +613,10 @@ alphabet is invalid here, where that library accepts some.
 ## Limits
 
 Agents write rows too, so `Limits` caps what a database and its rows may hold. The server checks
-writes against the same numbers, the crate clamps what people type and paste
-(`Limits::clamp_value`), and the engine ignores what's over (a filter too deep, a sort too many)
-and reports it. Nothing over a limit panics. Strings count Unicode characters.
+writes against the same numbers, the crate stops typing at them and cuts what people paste and
+commit (`Limits::clamp_value`), and the engine ignores what's over (a filter too deep, a sort too
+many) and reports it. Nothing over a limit panics. Strings count Unicode characters (scalar
+values, as gpui-core's `InputState::max_chars` does).
 
 `Limits::check_doc` lists every problem with a doc, each a path from the doc's root and a message,
 like `database.properties[3].config.options: 201 is more than 200` or `values.<phone>: 65
@@ -814,6 +817,11 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
   (grouped or not, focused, with a finger's sizes, and the worst valid icons), laid out with
   Core Text; no glyph leaves its place.
+- `tests/fields.rs`: the fields values are typed in, in place, laid out with Core Text: typing
+  stops at a value's limit (counted in characters, a title's, an email's, a filter value's), a
+  paste is cut to fit, a value already over its limit opens whole and commits cut, a host's
+  field is told the limit and its answer is cut, and a number is typed at the right, where its
+  cell shows it.
 - `tests/view_performance.rs`: the table, the board and the list with 10,000 rows, timed, as
   above.
 - Unit tests for fractional indexes and calendar arithmetic.
