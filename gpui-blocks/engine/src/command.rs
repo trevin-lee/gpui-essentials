@@ -14,7 +14,7 @@ use super::{
 };
 use gpui::SharedString;
 
-use gpui_kit::base::text::editor_host::TextMark;
+use crate::text_mark::TextMark;
 
 #[non_exhaustive]
 #[derive(Clone, PartialEq, Debug)]

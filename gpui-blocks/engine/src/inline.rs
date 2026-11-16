@@ -2,10 +2,8 @@ use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
-use gpui_kit::base::text::{
-    MarkdownNode,
-    editor_host::{ImageNode, TextMark},
-};
+use crate::text_mark::{ImageNode, TextMark};
+use gpui_kit::base::text::MarkdownNode;
 
 /// The placeholder an inline atom occupies in the flat text.
 pub(crate) const ATOM_CHAR: char = '\u{FFFC}';

@@ -18,10 +18,9 @@ use super::{
     step::{DetachedBlock, DetachedContent},
     transaction::TransactionBuilder,
 };
-use gpui_kit::base::text::{
-    MarkdownExtensions, MarkdownNode,
-    editor_host::{ColumnAlign, ImageNode, LinkMark, TextMark},
-};
+use crate::kind::ColumnAlign;
+use crate::text_mark::{ImageNode, LinkMark, TextMark};
+use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode};
 
 /// The name of a block kept as the Markdown source it was (raw HTML, a footnote), and of an
 /// inline piece kept so.
@@ -632,11 +631,11 @@ fn with(mark: &TextMark, add: TextMark) -> TextMark {
 }
 
 fn image_node(url: &str, title: Option<String>, alt: &str) -> ImageNode {
-    let mut node = ImageNode::default();
-    node.url = url.to_string().into();
-    node.title = title.map(Into::into);
-    node.alt = Some(alt.to_string().into());
-    node
+    ImageNode {
+        url: url.to_string().into(),
+        title: title.map(Into::into),
+        alt: Some(alt.to_string().into()),
+    }
 }
 
 fn collect_definitions(node: &Node, out: &mut Definitions) {

@@ -22,7 +22,7 @@ use super::{
     transaction::{EditOrigin, Transaction, TransactionBuilder},
     undo::BlockUndoManager,
 };
-use gpui_kit::base::text::editor_host::TextMark;
+use crate::text_mark::TextMark;
 
 /// Headless editor facade (spike name). Phase 3 wraps this in the
 /// `BlockEditorState` entity.

@@ -10,10 +10,10 @@ use super::{
     inline::{InlineAtom, InlineText},
     kind::BlockKindData,
 };
+use crate::kind::ColumnAlign;
 use crate::markdown_source::{
     MarkdownSource, MarkdownSourceOptions, markdown_destination, markdown_title,
 };
-use gpui_kit::base::text::editor_host::ColumnAlign;
 
 pub(crate) fn editor_source_options() -> MarkdownSourceOptions {
     MarkdownSourceOptions {

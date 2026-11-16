@@ -75,6 +75,7 @@ mod style;
 mod support;
 pub(crate) mod table;
 mod table_ui;
+mod text_mark;
 mod transaction;
 mod undo;
 
@@ -91,8 +92,8 @@ pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
 pub use extension::{CustomNode, Extension, Extensions, InlineContext};
-pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
+pub use kind::ColumnAlign;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;
