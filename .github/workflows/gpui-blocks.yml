@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - "gpui-blocks/**"
+      # The engine draws with gpui-core's paragraph layer.
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -13,6 +15,8 @@ on:
   pull_request:
     paths:
       - "gpui-blocks/**"
+      # The engine draws with gpui-core's paragraph layer.
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -42,7 +46,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then echo own=true >> "$GITHUB_OUTPUT"; exit 0; fi
           gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename' > files
-          if grep -qE '^(gpui\-blocks/|\.github/workflows/gpui\-blocks\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
+          if grep -qE '^(gpui\-blocks/|gpui\-core/|\.github/workflows/gpui\-blocks\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
