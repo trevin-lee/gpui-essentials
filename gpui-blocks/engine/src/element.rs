@@ -87,7 +87,8 @@ impl RenderOnce for BlockEditor {
         // renderer must never open a URL on its own.
         let mut render_cx = RenderContext::from_app(cx).on_link_click(|_, _, _, _| {});
         // Pictures load through the host's loader when it gives one.
-        if let Some(source) = self.state.read(cx).image_source() {
+        let image_source = self.state.read(cx).image_source();
+        if let Some(source) = image_source.clone() {
             render_cx = render_cx.with_image_source(move |uri| source(uri));
         }
         let text_style = render_cx.style().clone();
@@ -188,6 +189,7 @@ impl RenderOnce for BlockEditor {
             leaves: super::draw::LeafContext {
                 extensions: &own_extensions,
                 leaves: &own_leaves,
+                images: image_source.as_ref(),
             },
         };
         let mut children: Vec<AnyElement> = Vec::new();
