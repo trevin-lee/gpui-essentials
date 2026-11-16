@@ -50,6 +50,33 @@ impl CalendarSource {
     }
 }
 
+/// Which occurrences of a recurring event an edit is for: the person's answer to "This event,
+/// this and following events, or all events?". An edit to an event that isn't recurring is
+/// always [`EditScope::This`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum EditScope {
+    /// Only the occurrence touched.
+    #[default]
+    This,
+    /// The occurrence touched and every later one.
+    ThisAndFollowing,
+    /// Every occurrence in the series.
+    All,
+}
+
+impl EditScope {
+    pub const ALL: [EditScope; 3] = [EditScope::This, EditScope::ThisAndFollowing, EditScope::All];
+
+    /// What the choice says.
+    pub fn label(self) -> &'static str {
+        match self {
+            EditScope::This => "This event",
+            EditScope::ThisAndFollowing => "This and following events",
+            EditScope::All => "All events",
+        }
+    }
+}
+
 /// Which event an edit is about: the occurrence's id, its series if it's one of a recurring
 /// event's, and its calendar. The host decides whether a change to an occurrence changes that
 /// one only or the whole series.

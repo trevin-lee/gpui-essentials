@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
-use gpui::{Bounds, Pixels, TestAppContext, TestDispatcher, px, size};
+use gpui::{Bounds, Pixels, TestAppContext, TestDispatcher, point, px, size};
 use gpui_core::Theme;
 
 use crate::paint::drawn;
@@ -354,4 +354,99 @@ fn a_second_zone_fits_at_every_width() {
     check_widths_with(&views, &widths, 820., |o| {
         o.secondary_zone = Some(chrono_tz::Australia::Lord_Howe)
     });
+}
+
+/// The recurring-event question fits the window at every width and height: a popover on the
+/// Mac, hung from the event (one at the week's right edge, and one too tall for room above or
+/// below, where it goes beside) and never over it; a sheet on touch.
+#[test]
+fn the_recurring_question_fits_at_every_width() {
+    for touch in [false, true] {
+        let mut cx = context();
+        let (calendar, vcx) = cx.add_window_view(|_, cx| {
+            let mut events = worst_week();
+            events.push(
+                Event::timed("r@6", "Repeats", at(day(6), 9, 0), at(day(6), 10, 0)).series("r"),
+            );
+            events.push(
+                Event::timed("tall@5", "Long", at(day(5), 8, 0), at(day(5), 20, 0)).series("t"),
+            );
+            let mut c = Calendar::new(cx)
+                .with_options(|o| {
+                    o.time_zone = TZ;
+                    o.touch = touch;
+                })
+                .with_now(at(day(2), 10, 40))
+                .with_date(day(2))
+                .with_events(events);
+            c.scroll_to_minute(8. * 60.);
+            c
+        });
+        let mut found = Vec::new();
+        for (w, h) in [
+            (320., 800.),
+            (390., 844.),
+            (720., 600.),
+            (1280., 800.),
+            (2200., 900.),
+        ] {
+            vcx.simulate_resize(size(px(w), px(h)));
+            for id in ["r@6", "tall@5"] {
+                calendar.update(vcx, |c, cx| {
+                    c.dismiss_question(cx);
+                    c.set_view(CalendarView::Week, cx);
+                    c.scroll_to_minute(8. * 60.);
+                    c.select(Some(Selection::Event(id.into())), cx);
+                });
+                for _ in 0..2 {
+                    vcx.run_until_parked();
+                    vcx.update(|window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                }
+                let event = calendar.read_with(vcx, |c, _| c.event_bounds(id));
+                calendar.update(vcx, |c, cx| c.delete_selected(cx));
+                vcx.run_until_parked();
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+                assert!(calendar.read_with(vcx, |c, _| c.is_asking()));
+                let window = Bounds::new(point(px(0.), px(0.)), size(px(w), px(h)));
+                let panel = if touch {
+                    "calendar-sheet"
+                } else {
+                    "calendar-popover"
+                };
+                let b = vcx.debug_bounds(panel).expect("the question");
+                let inside = |r: Bounds<Pixels>, of: Bounds<Pixels>| {
+                    r.left() >= of.left() - px(0.5)
+                        && r.right() <= of.right() + px(0.5)
+                        && r.top() >= of.top() - px(0.5)
+                        && r.bottom() <= of.bottom() + px(0.5)
+                };
+                if !inside(b, window) {
+                    found.push(format!("{w}x{h}, {id}, touch {touch}: {panel} {b:?}"));
+                }
+                if !touch && let Some(event) = event {
+                    let both = b.intersect(&event);
+                    if both.size.width > px(0.) && both.size.height > px(0.) {
+                        found.push(format!("{w}x{h}, {id}: popover {b:?} covers {event:?}"));
+                    }
+                }
+                for i in 0..3 {
+                    let sel: &'static str = Box::leak(format!("scope-{i}").into_boxed_str());
+                    let row = vcx.debug_bounds(sel).expect("an answer");
+                    if !inside(row, b) {
+                        found.push(format!("{w}x{h}, {id}: answer {i} {row:?} in {b:?}"));
+                    }
+                    if touch && row.size.height < px(44.) {
+                        found.push(format!("{w}x{h}: answer {i} is {:?} tall", row.size.height));
+                    }
+                }
+            }
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
 }

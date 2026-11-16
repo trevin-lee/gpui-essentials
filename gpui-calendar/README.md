@@ -141,7 +141,8 @@ fn main() {
                 cx.subscribe(&calendar, |calendar, event: &CalendarEvent, cx| match event {
                     // The app owns the events: it agrees to a move by setting the event again.
                     // `event.series` says it's one occurrence of a recurring event.
-                    CalendarEvent::Move { event, time } | CalendarEvent::Resize { event, time } => {
+                    CalendarEvent::Move { event, time, .. }
+                    | CalendarEvent::Resize { event, time, .. } => {
                         calendar.update(cx, |c, cx| {
                             if let Some(mut e) = c.event(&event.id).cloned() {
                                 e.time = *time;
@@ -149,7 +150,7 @@ fn main() {
                             }
                         });
                     }
-                    CalendarEvent::Delete(event) => {
+                    CalendarEvent::Delete { event, .. } => {
                         calendar.update(cx, |c, cx| c.remove_event(&event.id, cx));
                     }
                     // Fetch the events in this range, then call `set_events`.
@@ -187,9 +188,15 @@ fn main() {
   click on one sends `CalendarEvent::OpenLink { event, link }`; the calendar never fetches or
   opens anything. `link_bounds(id, index)` gives where a link was drawn.
 - **Recurring events:** your app expands them, supplying each occurrence in the range as an
-  event of its own, with an id of its own and the series' id in `series`. An edit names the
-  occurrence it touched and its series, and your app decides whether it changes that one or all
-  of them.
+  event of its own, with an id of its own and the series' id in `series`. When a move, a resize
+  or a delete touches an occurrence, the calendar first asks "This event / This and following
+  events / All events", in a small popover where the edit was let go (a sheet with 44-point
+  answers on touch), and puts the answer in the edit's `scope` (`EditScope`). The ghost stays
+  where it was dropped while it asks; Escape, a click outside or Cancel drops the edit and the
+  event stays put. The arrow keys and Enter answer too. An event that doesn't repeat isn't asked
+  about: its edits carry `EditScope::This`. `is_asking()`, `answer(scope)` and
+  `dismiss_question()` let a host drive the question itself. The popover and the sheet are the
+  calendar's own for now, stand-ins for gpui-core's coming `Popover` and `Sheet`.
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
   `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.
@@ -241,9 +248,10 @@ never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `dra
 720 pixels wide) and, at an iPhone's 390 by 844 and taken by touch, `compact` (with an event
 selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger
 halfway through a swipe to the next day), `compact-hold` (a long press on empty time, drawn
-down) and `compact-zones` (the day with a second zone); `zones` is the week with India's hours
-beside Los Angeles'. `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
-presses, drags, swipes and pans.
+down), `compact-zones` (the day with a second zone) and `compact-recurring` (the recurring
+question as a sheet); at the Mac's size, `zones` is the week with India's hours beside Los
+Angeles', and `recurring` asks the recurring question in a popover. `tests/touch.rs` drives
+the calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from
@@ -264,6 +272,8 @@ gpui-core's theme.
 | ![Wednesday carried left by a finger, Thursday coming in beside it](docs/compact-swipe.png) | ![A new event from 5:30 to 7:15 under a finger](docs/compact-hold.png) |
 | **A second zone, half an hour off** | **On a phone** |
 | ![The week with India's hours beside Los Angeles'](docs/zones.png) | ![Wednesday at 390 pixels wide with a second column of hours](docs/compact-zones.png) |
+| **A repeating event moved: which ones?** | **The same question on a phone** |
+| ![Tuesday's standup dragged half an hour later, a popover asking which occurrences](docs/recurring.png) | ![A sheet asking which occurrences, with Cancel](docs/compact-recurring.png) |
 
 ## Performance
 
@@ -294,8 +304,8 @@ simulator (`aarch64-apple-ios-sim`): the crate takes no platform, and on iOS the
 there.
 
 Not done yet:
-- Recurrence editing (expanding recurring events, and asking "this event or all of them", is
-  the app's job, as above).
+- Editing a recurrence rule itself (expanding recurring events, and applying a scoped edit to
+  the series, is the app's job, as above).
 - A context menu (Delete is the key for now).
 - Year, resource and timeline views.
 - Dragging a timed event into the all-day row, or back.

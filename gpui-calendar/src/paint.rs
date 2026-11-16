@@ -129,6 +129,8 @@ pub(crate) struct Shared {
     pub mores: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub dates: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub expand: RefCell<Vec<Bounds<Pixels>>>,
+    /// Where the drag's ghost was drawn in the last frame.
+    pub ghost: Cell<Option<Bounds<Pixels>>>,
     /// How far the agenda is scrolled, in pixels; none until a frame places it (at today).
     pub agenda_scroll: Cell<Option<f32>>,
     /// The farthest the agenda scrolls, from the last frame.
@@ -639,6 +641,7 @@ pub(crate) fn body(
             shared.mores.borrow_mut().clear();
             shared.dates.borrow_mut().clear();
             shared.expand.borrow_mut().clear();
+            shared.ghost.set(None);
             window.with_content_mask(Some(ContentMask { bounds }), |window| {
                 let mut ink = Ink {
                     window,
@@ -1598,6 +1601,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                             location: None,
                             links: &[],
                         };
+                        note_ghost(shared, rect);
                         paint_timed_chip(&mut ink, rect, &text, ghost_cc, c.background, false);
                         ink.outlined(rect, ink.u(4.), transparent_black(), ink.u(1.5), accent);
                     }
@@ -1755,7 +1759,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
     if let Some(ghost) = &scene.ghost
         && time::in_all_day_row(&ghost.time)
     {
-        paint_span_ghost(ink, scene, geo, ghost, 0, row_top(0));
+        paint_span_ghost(ink, scene, geo, shared, ghost, 0, row_top(0));
     }
     // The line under the all-day row.
     ink.hline(geo.left, geo.col_x(days), geo.grid_top - px(1.), c.line);
@@ -2132,7 +2136,15 @@ fn push_links(shared: &Shared, chip: &Chip, links: LinkRects, clip: &Bounds<Pixe
 
 /// The ghost of an all-day drag: the days it would cover, tinted, and its chip over the
 /// first row.
-fn paint_span_ghost(ink: &mut Ink, scene: &Scene, geo: &Geo, ghost: &Ghost, row: u32, top: Pixels) {
+fn paint_span_ghost(
+    ink: &mut Ink,
+    scene: &Scene,
+    geo: &Geo,
+    shared: &Shared,
+    ghost: &Ghost,
+    row: u32,
+    top: Pixels,
+) {
     let c = &scene.colors;
     let (d0, d1) = time::event_days(&ghost.time, scene.options.time_zone);
     let lo = row as i32 * 7;
@@ -2156,9 +2168,19 @@ fn paint_span_ghost(ink: &mut Ink, scene: &Scene, geo: &Geo, ghost: &Ghost, row:
         point(geo.col_x(a - lo) + ink.u(3.), top),
         point(geo.col_x(z - lo + 1) - ink.u(4.), top + lane - ink.u(2.)),
     );
+    note_ghost(shared, rect);
     let label = format!("{}  {}", ghost.title, ghost.label);
     paint_span_chip(ink, rect, &label, &[], cc, false, false, false);
     ink.outlined(rect, ink.u(4.), transparent_black(), ink.u(1.5), accent);
+}
+
+/// Keeps where the ghost was drawn: all of it, across the days and weeks it covers.
+fn note_ghost(shared: &Shared, rect: Bounds<Pixels>) {
+    let all = match shared.ghost.get() {
+        Some(b) => b.union(&rect),
+        None => rect,
+    };
+    shared.ghost.set(Some(all));
 }
 
 fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
@@ -2312,7 +2334,7 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
     if let Some(ghost) = &scene.ghost {
         for row in 0..geo.rows {
             let top = geo.row_top(row) + ink.u(MONTH_DATE);
-            paint_span_ghost(ink, scene, geo, ghost, row, top);
+            paint_span_ghost(ink, scene, geo, shared, ghost, row, top);
         }
     }
 }

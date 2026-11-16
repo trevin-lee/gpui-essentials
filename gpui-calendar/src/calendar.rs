@@ -13,11 +13,12 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariants as _, IconName, Selectable as _, Sizable as _, Theme,
+    Button, ButtonGroup, ButtonVariants as _, IconName, Press, Selectable as _, Sizable as _, Theme,
 };
 
 use crate::layout::{self, Column};
 use crate::model::*;
+use crate::overlay::{Popover, Sheet};
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
 use crate::theme::{CalendarColors, palette_color};
 use crate::time::{self, DstChange};
@@ -101,14 +102,46 @@ pub enum CalendarEvent {
         calendar: Option<CalendarId>,
         time: EventTime,
     },
-    /// An event (one occurrence, for a recurring one) was dragged somewhere else.
-    Move { event: EventRef, time: EventTime },
+    /// An event was dragged somewhere else. For an occurrence of a recurring event, `scope`
+    /// is the person's answer to "this event, this and following, or all?"; otherwise
+    /// [`EditScope::This`].
+    Move {
+        event: EventRef,
+        time: EventTime,
+        scope: EditScope,
+    },
     /// An event's end was dragged.
-    Resize { event: EventRef, time: EventTime },
+    Resize {
+        event: EventRef,
+        time: EventTime,
+        scope: EditScope,
+    },
     /// Delete or Backspace was pressed with this event selected.
-    Delete(EventRef),
+    Delete { event: EventRef, scope: EditScope },
     /// One of an event's links was clicked: the host opens what it points at.
     OpenLink { event: EventRef, link: EventLink },
+}
+
+/// Which edit is waiting for the recurring-event question's answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditKind {
+    Move,
+    Resize,
+    Delete,
+}
+
+/// An edit to an occurrence of a recurring event, held until the person says which
+/// occurrences it's for. Its ghost stays where the drag left it.
+#[derive(Clone, Debug)]
+pub(crate) struct Asking {
+    kind: EditKind,
+    event: EventRef,
+    time: Option<EventTime>,
+    ghost: Option<Ghost>,
+    /// Where the question hangs from: where the finger or pointer let go, or the event.
+    anchor: Bounds<Pixels>,
+    /// The answer the arrow keys are on.
+    highlighted: usize,
 }
 
 /// A drag in progress, or a press that might become one.
@@ -307,6 +340,10 @@ pub struct Calendar {
     settle: Option<Settle>,
     /// The period beside this one, laid out while a swipe shows it.
     neighbour: Option<Rc<Laid>>,
+    /// An edit to a recurring event waiting for "this, following or all".
+    asking: Option<Asking>,
+    /// Where the pointer or finger last was in a drag.
+    last_point: Point<Pixels>,
 }
 
 impl EventEmitter<CalendarEvent> for Calendar {}
@@ -366,6 +403,8 @@ impl Calendar {
             swipe_track: VecDeque::new(),
             settle: None,
             neighbour: None,
+            asking: None,
+            last_point: Point::default(),
         }
     }
 
@@ -1136,6 +1175,11 @@ impl Calendar {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(window, cx);
+        // A press outside the question drops it, and does nothing else.
+        if self.asking.is_some() {
+            self.dismiss_question(cx);
+            return;
+        }
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
@@ -1210,6 +1254,7 @@ impl Calendar {
     /// Carries a press or a drag to `p`. A press becomes a drag once it has moved a few pixels,
     /// or at once when `now` (a long press, or a touch on a selected event).
     fn drag_to(&mut self, drag: Drag, p: Point<Pixels>, now: bool, cx: &mut Context<Self>) {
+        self.last_point = p;
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
@@ -1364,6 +1409,7 @@ impl Calendar {
 
     fn finish(&mut self, cx: &mut Context<Self>) {
         let proposal = self.drag_proposal();
+        let ghost = self.ghost();
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -1395,12 +1441,18 @@ impl Calendar {
                     && time != original
                     && let Some(event) = self.editable(&id).map(Event::to_ref)
                 {
-                    let moved = matches!(drag, Drag::Move { .. });
-                    cx.emit(if moved {
-                        CalendarEvent::Move { event, time }
+                    let kind = if matches!(drag, Drag::Move { .. }) {
+                        EditKind::Move
                     } else {
-                        CalendarEvent::Resize { event, time }
-                    });
+                        EditKind::Resize
+                    };
+                    // The question opens beside the ghost, never over it.
+                    let anchor = self
+                        .shared
+                        .ghost
+                        .get()
+                        .unwrap_or_else(|| Bounds::new(self.last_point, size(px(1.), px(1.))));
+                    self.propose_edit(kind, event, Some(time), ghost, anchor, cx);
                 }
             }
             Drag::Create { .. } | Drag::CreateDays { .. } => {
@@ -1681,7 +1733,9 @@ impl Calendar {
     // The keyboard.
 
     fn cancel(&mut self, cx: &mut Context<Self>) {
-        if self.drag.take().is_some() {
+        if self.asking.is_some() {
+            self.dismiss_question(cx);
+        } else if self.drag.take().is_some() {
             cx.notify();
         } else if self.selection.is_some() {
             self.select(None, cx);
@@ -1885,20 +1939,189 @@ impl Calendar {
         }
     }
 
-    fn delete_selected(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn delete_selected(&mut self, cx: &mut Context<Self>) {
+        if self.asking.is_some() {
+            return;
+        }
         if let Some(event) = self
             .selected_event()
             .and_then(|id| self.editable(id))
             .map(Event::to_ref)
         {
-            cx.emit(CalendarEvent::Delete(event));
+            let anchor = self.event_bounds(&event.id).unwrap_or_else(|| {
+                self.shared.geo.get().map_or(Bounds::default(), |g| {
+                    Bounds::new(g.bounds.center(), size(px(1.), px(1.)))
+                })
+            });
+            self.propose_edit(EditKind::Delete, event, None, None, anchor, cx);
         }
+    }
+
+    // Recurring events.
+
+    /// Sends an edit to the host, or first asks which occurrences it's for when the event is
+    /// one of a recurring series.
+    fn propose_edit(
+        &mut self,
+        kind: EditKind,
+        event: EventRef,
+        time: Option<EventTime>,
+        ghost: Option<Ghost>,
+        anchor: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if event.series.is_none() {
+            self.emit_edit(kind, event, time, EditScope::This, cx);
+            return;
+        }
+        self.asking = Some(Asking {
+            kind,
+            event,
+            time,
+            ghost,
+            anchor,
+            highlighted: 0,
+        });
+        cx.notify();
+    }
+
+    fn emit_edit(
+        &mut self,
+        kind: EditKind,
+        event: EventRef,
+        time: Option<EventTime>,
+        scope: EditScope,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(match (kind, time) {
+            (EditKind::Move, Some(time)) => CalendarEvent::Move { event, time, scope },
+            (EditKind::Resize, Some(time)) => CalendarEvent::Resize { event, time, scope },
+            _ => CalendarEvent::Delete { event, scope },
+        });
+    }
+
+    /// Whether the calendar is asking which occurrences of a recurring event an edit is for.
+    pub fn is_asking(&self) -> bool {
+        self.asking.is_some()
+    }
+
+    /// Answers the question: the held edit goes to the host with this scope.
+    pub fn answer(&mut self, scope: EditScope, cx: &mut Context<Self>) {
+        if let Some(a) = self.asking.take() {
+            self.emit_edit(a.kind, a.event, a.time, scope, cx);
+            cx.notify();
+        }
+    }
+
+    /// Drops the question and the edit with it: the event stays where it was.
+    pub fn dismiss_question(&mut self, cx: &mut Context<Self>) {
+        if self.asking.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn highlight_answer(&mut self, by: i32, cx: &mut Context<Self>) {
+        if let Some(a) = &mut self.asking {
+            let n = EditScope::ALL.len() as i32;
+            a.highlighted = (a.highlighted as i32 + by).rem_euclid(n) as usize;
+            cx.notify();
+        }
+    }
+
+    /// The question: on the Mac a popover where the edit was let go; on touch a sheet.
+    fn render_question(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let asking = self.asking.as_ref()?;
+        let theme = Theme::global(cx);
+        let c = theme.colors;
+        let touch = self.options.touch;
+        let title = match asking.kind {
+            EditKind::Move => "Move a repeating event",
+            EditKind::Resize => "Change a repeating event",
+            EditKind::Delete => "Delete a repeating event",
+        };
+        let this = cx.entity().downgrade();
+        let rows = EditScope::ALL.into_iter().enumerate().map(|(i, scope)| {
+            let this = this.clone();
+            let highlighted = i == asking.highlighted;
+            Press::new(("scope", i))
+                .flex()
+                .items_center()
+                .w_full()
+                .min_h(if touch {
+                    DefiniteLength::from(px(44.))
+                } else {
+                    DefiniteLength::from(rems(30. / 15.))
+                })
+                .px(rems(10. / 15.))
+                .rounded(rems(6. / 15.))
+                .text_size(rems(13. / 15.))
+                .when(highlighted && !touch, |d| d.bg(c.accent))
+                .hover(|d| d.bg(c.accent))
+                .debug_selector(move || format!("scope-{i}"))
+                .on_click(move |_, _, cx| {
+                    this.update(cx, |c, cx| c.answer(scope, cx)).ok();
+                })
+                .child(div().truncate().child(scope.label()))
+        });
+        let heading = div()
+            .px(rems(10. / 15.))
+            .pt(rems(6. / 15.))
+            .pb(rems(4. / 15.))
+            .truncate()
+            .text_size(rems(12. / 15.))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(c.muted_foreground)
+            .child(title);
+        let dismiss = {
+            let this = this.clone();
+            move |_: &mut Window, cx: &mut App| {
+                this.update(cx, |c, cx| c.dismiss_question(cx)).ok();
+            }
+        };
+        Some(if touch {
+            let cancel = {
+                let this = this.clone();
+                Press::new("scope-cancel")
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w_full()
+                    .min_h(px(44.))
+                    .mt(rems(6. / 15.))
+                    .rounded(rems(6. / 15.))
+                    .bg(c.secondary)
+                    .text_size(rems(13. / 15.))
+                    .on_click(move |_, _, cx| {
+                        this.update(cx, |c, cx| c.dismiss_question(cx)).ok();
+                    })
+                    .child("Cancel")
+            };
+            Sheet::new("calendar-question")
+                .open(true)
+                .on_dismiss(dismiss)
+                .child(heading)
+                .child(div().flex().flex_col().children(rows))
+                .child(cancel)
+                .into_any_element()
+        } else {
+            Popover::new("calendar-question")
+                .open(true)
+                .anchor(asking.anchor)
+                .height(140.)
+                .on_dismiss(dismiss)
+                .child(heading)
+                .child(div().flex().flex_col().children(rows))
+                .into_any_element()
+        })
     }
 
     // Drawing.
 
     /// The ghost of the drag in progress: the proposal, drawn where it would land.
     fn ghost(&self) -> Option<Ghost> {
+        if let Some(a) = &self.asking {
+            return a.ghost.clone();
+        }
         let (id, time) = self.drag_proposal()?;
         let tz = self.options.time_zone;
         let (title, color) = match id.as_ref().and_then(|id| self.event(id)) {
@@ -2223,8 +2446,10 @@ impl Render for Calendar {
         };
         let this = cx.entity().downgrade();
         let body = paint::body(scene, self.shared.clone(), this);
+        let question = self.render_question(cx);
         div()
             .id("calendar")
+            .relative()
             .flex()
             .flex_col()
             .size_full()
@@ -2234,8 +2459,20 @@ impl Render for Calendar {
             .key_context(CONTEXT)
             .on_action(cx.listener(|c, _: &SelectLeft, _, cx| c.move_selection(-1, 0, cx)))
             .on_action(cx.listener(|c, _: &SelectRight, _, cx| c.move_selection(1, 0, cx)))
-            .on_action(cx.listener(|c, _: &SelectUp, _, cx| c.move_selection(0, -1, cx)))
-            .on_action(cx.listener(|c, _: &SelectDown, _, cx| c.move_selection(0, 1, cx)))
+            .on_action(cx.listener(|c, _: &SelectUp, _, cx| {
+                if c.asking.is_some() {
+                    c.highlight_answer(-1, cx)
+                } else {
+                    c.move_selection(0, -1, cx)
+                }
+            }))
+            .on_action(cx.listener(|c, _: &SelectDown, _, cx| {
+                if c.asking.is_some() {
+                    c.highlight_answer(1, cx)
+                } else {
+                    c.move_selection(0, 1, cx)
+                }
+            }))
             .on_action(cx.listener(|c, _: &Today, _, cx| c.go_to_today(cx)))
             .on_action(cx.listener(|c, _: &DayView, _, cx| c.set_view(CalendarView::Day, cx)))
             .on_action(cx.listener(|c, _: &WeekView, _, cx| c.set_view(CalendarView::Week, cx)))
@@ -2243,7 +2480,12 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &AgendaView, _, cx| c.set_view(CalendarView::AGENDA, cx)))
             .on_action(cx.listener(|c, _: &PreviousPeriod, _, cx| c.previous(cx)))
             .on_action(cx.listener(|c, _: &NextPeriod, _, cx| c.next(cx)))
-            .on_action(cx.listener(|c, _: &OpenSelected, _, cx| c.open_selected(cx)))
+            .on_action(cx.listener(|c, _: &OpenSelected, _, cx| {
+                match c.asking.as_ref().map(|a| a.highlighted) {
+                    Some(i) => c.answer(EditScope::ALL[i], cx),
+                    None => c.open_selected(cx),
+                }
+            }))
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
             .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
             .when(self.header, |d| {
@@ -2265,5 +2507,6 @@ impl Render for Calendar {
                     .on_scroll(cx.listener(|c, e, _, cx| c.scroll(e, cx)))
                     .child(body),
             )
+            .children(question)
     }
 }
