@@ -153,12 +153,11 @@ impl Render for Frame {
 }
 
 /// Opens a card from `source` in a test window, `width` wide (or the window's width).
-/// GPUI Kit and gpui-core set up (gpui-core's keys for its text fields), and the fonts the
-/// cards draw with loaded.
+/// GPUI Kit set up and the fonts the cards draw with loaded. gpui-core sets itself up (its
+/// text fields' keys) when the first field is made, as in a host that never calls its init.
 pub fn setup(cx: &mut TestAppContext) {
     cx.update(|cx| {
         gpui_kit::init(cx);
-        gpui_core::init(cx);
         let _ = cx.text_system().add_fonts(vec![
             std::borrow::Cow::Borrowed(
                 include_bytes!("../../examples/fonts/Inter-Regular.ttf").as_slice(),

@@ -114,16 +114,9 @@ impl AssetSource for Assets {
     }
 }
 
-/// GPUI Kit's theme (its date picker) and gpui-core's (the text fields' caret, selection and
-/// placeholder, the slider and tooltips) in the same mode as the cards.
+/// GPUI Kit's theme (its date picker and Markdown) in the same mode as the cards. gpui-core's
+/// text fields, slider and tooltips take their colours from the card.
 fn apply_theme(dark: bool, cx: &mut App) {
-    let mut core = if dark {
-        gpui_core::Theme::dark()
-    } else {
-        gpui_core::Theme::light()
-    };
-    core.font_family = "Inter".into();
-    gpui_core::Theme::set(core, cx);
     Theme::change(
         if dark {
             ThemeMode::Dark
@@ -443,7 +436,6 @@ fn main() {
     application().with_assets(Assets).run(move |cx| {
         load_fonts(cx);
         gpui_kit::init(cx);
-        gpui_core::init(cx);
         apply_theme(true, cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());

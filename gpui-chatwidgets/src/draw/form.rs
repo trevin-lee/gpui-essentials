@@ -1,7 +1,7 @@
-//! Forms and their controls, buttons and icon buttons. Text fields and the slider are
-//! gpui-core's (their editing and dragging), text fields drawn in the card's colours; the date
-//! picker is still GPUI Kit's (its popover). The others are drawn here, as gpui-core's presses
-//! so the keyboard reaches them.
+//! Forms and their controls, buttons and icon buttons. Text fields, the slider and an icon
+//! button's tooltip are gpui-core's (their editing and dragging), drawn in the card's colours;
+//! the date picker is still GPUI Kit's (its popover). The others are drawn here, as gpui-core's
+//! presses so the keyboard reaches them.
 
 use std::rc::Rc;
 
@@ -238,11 +238,14 @@ impl Draw<'_, '_> {
                     )
                     .child({
                         let sel = self.selector(&format!("slider:{key}"));
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .debug_selector(move || sel)
-                            .child(Slider::new(&e.state).w_full().when(t.touch, |s| s.touch()))
+                        div().w_full().min_w_0().debug_selector(move || sel).child(
+                            Slider::new(&e.state)
+                                .track_color(t.colors.line_strong)
+                                .fill_color(t.colors.accent)
+                                .thumb_color(t.colors.background)
+                                .w_full()
+                                .when(t.touch, |s| s.touch()),
+                        )
                     })
                     .child(
                         div()
@@ -715,6 +718,9 @@ impl Draw<'_, '_> {
             .text_size(self.px(t.text.sm))
             .line_height(self.px(t.text.sm * t.text.body_leading))
             .text_color(t.colors.text)
+            .caret_color(t.colors.text)
+            .selection_color(selection(t))
+            .placeholder_color(t.colors.text_muted)
     }
 
     pub fn dropdown(
@@ -1005,13 +1011,26 @@ impl Draw<'_, '_> {
         // Its name, for the people the icon says nothing to: on hover with a mouse, and with a
         // long press on touch (GPUI shows an element's tooltip for one).
         let name = b.name.clone();
+        let (bg, text, border) = (t.colors.popover, t.colors.text, t.colors.line_strong);
         div()
             .id(self.id(&format!("{path}.tip")))
             .flex_none()
-            .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
+            .tooltip(move |window, cx| {
+                Tooltip::new(name.clone())
+                    .background(bg)
+                    .text_color(text)
+                    .border_color(border)
+                    .build(window, cx)
+            })
             .child(press)
             .into_any_element()
     }
+}
+
+/// Selected text's highlight in a text field: the accent at 30%, as gpui-core draws its own
+/// (its ring at 30%), so the text stays readable over it on a light card or a dark one.
+fn selection(t: &crate::theme::CardTheme) -> Hsla {
+    t.colors.accent.opacity(0.3)
 }
 
 /// Whether a toggle is on: the stored map's entry, else its default.
