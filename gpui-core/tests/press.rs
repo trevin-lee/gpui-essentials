@@ -1,13 +1,13 @@
 //! Press: a click, a tap, Enter and Space press it; Tab reaches it; disabled, it takes neither
 //! the focus nor a press.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
     AppContext as _, Context, InteractiveElement as _, IntoElement, KeyDownEvent, KeyUpEvent,
-    Keystroke, Modifiers, ParentElement as _, Render, Styled as _, TestAppContext,
-    VisualTestContext, Window, div, px,
+    Keystroke, Modifiers, ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _,
+    TestAppContext, VisualTestContext, Window, div, px,
 };
 use gpui_core::{Disableable as _, Press, Root};
 
@@ -95,4 +95,132 @@ fn disabled_it_takes_neither_the_focus_nor_a_press(cx: &mut TestAppContext) {
     // Tab stops only on the first; Enter there presses it, not the disabled one.
     key(vcx, "tab tab enter");
     assert_eq!(pressed.get(), [1, 0]);
+}
+
+#[gpui::test]
+fn disabled_is_announced(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|_, _| Two {
+        pressed: Rc::default(),
+        disabled: false,
+    });
+    let node = |disabled: bool, vcx: &mut VisualTestContext| {
+        vcx.update(|window, cx| {
+            let focus = cx.focus_handle();
+            let press = Press::new("p").track_focus(&focus).disabled(disabled);
+            let el = gpui::RenderOnce::render(press, window, cx).into_element();
+            let mut node = gpui::accesskit::Node::new(gpui::Role::Button);
+            gpui::Element::write_a11y_info(&el, &mut node);
+            node
+        })
+    };
+    assert!(node(true, vcx).is_disabled());
+    assert!(!node(false, vcx).is_disabled());
+}
+
+/// Three presses; pressing the middle one disables it.
+struct Three {
+    off: Rc<Cell<bool>>,
+    focus: Vec<gpui::FocusHandle>,
+}
+
+impl Render for Three {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let off = self.off.clone();
+        div()
+            .size_full()
+            .child(
+                Press::new("a")
+                    .track_focus(&self.focus[0])
+                    .w(px(40.))
+                    .h(px(20.))
+                    .child("A"),
+            )
+            .child(
+                Press::new("b")
+                    .track_focus(&self.focus[1])
+                    .w(px(40.))
+                    .h(px(20.))
+                    .child("B")
+                    .disabled(self.off.get())
+                    .on_click(move |_, window, _| {
+                        off.set(true);
+                        window.refresh();
+                    }),
+            )
+            .child(
+                Press::new("c")
+                    .track_focus(&self.focus[2])
+                    .w(px(40.))
+                    .h(px(20.))
+                    .child("C"),
+            )
+    }
+}
+
+#[gpui::test]
+fn a_press_that_disables_itself_keeps_its_place_in_tab_order(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let made = Rc::new(RefCell::new(Vec::new()));
+    let m = made.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let focus: Vec<_> = (0..3).map(|_| cx.focus_handle()).collect();
+        *m.borrow_mut() = focus.clone();
+        let three = cx.new(|_| Three {
+            off: Rc::default(),
+            focus,
+        });
+        Root::new(three, window, cx)
+    });
+    vcx.run_until_parked();
+    let focus = made.borrow().clone();
+    key(vcx, "tab tab enter");
+    vcx.update(|window, _| {
+        assert!(
+            focus[1].is_focused(window),
+            "B lost the focus when it was disabled"
+        )
+    });
+    key(vcx, "tab");
+    vcx.update(|window, _| assert!(focus[2].is_focused(window), "Tab didn't move on from B"));
+    // And it's no longer a stop: back from C is A.
+    key(vcx, "shift-tab");
+    vcx.update(|window, _| assert!(focus[0].is_focused(window)));
+}
+
+struct Inside {
+    outer: Rc<Cell<usize>>,
+}
+
+impl Render for Inside {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let outer = self.outer.clone();
+        div()
+            .id("outer")
+            .size_full()
+            .on_click(move |_, _, _| outer.set(outer.get() + 1))
+            .child(
+                div().child(
+                    Press::new("off")
+                        .debug_selector(|| "off".into())
+                        .w(px(40.))
+                        .h(px(20.))
+                        .disabled(true),
+                ),
+            )
+    }
+}
+
+#[gpui::test]
+fn a_press_on_a_disabled_one_doesnt_fall_through(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let outer = Rc::new(Cell::new(0));
+    let o = outer.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let inside = cx.new(|_| Inside { outer: o });
+        Root::new(inside, window, cx)
+    });
+    vcx.run_until_parked();
+    click(vcx, "off");
+    assert_eq!(outer.get(), 0);
 }
