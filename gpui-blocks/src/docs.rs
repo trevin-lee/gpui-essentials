@@ -360,6 +360,307 @@ impl MarkdownPlugin for PagePlugin {
     }
 }
 
+/// The link title word that makes a line holding only a document link an embed.
+pub const EMBED_TITLE: &str = "embed";
+/// The view an embed without one shows.
+pub const DEFAULT_VIEW: &str = "page";
+/// The height an embed without one has, in points.
+pub const DEFAULT_HEIGHT: u32 = 320;
+/// The heights an embed can be dragged between, in points.
+pub const HEIGHTS: std::ops::RangeInclusive<u32> = 80..=1600;
+
+/// A document drawn inside another: which document, how the app shows it (a hint such as
+/// `table`, `board`, `mindmap`, `calendar` or `page`), and how tall it is.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Embed {
+    pub doc: SharedString,
+    pub view: SharedString,
+    pub height: u32,
+}
+
+/// The Markdown of an embed of the document `id`: a line holding only a link, so other
+/// Markdown tools show a link. `view` must be 1 to 24 of `a-z 0-9 -`, else it's `page`;
+/// `height` is kept within [`HEIGHTS`].
+pub fn embed(id: &str, title: &str, view: &str, height: u32) -> String {
+    let view = if valid_view(view) { view } else { DEFAULT_VIEW };
+    let height = height.clamp(*HEIGHTS.start(), *HEIGHTS.end());
+    format!(
+        "[{}]({SCHEME}{id} \"{EMBED_TITLE} {view} {height}\")",
+        link_text(title)
+    )
+}
+
+/// An embed's document, title, view and height read back from its Markdown.
+pub(crate) fn embed_of(markdown: &str) -> Option<(String, String, String, u32)> {
+    let tree = markdown::to_mdast(markdown, &markdown::ParseOptions::gfm()).ok()?;
+    let [Node::Paragraph(paragraph)] = tree.children()?.as_slice() else {
+        return None;
+    };
+    let [Node::Link(link)] = paragraph.children.as_slice() else {
+        return None;
+    };
+    let (view, height) = embed_title(link.title.as_deref()?)?;
+    let doc = DocRef::from_link(link)?;
+    Some((doc.id.to_string(), doc.title.to_string(), view, height))
+}
+
+fn valid_view(view: &str) -> bool {
+    (1..=24).contains(&view.len())
+        && view
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// An embed's view and height from its link title (`embed`, `embed table`,
+/// `embed table 320`), or `None` when the title isn't an embed's.
+fn embed_title(title: &str) -> Option<(String, u32)> {
+    let mut words = title.split_whitespace();
+    if words.next()? != EMBED_TITLE {
+        return None;
+    }
+    let view = words
+        .next()
+        .filter(|v| valid_view(v))
+        .unwrap_or(DEFAULT_VIEW);
+    let height = words
+        .next()
+        .and_then(|h| h.parse::<u32>().ok())
+        .unwrap_or(DEFAULT_HEIGHT)
+        .clamp(*HEIGHTS.start(), *HEIGHTS.end());
+    Some((view.to_string(), height))
+}
+
+/// Draws an embedded document's content into the space the editor keeps for it, or `None` for
+/// the editor's placeholder. Called each time the document is drawn.
+pub(crate) type EmbedFn = dyn Fn(&Embed, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync;
+
+/// An embed being resized: its parse key, its Markdown as it was, its height then, and where the
+/// press was.
+#[derive(Clone, Debug)]
+pub(crate) struct ResizeStart {
+    pub(crate) key: u64,
+    pub(crate) markdown: String,
+    pub(crate) embed: Embed,
+    pub(crate) title: SharedString,
+    pub(crate) at: Point<Pixels>,
+}
+
+/// Embeds' heights while one is being resized, by parse key.
+pub(crate) type Heights = Arc<std::sync::Mutex<std::collections::HashMap<u64, u32>>>;
+
+/// Called when an embed's bottom edge is pressed, to follow the drag.
+pub(crate) type OnResize = Arc<dyn Fn(ResizeStart, &mut Window, &mut App) + Send + Sync>;
+
+/// What embeds draw and do.
+#[derive(Clone, Default)]
+pub(crate) struct EmbedHooks {
+    pub(crate) docs: Option<Arc<dyn Docs>>,
+    pub(crate) render: Option<Arc<EmbedFn>>,
+    pub(crate) on_click: Option<OnDocClick>,
+    /// Heights while a resize is under way, by parse key.
+    pub(crate) heights: Heights,
+    pub(crate) on_resize: Option<OnResize>,
+}
+
+/// An embed as the document keeps it.
+#[derive(Clone, Debug, PartialEq)]
+struct EmbedRef {
+    /// New each time the block is read, so a resize finds its block's drawing.
+    key: u64,
+    embed: Embed,
+    title: SharedString,
+    markdown: String,
+}
+
+static EMBED_KEYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The custom node's name for an embed.
+pub(crate) const EMBED_NODE: &str = "doc-embed";
+
+/// Embed blocks: a line holding only `[title](doc:id "embed view height")`.
+pub(crate) struct EmbedPlugin(pub(crate) EmbedHooks);
+
+impl MarkdownPlugin for EmbedPlugin {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        EMBED_NODE
+    }
+
+    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        let Node::Paragraph(paragraph) = node else {
+            return None;
+        };
+        let [Node::Link(link)] = paragraph.children.as_slice() else {
+            return None;
+        };
+        let (view, height) = embed_title(link.title.as_deref()?)?;
+        let doc = DocRef::from_link(link)?;
+        let markdown = embed(&doc.id, &doc.title, &view, height);
+        let data = EmbedRef {
+            key: EMBED_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            embed: Embed {
+                doc: doc.id.clone(),
+                view: view.into(),
+                height,
+            },
+            title: doc.title.clone(),
+            markdown: markdown.clone(),
+        };
+        let label = format!("{} embedded", doc.title);
+        Some(
+            MarkdownNode::new(EMBED_NODE, data)
+                .text(doc.title.clone())
+                .accessibility_label(label)
+                .markdown(markdown),
+        )
+    }
+
+    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let Some(data) = node.data::<EmbedRef>() else {
+            return div().into_any_element();
+        };
+        let hooks = &self.0;
+        let height = hooks
+            .heights
+            .lock()
+            .ok()
+            .and_then(|h| h.get(&data.key).copied())
+            .unwrap_or(data.embed.height);
+        let shown = Embed {
+            height,
+            ..data.embed.clone()
+        };
+        let doc_ref = DocRef {
+            id: data.embed.doc.clone(),
+            title: data.title.clone(),
+        };
+        let (title, icon, found) = DocHooks {
+            docs: hooks.docs.clone(),
+            on_click: None,
+        }
+        .info(&doc_ref, cx);
+        let content = hooks.render.as_ref().and_then(|r| r(&shown, window, cx));
+        let theme = cx.theme();
+        let (muted, fg, border, accent) = (
+            theme.muted_foreground,
+            theme.foreground,
+            theme.border,
+            theme.accent,
+        );
+        let on_click = hooks.on_click.clone();
+        let id = data.embed.doc.clone();
+        let header = div()
+            .id(SharedString::from(format!(
+                "blocks-embed-title-{}",
+                data.key
+            )))
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(10.))
+            .h(px(32.))
+            .border_b_1()
+            .border_color(border)
+            .text_size(px(13.))
+            .cursor_pointer()
+            .hover(move |s| s.bg(accent))
+            .child(
+                div()
+                    .flex_none()
+                    .child(icon.unwrap_or_else(|| PAGE_GLYPH.into())),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(if found { fg } else { muted })
+                    .child(title.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(muted)
+                    .child(data.embed.view.clone()),
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, window, cx| {
+                if let Some(on_click) = &on_click {
+                    on_click(&id, window, cx);
+                }
+            });
+        let body = match content {
+            Some(content) => div().flex_1().min_h_0().overflow_hidden().child(content),
+            None => div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(13.))
+                .text_color(muted)
+                .child(format!("{title} ({}) isn't shown here", data.embed.view)),
+        };
+        let on_resize = hooks.on_resize.clone();
+        let start = ResizeStart {
+            key: data.key,
+            markdown: data.markdown.clone(),
+            embed: data.embed.clone(),
+            title: data.title.clone(),
+            at: Point::default(),
+        };
+        let grip = div()
+            .id(SharedString::from(format!(
+                "blocks-embed-grip-{}",
+                data.key
+            )))
+            .debug_selector(|| "blocks-embed-grip".into())
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .h(px(8.))
+            .cursor(CursorStyle::ResizeUpDown)
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                cx.stop_propagation();
+                if let Some(on_resize) = &on_resize {
+                    on_resize(
+                        ResizeStart {
+                            at: event.position,
+                            ..start.clone()
+                        },
+                        window,
+                        cx,
+                    );
+                }
+            });
+        let selector = format!("blocks-embed-{}", data.embed.doc);
+        div()
+            .debug_selector(move || selector)
+            .relative()
+            .w_full()
+            .my(px(4.))
+            .h(px(height as f32))
+            .flex()
+            .flex_col()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(border)
+            .overflow_hidden()
+            .child(header)
+            .child(body)
+            .child(grip)
+            .into_any_element()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +883,169 @@ mod tests {
         let before = editor.read_with(cx, |e, cx| e.markdown(cx));
         editor.update(cx, |e, cx| e.insert_mention("../etc", "x", cx));
         assert_eq!(editor.read_with(cx, |e, cx| e.markdown(cx)), before);
+    }
+
+    fn open_with_embeds<'a>(
+        cx: &'a mut TestAppContext,
+        source: &'static str,
+        drawn: std::sync::Arc<Mutex<Vec<Embed>>>,
+    ) -> (
+        Entity<Editor>,
+        Rc<RefCell<Vec<EditorEvent>>>,
+        &'a mut VisualTestContext,
+    ) {
+        cx.update(|cx| {
+            gpui_kit::init(cx);
+            crate::init(cx);
+        });
+        let (editor, cx) = cx.add_window_view(move |window, cx| {
+            let options = Options::default()
+                .docs(Shared(std::sync::Arc::new(Titles(Mutex::new(vec![(
+                    "b1", "Q4 board",
+                )])))))
+                .embeds(move |embed, _, _| {
+                    drawn.lock().unwrap().push(embed.clone());
+                    (embed.view == "board").then(|| {
+                        div()
+                            .debug_selector(|| "host-board".into())
+                            .size_full()
+                            .into_any_element()
+                    })
+                });
+            Editor::with_options(source, options, window, cx)
+        });
+        cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let seen = events.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&editor, move |_, event: &EditorEvent, _| {
+                seen.borrow_mut().push(event.clone())
+            })
+            .detach();
+        });
+        draw(cx);
+        (editor, events, cx)
+    }
+
+    #[gpui_kit::test]
+    fn an_embed_is_drawn_by_the_app_in_the_space_it_keeps(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (_, events, cx) = open_with_embeds(
+            cx,
+            "Intro\n\n[Board](doc:b1 \"embed board 300\")\n\n[Map](doc:m1 \"embed mindmap 200\")",
+            drawn.clone(),
+        );
+        let asked: Vec<(String, String, u32)> = drawn
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|e| (e.doc.to_string(), e.view.to_string(), e.height))
+            .collect();
+        assert!(asked.contains(&("b1".into(), "board".into(), 300)));
+        assert!(asked.contains(&("m1".into(), "mindmap".into(), 200)));
+        // The board is the app's; the mind map, which the app doesn't draw, is a placeholder.
+        assert!(cx.debug_bounds("host-board").is_some());
+        let embed = cx.debug_bounds("blocks-embed-b1").unwrap();
+        assert_eq!(embed.size.height, px(300.));
+        // A click on the title opens the document.
+        cx.simulate_click(
+            point(embed.left() + px(40.), embed.top() + px(16.)),
+            Modifiers::none(),
+        );
+        draw(cx);
+        assert_eq!(clicked(&events), ["b1"]);
+    }
+
+    #[gpui_kit::test]
+    fn dragging_an_embeds_edge_sets_its_height(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, _, cx) = open_with_embeds(
+            cx,
+            "Intro\n\n[Board](doc:b1 \"embed board 300\")\n\nAfter",
+            drawn,
+        );
+        let grip = cx.debug_bounds("blocks-embed-grip").unwrap().center();
+        cx.simulate_mouse_down(grip, MouseButton::Left, Modifiers::none());
+        draw(cx);
+        cx.simulate_mouse_move(
+            grip + point(px(0.), px(90.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        draw(cx);
+        // Taller while dragging, before anything is written.
+        assert_eq!(
+            cx.debug_bounds("blocks-embed-b1").unwrap().size.height,
+            px(390.)
+        );
+        cx.simulate_mouse_move(
+            grip + point(px(0.), px(180.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.simulate_mouse_up(
+            grip + point(px(0.), px(180.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        draw(cx);
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Board](doc:b1 \"embed board 480\")\n\nAfter"
+        );
+        assert_eq!(
+            cx.debug_bounds("blocks-embed-b1").unwrap().size.height,
+            px(480.)
+        );
+        // One undo puts it back.
+        editor.update(cx, |e, cx| e.state().update(cx, |s, cx| s.undo(cx)));
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Board](doc:b1 \"embed board 300\")\n\nAfter"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn the_slash_menu_asks_for_an_embed(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, events, cx) = open_with_embeds(cx, "Intro", drawn);
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let _ = s.select_end(cx);
+            })
+        });
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("/embed");
+        draw(cx);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            events
+                .borrow()
+                .iter()
+                .any(|e| matches!(e, EditorEvent::EmbedRequested))
+        );
+        editor.update(cx, |e, cx| e.insert_embed("b1", "Q4 board", "board", cx));
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Q4 board](doc:b1 \"embed board 320\")\n\n"
+        );
+    }
+
+    #[test]
+    fn embed_titles_are_read_and_kept_in_bounds() {
+        assert_eq!(embed("a", "T", "Board!", 5), "[T](doc:a \"embed page 80\")");
+        assert_eq!(
+            embed("a", "T", "table", 99999),
+            "[T](doc:a \"embed table 1600\")"
+        );
+        assert_eq!(embed_title("embed"), Some(("page".into(), 320)));
+        assert_eq!(
+            embed_title("embed calendar 90"),
+            Some(("calendar".into(), 90))
+        );
+        assert_eq!(embed_title("embedded"), None);
+        assert_eq!(embed_title("page"), None);
     }
 
     #[test]

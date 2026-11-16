@@ -32,6 +32,10 @@ pub enum SlashAction {
     /// ([`EditorEvent::DocLinkRequested`](crate::EditorEvent::DocLinkRequested)). The app shows
     /// a picker and calls [`Editor::insert_mention`](crate::Editor::insert_mention).
     LinkToPage,
+    /// Ask the app which document to embed, and how to show it
+    /// ([`EditorEvent::EmbedRequested`](crate::EditorEvent::EmbedRequested)). The app calls
+    /// [`Editor::insert_embed`](crate::Editor::insert_embed).
+    Embed,
 }
 
 /// One entry of the menu. Make one with [`SlashItem::new`] and its builder methods.
@@ -224,6 +228,11 @@ pub fn doc_items() -> Vec<SlashItem> {
             .hint("A link to another page")
             .aliases(["mention", "@", "reference", "link"])
             .icon("↗")
+            .group(DOCS),
+        SlashItem::new("Embed", SlashAction::Embed)
+            .hint("Another page, table or board shown here")
+            .aliases(["view", "linked", "database", "board", "mindmap"])
+            .icon("▣")
             .group(DOCS),
     ]
 }

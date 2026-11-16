@@ -197,8 +197,16 @@ fn editor(markdown: &str, window: &mut Window, cx: &mut App) -> Entity<Editor> {
 }
 ```
 
-`Options::docs` also adds Page and Link to page to the slash menu, which send
-`NewPageRequested` and `DocLinkRequested`. A click on a link sends `DocClicked`, and the editor
+**Embeds** show another document inside this one, the way Notion shows a board or a linked
+view in a page: a line holding only `[Q4 board](doc:b1 "embed board 480")`, with how your app
+should show it (`table`, `board`, `mindmap`, `calendar`, `page`) and its height. Your app draws
+the content with `Options::embeds(..)`; the editor keeps the space, draws the frame and title,
+selects, moves and deletes the block whole, and lets the bottom edge be dragged to change the
+height. Without content from your app, it says the document isn't shown there.
+
+`Options::docs` also adds Page, Link to page and Embed to the slash menu, which send
+`NewPageRequested`, `DocLinkRequested` and `EmbedRequested`; answer with `insert_page`,
+`insert_mention` or `insert_embed`. A click on a link sends `DocClicked`, and the editor
 never opens anything itself. After your documents change, call `editor.refresh_docs(cx)` to
 draw the links again.
 

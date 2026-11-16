@@ -176,7 +176,8 @@ impl Root {
                 .icon("✦"),
             )
             .docs(DemoDocs)
-            .images(local_images(file.clone()));
+            .images(local_images(file.clone()))
+            .embeds(|embed, _, cx| (embed.view == "board").then(|| demo_board(cx)));
         let editor = cx.new(|cx| Editor::with_options(source, options, window, cx));
         let subscription = cx.subscribe(&editor, |this, editor, event: &EditorEvent, cx| {
             // An app opens the document, makes a new one, or shows a picker; the example has one
@@ -830,6 +831,46 @@ fn local_images(file: Option<PathBuf>) -> impl Fn(&str) -> ImageSource + Send + 
     }
 }
 
+/// The example's embedded board: a real app draws the document's own view here.
+fn demo_board(cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    let column = |name: &'static str, cards: &[&'static str]| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted_foreground)
+                    .child(name),
+            )
+            .children(cards.iter().map(|card| {
+                div()
+                    .px(px(8.))
+                    .py(px(6.))
+                    .rounded(px(6.))
+                    .bg(theme.secondary)
+                    .text_size(px(13.))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(*card)
+            }))
+    };
+    div()
+        .size_full()
+        .p(px(10.))
+        .flex()
+        .gap(px(10.))
+        .child(column("To do", &["Book the dentist", "Plan the offsite"]))
+        .child(column("Doing", &["Finish the editor"]))
+        .child(column("Done", &["Send the lease renewal"]))
+        .into_any_element()
+}
+
 /// The example's other documents: a real app answers from its own list.
 struct DemoDocs;
 
@@ -838,6 +879,7 @@ impl Docs for DemoDocs {
         match id {
             "roadmap" => Some(DocInfo::new("Q4 roadmap").icon("🗺")),
             "last-week" => Some(DocInfo::new("Notes from last week").icon("🗒")),
+            "board" => Some(DocInfo::new("Q4 board").icon("📋")),
             _ if id.starts_with("new-") => Some(DocInfo::new("Untitled")),
             _ => None,
         }

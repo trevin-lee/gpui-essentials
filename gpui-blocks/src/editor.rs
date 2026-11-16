@@ -20,7 +20,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::actions::*;
-use crate::docs::{self, DocHooks, Docs, MentionPlugin, PagePlugin};
+use crate::docs::{
+    self, DocHooks, Docs, Embed, EmbedFn, EmbedHooks, EmbedPlugin, MentionPlugin, PagePlugin,
+    ResizeStart,
+};
 use crate::slash::{self, SlashAction, SlashItem};
 use crate::toc::{Heading, TocHooks, TocPlugin};
 use crate::widget::{Widget, WidgetPlugin};
@@ -77,16 +80,23 @@ pub(crate) fn bind_keys(cx: &mut App) {
 /// The Markdown extensions the editor parses and draws with: the toggles' and callouts'
 /// containers, document links (see [`crate::docs`]) and the widgets.
 pub fn extensions(widgets: &[Arc<dyn Widget>]) -> gpui_kit::base::text::MarkdownExtensions {
-    extensions_with(widgets, DocHooks::default(), TocHooks::default())
+    extensions_with(
+        widgets,
+        DocHooks::default(),
+        TocHooks::default(),
+        EmbedHooks::default(),
+    )
 }
 
 fn extensions_with(
     widgets: &[Arc<dyn Widget>],
     hooks: DocHooks,
     toc: TocHooks,
+    embeds: EmbedHooks,
 ) -> gpui_kit::base::text::MarkdownExtensions {
     let ext = with_default_surfaces(Default::default())
         .plugin(TocPlugin(toc))
+        .plugin(EmbedPlugin(embeds))
         .plugin(PagePlugin(hooks.clone()))
         .plugin(MentionPlugin(hooks));
     widgets
@@ -106,6 +116,7 @@ pub struct Options {
     image_link: Option<ImageLink>,
     images: Option<markdown_editor::ImageSourceFn>,
     docs: Option<Arc<dyn Docs>>,
+    embeds: Option<Arc<EmbedFn>>,
 }
 
 impl Default for Options {
@@ -116,6 +127,7 @@ impl Default for Options {
             image_link: None,
             images: None,
             docs: None,
+            embeds: None,
         }
     }
 }
@@ -135,6 +147,7 @@ impl std::fmt::Debug for Options {
             .field("image_link", &self.image_link.is_some())
             .field("images", &self.images.is_some())
             .field("docs", &self.docs.is_some())
+            .field("embeds", &self.embeds.is_some())
             .finish()
     }
 }
@@ -178,6 +191,18 @@ impl Options {
         self
     }
 
+    /// How embedded documents are drawn (see [`crate::docs`]): `draw` gets the document, the
+    /// view the embed asks for and its height, and returns its content, or `None` for the
+    /// editor's placeholder. The editor draws the frame, the title and the handle that drags
+    /// the height.
+    pub fn embeds(
+        mut self,
+        draw: impl Fn(&Embed, &mut Window, &mut App) -> Option<AnyElement> + Send + Sync + 'static,
+    ) -> Self {
+        self.embeds = Some(Arc::new(draw));
+        self
+    }
+
     /// Add an item to the end of the slash menu.
     pub fn slash_item(mut self, item: SlashItem) -> Self {
         self.items.push(item);
@@ -210,6 +235,9 @@ pub enum EditorEvent {
     /// The slash menu's Link to page: the app asks which document, then calls
     /// [`Editor::insert_mention`].
     DocLinkRequested,
+    /// The slash menu's Embed: the app asks which document and view, then calls
+    /// [`Editor::insert_embed`].
+    EmbedRequested,
 }
 
 /// Splits YAML front matter (between `---` lines at the very top) from the document, so the
@@ -264,6 +292,10 @@ pub struct Editor {
     open_on_next_change: bool,
     /// The top-level block the side menu is beside.
     hovered: Option<BlockId>,
+    /// Embeds' heights while one is being resized.
+    embed_heights: docs::Heights,
+    /// The embed being resized.
+    resizing: Option<ResizeStart>,
     /// The headings a table of contents lists, kept up to date after each change.
     headings: Arc<std::sync::Mutex<Vec<Heading>>>,
     /// The blocks' ids in [`Editor::document`].
@@ -304,6 +336,24 @@ impl Editor {
             })),
         };
         let images = options.images.clone();
+        let embed_heights: docs::Heights = Arc::default();
+        let this = cx.entity().downgrade();
+        let that = this.clone();
+        let embeds = EmbedHooks {
+            docs: options.docs.clone(),
+            render: options.embeds.clone(),
+            on_click: Some(Arc::new(move |id: &str, _: &mut Window, cx: &mut App| {
+                let id = SharedString::from(id.to_string());
+                let _ = that.update(cx, |_, cx| cx.emit(EditorEvent::DocClicked { id }));
+            })),
+            heights: embed_heights.clone(),
+            on_resize: Some(Arc::new(move |start, _: &mut Window, cx: &mut App| {
+                let _ = this.update(cx, |this, cx| {
+                    this.resizing = Some(start);
+                    cx.notify();
+                });
+            })),
+        };
         let headings: Arc<std::sync::Mutex<Vec<Heading>>> = Arc::default();
         let this = cx.entity().downgrade();
         let toc = TocHooks {
@@ -314,7 +364,7 @@ impl Editor {
         };
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
-                .with_markdown_extensions(extensions_with(&widgets, hooks, toc))
+                .with_markdown_extensions(extensions_with(&widgets, hooks, toc, embeds))
                 .with_source(body);
             // Pictures load only through the app's loader.
             state = match images {
@@ -361,6 +411,8 @@ impl Editor {
             hovered: None,
             ids: Default::default(),
             headings,
+            embed_heights,
+            resizing: None,
             touch_drag: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
@@ -472,6 +524,51 @@ impl Editor {
                 }
                 let _ = state.run(EditorCommand::InsertMarkdown(markdown), cx);
             });
+        });
+    }
+
+    /// Inserts an embed of the document `id` at the caret (see [`crate::docs`]), shown as `view`
+    /// at the default height, on a line of its own as [`Editor::insert_page`] does.
+    pub fn insert_embed(&mut self, id: &str, title: &str, view: &str, cx: &mut Context<Self>) {
+        let markdown = docs::embed(id, title, view, docs::DEFAULT_HEIGHT);
+        self.insert_doc(id, markdown, true, cx);
+    }
+
+    /// Follows the pointer while an embed's height is dragged.
+    fn resize_to(&mut self, y: Pixels, cx: &mut Context<Self>) {
+        let Some(start) = &self.resizing else {
+            return;
+        };
+        let height = (start.embed.height as f32 + f32::from(y - start.at.y)).round();
+        let height = (height.max(0.) as u32).clamp(*docs::HEIGHTS.start(), *docs::HEIGHTS.end());
+        if let Ok(mut heights) = self.embed_heights.lock() {
+            heights.insert(start.key, height);
+        }
+        cx.notify();
+    }
+
+    /// Writes the dragged height into the document, as one undo step.
+    fn finish_resize(&mut self, cx: &mut Context<Self>) {
+        let Some(start) = self.resizing.take() else {
+            return;
+        };
+        let height = self
+            .embed_heights
+            .lock()
+            .ok()
+            .and_then(|mut h| h.remove(&start.key));
+        cx.notify();
+        let Some(height) = height.filter(|h| *h != start.embed.height) else {
+            return;
+        };
+        let markdown = docs::embed(&start.embed.doc, &start.title, &start.embed.view, height);
+        self.state.update(cx, |state, cx| {
+            if state.is_readonly() {
+                return;
+            }
+            if let Some(block) = embed_block(state, &start) {
+                let _ = state.run(EditorCommand::ReplaceBlock { block, markdown }, cx);
+            }
         });
     }
 
@@ -685,6 +782,7 @@ impl Editor {
         let request = match action {
             SlashAction::NewPage => Some(EditorEvent::NewPageRequested),
             SlashAction::LinkToPage => Some(EditorEvent::DocLinkRequested),
+            SlashAction::Embed => Some(EditorEvent::EmbedRequested),
             _ => None,
         };
         let image_at = self.state.update(cx, |state, cx| {
@@ -706,7 +804,7 @@ impl Editor {
                     }
                     SlashAction::Image => return state.model().caret(),
                     // The app answers with insert_page or insert_mention.
-                    SlashAction::NewPage | SlashAction::LinkToPage => {}
+                    SlashAction::NewPage | SlashAction::LinkToPage | SlashAction::Embed => {}
                 }
                 None
             })
@@ -986,6 +1084,33 @@ impl Editor {
 }
 
 /// `Some(ordered)` when the caret's line is a plain (not to-do) list item's first line.
+/// The block of the embed a resize started on: the one block written as its Markdown, or among
+/// several the one under where the press was.
+fn embed_block(state: &BlockEditorState, start: &ResizeStart) -> Option<BlockId> {
+    fn walk(block: markdown_editor::BlockRef<'_>, markdown: &str, out: &mut Vec<BlockId>) {
+        if block.kind() == BlockKind::Custom && block.markdown() == markdown {
+            out.push(block.id());
+        }
+        for child in block.children() {
+            walk(child, markdown, out);
+        }
+    }
+    let doc = state.model().document();
+    let mut found = Vec::new();
+    walk(doc.root(), &start.markdown, &mut found);
+    if found.len() <= 1 {
+        return found.pop();
+    }
+    let top = state
+        .top_level_blocks()
+        .into_iter()
+        .find(|(_, b)| b.contains(&start.at))?
+        .0;
+    found
+        .into_iter()
+        .find(|id| top_level(state, *id) == Some(top))
+}
+
 /// Whether the caret is on an empty paragraph, which a block inserted there replaces.
 fn on_empty_line(state: &BlockEditorState) -> bool {
     let model = state.model();
@@ -1343,6 +1468,29 @@ impl Render for Editor {
         let side_menu = self.side_menu(cx);
         let slash_menu = self.slash_menu(cx);
         let handles = self.selection_handles(window, cx);
+        let resize = self.resizing.is_some().then(|| {
+            // While an embed's height is dragged, the pointer is followed anywhere in the window.
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moving = this.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ =
+                                moving.update(cx, |this, cx| this.resize_to(event.position.y, cx));
+                        }
+                    });
+                    let up = this.clone();
+                    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ = up.update(cx, |this, cx| this.finish_resize(cx));
+                        }
+                    });
+                },
+            )
+            .size_0()
+        });
         let edit_menu = self.edit_menu(window, cx);
         div()
             .id("gpui-blocks")
@@ -1388,6 +1536,7 @@ impl Render for Editor {
             .children(side_menu)
             .children(slash_menu)
             .children(handles)
+            .children(resize)
             .children(edit_menu)
             .child(self.long_press_watch(cx))
     }
