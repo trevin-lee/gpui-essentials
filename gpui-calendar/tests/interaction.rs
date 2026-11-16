@@ -546,6 +546,24 @@ fn new_events_go_in_the_default_calendar_or_nowhere(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_hidden_default_calendar_is_passed_over(cx: &mut TestAppContext) {
+    // "old" can be edited but isn't shown: an event made there would vanish.
+    let (_, seen, cx) = open_with(cx, |c| {
+        c.with_options(|o| o.default_calendar = Some("old".into()))
+    });
+    cx.simulate_keystrokes("down enter");
+    let made: Vec<_> = seen
+        .borrow()
+        .iter()
+        .filter_map(|e| match e {
+            CalendarEvent::Create { calendar, .. } => Some(calendar.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(made, vec![Some("work".into())]);
+}
+
+#[gpui_kit::test]
 fn nothing_is_made_when_every_calendar_is_read_only(cx: &mut TestAppContext) {
     let (c, seen, cx) = open_with(cx, |c| {
         c.with_calendars(
