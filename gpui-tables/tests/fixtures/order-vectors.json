@@ -1,0 +1,677 @@
+{
+  "about": "Fractional-index test vectors for gpui-tables' order module and any client using the same scheme: rocicorp's fractional-indexing 3.4.0 (base 62, integer heads a-z and A-Z) with keys capped at 256 characters. Expected keys come from fractional-indexing itself. Stricter than it in one way: a key with a character outside the alphabet is invalid. error is one of: invalid (a key is malformed or longer than 256), notBelow (a is not below b), tooLong (the key made would be longer than 256; renumber the list).",
+  "alphabet": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+  "maxLength": 256,
+  "between": [
+    {
+      "a": null,
+      "b": null,
+      "expected": "a0",
+      "note": "an empty list"
+    },
+    {
+      "a": "a0",
+      "b": null,
+      "expected": "a1",
+      "note": "append"
+    },
+    {
+      "a": "a1",
+      "b": null,
+      "expected": "a2",
+      "note": "append"
+    },
+    {
+      "a": "az",
+      "b": null,
+      "expected": "b00",
+      "note": "append: the integer part grows"
+    },
+    {
+      "a": "Zz",
+      "b": null,
+      "expected": "a0",
+      "note": "append across the a/Z boundary"
+    },
+    {
+      "a": "bzz",
+      "b": null,
+      "expected": "c000",
+      "note": "append: b to c"
+    },
+    {
+      "a": "a0V",
+      "b": null,
+      "expected": "a1",
+      "note": "append after a fraction"
+    },
+    {
+      "a": "zzzzzzzzzzzzzzzzzzzzzzzzzzy",
+      "b": null,
+      "expected": "zzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "note": "append near the largest integer"
+    },
+    {
+      "a": "zzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "b": null,
+      "expected": "zzzzzzzzzzzzzzzzzzzzzzzzzzzV",
+      "note": "append after the largest integer: a fraction"
+    },
+    {
+      "a": null,
+      "b": "a0",
+      "expected": "Zz",
+      "note": "prepend"
+    },
+    {
+      "a": null,
+      "b": "a1",
+      "expected": "a0",
+      "note": "prepend"
+    },
+    {
+      "a": null,
+      "b": "Zz",
+      "expected": "Zy",
+      "note": "prepend"
+    },
+    {
+      "a": null,
+      "b": "Y00",
+      "expected": "Xzzz",
+      "note": "prepend: the integer part grows"
+    },
+    {
+      "a": null,
+      "b": "a0V",
+      "expected": "a0",
+      "note": "prepend before a fraction"
+    },
+    {
+      "a": null,
+      "b": "b999",
+      "expected": "b99",
+      "note": "prepend"
+    },
+    {
+      "a": null,
+      "b": "A000000000000000000000000001",
+      "expected": "A000000000000000000000000000V",
+      "note": "prepend before the smallest integer: a fraction"
+    },
+    {
+      "a": "a0",
+      "b": "a1",
+      "expected": "a0V",
+      "note": "adjacent"
+    },
+    {
+      "a": "a1",
+      "b": "a2",
+      "expected": "a1V",
+      "note": "adjacent"
+    },
+    {
+      "a": "a0",
+      "b": "a0V",
+      "expected": "a0G",
+      "note": "adjacent, with a fraction"
+    },
+    {
+      "a": "a0",
+      "b": "a0G",
+      "expected": "a08",
+      "note": "adjacent, with a fraction"
+    },
+    {
+      "a": "a0V",
+      "b": "a1",
+      "expected": "a0l",
+      "note": "between"
+    },
+    {
+      "a": "Zz",
+      "b": "a0",
+      "expected": "ZzV",
+      "note": "adjacent across a/Z"
+    },
+    {
+      "a": "Zz",
+      "b": "a1",
+      "expected": "a0",
+      "note": "an integer fits"
+    },
+    {
+      "a": "a0",
+      "b": "a1V",
+      "expected": "a1",
+      "note": "an integer fits"
+    },
+    {
+      "a": "b125",
+      "b": "b129",
+      "expected": "b127",
+      "note": "same integer"
+    },
+    {
+      "a": "a0",
+      "b": "a01",
+      "expected": "a00V",
+      "note": "a fraction of zeros"
+    },
+    {
+      "a": "Zz",
+      "b": "a01",
+      "expected": "a0",
+      "note": "across a/Z with a fraction"
+    },
+    {
+      "a": "a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": "a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002",
+      "expected": "a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001V",
+      "note": "long keys: the result is 255 characters"
+    },
+    {
+      "a": "a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": "a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002",
+      "expected": "a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001V",
+      "note": "long keys: the result is exactly 256 characters"
+    },
+    {
+      "a": "a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": "a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002",
+      "error": "tooLong",
+      "note": "long keys: the result would be 258 characters, over the cap"
+    },
+    {
+      "a": "a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": null,
+      "expected": "a1",
+      "note": "a 256-character key, then append: short"
+    },
+    {
+      "a": null,
+      "b": "a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "expected": "a0",
+      "note": "prepend before a 256-character key: short"
+    },
+    {
+      "a": "a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": null,
+      "error": "invalid",
+      "note": "a 257-character key is over the cap"
+    },
+    {
+      "a": "a1",
+      "b": "a0",
+      "error": "notBelow",
+      "note": "out of order"
+    },
+    {
+      "a": "a1",
+      "b": "a1",
+      "error": "notBelow",
+      "note": "equal"
+    },
+    {
+      "a": "",
+      "b": null,
+      "error": "invalid",
+      "note": "empty"
+    },
+    {
+      "a": "0",
+      "b": null,
+      "error": "invalid",
+      "note": "no integer head"
+    },
+    {
+      "a": "a",
+      "b": null,
+      "error": "invalid",
+      "note": "integer part too short"
+    },
+    {
+      "a": "b0",
+      "b": null,
+      "error": "invalid",
+      "note": "integer part too short for its head"
+    },
+    {
+      "a": "a00",
+      "b": null,
+      "error": "invalid",
+      "note": "a fraction ending in 0"
+    },
+    {
+      "a": "a0 ",
+      "b": null,
+      "error": "invalid",
+      "note": "a space (fractional-indexing itself accepts it; this scheme doesn't)"
+    },
+    {
+      "a": "a0/",
+      "b": null,
+      "error": "invalid",
+      "note": "outside the alphabet (fractional-indexing itself accepts it; this scheme doesn't)"
+    },
+    {
+      "a": "é0",
+      "b": null,
+      "error": "invalid",
+      "note": "outside the alphabet"
+    },
+    {
+      "a": "A00000000000000000000000000",
+      "b": null,
+      "error": "invalid",
+      "note": "the smallest integer alone"
+    },
+    {
+      "a": null,
+      "b": "a00",
+      "error": "invalid",
+      "note": "a fraction ending in 0, as the upper key"
+    },
+    {
+      "a": "a0",
+      "b": "nope",
+      "error": "invalid",
+      "note": "an invalid upper key"
+    }
+  ],
+  "nBetween": [
+    {
+      "a": null,
+      "b": null,
+      "n": 0,
+      "expected": [],
+      "note": "none"
+    },
+    {
+      "a": null,
+      "b": null,
+      "n": 5,
+      "expected": [
+        "a0",
+        "a1",
+        "a2",
+        "a3",
+        "a4"
+      ],
+      "note": "a fresh list"
+    },
+    {
+      "a": "a0",
+      "b": null,
+      "n": 5,
+      "expected": [
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "a5"
+      ],
+      "note": "appends"
+    },
+    {
+      "a": null,
+      "b": "a0",
+      "n": 5,
+      "expected": [
+        "Zv",
+        "Zw",
+        "Zx",
+        "Zy",
+        "Zz"
+      ],
+      "note": "prepends"
+    },
+    {
+      "a": "a0",
+      "b": "a1",
+      "n": 10,
+      "expected": [
+        "a04",
+        "a08",
+        "a0G",
+        "a0K",
+        "a0O",
+        "a0V",
+        "a0Z",
+        "a0d",
+        "a0l",
+        "a0t"
+      ],
+      "note": "between adjacent keys"
+    },
+    {
+      "a": "a0V",
+      "b": "a0W",
+      "n": 7,
+      "expected": [
+        "a0V8",
+        "a0VG",
+        "a0VO",
+        "a0VV",
+        "a0Vd",
+        "a0Vl",
+        "a0Vt"
+      ],
+      "note": "between adjacent fractions"
+    },
+    {
+      "a": "Zz",
+      "b": "a0",
+      "n": 4,
+      "expected": [
+        "Zz8",
+        "ZzG",
+        "ZzV",
+        "Zzl"
+      ],
+      "note": "across a/Z"
+    },
+    {
+      "a": "a0",
+      "b": "b00",
+      "n": 3,
+      "expected": [
+        "a0V",
+        "a1",
+        "a2"
+      ],
+      "note": "a wide gap"
+    },
+    {
+      "a": "a1",
+      "b": "a0",
+      "n": 2,
+      "error": "notBelow",
+      "note": "out of order"
+    },
+    {
+      "a": "a00",
+      "b": null,
+      "n": 2,
+      "error": "invalid",
+      "note": "invalid"
+    },
+    {
+      "a": "a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": "a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002",
+      "n": 1,
+      "expected": [
+        "a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001V"
+      ],
+      "note": "long keys: at the cap"
+    },
+    {
+      "a": "a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001",
+      "b": "a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002",
+      "n": 3,
+      "error": "tooLong",
+      "note": "long keys: over the cap"
+    }
+  ],
+  "spread": [
+    {
+      "n": 0,
+      "expected": []
+    },
+    {
+      "n": 1,
+      "expected": [
+        "a0"
+      ]
+    },
+    {
+      "n": 3,
+      "expected": [
+        "a0",
+        "a1",
+        "a2"
+      ]
+    },
+    {
+      "n": 62,
+      "expected": [
+        "a0",
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "a5",
+        "a6",
+        "a7",
+        "a8",
+        "a9",
+        "aA",
+        "aB",
+        "aC",
+        "aD",
+        "aE",
+        "aF",
+        "aG",
+        "aH",
+        "aI",
+        "aJ",
+        "aK",
+        "aL",
+        "aM",
+        "aN",
+        "aO",
+        "aP",
+        "aQ",
+        "aR",
+        "aS",
+        "aT",
+        "aU",
+        "aV",
+        "aW",
+        "aX",
+        "aY",
+        "aZ",
+        "aa",
+        "ab",
+        "ac",
+        "ad",
+        "ae",
+        "af",
+        "ag",
+        "ah",
+        "ai",
+        "aj",
+        "ak",
+        "al",
+        "am",
+        "an",
+        "ao",
+        "ap",
+        "aq",
+        "ar",
+        "as",
+        "at",
+        "au",
+        "av",
+        "aw",
+        "ax",
+        "ay",
+        "az"
+      ]
+    },
+    {
+      "n": 63,
+      "expected": [
+        "a0",
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "a5",
+        "a6",
+        "a7",
+        "a8",
+        "a9",
+        "aA",
+        "aB",
+        "aC",
+        "aD",
+        "aE",
+        "aF",
+        "aG",
+        "aH",
+        "aI",
+        "aJ",
+        "aK",
+        "aL",
+        "aM",
+        "aN",
+        "aO",
+        "aP",
+        "aQ",
+        "aR",
+        "aS",
+        "aT",
+        "aU",
+        "aV",
+        "aW",
+        "aX",
+        "aY",
+        "aZ",
+        "aa",
+        "ab",
+        "ac",
+        "ad",
+        "ae",
+        "af",
+        "ag",
+        "ah",
+        "ai",
+        "aj",
+        "ak",
+        "al",
+        "am",
+        "an",
+        "ao",
+        "ap",
+        "aq",
+        "ar",
+        "as",
+        "at",
+        "au",
+        "av",
+        "aw",
+        "ax",
+        "ay",
+        "az",
+        "b00"
+      ]
+    },
+    {
+      "n": 100,
+      "expected": [
+        "a0",
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "a5",
+        "a6",
+        "a7",
+        "a8",
+        "a9",
+        "aA",
+        "aB",
+        "aC",
+        "aD",
+        "aE",
+        "aF",
+        "aG",
+        "aH",
+        "aI",
+        "aJ",
+        "aK",
+        "aL",
+        "aM",
+        "aN",
+        "aO",
+        "aP",
+        "aQ",
+        "aR",
+        "aS",
+        "aT",
+        "aU",
+        "aV",
+        "aW",
+        "aX",
+        "aY",
+        "aZ",
+        "aa",
+        "ab",
+        "ac",
+        "ad",
+        "ae",
+        "af",
+        "ag",
+        "ah",
+        "ai",
+        "aj",
+        "ak",
+        "al",
+        "am",
+        "an",
+        "ao",
+        "ap",
+        "aq",
+        "ar",
+        "as",
+        "at",
+        "au",
+        "av",
+        "aw",
+        "ax",
+        "ay",
+        "az",
+        "b00",
+        "b01",
+        "b02",
+        "b03",
+        "b04",
+        "b05",
+        "b06",
+        "b07",
+        "b08",
+        "b09",
+        "b0A",
+        "b0B",
+        "b0C",
+        "b0D",
+        "b0E",
+        "b0F",
+        "b0G",
+        "b0H",
+        "b0I",
+        "b0J",
+        "b0K",
+        "b0L",
+        "b0M",
+        "b0N",
+        "b0O",
+        "b0P",
+        "b0Q",
+        "b0R",
+        "b0S",
+        "b0T",
+        "b0U",
+        "b0V",
+        "b0W",
+        "b0X",
+        "b0Y",
+        "b0Z",
+        "b0a",
+        "b0b"
+      ]
+    }
+  ]
+}

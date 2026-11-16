@@ -1,0 +1,295 @@
+//! Views: saved ways of looking at a database's rows (a table, a board, a list), each with its
+//! own sort, filter, grouping and columns.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value as Json;
+
+use super::{Extra, opt_number, string_enum};
+
+string_enum! {
+    /// How a view lays its rows out.
+    pub enum ViewType {
+        /// Rows and columns: resizable, reorderable columns, sort, filter and group.
+        Table = "table",
+        /// Cards in columns, one per group of a select (or other groupable property).
+        Board = "board",
+        /// One line per row: the title and a few properties.
+        List = "list",
+        /// Cards in a grid. Not drawn in v1.
+        Gallery = "gallery",
+    }
+}
+
+string_enum! {
+    pub enum Direction {
+        Ascending = "ascending",
+        Descending = "descending",
+    }
+}
+
+string_enum! {
+    /// How a view groups by a date: relative to today (Notion's default), or by calendar day,
+    /// week, month or year.
+    pub enum DateBucket {
+        /// Older, past 30 days, past 7 days, yesterday, today, tomorrow, next 7 days, next 30
+        /// days, later.
+        Relative = "relative",
+        Day = "day",
+        Week = "week",
+        Month = "month",
+        Year = "year",
+    }
+}
+
+string_enum! {
+    /// A filter condition's operator. Which apply depends on the property's type (see
+    /// [`FilterOp::applies_to`]).
+    pub enum FilterOp {
+        Is = "is",
+        IsNot = "isNot",
+        Contains = "contains",
+        DoesNotContain = "doesNotContain",
+        StartsWith = "startsWith",
+        IsEmpty = "isEmpty",
+        IsNotEmpty = "isNotEmpty",
+        Greater = "greater",
+        GreaterOrEqual = "greaterOrEqual",
+        Less = "less",
+        LessOrEqual = "lessOrEqual",
+        Before = "before",
+        After = "after",
+        OnOrBefore = "onOrBefore",
+        OnOrAfter = "onOrAfter",
+        /// Within a span around today, named by a [`Within`] string.
+        Within = "within",
+        IsChecked = "isChecked",
+        IsNotChecked = "isNotChecked",
+    }
+}
+
+string_enum! {
+    /// The spans `within` takes, each counted in whole days in the viewer's time zone and
+    /// including today.
+    pub enum Within {
+        Today = "today",
+        PastWeek = "pastWeek",
+        PastMonth = "pastMonth",
+        PastYear = "pastYear",
+        NextWeek = "nextWeek",
+        NextMonth = "nextMonth",
+        NextYear = "nextYear",
+    }
+}
+
+impl FilterOp {
+    /// Whether this operator applies to a property of `kind`.
+    pub fn applies_to(&self, kind: &super::PropertyType) -> bool {
+        use super::PropertyType as T;
+        use FilterOp as O;
+        let empty = matches!(self, O::IsEmpty | O::IsNotEmpty);
+        match kind {
+            T::Title | T::Text | T::Url | T::Email | T::Phone => {
+                empty
+                    || matches!(
+                        self,
+                        O::Is | O::IsNot | O::Contains | O::DoesNotContain | O::StartsWith
+                    )
+            }
+            T::Number => {
+                empty
+                    || matches!(
+                        self,
+                        O::Is
+                            | O::IsNot
+                            | O::Greater
+                            | O::GreaterOrEqual
+                            | O::Less
+                            | O::LessOrEqual
+                    )
+            }
+            T::Select => empty || matches!(self, O::Is | O::IsNot),
+            T::MultiSelect | T::Person | T::Relation => {
+                empty || matches!(self, O::Contains | O::DoesNotContain)
+            }
+            T::Date | T::CreatedTime | T::EditedTime => {
+                // The derived times are never empty, but asking is harmless.
+                empty
+                    || matches!(
+                        self,
+                        O::Is
+                            | O::IsNot
+                            | O::Before
+                            | O::After
+                            | O::OnOrBefore
+                            | O::OnOrAfter
+                            | O::Within
+                    )
+            }
+            T::Checkbox => matches!(self, O::Is | O::IsChecked | O::IsNotChecked),
+            T::Other(_) => false,
+        }
+    }
+}
+
+/// One way a view sorts: by a property, up or down. A view's sorts apply in turn, each breaking
+/// the ties of the one before.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Sort {
+    pub property_id: String,
+    pub direction: Direction,
+}
+
+impl Sort {
+    pub fn ascending(property_id: impl Into<String>) -> Self {
+        Self {
+            property_id: property_id.into(),
+            direction: Direction::Ascending,
+        }
+    }
+
+    pub fn descending(property_id: impl Into<String>) -> Self {
+        Self {
+            property_id: property_id.into(),
+            direction: Direction::Descending,
+        }
+    }
+}
+
+/// One test of a row: `{propertyId, op, value}`. `value` depends on the operator and the
+/// property's type: a string for text, an option id for a select, a number, a row id for a
+/// relation, a person for a person, a date (`{start, includeTime}`, milliseconds, or
+/// `"2026-11-15"`) for a date, a [`Within`] name for `within`, and nothing for `isEmpty`,
+/// `isNotEmpty`, `isChecked` and `isNotChecked`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Condition {
+    pub property_id: String,
+    pub op: FilterOp,
+    #[serde(default, skip_serializing_if = "Json::is_null")]
+    pub value: Json,
+}
+
+/// A view's filter: a tree of `{"and": [..]}` and `{"or": [..]}` over conditions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Filter {
+    And { and: Vec<Filter> },
+    Or { or: Vec<Filter> },
+    Condition(Condition),
+}
+
+impl Filter {
+    pub fn condition(property_id: impl Into<String>, op: FilterOp, value: Json) -> Self {
+        Self::Condition(Condition {
+            property_id: property_id.into(),
+            op,
+            value,
+        })
+    }
+
+    /// How deep the tree goes: a lone condition is 1. (Walked without recursion, so a tree
+    /// built in code to any depth can be measured.)
+    pub fn depth(&self) -> usize {
+        self.walk().map(|(_, d)| d).max().unwrap_or(0)
+    }
+
+    /// How many nodes it has, groups and conditions both.
+    pub fn nodes(&self) -> usize {
+        self.walk().count()
+    }
+
+    /// Every node with its depth (the root is 1), depth first.
+    pub fn walk(&self) -> impl Iterator<Item = (&Filter, usize)> {
+        let mut stack = vec![(self, 1)];
+        std::iter::from_fn(move || {
+            let (f, d) = stack.pop()?;
+            if let Self::And { and: c } | Self::Or { or: c } = f {
+                stack.extend(c.iter().rev().map(|x| (x, d + 1)));
+            }
+            Some((f, d))
+        })
+    }
+}
+
+/// A table view's column: a property shown at a width, in an order, or hidden.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Column {
+    pub property_id: String,
+    /// In points; null for the default width.
+    #[serde(default, with = "opt_number")]
+    pub width: Option<f64>,
+    #[serde(default)]
+    pub hidden: bool,
+    /// A fractional index among the view's columns.
+    #[serde(default)]
+    pub order: String,
+}
+
+/// A saved view of a database.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct View {
+    /// A lowercase UUID.
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: ViewType,
+    /// A fractional index among the database's views (their tabs' order).
+    #[serde(default)]
+    pub order: String,
+    #[serde(default)]
+    pub sort: Vec<Sort>,
+    #[serde(default)]
+    pub filter: Option<Filter>,
+    /// The property the rows are grouped by: a board's columns, a table's or list's sections.
+    #[serde(default)]
+    pub group_by: Option<String>,
+    /// How a date `groupBy` buckets; relative when absent. (An addition to the proposed JSON.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_date: Option<DateBucket>,
+    /// A table's columns. Properties without one show after them, at the default width.
+    #[serde(default)]
+    pub columns: Vec<Column>,
+    /// The properties a board's card or a list's line shows besides the title, in order.
+    #[serde(default)]
+    pub card_properties: Vec<String>,
+    /// Groups folded shut, by [`crate::engine::GroupKey`] string.
+    #[serde(default)]
+    pub collapsed_groups: Vec<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl View {
+    /// An empty view: no sort, filter, grouping or columns.
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        kind: ViewType,
+        order: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            kind,
+            order: order.into(),
+            sort: Vec::new(),
+            filter: None,
+            group_by: None,
+            group_date: None,
+            columns: Vec::new(),
+            card_properties: Vec::new(),
+            collapsed_groups: Vec::new(),
+            extra: Extra::new(),
+        }
+    }
+
+    /// Its columns by their `order` (then property id).
+    pub fn columns_in_order(&self) -> Vec<&Column> {
+        let mut c: Vec<&Column> = self.columns.iter().collect();
+        c.sort_by(|a, b| (&a.order, &a.property_id).cmp(&(&b.order, &b.property_id)));
+        c
+    }
+}

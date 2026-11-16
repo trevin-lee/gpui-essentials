@@ -1,0 +1,587 @@
+[
+  {
+    "id": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "kind": "database",
+    "title": "Interactions",
+    "order": "a0",
+    "folderId": null,
+    "parentDocId": "d23f0824-128b-4f33-8c5c-7fd0a6a3a450",
+    "parentObjectId": "9531985d-5d9d-49f8-9818-e811892f902b",
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788422400000,
+    "updated": 1794516060000,
+    "rev": 9,
+    "seq": 2290,
+    "deleted": false,
+    "database": {
+      "properties": [
+        {
+          "id": "57124242-5051-41cc-917f-9acae01f5057",
+          "name": "Summary",
+          "type": "title",
+          "config": {},
+          "order": "a0"
+        },
+        {
+          "id": "7f26144b-9828-4fcd-99a5-4a7bb1fee08f",
+          "name": "Kind",
+          "type": "select",
+          "config": {
+            "options": [
+              {
+                "id": "482c9cbc-4343-4cc5-aeae-05cf96d0cc5f",
+                "name": "Call",
+                "color": "blue"
+              },
+              {
+                "id": "88daf401-6b40-43ef-a54b-0c4e010c4759",
+                "name": "Email",
+                "color": "gray"
+              },
+              {
+                "id": "519088f5-90fb-4d11-9c1c-aaf75e8766ed",
+                "name": "Coffee",
+                "color": "brown"
+              },
+              {
+                "id": "dbf4a8b2-b0c4-412d-a020-3626f3fe39c0",
+                "name": "Meeting",
+                "color": "green"
+              },
+              {
+                "id": "a7abe1c2-9e1a-4ef4-b341-e07a83f73f16",
+                "name": "Message",
+                "color": "yellow"
+              }
+            ]
+          },
+          "order": "a1"
+        },
+        {
+          "id": "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+          "name": "When",
+          "type": "date",
+          "config": {
+            "includeTime": true,
+            "range": false
+          },
+          "order": "a2"
+        },
+        {
+          "id": "451abd81-f1d6-4ed6-97f5-e837d70820fe",
+          "name": "People",
+          "type": "relation",
+          "config": {
+            "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+            "twoWay": true,
+            "backPropertyId": "7f150524-34b9-45df-9e77-69b10f4205b4"
+          },
+          "order": "a3"
+        },
+        {
+          "id": "10a3d6b2-aa05-411a-b271-5945795e8229",
+          "name": "Company",
+          "type": "relation",
+          "config": {
+            "databaseId": "6b0d549b-6f03-475a-9600-a35a099950d8",
+            "twoWay": true,
+            "backPropertyId": "6bf46c69-7d2c-4f82-aeea-cbe226e87555"
+          },
+          "order": "a4"
+        },
+        {
+          "id": "4f426dcb-b394-4b36-bb2d-420f0f88080b",
+          "name": "Logged by",
+          "type": "person",
+          "config": {
+            "kinds": [
+              "owner",
+              "agent"
+            ]
+          },
+          "order": "a5"
+        },
+        {
+          "id": "ae658f33-fe3b-490b-93f4-48b3a5aa3c81",
+          "name": "Next step",
+          "type": "text",
+          "config": {},
+          "order": "a6"
+        },
+        {
+          "id": "b774eb52-48db-40af-b215-8370d269a9a5",
+          "name": "Done",
+          "type": "checkbox",
+          "config": {},
+          "order": "a7"
+        },
+        {
+          "id": "58d5563d-ab2c-431e-a315-128862c33a4f",
+          "name": "Edited",
+          "type": "editedTime",
+          "config": {},
+          "order": "a8"
+        }
+      ],
+      "views": [
+        {
+          "id": "fc132d0d-113d-417d-b0cb-c97d0fef7928",
+          "name": "Timeline",
+          "type": "table",
+          "order": "a0",
+          "sort": [
+            {
+              "propertyId": "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+              "direction": "descending"
+            }
+          ],
+          "filter": null,
+          "groupBy": "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+          "groupDate": "month",
+          "columns": [
+            {
+              "propertyId": "57124242-5051-41cc-917f-9acae01f5057",
+              "width": 280,
+              "hidden": false,
+              "order": "a0"
+            },
+            {
+              "propertyId": "7f26144b-9828-4fcd-99a5-4a7bb1fee08f",
+              "width": 110,
+              "hidden": false,
+              "order": "a1"
+            },
+            {
+              "propertyId": "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+              "width": 170,
+              "hidden": false,
+              "order": "a2"
+            },
+            {
+              "propertyId": "451abd81-f1d6-4ed6-97f5-e837d70820fe",
+              "width": 220,
+              "hidden": false,
+              "order": "a3"
+            },
+            {
+              "propertyId": "10a3d6b2-aa05-411a-b271-5945795e8229",
+              "width": 180,
+              "hidden": false,
+              "order": "a4"
+            },
+            {
+              "propertyId": "b774eb52-48db-40af-b215-8370d269a9a5",
+              "width": 70,
+              "hidden": false,
+              "order": "a5"
+            }
+          ],
+          "cardProperties": [],
+          "collapsedGroups": []
+        },
+        {
+          "id": "1c2442f9-298c-43a5-b0cc-ec313571810a",
+          "name": "By kind",
+          "type": "board",
+          "order": "a1",
+          "sort": [],
+          "filter": null,
+          "groupBy": "7f26144b-9828-4fcd-99a5-4a7bb1fee08f",
+          "columns": [],
+          "cardProperties": [
+            "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+            "451abd81-f1d6-4ed6-97f5-e837d70820fe"
+          ],
+          "collapsedGroups": []
+        },
+        {
+          "id": "1a358ca0-0d75-485d-99c9-4309570dc195",
+          "name": "Open next steps",
+          "type": "list",
+          "order": "a2",
+          "sort": [
+            {
+              "propertyId": "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+              "direction": "ascending"
+            }
+          ],
+          "filter": {
+            "and": [
+              {
+                "propertyId": "b774eb52-48db-40af-b215-8370d269a9a5",
+                "op": "isNotChecked"
+              },
+              {
+                "propertyId": "ae658f33-fe3b-490b-93f4-48b3a5aa3c81",
+                "op": "isNotEmpty"
+              }
+            ]
+          },
+          "groupBy": null,
+          "columns": [],
+          "cardProperties": [
+            "ae658f33-fe3b-490b-93f4-48b3a5aa3c81"
+          ],
+          "collapsedGroups": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "c215a82a-06ec-41ad-aa05-75438b0d590b",
+    "kind": "page",
+    "title": "Intro call about kiln sensors",
+    "order": "a0",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788886800000,
+    "updated": 1788890400000,
+    "rev": 1,
+    "seq": 2200,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "482c9cbc-4343-4cc5-aeae-05cf96d0cc5f",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1788883200000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "9a2ef80f-58ee-4571-b499-8d7c4093f6de"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": true,
+      "ae658f33-fe3b-490b-93f4-48b3a5aa3c81": "Send the spec sheet"
+    }
+  },
+  {
+    "id": "a49636a2-fa7f-4eab-8c4f-9b0687322e25",
+    "kind": "page",
+    "title": "Coffee near the office",
+    "order": "a1",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1789900200000,
+    "updated": 1789903860000,
+    "rev": 1,
+    "seq": 2201,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "519088f5-90fb-4d11-9c1c-aaf75e8766ed",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1789896600000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "bfeaa155-1a28-47b3-a4e4-e25a15fc899e"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "a268aa87-2607-479d-a050-914a9d33a01c"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": true
+    }
+  },
+  {
+    "id": "d86f40f6-b239-43c7-974c-77a2dd02de92",
+    "kind": "page",
+    "title": "Referral for the platform role",
+    "order": "a2",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "created": 1790953920000,
+    "updated": 1790957640000,
+    "rev": 1,
+    "seq": 2202,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "88daf401-6b40-43ef-a54b-0c4e010c4759",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1790950320000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "1d87cec3-1f72-46ab-b961-fd925d39d0a8",
+        "fa529ba3-fe3b-4ada-bcf2-0724d953ee26"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "agent",
+          "agentId": "career-planning"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": false,
+      "ae658f33-fe3b-490b-93f4-48b3a5aa3c81": "Follow up after the onsite"
+    }
+  },
+  {
+    "id": "e883a1d4-5de0-4997-84b5-a81842d87208",
+    "kind": "page",
+    "title": "Studio visit",
+    "order": "a3",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1792263600000,
+    "updated": 1792267380000,
+    "rev": 1,
+    "seq": 2203,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "dbf4a8b2-b0c4-412d-a020-3626f3fe39c0",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1792260000000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "4fd58dbe-7bdc-468b-bafb-2c68774b15d7"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "353c631c-dfd4-4f37-9200-339d068739fa"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": true
+    }
+  },
+  {
+    "id": "3908f227-c59d-4916-9b0e-e76f2ac34446",
+    "kind": "page",
+    "title": "Pilot scoping",
+    "order": "a4",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "agent",
+      "agentId": "inbox-triage"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "inbox-triage"
+    },
+    "created": 1793376000000,
+    "updated": 1793379840000,
+    "rev": 1,
+    "seq": 2204,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "dbf4a8b2-b0c4-412d-a020-3626f3fe39c0",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1793372400000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "842e7fc2-2954-4a6e-b12a-a1f6d42fddbb",
+        "bfeaa155-1a28-47b3-a4e4-e25a15fc899e"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "a268aa87-2607-479d-a050-914a9d33a01c"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "agent",
+          "agentId": "inbox-triage"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": false,
+      "ae658f33-fe3b-490b-93f4-48b3a5aa3c81": "Draft the pilot plan"
+    }
+  },
+  {
+    "id": "80b0c08b-c770-4420-8aa4-248c8857f9a4",
+    "kind": "page",
+    "title": "Quick thanks",
+    "order": "a5",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1793828700000,
+    "updated": 1793832600000,
+    "rev": 1,
+    "seq": 2205,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "a7abe1c2-9e1a-4ef4-b341-e07a83f73f16",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1793825100000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "9a2ef80f-58ee-4571-b499-8d7c4093f6de",
+        "f3b7a50d-f373-4a53-b488-f87605e999f3"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": true
+    }
+  },
+  {
+    "id": "9cfc8652-3919-4242-a2ed-dbbd5464ecc2",
+    "kind": "page",
+    "title": "Catch-up on the new studio",
+    "order": "a6",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1794421800000,
+    "updated": 1794425760000,
+    "rev": 1,
+    "seq": 2206,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "482c9cbc-4343-4cc5-aeae-05cf96d0cc5f",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1794418200000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "4fd58dbe-7bdc-468b-bafb-2c68774b15d7"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "353c631c-dfd4-4f37-9200-339d068739fa"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": false,
+      "ae658f33-fe3b-490b-93f4-48b3a5aa3c81": "Intro her to Rowan"
+    }
+  },
+  {
+    "id": "c2216b02-fc24-4d0b-89d4-88b1cfbf3360",
+    "kind": "page",
+    "title": "Portfolio review",
+    "order": "a7",
+    "folderId": null,
+    "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1794474900000,
+    "updated": 1794478920000,
+    "rev": 1,
+    "seq": 2207,
+    "deleted": false,
+    "values": {
+      "7f26144b-9828-4fcd-99a5-4a7bb1fee08f": "519088f5-90fb-4d11-9c1c-aaf75e8766ed",
+      "119a72d1-74c9-4f6a-8c01-1cdd9474031b": {
+        "start": 1794471300000,
+        "includeTime": true
+      },
+      "451abd81-f1d6-4ed6-97f5-e837d70820fe": [
+        "f3b7a50d-f373-4a53-b488-f87605e999f3"
+      ],
+      "10a3d6b2-aa05-411a-b271-5945795e8229": [
+        "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
+      ],
+      "4f426dcb-b394-4b36-bb2d-420f0f88080b": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "b774eb52-48db-40af-b215-8370d269a9a5": false
+    }
+  }
+]

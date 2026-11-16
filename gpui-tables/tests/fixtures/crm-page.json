@@ -1,0 +1,25 @@
+[
+  {
+    "id": "d23f0824-128b-4f33-8c5c-7fd0a6a3a450",
+    "kind": "page",
+    "title": "CRM",
+    "order": "a0",
+    "folderId": "6513270e-269e-4d37-b2a7-4de452e6b438",
+    "parentDocId": null,
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": true,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788361200000,
+    "updated": 1794516060000,
+    "rev": 22,
+    "seq": 2291,
+    "deleted": false
+  }
+]

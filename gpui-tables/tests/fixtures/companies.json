@@ -1,0 +1,357 @@
+[
+  {
+    "id": "6b0d549b-6f03-475a-9600-a35a099950d8",
+    "kind": "database",
+    "title": "Companies",
+    "order": "a2",
+    "folderId": "6513270e-269e-4d37-b2a7-4de452e6b438",
+    "parentDocId": null,
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "created": 1788361800000,
+    "updated": 1793697120000,
+    "rev": 6,
+    "seq": 2150,
+    "deleted": false,
+    "database": {
+      "properties": [
+        {
+          "id": "c7a2ea20-b2f1-4c94-ae05-319acb5c7427",
+          "name": "Name",
+          "type": "title",
+          "config": {},
+          "order": "a0"
+        },
+        {
+          "id": "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb",
+          "name": "Website",
+          "type": "url",
+          "config": {},
+          "order": "a1"
+        },
+        {
+          "id": "57ee05cd-e009-42c7-bebf-f20686734721",
+          "name": "Industry",
+          "type": "select",
+          "config": {
+            "options": [
+              {
+                "id": "616499c9-e25a-4605-aec6-f0245bd86d40",
+                "name": "Ceramics",
+                "color": "orange"
+              },
+              {
+                "id": "153e7c2a-26a2-40bd-bb12-87fff52ddf5d",
+                "name": "Robotics",
+                "color": "blue"
+              },
+              {
+                "id": "a8948c89-3b61-4676-a6bb-7dbd2d1c9af0",
+                "name": "Design",
+                "color": "purple"
+              },
+              {
+                "id": "d4c28c2e-7c26-447f-8316-909e3bbbe9ea",
+                "name": "Logistics",
+                "color": "green"
+              }
+            ]
+          },
+          "order": "a2"
+        },
+        {
+          "id": "9be4bcfc-49b6-4a08-b2e6-cc3ababced20",
+          "name": "Employees",
+          "type": "number",
+          "config": {
+            "format": "plain",
+            "precision": 0
+          },
+          "order": "a3"
+        },
+        {
+          "id": "830e07bc-1e39-4f10-92bd-4acefaecbd38",
+          "name": "Annual value",
+          "type": "number",
+          "config": {
+            "format": "currency",
+            "currency": "USD",
+            "precision": 0
+          },
+          "order": "a4"
+        },
+        {
+          "id": "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8",
+          "name": "People",
+          "type": "relation",
+          "config": {
+            "databaseId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+            "twoWay": true,
+            "backPropertyId": "a170b338-3926-4059-b28c-105d1fb17c23"
+          },
+          "order": "a5"
+        },
+        {
+          "id": "6bf46c69-7d2c-4f82-aeea-cbe226e87555",
+          "name": "Interactions",
+          "type": "relation",
+          "config": {
+            "databaseId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+            "twoWay": true,
+            "backPropertyId": "10a3d6b2-aa05-411a-b271-5945795e8229"
+          },
+          "order": "a6"
+        },
+        {
+          "id": "13deef86-ab10-41d0-b646-e1f40a097c97",
+          "name": "Notes",
+          "type": "text",
+          "config": {},
+          "order": "a7"
+        },
+        {
+          "id": "ca02135e-92b1-43f2-8ede-0d7ac3baea9e",
+          "name": "Added",
+          "type": "createdTime",
+          "config": {},
+          "order": "a8"
+        }
+      ],
+      "views": [
+        {
+          "id": "64e50cad-6623-4a04-a5e7-e4236472f1a3",
+          "name": "All companies",
+          "type": "table",
+          "order": "a0",
+          "sort": [
+            {
+              "propertyId": "830e07bc-1e39-4f10-92bd-4acefaecbd38",
+              "direction": "descending"
+            },
+            {
+              "propertyId": "c7a2ea20-b2f1-4c94-ae05-319acb5c7427",
+              "direction": "ascending"
+            }
+          ],
+          "filter": null,
+          "groupBy": null,
+          "columns": [
+            {
+              "propertyId": "c7a2ea20-b2f1-4c94-ae05-319acb5c7427",
+              "width": 220,
+              "hidden": false,
+              "order": "a0"
+            },
+            {
+              "propertyId": "57ee05cd-e009-42c7-bebf-f20686734721",
+              "width": 140,
+              "hidden": false,
+              "order": "a1"
+            },
+            {
+              "propertyId": "9be4bcfc-49b6-4a08-b2e6-cc3ababced20",
+              "width": 110,
+              "hidden": false,
+              "order": "a2"
+            },
+            {
+              "propertyId": "830e07bc-1e39-4f10-92bd-4acefaecbd38",
+              "width": 140,
+              "hidden": false,
+              "order": "a3"
+            },
+            {
+              "propertyId": "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8",
+              "width": 240,
+              "hidden": false,
+              "order": "a4"
+            },
+            {
+              "propertyId": "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb",
+              "width": 200,
+              "hidden": false,
+              "order": "a5"
+            }
+          ],
+          "cardProperties": [],
+          "collapsedGroups": []
+        },
+        {
+          "id": "66836886-a260-4d0b-bb45-145c1a81682c",
+          "name": "By industry",
+          "type": "board",
+          "order": "a1",
+          "sort": [],
+          "filter": null,
+          "groupBy": "57ee05cd-e009-42c7-bebf-f20686734721",
+          "columns": [],
+          "cardProperties": [
+            "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8",
+            "830e07bc-1e39-4f10-92bd-4acefaecbd38"
+          ],
+          "collapsedGroups": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "895fd7b3-26b9-4c7f-9118-bb16000f49c8",
+    "kind": "page",
+    "title": "Kestrel Ceramics",
+    "order": "a0",
+    "folderId": null,
+    "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788602400000,
+    "updated": 1793534400000,
+    "rev": 2,
+    "seq": 2100,
+    "deleted": false,
+    "values": {
+      "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://kestrel-ceramics.example",
+      "57ee05cd-e009-42c7-bebf-f20686734721": "616499c9-e25a-4605-aec6-f0245bd86d40",
+      "9be4bcfc-49b6-4a08-b2e6-cc3ababced20": 42,
+      "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8": [
+        "9a2ef80f-58ee-4571-b499-8d7c4093f6de",
+        "f3b7a50d-f373-4a53-b488-f87605e999f3"
+      ],
+      "6bf46c69-7d2c-4f82-aeea-cbe226e87555": [
+        "c215a82a-06ec-41ad-aa05-75438b0d590b",
+        "80b0c08b-c770-4420-8aa4-248c8857f9a4",
+        "c2216b02-fc24-4d0b-89d4-88b1cfbf3360"
+      ],
+      "830e07bc-1e39-4f10-92bd-4acefaecbd38": 18000,
+      "13deef86-ab10-41d0-b646-e1f40a097c97": "Small studio kiln maker; buys sensors in batches."
+    }
+  },
+  {
+    "id": "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c",
+    "kind": "page",
+    "title": "Bluefin Robotics",
+    "order": "a1",
+    "folderId": null,
+    "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "created": 1788606000000,
+    "updated": 1793620800000,
+    "rev": 3,
+    "seq": 2101,
+    "deleted": false,
+    "values": {
+      "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://bluefin-robotics.example",
+      "57ee05cd-e009-42c7-bebf-f20686734721": "153e7c2a-26a2-40bd-bb12-87fff52ddf5d",
+      "9be4bcfc-49b6-4a08-b2e6-cc3ababced20": 310,
+      "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8": [
+        "1d87cec3-1f72-46ab-b961-fd925d39d0a8",
+        "fa529ba3-fe3b-4ada-bcf2-0724d953ee26"
+      ],
+      "6bf46c69-7d2c-4f82-aeea-cbe226e87555": [
+        "d86f40f6-b239-43c7-974c-77a2dd02de92"
+      ],
+      "830e07bc-1e39-4f10-92bd-4acefaecbd38": 96000,
+      "13deef86-ab10-41d0-b646-e1f40a097c97": "Warehouse arms. Long sales cycles."
+    }
+  },
+  {
+    "id": "353c631c-dfd4-4f37-9200-339d068739fa",
+    "kind": "page",
+    "title": "Cedar & Pine Studio",
+    "order": "a2",
+    "folderId": null,
+    "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788609600000,
+    "updated": 1793707200000,
+    "rev": 4,
+    "seq": 2102,
+    "deleted": false,
+    "values": {
+      "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://cedarpine.example",
+      "57ee05cd-e009-42c7-bebf-f20686734721": "a8948c89-3b61-4676-a6bb-7dbd2d1c9af0",
+      "9be4bcfc-49b6-4a08-b2e6-cc3ababced20": 12,
+      "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8": [
+        "4fd58dbe-7bdc-468b-bafb-2c68774b15d7"
+      ],
+      "6bf46c69-7d2c-4f82-aeea-cbe226e87555": [
+        "e883a1d4-5de0-4997-84b5-a81842d87208",
+        "9cfc8652-3919-4242-a2ed-dbbd5464ecc2"
+      ]
+    }
+  },
+  {
+    "id": "a268aa87-2607-479d-a050-914a9d33a01c",
+    "kind": "page",
+    "title": "Lumen Freight",
+    "order": "a3",
+    "folderId": null,
+    "parentDocId": "6b0d549b-6f03-475a-9600-a35a099950d8",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "created": 1788613200000,
+    "updated": 1793793600000,
+    "rev": 5,
+    "seq": 2103,
+    "deleted": false,
+    "values": {
+      "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://lumen-freight.example",
+      "57ee05cd-e009-42c7-bebf-f20686734721": "d4c28c2e-7c26-447f-8316-909e3bbbe9ea",
+      "9be4bcfc-49b6-4a08-b2e6-cc3ababced20": 1200,
+      "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8": [
+        "bfeaa155-1a28-47b3-a4e4-e25a15fc899e",
+        "842e7fc2-2954-4a6e-b12a-a1f6d42fddbb"
+      ],
+      "6bf46c69-7d2c-4f82-aeea-cbe226e87555": [
+        "a49636a2-fa7f-4eab-8c4f-9b0687322e25",
+        "3908f227-c59d-4916-9b0e-e76f2ac34446"
+      ],
+      "830e07bc-1e39-4f10-92bd-4acefaecbd38": 240000,
+      "13deef86-ab10-41d0-b646-e1f40a097c97": "Asked for a pilot in Q1."
+    }
+  }
+]

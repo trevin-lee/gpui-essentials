@@ -1,0 +1,28 @@
+[package]
+name = "gpui-tables"
+version = "0.1.0"
+description = "Notion-style database views (table, board, list) for GPUI apps, with a model and engine that build without GPUI"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["gpui", "database", "table", "kanban", "notion"]
+categories = ["gui", "data-structures"]
+include = ["/src", "/README.md"]
+
+[lib]
+name = "gpui_tables"
+
+[dependencies]
+# The model and engine (gpui_tables::model, ::engine, ::order), which build without GPUI.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# New rows', properties', views' and options' ids: lowercase v4 UUIDs, made by the creator.
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+default = ["gpui"]
+# The GPUI views. Empty until the table view lands; without it (default-features = false) the
+# crate is the model and engine alone, with no GPUI in the build.
+gpui = []
