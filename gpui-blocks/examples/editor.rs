@@ -175,7 +175,8 @@ impl Root {
                 .aliases(["ask", "ai", "assistant", "question"])
                 .icon("✦"),
             )
-            .docs(DemoDocs);
+            .docs(DemoDocs)
+            .images(local_images(file.clone()));
         let editor = cx.new(|cx| Editor::with_options(source, options, window, cx));
         let subscription = cx.subscribe(&editor, |this, editor, event: &EditorEvent, cx| {
             // An app opens the document, makes a new one, or shows a picker; the example has one
@@ -796,6 +797,37 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
         });
     })
     .detach();
+}
+
+/// The example's picture loader: image files in the open document's folder, by a path relative
+/// to it. Nothing from the network, and nothing outside the folder; anything else draws empty.
+fn local_images(file: Option<PathBuf>) -> impl Fn(&str) -> ImageSource + Send + Sync + 'static {
+    let folder = file
+        .and_then(|f| f.canonicalize().ok())
+        .and_then(|f| f.parent().map(Path::to_path_buf));
+    move |address| {
+        let inside = folder.as_ref().and_then(|folder| {
+            if address.contains(':') {
+                return None;
+            }
+            let path = folder.join(address).canonicalize().ok()?;
+            let image = matches!(
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "svg")
+            );
+            (path.starts_with(folder) && image).then_some(path)
+        });
+        match inside {
+            Some(path) => ImageSource::Resource(Resource::Path(path.into())),
+            None => ImageSource::Image(std::sync::Arc::new(Image::from_bytes(
+                ImageFormat::Svg,
+                b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec(),
+            ))),
+        }
+    }
 }
 
 /// The example's other documents: a real app answers from its own list.

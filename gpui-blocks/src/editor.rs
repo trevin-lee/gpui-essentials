@@ -101,6 +101,7 @@ pub struct Options {
     widgets: Vec<Arc<dyn Widget>>,
     items: Vec<SlashItem>,
     image_link: Option<ImageLink>,
+    images: Option<markdown_editor::ImageSourceFn>,
     docs: Option<Arc<dyn Docs>>,
 }
 
@@ -110,6 +111,7 @@ impl Default for Options {
             widgets: Vec::new(),
             items: slash::default_items(),
             image_link: None,
+            images: None,
             docs: None,
         }
     }
@@ -128,6 +130,7 @@ impl std::fmt::Debug for Options {
             )
             .field("items", &self.items)
             .field("image_link", &self.image_link.is_some())
+            .field("images", &self.images.is_some())
             .field("docs", &self.docs.is_some())
             .finish()
     }
@@ -160,6 +163,15 @@ impl Options {
     pub fn docs(mut self, docs: impl Docs) -> Self {
         self.docs = Some(Arc::new(docs));
         self.items.extend(slash::doc_items());
+        self
+    }
+
+    /// How pictures load: `load` turns a picture's address, as written in the document, into
+    /// the image to draw, from the app's own files, cache or storage, under its own rules about
+    /// the network. Without it pictures are drawn as their description, and the editor never
+    /// reads a file or fetches an address a document names.
+    pub fn images(mut self, load: impl Fn(&str) -> ImageSource + Send + Sync + 'static) -> Self {
+        self.images = Some(Arc::new(move |uri: &SharedUri| load(uri.as_ref())));
         self
     }
 
@@ -286,10 +298,16 @@ impl Editor {
                 let _ = this.update(cx, |_, cx| cx.emit(EditorEvent::DocClicked { id }));
             })),
         };
+        let images = options.images.clone();
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
                 .with_markdown_extensions(extensions_with(&widgets, hooks))
                 .with_source(body);
+            // Pictures load only through the app's loader.
+            state = match images {
+                Some(load) => state.with_image_source(load),
+                None => state.with_image_policy(markdown_editor::ImagePolicy::Placeholder),
+            };
             state.set_scroll_handle(scroll.clone());
             state
         });
@@ -1678,6 +1696,36 @@ mod tests {
         draw(cx);
         assert_eq!(selected(&editor, cx), (6, 11));
         assert!(cx.debug_bounds("blocks-handle-start").is_none());
+    }
+
+    #[gpui_kit::test]
+    fn pictures_load_only_through_the_apps_loader(cx: &mut TestAppContext) {
+        use std::sync::{Arc, Mutex};
+        let source = "Before ![a picture](https://example.test/p.png) after";
+        // Without a loader, pictures are their description.
+        let (editor, cx) = open(cx, source);
+        let policy = editor.update(cx, |e, cx| e.state().read(cx).image_policy());
+        assert_eq!(policy, markdown_editor::ImagePolicy::Placeholder);
+        // With one, it's asked for the address.
+        let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = asked.clone();
+        let options = crate::Options::default().images(move |address| {
+            seen.lock().unwrap().push(address.to_string());
+            gpui_kit::ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
+                gpui_kit::ImageFormat::Svg,
+                b"<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>".to_vec(),
+            )))
+        });
+        let (_, cx) =
+            cx.add_window_view(move |window, cx| Editor::with_options(source, options, window, cx));
+        draw(cx);
+        assert!(
+            asked
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|a| a == "https://example.test/p.png")
+        );
     }
 
     #[gpui_kit::test]
