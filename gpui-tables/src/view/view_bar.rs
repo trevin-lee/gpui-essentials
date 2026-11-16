@@ -9,8 +9,8 @@ use gpui::{
     Render, Role, SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, px,
 };
 use gpui_core::{
-    DismissReason, IconName, MenuSelect, Popover as CorePopover, PopoverColors, PopupMenu,
-    PopupMenuItem, Press, Selectable as _,
+    DismissReason, IconName, MenuSelect, Popover as CorePopover, PopoverColors, PopupMenuItem,
+    Press, Selectable as _,
 };
 
 use super::render::{icon, line};
@@ -477,12 +477,17 @@ impl TableView {
             .text_color(t.colors.text);
         let popover = popover.open(true).anchor(target).match_trigger_width(false);
         match open {
-            // A name is typed: the field has the keyboard, and the popover leaves it there.
+            // A name is typed: the picker's field has the keyboard, and the popover leaves it
+            // there.
             Popover::AddView => popover
                 .take_focus(false)
                 .accessibility_label("Add a view")
                 .p(t.px(4.))
-                .child(body.w(width).child(self.render_add_view(cx)))
+                .child(
+                    body.w(width)
+                        .children(self.render_note(cx))
+                        .child(self.add_view_picker(cx)),
+                )
                 .into_any_element(),
             Popover::View { page, view_id, .. } if page.is_field() => popover
                 .take_focus(false)
@@ -510,81 +515,31 @@ impl TableView {
         }
     }
 
-    /// The + menu: the new view's name, typed, over its types. Up and Down in the field move
-    /// through the types, Enter makes the highlighted one, a press makes any.
-    fn render_add_view(&self, cx: &mut Context<Self>) -> AnyElement {
-        let t = &self.theme;
-        let Some(f) = &self.field else {
-            return div().into_any_element();
-        };
+    /// The + menu as gpui-core's Picker, naming rather than filtering: the new view's name typed
+    /// in its field over its types. Up and Down move through the types while typing stays in
+    /// the field; Enter makes the highlighted one, a press any, named as typed.
+    fn add_view_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let full = self
             .database
             .database
             .as_ref()
             .is_some_and(|d| d.views.len() >= self.host.limits().views);
         let label = |k: &ViewType| super::ops::view_type_label(k).to_owned();
-        let highlighted = VIEW_TYPES
-            .get(self.view_kind.0)
-            .map_or_else(String::new, label);
-        let mut menu = PopupMenu::new(ElementId::NamedInteger(
-            "gpui-tables-add-view-types".into(),
-            self.view_kind.1,
-        ))
-        .take_focus(false)
-        .touch(t.touch)
-        .row_height(t.px(28.))
-        .text_size(t.px(t.sizes.text))
-        .heading_size(t.px(t.sizes.small))
-        .check_leading(true)
-        .colors(self.menu_colors())
-        .heading("Type");
-        for k in VIEW_TYPES {
-            menu = menu.item(
-                PopupMenuItem::new(label(k), label(k))
-                    .icon(view_icon(k))
-                    .disabled(full),
-            );
-        }
-        let this = cx.entity().downgrade();
-        let menu = menu
-            .highlight(highlighted)
-            .on_highlight(move |id, cx| {
-                let Some(id) = id else { return };
-                let _ = this.update(cx, |t, _| {
-                    if let Some(i) = VIEW_TYPES
-                        .iter()
-                        .position(|k| super::ops::view_type_label(k) == id.as_ref())
-                    {
-                        t.view_kind.0 = i;
-                    }
-                });
-            })
-            .on_select(cx.listener(|this, pick: &MenuSelect, window, cx| {
-                if let Some(k) = VIEW_TYPES
-                    .iter()
-                    .find(|k| super::ops::view_type_label(k) == pick.id.as_ref())
-                {
-                    this.activate_view(ViewAction::Add(k.clone()), window, cx);
-                }
-            }));
-        div()
-            .flex()
-            .flex_col()
-            .gap(t.px(4.))
-            .child(
-                self.field_box(&f.state, "View name".into())
-                    .mt(t.px(4.))
-                    .key_context(super::MENU_FIELD)
-                    .on_action(
-                        cx.listener(|this, _: &super::FieldUp, _, cx| this.move_add_kind(-1, cx)),
-                    )
-                    .on_action(
-                        cx.listener(|this, _: &super::FieldDown, _, cx| this.move_add_kind(1, cx)),
-                    ),
-            )
-            .children(self.render_note(cx))
-            .child(menu)
-            .into_any_element()
+        let types = VIEW_TYPES.iter().map(|k| {
+            PopupMenuItem::new(label(k), label(k))
+                .icon(view_icon(k))
+                .disabled(full)
+        });
+        let pick = cx.listener(|this, pick: &MenuSelect, window, cx| {
+            if let Some(k) = VIEW_TYPES
+                .iter()
+                .find(|k| super::ops::view_type_label(k) == pick.id.as_ref())
+            {
+                let name = pick.query.as_deref().unwrap_or_default();
+                this.add_view(k.clone(), name, window, cx);
+            }
+        });
+        self.naming_picker("gpui-tables-add-view", "View name", types, pick)
     }
 
     /// A view's name, typed: the field, a note, and Save and Back for a pointer or a finger

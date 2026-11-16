@@ -15,7 +15,8 @@
 //! `TableHost::edit_text`.
 //!
 //! `--shot` takes a picture of the window without showing it. Scenes: `people` (the default),
-//! `grouped` (Interactions by month), `menu` (a column's menu), `picker` (a select's options),
+//! `grouped` (Interactions by month), `menu` (a column's menu, its types open beside it),
+//! `picker` (a select's options),
 //! `date` (a date's month, today ringed), `edit` (a text value typed in place, grown over the rows below),
 //! `scrolled` (scrolled sideways, the title column in place), `light` and `worst` (worst-case
 //! text, every cell ending in an ellipsis); and boards: `board` (People's
@@ -23,9 +24,10 @@
 //! `board-light` (Companies by industry, in the light theme) and `board-worst`; and lists:
 //! `list` (Interactions, most recent first), `list-grouped` (People by stage) and `list-light`
 //! (the Companies directory, in the light theme); and properties: `columns` (the + menu, a new
-//! property named, its type to pick) and `options` (a select's options, to rename, recolour,
-//! reorder and delete); and views: `add-view` (the bar's + menu, a new view named, its type to
-//! pick), `view-menu` (a view's menu) and `view-settings` (a board's settings).
+//! property named, its type to pick) and `options` (a select's options beside its column's
+//! menu, the first one's submenu open to rename, recolour, reorder and delete it); and views:
+//! `add-view` (the bar's + menu, a new view named, its type to pick), `view-menu` (a view's
+//! menu) and `view-settings` (a board's settings beside its menu, its card properties open).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -815,14 +817,7 @@ mod shots {
                     }
                     "options" => {
                         let t = pick(0, cx);
-                        t.update(cx, |t, cx| {
-                            t.open_property_menu(
-                                STAGE,
-                                gpui_tables::view::PropertyMenu::Options,
-                                window,
-                                cx,
-                            )
-                        });
+                        t.update(cx, |t, cx| t.open_column_menu(STAGE, cx));
                     }
                     "add-view" => {
                         let t = pick(0, cx);
@@ -845,7 +840,7 @@ mod shots {
                             t.set_view(PIPELINE, cx);
                             t.open_view_menu(
                                 PIPELINE,
-                                gpui_tables::view::ViewMenu::Settings,
+                                gpui_tables::view::ViewMenu::Menu,
                                 window,
                                 cx,
                             )
@@ -875,23 +870,46 @@ mod shots {
                 });
                 settle(window, cx).await;
             }
-            if scene == "columns" {
-                // A name typed for the new property.
+            // Typed and pressed as a person does: a + menu's name, the keys that open submenus.
+            let presses: &[&str] = match scene.as_str() {
+                // The column's menu opens on Sort ascending: up to Change type, and open it.
+                "menu" => &["up", "up", "right"],
+                // Up to Edit options, open it, and open its first option.
+                "options" => &["up", "right", "right"],
+                // Down to View settings, open it, and open Card properties.
+                "view-settings" => &["down", "down", "right", "down", "right"],
+                // A new view's type: Board.
+                "add-view" => &["down"],
+                _ => &[],
+            };
+            let typed = match scene.as_str() {
+                "columns" => "Deal size",
+                "add-view" => "Follow-ups by owner",
+                _ => "",
+            };
+            if !typed.is_empty() {
                 let _ = cx.update_window(window, |_, window, cx| {
-                    let t = crm.read(cx).table();
-                    if let Some(state) = t.read(cx).menu_field_state() {
-                        state.update(cx, |s, cx| s.set_value("Deal size", window, cx));
+                    for ch in typed.chars() {
+                        let key = match ch {
+                            ' ' => "space".to_owned(),
+                            c => c.to_lowercase().to_string(),
+                        };
+                        window.dispatch_keystroke(
+                            Keystroke {
+                                modifiers: Modifiers::none(),
+                                key,
+                                key_char: Some(ch.to_string()),
+                            },
+                            cx,
+                        );
                     }
                 });
                 settle(window, cx).await;
             }
-            if scene == "add-view" {
-                // A name typed for the new view, and Board highlighted.
+            // Each after the last has drawn, so a submenu just opened has the keys.
+            for key in presses {
                 let _ = cx.update_window(window, |_, window, cx| {
-                    let t = crm.read(cx).table();
-                    if let Some(state) = t.read(cx).menu_field_state() {
-                        state.update(cx, |s, cx| s.set_value("Follow-ups by owner", window, cx));
-                    }
+                    window.dispatch_keystroke(Keystroke::parse(key).expect("a key"), cx);
                 });
                 settle(window, cx).await;
             }
