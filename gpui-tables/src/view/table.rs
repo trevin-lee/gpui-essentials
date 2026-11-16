@@ -5,9 +5,11 @@ use std::cell::Cell as StdCell;
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, FocusHandle, Focusable, Pixels, ScrollStrategy, UniformListScrollHandle,
+    App, AppContext as _, Autocapitalize, Bounds, Context, Entity, FocusHandle, Focusable, Pixels,
+    ScrollStrategy, Subscription, TextInputAction, TextInputConfiguration, UniformListScrollHandle,
     Window, point, px, size,
 };
+use gpui_core::{InputEvent, InputState};
 
 use super::host::{HostLookup, TableHost, TextEdit, TextReply, TextTarget, person_label};
 use super::ops::{self, ColumnLayout};
@@ -117,6 +119,45 @@ pub(crate) enum Popover {
     Picker { cell: CellRef, highlight: usize },
     /// A cell's day grid, showing `month` (its first day) with `day` highlighted.
     Date { cell: CellRef, month: i64, day: i64 },
+    /// A column's filter value, typed in place: the field under its header.
+    FilterValue { column: usize },
+}
+
+/// A typed value asked for: of the host's field, or (when the host hands it back) of the
+/// table's own.
+pub(crate) struct PendingText {
+    token: u64,
+    target: TextTarget,
+    kind: PropertyType,
+    label: String,
+    text: String,
+}
+
+/// A typed value being edited in place, with gpui-core's Input.
+pub(crate) struct Editor {
+    token: u64,
+    pub target: TextTarget,
+    pub kind: PropertyType,
+    /// The property's name, for assistive technology.
+    pub label: String,
+    /// What it opened with: committed unchanged, it emits nothing.
+    original: String,
+    pub state: Entity<InputState>,
+    _events: Subscription,
+}
+
+impl Editor {
+    /// Whether it's editing this row's cell of this property.
+    pub(crate) fn edits(&self, row_id: &str, property_id: &str) -> bool {
+        matches!(&self.target, TextTarget::Cell { row_id: r, property_id: p }
+            if r == row_id && p == property_id)
+    }
+
+    /// Whether it grows over the cells below as a textarea (a text value), rather than staying
+    /// in its cell on one line.
+    pub(crate) fn multiline(&self) -> bool {
+        self.kind == PropertyType::Text && matches!(self.target, TextTarget::Cell { .. })
+    }
 }
 
 /// A drag in progress.
@@ -185,9 +226,10 @@ pub struct TableView {
     pub(crate) popover: Option<Popover>,
     pub(crate) drag: Option<Drag>,
     text_token: u64,
-    pending_text: Option<u64>,
-    /// What the pending typed value is for.
-    text_target: Option<TextTarget>,
+    /// A typed value asked of the host (or not yet handed back to be edited in place).
+    pending_text: Option<PendingText>,
+    /// The typed value being edited in place.
+    pub(crate) editor: Option<Editor>,
     /// A row asked for with `rowCreated`, focused when the host hands it back.
     pending_row: Option<String>,
     /// A row whose focus should land in this group (by key) when the rows are worked out
@@ -232,7 +274,7 @@ impl TableView {
             drag: None,
             text_token: 0,
             pending_text: None,
-            text_target: None,
+            editor: None,
             pending_row: None,
             focus_group: None,
             board: super::board::Board::default(),
@@ -272,6 +314,15 @@ impl TableView {
         self.view_id = Some(view_id.into());
         self.cell = None;
         self.popover = None;
+        // A filter value being typed was for the view left; a cell's is kept until its field
+        // loses the focus (it commits then).
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(|e| matches!(e.target, TextTarget::Filter { .. }))
+        {
+            self.editor = None;
+        }
         self.scroll_x = px(0.);
         self.list.scroll_to_item(0, ScrollStrategy::Top);
         self.board = super::board::Board::default();
@@ -402,7 +453,7 @@ impl TableView {
     }
 
     /// Edits a row's cell as Enter (or a second press) does: a picker, the day grid, a toggle,
-    /// or a typed value through the host.
+    /// or a typed value, in place (or in the host's field, if it has one).
     pub fn edit(
         &mut self,
         row_id: &str,
@@ -431,6 +482,17 @@ impl TableView {
     /// Whether a menu or picker is open.
     pub fn has_popover(&self) -> bool {
         self.popover.is_some()
+    }
+
+    /// What's being typed in place, and what for: a cell's value or a filter's.
+    pub fn editing(&self, cx: &App) -> Option<(TextTarget, String)> {
+        let e = self.editor.as_ref()?;
+        Some((e.target.clone(), e.state.read(cx).value().to_string()))
+    }
+
+    /// The field a value is typed in place in, while one is.
+    pub fn editor_state(&self) -> Option<Entity<InputState>> {
+        self.editor.as_ref().map(|e| e.state.clone())
     }
 
     fn invalidate(&mut self, cx: &mut Context<Self>) {
@@ -574,7 +636,8 @@ impl TableView {
         {
             self.popover = None;
         }
-        if let Some(Popover::Header { column, .. }) = &self.popover
+        if let Some(Popover::Header { column, .. } | Popover::FilterValue { column }) =
+            &self.popover
             && *column >= self.shown.columns.len()
         {
             self.popover = None;
@@ -826,7 +889,8 @@ impl TableView {
     }
 
     /// Edits a cell in the way its type edits: a checkbox toggles, an option, person or relation
-    /// opens a picker, a date the day grid, and a typed value asks the host for a field.
+    /// opens a picker, a date the day grid, and a typed value opens a field in place (or the
+    /// host's own).
     pub(crate) fn edit_cell(&mut self, cell: CellRef, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure();
         let Some((row, p)) = self.cell_target(cell) else {
@@ -915,9 +979,16 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Another field open in place commits first.
+        self.finish_editor(true, false, window, cx);
         self.text_token += 1;
-        self.pending_text = Some(self.text_token);
-        self.text_target = Some(target.clone());
+        self.pending_text = Some(PendingText {
+            token: self.text_token,
+            target: target.clone(),
+            kind: p.kind.clone(),
+            label: p.name.clone(),
+            text: text.clone(),
+        });
         let limits = self.host.limits();
         let max_chars = match p.kind {
             PropertyType::Title => Some(limits.title_chars),
@@ -935,8 +1006,117 @@ impl TableView {
                 token: self.text_token,
             },
         };
+        // The host's field, if it has one; by default the host hands it straight back
+        // (`TextReply::edit_in_place`) and it opens in place.
         let host = self.host.clone();
         window.defer(cx, move |window, cx| host.edit_text(edit, window, cx));
+    }
+
+    /// Opens the field in place for a typed value asked for, as [`TextReply::edit_in_place`]
+    /// asks: in the cell, or under the column's header for a filter.
+    pub(crate) fn open_editor(&mut self, token: u64, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_text.as_ref().map(|p| p.token) != Some(token) {
+            return;
+        }
+        let Some(pending) = self.pending_text.take() else {
+            return;
+        };
+        let cell = matches!(pending.target, TextTarget::Cell { .. });
+        let multiline = cell && pending.kind == PropertyType::Text;
+        let placeholder = match (&pending.target, &pending.kind) {
+            (TextTarget::Filter { .. }, _) => "Value".to_owned(),
+            (_, PropertyType::Title) => "Untitled".to_owned(),
+            _ => String::new(),
+        };
+        let keyboard = keyboard_for(&pending.kind);
+        let text = pending.text.clone();
+        let state = cx.new(|cx| {
+            let state = if multiline {
+                // Enter commits, as on one line; Shift-Enter starts a new line.
+                InputState::textarea(window, cx)
+                    .auto_grow(1, 8)
+                    .submit_on_enter(true)
+            } else {
+                InputState::new(window, cx)
+            };
+            state
+                .placeholder(placeholder)
+                .default_value(text)
+                .keyboard(keyboard)
+        });
+        let events = cx.subscribe_in(
+            &state,
+            window,
+            move |this: &mut Self, state, event: &InputEvent, window, cx| {
+                if this.editor.as_ref().map(|e| e.token) != Some(token) {
+                    return;
+                }
+                match event {
+                    InputEvent::PressEnter { .. } => this.finish_editor(true, true, window, cx),
+                    // Clicking elsewhere commits. The window going to the background doesn't:
+                    // the field is still open when it comes back. If the field lost the focus by
+                    // being scrolled away (it still holds it, undrawn), the table takes it back.
+                    InputEvent::Blur if window.is_window_active() => {
+                        let held = state.read(cx).is_focused(window);
+                        this.finish_editor(true, held, window, cx)
+                    }
+                    InputEvent::Blur => {}
+                    InputEvent::Change | InputEvent::Focus => {}
+                }
+            },
+        );
+        if let TextTarget::Filter { property_id, .. } = &pending.target {
+            match self
+                .shown
+                .columns
+                .iter()
+                .position(|c| c.property_id == *property_id)
+            {
+                Some(column) => self.popover = Some(Popover::FilterValue { column }),
+                None => return,
+            }
+        }
+        state.update(cx, |s, cx| s.focus(window, cx));
+        self.editor = Some(Editor {
+            token,
+            target: pending.target,
+            kind: pending.kind,
+            label: pending.label,
+            original: pending.text,
+            state,
+            _events: events,
+        });
+        cx.notify();
+    }
+
+    /// Whether a value is being typed in place.
+    pub(crate) fn is_editing(&self) -> bool {
+        self.editor.is_some()
+    }
+
+    /// Closes the field in place: committing what's typed in it (read, limited and emitted as
+    /// the host's answer would be) or not, and giving the table back the focus if `refocus`.
+    pub(crate) fn finish_editor(
+        &mut self,
+        commit: bool,
+        refocus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.editor.take() else {
+            return;
+        };
+        if matches!(self.popover, Some(Popover::FilterValue { .. })) {
+            self.popover = None;
+        }
+        if refocus {
+            window.focus(&self.focus, cx);
+        }
+        let text = editor.state.read(cx).value().to_string();
+        if commit && text != editor.original {
+            self.apply_text(editor.target, text, window, cx);
+        }
+        cx.notify();
     }
 
     /// A host's answer to [`TableHost::edit_text`].
@@ -947,24 +1127,37 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.pending_text != Some(token) {
+        if self.pending_text.as_ref().map(|p| p.token) != Some(token) {
             return;
         }
-        self.pending_text = None;
-        window.focus(&self.focus, cx);
-        let Some(text) = text else {
+        let Some(pending) = self.pending_text.take() else {
             return;
         };
+        window.focus(&self.focus, cx);
+        if let Some(text) = text {
+            self.apply_text(pending.target, text, window, cx);
+        }
+    }
+
+    /// Reads typed text as its property's type (a number from "1,200" or "$1,200", a percent
+    /// from "25%"), cuts it to the limits and emits the edit: a cell's value or title, or a
+    /// filter. Text that isn't a number, for a number, changes nothing.
+    fn apply_text(
+        &mut self,
+        target: TextTarget,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(fields) = self.database.database.clone() else {
             return;
         };
         let limits = self.host.limits();
-        let target = self.text_target.take();
         match target {
-            Some(TextTarget::Cell {
+            TextTarget::Cell {
                 row_id,
                 property_id,
-            }) => {
+            } => {
                 let (Some(r), Some(p)) = (
                     self.rows.iter().find(|r| r.id == row_id),
                     fields.property(&property_id),
@@ -1006,7 +1199,7 @@ impl TableView {
                 };
                 self.emit_edits(edit.into_iter().collect(), window, cx);
             }
-            Some(TextTarget::Filter { property_id, op }) => {
+            TextTarget::Filter { property_id, op } => {
                 let Some(p) = fields.property(&property_id) else {
                     return;
                 };
@@ -1034,7 +1227,6 @@ impl TableView {
                     self.change_view(view, window, cx);
                 }
             }
-            None => {}
         }
     }
 
@@ -1076,8 +1268,13 @@ impl TableView {
         self.emit_edits(edits, window, cx);
     }
 
-    /// Escape: closes a menu, else lets go of the focused cell.
-    pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
+    /// Escape: closes the field a value is typed in (keeping the cell focused), else a menu,
+    /// else lets go of the focused cell.
+    pub(crate) fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_editing() {
+            self.finish_editor(false, true, window, cx);
+            return;
+        }
         if self.popover.take().is_none() && self.drag.take().is_none() {
             self.cell = None;
         }
@@ -1523,7 +1720,7 @@ impl TableView {
                 self.pick_day(Some(day), window, cx);
                 return;
             }
-            None => return,
+            Some(Popover::FilterValue { .. }) | None => return,
         };
         if let Some(action) = self.entries().get(highlight).and_then(|e| e.action.clone()) {
             self.activate(action, add, window, cx);
@@ -1828,6 +2025,23 @@ impl TableView {
             }
         }
         cx.notify();
+    }
+}
+
+/// What the on-screen keyboard offers for a type: capitals and suggestions for words, none of
+/// that for numbers, links, addresses and phone numbers.
+fn keyboard_for(kind: &PropertyType) -> TextInputConfiguration {
+    let words = matches!(kind, PropertyType::Title | PropertyType::Text);
+    TextInputConfiguration {
+        autocorrect: words,
+        autocapitalize: if words {
+            Autocapitalize::Sentences
+        } else {
+            Autocapitalize::None
+        },
+        suggestions: words,
+        // Return commits, a textarea's too (Shift-Enter breaks its line).
+        input_action: TextInputAction::Done,
     }
 }
 

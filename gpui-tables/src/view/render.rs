@@ -11,7 +11,7 @@ use gpui::{
     Styled, TouchDragEvent, TouchPhase, Window, anchored, canvas, deferred, div, point, px,
     uniform_list,
 };
-use gpui_core::{Icon, IconName, Press, Selectable as _};
+use gpui_core::{Icon, IconName, Input, Press, Selectable as _};
 
 use super::format;
 use super::host::person_label;
@@ -126,45 +126,47 @@ impl Render for TableView {
             .on_action(cx.listener(|this, _: &super::Down, _, cx| this.on_vertical(1, cx)))
             .on_action(cx.listener(|this, _: &super::Left, _, cx| this.on_horizontal(-1, cx)))
             .on_action(cx.listener(|this, _: &super::Right, _, cx| this.on_horizontal(1, cx)))
-            .on_action(cx.listener(|this, _: &super::NextCell, _, cx| {
-                if this.popover.is_none() {
-                    this.tab(false, cx)
-                }
-            }))
-            .on_action(cx.listener(|this, _: &super::PrevCell, _, cx| {
-                if this.popover.is_none() {
-                    this.tab(true, cx)
-                }
-            }))
+            .on_action(
+                cx.listener(|this, _: &super::NextCell, window, cx| this.on_tab(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &super::PrevCell, window, cx| this.on_tab(true, window, cx)),
+            )
             .on_action(cx.listener(|this, _: &super::Confirm, window, cx| {
-                if this.popover.is_some() {
+                if this.is_editing() {
+                    // The field takes Enter itself; nothing else does while it's open.
+                } else if this.popover.is_some() {
                     this.activate_highlight(false, window, cx)
                 } else {
                     this.confirm(window, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &super::ConfirmAdd, window, cx| {
-                if this.popover.is_some() {
+                if this.is_editing() {
+                } else if this.popover.is_some() {
                     this.activate_highlight(true, window, cx)
                 } else {
                     this.confirm(window, cx)
                 }
             }))
-            .on_action(cx.listener(|this, _: &super::Cancel, _, cx| this.cancel(cx)))
+            .on_action(cx.listener(|this, _: &super::Cancel, window, cx| this.cancel(window, cx)))
             .on_action(cx.listener(|this, _: &super::Clear, window, cx| {
-                if this.popover.is_none() {
+                if this.popover.is_none() && !this.is_editing() {
                     this.clear_cell(window, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &super::Edit, window, cx| {
                 if this.popover.is_none()
+                    && !this.is_editing()
                     && let Some(c) = this.cell
                 {
                     this.edit_cell(c, window, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &super::ColumnMenu, _, cx| {
-                if let Some(c) = this.cell {
+                if !this.is_editing()
+                    && let Some(c) = this.cell
+                {
                     this.open_header_menu(c.column, cx)
                 }
             }))
@@ -210,7 +212,13 @@ pub(crate) fn icon(name: IconName, size: gpui::Rems, color: Hsla) -> Icon {
 impl TableView {
     // --- Keys -------------------------------------------------------------------------------
 
+    // While a value is typed in place, the arrows (and Page Up and Down) are the field's: they
+    // never move the focused cell.
+
     fn on_vertical(&mut self, d: isize, cx: &mut Context<Self>) {
+        if self.is_editing() {
+            return;
+        }
         match &self.popover {
             Some(Popover::Date { .. }) => self.move_day(7 * d as i64, cx),
             Some(_) => self.move_highlight(d, cx),
@@ -219,6 +227,9 @@ impl TableView {
     }
 
     fn on_horizontal(&mut self, d: isize, cx: &mut Context<Self>) {
+        if self.is_editing() {
+            return;
+        }
         match &self.popover {
             Some(Popover::Date { .. }) => self.move_day(d as i64, cx),
             Some(_) => {}
@@ -227,6 +238,9 @@ impl TableView {
     }
 
     fn on_page(&mut self, d: isize, cx: &mut Context<Self>) {
+        if self.is_editing() {
+            return;
+        }
         match &self.popover {
             Some(Popover::Date { .. }) => self.turn_month(d as i64, cx),
             Some(_) => {}
@@ -236,6 +250,22 @@ impl TableView {
                     .max(1.);
                 self.move_cell(d * rows as isize, 0, cx)
             }
+        }
+    }
+
+    /// Tab: commits a value being typed (a cell's moves on to the next cell), else moves the
+    /// focused cell when no menu is open.
+    fn on_tab(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(e) = &self.editor {
+            let cell = matches!(e.target, super::TextTarget::Cell { .. });
+            self.finish_editor(true, true, window, cx);
+            if cell {
+                self.tab(back, cx);
+            }
+            return;
+        }
+        if self.popover.is_none() {
+            self.tab(back, cx)
         }
     }
 
@@ -642,7 +672,12 @@ impl TableView {
         let (rid, pid) = (r.id.clone(), p.id.clone());
         let is_check = p.kind == PropertyType::Checkbox;
         let numeric = p.kind == PropertyType::Number;
-        let content = self.cell_content(ix, row, r, p, row_focused, cx);
+        let editor = self.editor.as_ref().filter(|e| e.edits(&r.id, &p.id));
+        let editing = editor.is_some();
+        let content = match editor {
+            Some(e) => self.render_editor(e, column),
+            None => self.cell_content(ix, row, r, p, row_focused, cx),
+        };
         let label = format!("{}: {}", p.name, self.cell_text(r, p));
         div()
             .id(("cell", column))
@@ -656,12 +691,13 @@ impl TableView {
             .px(t.px(t.sizes.cell_padding))
             .flex()
             .items_center()
-            .when(numeric, |d| d.justify_end())
+            .when(numeric && !editing, |d| d.justify_end())
             .overflow_hidden()
             .border_r_1()
             .border_color(t.colors.line)
+            .when(editing, |d| d.bg(t.colors.background))
             .when(focused, |d| {
-                d.bg(t.colors.selection).child(
+                d.when(!editing, |d| d.bg(t.colors.selection)).child(
                     div()
                         .absolute()
                         .top_0()
@@ -673,6 +709,10 @@ impl TableView {
             })
             .child(content)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                // A press in the field being typed in is the field's (placing the caret).
+                if editing {
+                    return;
+                }
                 let cell = super::CellRef { item: ix, column };
                 window.focus(&this.focus, cx);
                 this.popover = None;
@@ -682,6 +722,82 @@ impl TableView {
                     this.set_cell(cell, cx);
                 }
             }))
+            .into_any_element()
+    }
+
+    /// The field a cell's value is typed in: on one line inside the cell, or for a text value,
+    /// a textarea over the cell that grows down over the rows below (up to eight lines, then it
+    /// scrolls), at least a menu's width.
+    fn render_editor(&self, e: &super::table::Editor, column: usize) -> AnyElement {
+        let t = &self.theme;
+        let input = Input::new(&e.state)
+            .appearance(false)
+            .accessibility_label(e.label.clone())
+            .caret_color(t.colors.accent)
+            .selection_color(t.colors.accent.opacity(0.3))
+            .placeholder_color(t.colors.text_faint)
+            .flex_1()
+            .min_w_0();
+        if !e.multiline() {
+            return div()
+                .debug_selector(|| "editor".into())
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .when(e.kind == PropertyType::Title, |d| {
+                    d.font_weight(FontWeight(t.sizes.medium))
+                })
+                .child(input)
+                .into_any_element();
+        }
+        let width = self
+            .column_px(column)
+            .max(t.pixels(t.sizes.menu_width, self.rem));
+        // One line is the row's height (the 2-pixel edge included); more grow down.
+        let row = self.row_height();
+        let line_height = t.pixels(t.sizes.text + 6., self.rem);
+        let pad_y = ((row - px(4.) - line_height) / 2.).max(px(0.));
+        let shadow = BoxShadow {
+            color: t.colors.shadow,
+            offset: point(px(0.), px(4.)),
+            blur_radius: px(12.),
+            spread_radius: px(0.),
+            inset: false,
+        };
+        // Its layout starts at the cell's corner (the box it's in fills the cell); it's drawn
+        // after the rows, so it isn't cut off by them, and kept in the window.
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .child(
+                deferred(
+                    anchored().snap_to_window_with_margin(px(8.)).child(
+                        div()
+                            .id("gpui-tables-editor")
+                            .debug_selector(|| "editor".into())
+                            .occlude()
+                            .w(width)
+                            .min_h(row)
+                            // The text where the cell's is, inside the 2-pixel edge.
+                            .px((t.pixels(t.sizes.cell_padding, self.rem) - px(2.)).max(px(0.)))
+                            .py(pad_y)
+                            .line_height(line_height)
+                            .flex()
+                            .bg(t.colors.popover)
+                            .border_2()
+                            .border_color(t.colors.focus)
+                            .shadow(vec![shadow])
+                            .text_color(t.colors.text)
+                            .font_family(t.fonts.body.clone())
+                            .text_size(t.px(t.sizes.text))
+                            .child(input),
+                    ),
+                )
+                .with_priority(1),
+            )
             .into_any_element()
     }
 
@@ -1057,9 +1173,12 @@ impl TableView {
                 )
             }
             Popover::Picker { cell, .. } | Popover::Date { cell, .. } => self.cell_bounds(*cell),
+            Popover::FilterValue { column } => self.header_bounds(*column),
         };
+        let filter_value = matches!(popover, Popover::FilterValue { .. });
         let body = match &popover {
             Popover::Date { month, day, cell } => self.render_day_grid(*month, *day, *cell, cx),
+            Popover::FilterValue { column } => self.render_filter_value(*column),
             Popover::Header { highlight, .. }
             | Popover::Columns { highlight }
             | Popover::Picker { highlight, .. } => self.render_entries(*highlight, cx),
@@ -1087,7 +1206,11 @@ impl TableView {
             .text_size(t.px(t.sizes.text))
             .text_color(t.colors.text)
             .font_family(t.fonts.body.clone())
-            .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {
+            .on_mouse_down_out(cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                // A filter value typed is applied by pressing elsewhere, as a cell's is.
+                if filter_value {
+                    this.finish_editor(true, false, window, cx);
+                }
                 this.popover = None;
                 cx.notify();
             }))
@@ -1103,6 +1226,62 @@ impl TableView {
             .with_priority(1)
             .into_any_element(),
         )
+    }
+
+    /// A filter's value typed in place under the column's header: what it filters by, then the
+    /// field. Enter, Tab or pressing elsewhere applies it, Escape closes it.
+    fn render_filter_value(&self, column: usize) -> AnyElement {
+        let t = &self.theme;
+        let Some(e) = self.editor.as_ref() else {
+            return div().into_any_element();
+        };
+        let name = self.property_at(column).map_or("", |p| p.name.as_str());
+        let how = match &e.target {
+            super::TextTarget::Filter { op, .. } => match op {
+                crate::model::FilterOp::Contains => "contains",
+                crate::model::FilterOp::Greater => "is greater than",
+                crate::model::FilterOp::Less => "is less than",
+                _ => "is",
+            },
+            super::TextTarget::Cell { .. } => "",
+        };
+        let label = format!("{name} {how}");
+        div()
+            .px(t.px(8.))
+            .pb(t.px(4.))
+            .flex()
+            .flex_col()
+            .gap(t.px(4.))
+            .child(
+                line(label.clone())
+                    .px(t.px(4.))
+                    .pt(t.px(4.))
+                    .text_size(t.px(t.sizes.small))
+                    .text_color(t.colors.text_muted),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "editor".into())
+                    .h(t.hit(30., self.rem))
+                    .px(t.px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(t.px(t.sizes.chip_radius))
+                    .bg(t.colors.background)
+                    .border_2()
+                    .border_color(t.colors.focus)
+                    .child(
+                        Input::new(&e.state)
+                            .appearance(false)
+                            .accessibility_label(label)
+                            .caret_color(t.colors.accent)
+                            .selection_color(t.colors.accent.opacity(0.3))
+                            .placeholder_color(t.colors.text_faint)
+                            .flex_1()
+                            .min_w_0(),
+                    ),
+            )
+            .into_any_element()
     }
 
     fn render_entries(&self, highlight: usize, cx: &mut Context<Self>) -> AnyElement {

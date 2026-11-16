@@ -1,5 +1,5 @@
-//! What the table asks of the app around it: its look, names it can't know, pickers' choices, a
-//! text field for typed values, and where its events go.
+//! What the table asks of the app around it: its look, names it can't know, pickers' choices,
+//! optionally a text field of its own for typed values, and where its events go.
 
 use gpui::{App, Bounds, Pixels, WeakEntity, Window};
 
@@ -28,8 +28,9 @@ pub enum TextTarget {
     },
 }
 
-/// A request for a typed value: the host shows a field (over `bounds`, the cell's place in
-/// the window, or wherever it likes), and answers through `reply`.
+/// A request for a typed value, made to a host that shows its own field
+/// ([`TableHost::edit_text`]): the host shows one (over `bounds`, the cell's place in the window,
+/// or wherever it likes), and answers through `reply`.
 pub struct TextEdit {
     pub target: TextTarget,
     /// The property's type: what the field is for (a number, an email, ...).
@@ -70,6 +71,16 @@ impl TextReply {
         let _ = self.view.update(cx, |view, cx| {
             view.finish_text_edit(token, None, window, cx)
         });
+    }
+
+    /// Hands the edit back to the table, which edits it in place with gpui-core's `Input` (what
+    /// [`TableHost::edit_text`] does unless the host overrides it). For a host that shows its
+    /// own field for some edits and not others.
+    pub fn edit_in_place(&self, window: &mut Window, cx: &mut App) {
+        let token = self.token;
+        let _ = self
+            .view
+            .update(cx, |view, cx| view.open_editor(token, window, cx));
     }
 }
 
@@ -113,13 +124,17 @@ pub trait TableHost {
         Vec::new()
     }
 
-    /// Shows a field for a typed value, and answers through `edit.reply`. Text, number, URL,
-    /// email, phone and title cells, and the filters of those types, edit this way (gpui-core
-    /// has no text input yet). Called after the table's own update, so the host may change the
-    /// table from here. A host with no field ignores it, and such values are edited on the
-    /// row's page.
+    /// A typed value is wanted: a text, number, URL, email, phone or title cell's, or the value
+    /// of a filter of those types. By default the table edits it in place, with gpui-core's
+    /// `Input` in the cell (or in the column's menu, for a filter).
+    ///
+    /// A host with a field of its own overrides this: it shows its field and answers through
+    /// `edit.reply` (`commit` or `cancel`), and the table reads, limits and emits the answer as
+    /// it does its own. It may also hand an edit back with `edit.reply.edit_in_place`. Called
+    /// after the table's own update, so the host may change the table from here. An override
+    /// that does nothing leaves such values to be edited on the row's page.
     fn edit_text(&self, edit: TextEdit, window: &mut Window, cx: &mut App) {
-        let _ = (edit, window, cx);
+        edit.reply.edit_in_place(window, cx);
     }
 
     /// The time now, in milliseconds since the epoch: for date groups and filters relative to

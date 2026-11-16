@@ -145,31 +145,64 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
             serde_json::Value::Null
         ))
     );
-    // A text filter asks the host for its value.
+    // A text filter's value is typed in the menu, under the header; Enter applies it.
     menu(cx, "Role");
     click(cx, "entry:Contains…");
-    let edit = host.texts.borrow_mut().pop().expect("a text field");
-    assert_eq!(
-        edit.target,
-        TextTarget::Filter {
-            property_id: ROLE.into(),
-            op: FilterOp::Contains
-        }
+    assert!(
+        drawn(cx, "menu") && drawn(cx, "editor"),
+        "a field in the menu"
     );
-    cx.update(|window, cx| edit.reply.commit("partner", window, cx));
-    draw(cx);
+    assert_eq!(
+        editing(&table, cx),
+        Some((
+            TextTarget::Filter {
+                property_id: ROLE.into(),
+                op: FilterOp::Contains
+            },
+            String::new()
+        ))
+    );
+    assert!(rect(cx, "editor").top() >= rect(cx, "header:Role").bottom());
+    type_text(cx, "partner");
+    keys(cx, "enter");
+    assert!(!drawn(cx, "menu") && editing(&table, cx).is_none());
     assert_eq!(titles(&table, cx), ["Sami Halloran"]);
-    // A number's is read as a number.
+    // A number's is read as a number, and Tab applies it too.
     menu(cx, "Warmth");
     click(cx, "entry:Greater than…");
-    let edit = host.texts.borrow_mut().pop().unwrap();
-    cx.update(|window, cx| edit.reply.commit("2", window, cx));
-    draw(cx);
+    type_text(cx, "2");
+    keys(cx, "tab");
     let v = host.last_view();
     let Some(Filter::And { and }) = &v.filter else {
         panic!("{:?}", v.filter)
     };
     assert!(and.contains(&Filter::condition(WARMTH, FilterOp::Greater, 2.into())));
+    // Escape closes the field and filters by nothing.
+    let n = host.edits().len();
+    menu(cx, "Warmth");
+    click(cx, "entry:Less than…");
+    type_text(cx, "9");
+    keys(cx, "escape");
+    assert!(!drawn(cx, "menu") && editing(&table, cx).is_none());
+    assert_eq!(host.edits().len(), n);
+    // Pressing elsewhere applies it, as a cell's value; with grouping and a currency sign.
+    menu(cx, "Warmth");
+    click(cx, "entry:Equals…");
+    type_text(cx, "$1,0");
+    click(cx, "header:Role");
+    keys(cx, "escape");
+    let v = host.last_view();
+    let Some(Filter::And { and }) = &v.filter else {
+        panic!("{:?}", v.filter)
+    };
+    assert!(and.contains(&Filter::condition(WARMTH, FilterOp::Is, 10.into())));
+    // What isn't a number filters by nothing.
+    let n = host.edits().len();
+    menu(cx, "Warmth");
+    click(cx, "entry:Equals…");
+    type_text(cx, "warm");
+    keys(cx, "enter");
+    assert_eq!(host.edits().len(), n);
 }
 
 #[gpui::test]
@@ -392,62 +425,104 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     let (_, _, v) = value_edit(&last);
     assert_eq!(v, Some(&Value::date_on_day(day + 6)));
 
-    // Typed values go through the host's field.
+    // A typed value opens a field in the cell, holding what's there, sized to the cell.
     click(cx, cell(ANA, ROLE));
     keys(cx, "enter");
-    let edit = host.texts.borrow_mut().pop().expect("a field for Role");
-    assert_eq!(edit.text, "Designer");
-    assert_eq!(edit.kind, PropertyType::Text);
-    assert!(edit.bounds.size.width > px(100.));
-    cx.update(|window, cx| edit.reply.commit("  Lead designer ", window, cx));
-    draw(cx);
+    let (target, text) = editing(&table, cx).expect("a field for Role");
+    assert_eq!(
+        target,
+        TextTarget::Cell {
+            row_id: ANA.into(),
+            property_id: ROLE.into()
+        }
+    );
+    assert_eq!(text, "Designer");
+    let (field, place) = (rect(cx, "editor"), rect(cx, cell(ANA, ROLE)));
+    assert!(field.left() >= place.left() && field.top() >= place.top() - px(1.));
+    // Typing replaces the selection; Enter commits, trimmed, and the cell keeps the focus.
+    select_all(&table, cx);
+    type_text(cx, "  Lead designer ");
+    keys(cx, "enter");
+    assert!(editing(&table, cx).is_none() && !drawn(cx, "editor"));
     assert_eq!(
         value_edit(&host.last_edit()),
         (ANA, ROLE, Some(&Value::text("Lead designer")))
     );
-    // Answering twice does nothing.
-    let n = host.edits().len();
-    cx.update(|window, cx| edit.reply.commit("again", window, cx));
-    draw(cx);
-    assert_eq!(host.edits().len(), n);
+    assert_eq!(
+        table.update(cx, |t, _| t.focused_row_cell()),
+        Some((ANA.into(), ROLE.into()))
+    );
 
-    // A number reads grouping; what isn't a number changes nothing.
+    // A number reads grouping, a currency sign and a percent sign; what isn't a number changes
+    // nothing, and an empty field clears it.
     table.update(cx, |t, cx| t.focus_cell(ANA, WARMTH, cx));
     keys(cx, "enter");
-    let edit = host.texts.borrow_mut().pop().unwrap();
-    assert_eq!(edit.text, "4");
-    cx.update(|window, cx| edit.reply.commit("1,234", window, cx));
-    draw(cx);
-    assert_eq!(
-        value_edit(&host.last_edit()),
-        (ANA, WARMTH, Some(&Value::number(1234.)))
-    );
+    assert_eq!(editing(&table, cx).unwrap().1, "4");
+    for (typed, value) in [
+        ("1,234", Some(1234.)),
+        ("$1,200", Some(1200.)),
+        ("25%", Some(0.25)),
+        (" -7.5 ", Some(-7.5)),
+        ("", None),
+    ] {
+        if editing(&table, cx).is_none() {
+            keys(cx, "enter");
+        }
+        select_all(&table, cx);
+        if typed.is_empty() {
+            keys(cx, "backspace");
+        } else {
+            type_text(cx, typed);
+        }
+        keys(cx, "enter");
+        assert_eq!(
+            value_edit(&host.last_edit()),
+            (ANA, WARMTH, value.map(Value::number).as_ref()),
+            "{typed:?}"
+        );
+    }
     keys(cx, "enter");
-    let edit = host.texts.borrow_mut().pop().unwrap();
     let n = host.edits().len();
-    cx.update(|window, cx| edit.reply.commit("lots", window, cx));
-    draw(cx);
+    type_text(cx, "lots");
+    keys(cx, "enter");
     assert_eq!(host.edits().len(), n);
+    assert!(
+        editing(&table, cx).is_none(),
+        "the field closes all the same"
+    );
 
-    // Email and URL are text, cut to their limits.
+    // Email, URL and phone are text, cut to their limits.
     table.update(cx, |t, cx| t.focus_cell(ANA, EMAIL, cx));
     keys(cx, "enter");
-    let edit = host.texts.borrow_mut().pop().unwrap();
-    assert_eq!(edit.max_chars, Some(320));
-    cx.update(|window, cx| edit.reply.commit(&"a".repeat(400), window, cx));
-    draw(cx);
+    select_all(&table, cx);
+    type_text(cx, &"a".repeat(400));
+    keys(cx, "enter");
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     assert_eq!(v.and_then(Value::as_str).unwrap().chars().count(), 320);
     table.update(cx, |t, cx| t.focus_cell(ANA, PROFILE, cx));
     keys(cx, "enter");
-    let edit = host.texts.borrow_mut().pop().unwrap();
-    assert_eq!(edit.kind, PropertyType::Url);
-    cx.update(|window, cx| edit.reply.commit("https://example.com/ana", window, cx));
-    draw(cx);
+    select_all(&table, cx);
+    type_text(cx, "https://example.com/ana");
+    keys(cx, "enter");
     assert_eq!(
-        value_edit(&host.last_edit()).2,
-        Some(&Value::text("https://example.com/ana"))
+        value_edit(&host.last_edit()),
+        (ANA, PROFILE, Some(&Value::text("https://example.com/ana")))
+    );
+    // (Phone is hidden in this view: shown first.)
+    click(cx, "columns-button");
+    click(cx, "entry:Phone");
+    keys(cx, "escape");
+    table.update(cx, |t, cx| t.focus_cell(ANA, PHONE, cx));
+    keys(cx, "enter");
+    let phone = table.update(cx, |t, _| t.cell_words(ANA, PHONE)).unwrap();
+    assert_eq!(editing(&table, cx).unwrap().1, phone);
+    select_all(&table, cx);
+    type_text(cx, "+1 415 555 0100");
+    keys(cx, "enter");
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (ANA, PHONE, Some(&Value::text("+1 415 555 0100")))
     );
 
     // A person toggles people the property allows.
@@ -462,13 +537,14 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     );
     keys(cx, "escape");
 
-    // The title edits with F2 (Enter opens the row), as a rowTitleChanged.
+    // The title edits in place with F2 or a second press (Enter opens the row), as a
+    // rowTitleChanged.
     table.update(cx, |t, cx| t.focus_cell(ANA, NAME, cx));
     keys(cx, "f2");
-    let edit = host.texts.borrow_mut().pop().unwrap();
-    assert_eq!(edit.kind, PropertyType::Title);
-    cx.update(|window, cx| edit.reply.commit("Ana Durán", window, cx));
-    draw(cx);
+    assert_eq!(editing(&table, cx).unwrap().1, "Ana Sofía Durán");
+    select_all(&table, cx);
+    type_text(cx, "Ana Durán");
+    keys(cx, "enter");
     assert_eq!(
         host.last_edit(),
         Edit::RowTitleChanged {
@@ -476,6 +552,9 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
             title: "Ana Durán".into()
         }
     );
+    click(cx, cell(ANA, NAME));
+    assert!(drawn(cx, "editor"), "a second press edits the title");
+    keys(cx, "escape");
 
     // Delete clears a cell, as a null value; a created time can't be cleared.
     table.update(cx, |t, cx| t.focus_cell(ANA, ROLE, cx));
@@ -487,6 +566,244 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     });
     keys(cx, "delete");
     assert_eq!(host.edits().len(), n);
+}
+
+#[gpui::test]
+fn typed_values_commit_with_tab_or_a_press_elsewhere_and_escape_cancels(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people(cx, &host);
+    activate(cx);
+    let at = |table: &Entity<TableView>, cx: &mut VisualTestContext| {
+        table.update(cx, |t, _| t.focused_row_cell())
+    };
+    let role = |table: &Entity<TableView>, cx: &mut VisualTestContext, row: &str| {
+        table.update(cx, |t, _| t.cell_words(row, ROLE)).unwrap()
+    };
+
+    // The arrows move the caret while a field is open, never the focused cell.
+    table.update(cx, |t, cx| t.focus_cell(ANA, ROLE, cx));
+    keys(cx, "enter");
+    keys(cx, "up down left left");
+    assert_eq!(at(&table, cx), Some((ANA.into(), ROLE.into())));
+    assert!(editing(&table, cx).is_some());
+    type_text(cx, "X");
+    assert_eq!(editing(&table, cx).unwrap().1, "DesignXer");
+    // Tab commits and moves to the next cell, without opening it.
+    let next = table.update(cx, |t, _| t.columns()[3].0.clone());
+    keys(cx, "tab");
+    assert_eq!(role(&table, cx, ANA), "DesignXer");
+    assert_eq!(at(&table, cx), Some((ANA.into(), next)));
+    assert!(editing(&table, cx).is_none());
+    // Shift-Tab commits and moves back.
+    keys(cx, "shift-tab");
+    keys(cx, "enter");
+    select_all(&table, cx);
+    type_text(cx, "Designer");
+    keys(cx, "shift-tab");
+    assert_eq!(role(&table, cx, ANA), "Designer");
+    assert_eq!(at(&table, cx), Some((ANA.into(), COMPANY.into())));
+    // With no field open the arrows move the focused cell again.
+    keys(cx, "right");
+    assert_eq!(at(&table, cx), Some((ANA.into(), ROLE.into())));
+
+    // Escape closes the field without an edit; the cell keeps the focus, and a second Escape
+    // lets go of it.
+    let n = host.edits().len();
+    keys(cx, "enter");
+    type_text(cx, " and more");
+    keys(cx, "escape");
+    assert!(editing(&table, cx).is_none() && !drawn(cx, "editor"));
+    assert_eq!(host.edits().len(), n);
+    assert_eq!(role(&table, cx, ANA), "Designer");
+    assert_eq!(at(&table, cx), Some((ANA.into(), ROLE.into())));
+    keys(cx, "escape");
+    assert_eq!(at(&table, cx), None);
+
+    // A field committed unchanged emits nothing.
+    table.update(cx, |t, cx| t.focus_cell(ANA, ROLE, cx));
+    keys(cx, "enter");
+    keys(cx, "enter");
+    assert_eq!(host.edits().len(), n);
+    // The window going to the background leaves the field open, as it was.
+    keys(cx, "enter");
+    type_text(cx, "!");
+    cx.deactivate_window();
+    draw(cx);
+    activate(cx);
+    assert_eq!(editing(&table, cx).unwrap().1, "Designer!");
+    keys(cx, "escape");
+    assert_eq!(host.edits().len(), n);
+
+    // Pressing another cell commits (the field loses the focus) and focuses that cell.
+    click(cx, cell(IMANI, ROLE));
+    click(cx, cell(IMANI, ROLE));
+    assert!(drawn(cx, "editor"), "a second press edits");
+    // A press inside the field is the field's: it stays open.
+    click(cx, "editor");
+    assert!(editing(&table, cx).is_some());
+    select_all(&table, cx);
+    type_text(cx, "Partner");
+    click(cx, cell(THEO, STAGE));
+    assert!(editing(&table, cx).is_none());
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (IMANI, ROLE, Some(&Value::text("Partner")))
+    );
+    assert_eq!(at(&table, cx), Some((THEO.into(), STAGE.into())));
+    // Delete and Backspace are the field's while it's open: they empty nothing else.
+    table.update(cx, |t, cx| t.focus_cell(IMANI, ROLE, cx));
+    keys(cx, "enter");
+    let n = host.edits().len();
+    keys(cx, "backspace delete");
+    assert_eq!(host.edits().len(), n);
+    assert_eq!(editing(&table, cx).unwrap().1, "Partne");
+    keys(cx, "escape");
+}
+
+#[gpui::test]
+fn text_values_grow_over_the_rows_below_and_take_new_lines(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, rows) = load("people");
+    let (table, cx) = open_with(cx, &host, db, rows, None, size(px(1200.), px(700.)));
+    table.update(cx, |t, cx| t.focus_cell(ANA, ROLE, cx));
+    keys(cx, "enter");
+    let place = rect(cx, cell(ANA, ROLE));
+    let one = rect(cx, "editor");
+    assert!((one.left() - place.left()).abs() < px(1.) && (one.top() - place.top()).abs() < px(1.));
+    assert!(one.size.width >= place.size.width && one.size.width >= px(240.));
+    assert!(
+        one.size.height <= place.size.height + px(1.),
+        "one line, the row's height"
+    );
+    // Shift-Enter starts a new line, and the field grows; Enter commits both.
+    keys(cx, "shift-enter");
+    type_text(cx, "Speaker");
+    let two = rect(cx, "editor");
+    assert!(
+        two.size.height > one.size.height + px(8.),
+        "{one:?} then {two:?}"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (ANA, ROLE, Some(&Value::text("Designer\nSpeaker")))
+    );
+    // Opened again, it holds both lines.
+    keys(cx, "enter");
+    assert_eq!(editing(&table, cx).unwrap().1, "Designer\nSpeaker");
+    keys(cx, "escape");
+}
+
+#[gpui::test]
+fn the_hosts_field_wins_when_it_has_one(cx: &mut TestAppContext) {
+    let host = TestHost::with_hook();
+    let (table, cx) = open_people(cx, &host);
+    // The host gets the request, and no field opens in place.
+    click(cx, cell(ANA, ROLE));
+    keys(cx, "enter");
+    assert!(editing(&table, cx).is_none() && !drawn(cx, "editor"));
+    let edit = host.texts.borrow_mut().pop().expect("a field for Role");
+    assert_eq!(edit.text, "Designer");
+    assert_eq!(edit.kind, PropertyType::Text);
+    assert_eq!(edit.label, "Role");
+    assert!(edit.bounds.size.width > px(100.));
+    // Its answer is read, limited and emitted as the field in place's would be.
+    cx.update(|window, cx| edit.reply.commit("  Lead designer ", window, cx));
+    draw(cx);
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (ANA, ROLE, Some(&Value::text("Lead designer")))
+    );
+    // Answering twice does nothing.
+    let n = host.edits().len();
+    cx.update(|window, cx| edit.reply.commit("again", window, cx));
+    draw(cx);
+    assert_eq!(host.edits().len(), n);
+    // Numbers and limits too.
+    table.update(cx, |t, cx| t.focus_cell(ANA, WARMTH, cx));
+    keys(cx, "enter");
+    let edit = host.texts.borrow_mut().pop().unwrap();
+    assert_eq!(edit.text, "4");
+    cx.update(|window, cx| edit.reply.commit("1,234", window, cx));
+    draw(cx);
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (ANA, WARMTH, Some(&Value::number(1234.)))
+    );
+    table.update(cx, |t, cx| t.focus_cell(ANA, EMAIL, cx));
+    keys(cx, "enter");
+    let edit = host.texts.borrow_mut().pop().unwrap();
+    assert_eq!(edit.max_chars, Some(320));
+    cx.update(|window, cx| edit.reply.cancel(window, cx));
+    draw(cx);
+    assert_eq!(host.edits().len(), n + 1);
+    // A filter's value too, under its header.
+    menu(cx, "Role");
+    click(cx, "entry:Contains…");
+    assert!(!drawn(cx, "editor"));
+    let edit = host
+        .texts
+        .borrow_mut()
+        .pop()
+        .expect("a field for the filter");
+    assert_eq!(
+        edit.target,
+        TextTarget::Filter {
+            property_id: ROLE.into(),
+            op: FilterOp::Contains
+        }
+    );
+    cx.update(|window, cx| edit.reply.commit("lead", window, cx));
+    draw(cx);
+    assert_eq!(titles(&table, cx), ["Ana Sofía Durán"]);
+    // And the host can hand an edit back to be edited in place.
+    table.update(cx, |t, cx| t.focus_cell(ANA, ROLE, cx));
+    keys(cx, "enter");
+    let edit = host.texts.borrow_mut().pop().unwrap();
+    cx.update(|window, cx| edit.reply.edit_in_place(window, cx));
+    draw(cx);
+    assert_eq!(editing(&table, cx).unwrap().1, "Lead designer");
+    type_text(cx, "!");
+    keys(cx, "enter");
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (ANA, ROLE, Some(&Value::text("Lead designer!")))
+    );
+}
+
+#[gpui::test]
+fn a_tap_on_a_focused_cell_edits_it_in_place(cx: &mut TestAppContext) {
+    let host = TestHost::touch();
+    let (db, rows) = load("people");
+    let (table, cx) = open_with(cx, &host, db, rows, None, size(px(1200.), px(900.)));
+    activate(cx);
+    let at = rect(cx, cell(IMANI, ROLE)).center();
+    tap(cx, at);
+    assert!(!drawn(cx, "editor"), "the first tap focuses");
+    tap(cx, at);
+    assert!(drawn(cx, "editor"), "a tap on the focused cell edits it");
+    // The field has the focus, so the platform's keyboard (and its input methods) come up.
+    let state = table.read_with(cx, |t, _| t.editor_state()).unwrap();
+    assert!(cx.update(|window, cx| state.read(cx).is_focused(window)));
+    // A tap in the field keeps it open; a tap elsewhere commits.
+    let inside = rect(cx, "editor").center();
+    tap(cx, inside);
+    assert!(editing(&table, cx).is_some());
+    select_all(&table, cx);
+    type_text(cx, "Founder");
+    let elsewhere = rect(cx, cell(THEO, STAGE)).center();
+    tap(cx, elsewhere);
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (IMANI, ROLE, Some(&Value::text("Founder")))
+    );
+    // The title too, its field the cell's height.
+    let at = rect(cx, cell(IMANI, NAME)).center();
+    tap(cx, point(at.x - px(60.), at.y));
+    tap(cx, point(at.x - px(60.), at.y));
+    assert_eq!(editing(&table, cx).unwrap().1, "Imani Castell");
+    assert!(rect(cx, "editor").size.height <= rect(cx, cell(IMANI, NAME)).size.height);
+    keys(cx, "escape");
 }
 
 #[gpui::test]
