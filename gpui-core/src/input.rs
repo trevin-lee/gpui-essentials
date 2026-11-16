@@ -1311,6 +1311,7 @@ struct InputColors {
     caret: Option<Hsla>,
     selection: Option<Hsla>,
     placeholder: Option<Hsla>,
+    ring: Option<Hsla>,
 }
 
 impl Input {
@@ -1338,6 +1339,13 @@ impl Input {
     }
 
     /// The placeholder's colour (otherwise the theme's muted foreground).
+    /// The keyboard focus ring's colour (with `appearance`), drawn as given (otherwise the
+    /// theme's ring at half strength).
+    pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.colors.ring = Some(color.into());
+        self
+    }
+
     pub fn placeholder_color(mut self, color: impl Into<Hsla>) -> Self {
         self.colors.placeholder = Some(color.into());
         self
@@ -1377,7 +1385,13 @@ impl RenderOnce for Input {
                 st.placeholder.clone(),
             )
         };
-        let ring = focus_ring(cx);
+        let ring = match self.colors.ring {
+            Some(color) => gpui::BoxShadow {
+                color,
+                ..focus_ring(cx)
+            },
+            None => focus_ring(cx),
+        };
         let mut el = div()
             .id(ElementId::Integer(s.entity_id().as_u64()))
             .key_context(CONTEXT)
