@@ -52,8 +52,8 @@ pub use flow::{
     AddChild, AddSibling, Align, Cancel, CanvasTransform, ContextTarget, DeleteSelected,
     Distribute, EdgeDefaults, FitView, Flow, FlowEvent, FlowOptions, FrameSelection, Guide,
     HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar, MoveUp,
-    MoveUpFar, OpenLink, PanelPosition, PointerMode, Redo, SelectAll, Undo, Unframe, ZoomIn,
-    ZoomOut, ZoomReset, bind_keys,
+    MoveUpFar, OpenLink, PanelPosition, Pen, PointerMode, Redo, SelectAll, Tool, Undo, Unframe,
+    ZoomIn, ZoomOut, ZoomReset, bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, ImageLoader, NodeContext, NodeInput, NodeRenderer, drawing_node,
