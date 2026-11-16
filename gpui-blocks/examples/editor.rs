@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use gpui_blocks::docs::{DocInfo, Docs};
 use gpui_blocks::slash::{SlashAction, SlashItem};
 use gpui_blocks::widget::{Widget, fenced};
 use gpui_blocks::{Editor, EditorEvent, Options};
@@ -144,6 +145,8 @@ struct Root {
     /// `--bench` scrolling: this many points each frame, as a smooth scroll does, until the end,
     /// then the sender hears.
     scrolling: Option<(Pixels, futures::channel::oneshot::Sender<()>)>,
+    /// Pages made from the slash menu, for their ids.
+    pages: usize,
     _subscription: Subscription,
 }
 
@@ -155,23 +158,43 @@ impl Root {
         cx: &mut Context<Self>,
     ) -> Self {
         // The example's own widget, and a slash menu item that inserts one.
-        let options = Options::default().widget(Answer).slash_item(
-            SlashItem::new(
-                "Answer",
-                SlashAction::Markdown(
-                    fenced(
-                        "answer",
-                        "from: Assistant\nasked: What should I look at first today?\n---\n",
-                    )
-                    .into(),
-                ),
+        let options = Options::default()
+            .widget(Answer)
+            .slash_item(
+                SlashItem::new(
+                    "Answer",
+                    SlashAction::Markdown(
+                        fenced(
+                            "answer",
+                            "from: Assistant\nasked: What should I look at first today?\n---\n",
+                        )
+                        .into(),
+                    ),
+                )
+                .hint("A question and its answer, as a card")
+                .aliases(["ask", "ai", "assistant", "question"])
+                .icon("✦"),
             )
-            .hint("A question and its answer, as a card")
-            .aliases(["ask", "ai", "assistant", "question"])
-            .icon("✦"),
-        );
+            .docs(DemoDocs);
         let editor = cx.new(|cx| Editor::with_options(source, options, window, cx));
-        let subscription = cx.subscribe(&editor, |this, editor, _: &EditorEvent, cx| {
+        let subscription = cx.subscribe(&editor, |this, editor, event: &EditorEvent, cx| {
+            // An app opens the document, makes a new one, or shows a picker; the example has one
+            // other document to link to, and makes untitled pages that go nowhere.
+            match event {
+                EditorEvent::DocClicked { id } => eprintln!("open the document {id}"),
+                EditorEvent::NewPageRequested => {
+                    this.pages += 1;
+                    let id = format!("new-{}", this.pages);
+                    editor.update(cx, |e, cx| e.insert_page(&id, "Untitled", cx));
+                }
+                EditorEvent::DocLinkRequested => {
+                    editor.update(cx, |e, cx| e.insert_mention("roadmap", "Roadmap", cx));
+                }
+                _ => {}
+            }
+            if !matches!(event, EditorEvent::Changed) {
+                return;
+            }
             // Saved a moment after typing stops, not on every keystroke.
             let Some(path) = this.file.clone() else {
                 return;
@@ -205,6 +228,7 @@ impl Root {
             save: None,
             probe: Rc::default(),
             scrolling: None,
+            pages: 0,
             _subscription: subscription,
         }
     }
@@ -742,6 +766,20 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
         });
     })
     .detach();
+}
+
+/// The example's other documents: a real app answers from its own list.
+struct DemoDocs;
+
+impl Docs for DemoDocs {
+    fn info(&self, id: &str, _: &App) -> Option<DocInfo> {
+        match id {
+            "roadmap" => Some(DocInfo::new("Q4 roadmap").icon("🗺")),
+            "last-week" => Some(DocInfo::new("Notes from last week").icon("🗒")),
+            _ if id.starts_with("new-") => Some(DocInfo::new("Untitled")),
+            _ => None,
+        }
+    }
 }
 
 /// The example's widget: a question and its answer, drawn as a card. In Markdown it's a fenced

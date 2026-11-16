@@ -10,6 +10,8 @@
 //!   drag the block. The blocks it passes slide aside, and it springs into place when let go.
 //! - **Widgets** ([`widget`]): fenced blocks an app draws, such as a chart, kept as fenced code
 //!   so any Markdown tool can still read the document.
+//! - **Links to other documents** ([`docs`]): mentions inside text and sub-page blocks, drawn
+//!   with the title and icon the app gives them.
 //! - Markdown shortcuts as you type (`# `, `- `, `1. `, `[ ] `, `> `, three backticks, `---`,
 //!   `**bold**`), undo and redo, selection across blocks, and copy and paste as Markdown.
 //!
@@ -33,6 +35,7 @@
 //! });
 //! ```
 
+pub mod docs;
 mod editor;
 pub mod slash;
 pub mod widget;
