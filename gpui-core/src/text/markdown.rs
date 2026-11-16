@@ -50,7 +50,11 @@ pub fn parse(source: &str) -> Vec<Block> {
     while !source.is_char_boundary(end) {
         end -= 1;
     }
-    let options = markdown::ParseOptions::gfm();
+    // Raw HTML is never rendered, so it isn't parsed either: it reads as the text it is, and
+    // the Markdown after it isn't swallowed into an HTML block (which runs to a blank line).
+    let mut options = markdown::ParseOptions::gfm();
+    options.constructs.html_flow = false;
+    options.constructs.html_text = false;
     match markdown::to_mdast(&source[..end], &options) {
         Ok(Node::Root(root)) => blocks(&root.children, 0),
         // Markdown without MDX has no syntax errors; if anything comes back, show the text.
@@ -261,6 +265,18 @@ mod tests {
 
     #[test]
     fn html_is_text_and_images_are_their_words() {
+        // HTML right before Markdown, with no blank line between: the Markdown is still read.
+        let h = parse("<div>raw</div>\n# A heading\n- an item");
+        assert!(
+            matches!(&h[0], Block::Paragraph(p) if p.text.contains("<div>raw</div>")),
+            "{h:?}"
+        );
+        assert!(
+            h.iter()
+                .any(|b| matches!(b, Block::Heading(1, p) if p.text == "A heading")),
+            "{h:?}"
+        );
+        assert!(h.iter().any(|b| matches!(b, Block::List { .. })), "{h:?}");
         let b = parse("<script>alert(1)</script>\n\n![a cat](https://x.test/cat.png)");
         assert!(matches!(&b[0], Block::Paragraph(p) if p.text.contains("<script>")));
         assert!(matches!(&b[1], Block::Paragraph(p) if p.text == "a cat" && p.spans[0].1.muted));

@@ -62,7 +62,8 @@ use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, Window
 
 /// Sets the crate up: the default theme if the host has set none, and the key bindings.
 ///
-/// It runs by itself the first time a [`Root`] or an [`InputState`] is made, so a host that
+/// It runs by itself the first time a [`Root`] or an [`InputState`] is made, or a [`TextView`]
+/// drawn, so a host that
 /// embeds gpui-core's components without calling it still gets their keys; calling it again does
 /// nothing.
 pub fn init(cx: &mut App) {
@@ -76,6 +77,14 @@ pub fn init(cx: &mut App) {
     root::init(cx);
     input::init(cx);
     text::init(cx);
+}
+
+/// Runs [`init`] after this frame if it hasn't run: for a component with no state of its own to
+/// run it from (keys can't be bound in the middle of a draw).
+pub(crate) fn init_soon(cx: &mut App) {
+    if !cx.has_global::<Initialized>() {
+        cx.defer(init);
+    }
 }
 
 /// That [`init`] has run.

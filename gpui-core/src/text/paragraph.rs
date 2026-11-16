@@ -118,6 +118,22 @@ pub struct ParagraphStyle {
     pub code_family: SharedString,
     pub code_background: Hsla,
     pub align: TextAlign,
+    /// How inline code is set, beyond its family and fill.
+    pub code: CodeStyle,
+}
+
+/// Inline code's own size, padding, corners and colour. The default is code at the text's size
+/// with no padding, square corners, in the text's colour.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CodeStyle {
+    /// Its font size (the text's unless given).
+    pub size: Option<Pixels>,
+    /// Space either side of it, inside its fill; half as much above and below.
+    pub padding: Pixels,
+    /// Its fill's corners.
+    pub radius: Pixels,
+    /// Its text's colour (the text's unless given).
+    pub color: Option<Hsla>,
 }
 
 impl ParagraphStyle {
@@ -132,19 +148,26 @@ impl ParagraphStyle {
         if m.code {
             font.family = self.code_family.clone();
         }
-        let color = m.color.unwrap_or(if m.link.is_some() {
-            self.link
-        } else if m.muted {
-            self.muted
-        } else {
-            self.color
-        });
+        let color = m.color.unwrap_or(
+            if m.code
+                && let Some(c) = self.code.color
+            {
+                c
+            } else if m.link.is_some() {
+                self.link
+            } else if m.muted {
+                self.muted
+            } else {
+                self.color
+            },
+        );
         let underline = m.link.is_some() || m.underline;
         TextRun {
             len,
             font,
             color,
-            background_color: m.highlight.or(m.code.then_some(self.code_background)),
+            // Inline code's fill is painted by the layout, with its padding and corners.
+            background_color: m.highlight,
             underline: underline.then(|| UnderlineStyle {
                 color: Some(if m.link.is_some() {
                     self.link.opacity(0.5)
@@ -202,6 +225,11 @@ enum Piece {
         range: Range<usize>,
         x: Pixels,
         line: Box<ShapedLine>,
+        /// Inline code's padding before and after it (none for other text).
+        pad: (Pixels, Pixels),
+        /// Its text's baseline from the top of a line of the paragraph's line height.
+        baseline: Pixels,
+        code: bool,
     },
     Box {
         offset: usize,
@@ -226,7 +254,7 @@ impl Piece {
 
     fn width(&self) -> Pixels {
         match self {
-            Piece::Text { line, .. } => line.width,
+            Piece::Text { line, pad, .. } => pad.0 + line.width + pad.1,
             Piece::Box { b, .. } => b.width,
         }
     }
@@ -234,7 +262,13 @@ impl Piece {
     /// The x of `offset` in this piece (which holds it).
     fn x_for(&self, offset: usize) -> Pixels {
         match self {
-            Piece::Text { range, x, line } => *x + line.x_for_index(offset - range.start),
+            Piece::Text {
+                range,
+                x,
+                line,
+                pad,
+                ..
+            } => *x + pad.0 + line.x_for_index(offset - range.start),
             Piece::Box { offset: o, x, b } => *x + if offset > *o { b.width } else { px(0.) },
         }
     }
@@ -289,8 +323,10 @@ fn breaks(text: &str) -> Vec<usize> {
 pub struct ParagraphLayout {
     rows: Vec<Row>,
     pieces: Vec<Vec<Piece>>,
-    /// Where text alone sits in a line: its baseline from the line's top.
-    text_baseline: Pixels,
+    /// Inline code's fill, its corners, and how far it reaches above and below the code's ink.
+    code_fill: Hsla,
+    code_radius: Pixels,
+    code_pad_y: Pixels,
     pub line_height: Pixels,
     pub width: Pixels,
     pub height: Pixels,
@@ -302,11 +338,32 @@ impl ParagraphLayout {
     pub fn new(p: &Paragraph, style: &ParagraphStyle, width: Pixels, window: &mut Window) -> Self {
         let lh = style.line_height;
         let ts = window.text_system().clone();
+        // Inline code's spans: shaped at their own size, padded, with fills of their own.
+        let mut code_spans: Vec<Range<usize>> = Vec::new();
+        for (r, m) in &p.spans {
+            if m.code {
+                match code_spans.last_mut() {
+                    Some(last) if last.end == r.start => last.end = r.end,
+                    _ => code_spans.push(r.clone()),
+                }
+            }
+        }
+        let code_of = |offset: usize| code_spans.iter().position(|c| c.contains(&offset));
+        let code_size = style.code.size.unwrap_or(style.size);
+        let pad = style.code.padding;
+        let size_at = |offset: usize| {
+            if code_of(offset).is_some() {
+                code_size
+            } else {
+                style.size
+            }
+        };
         let shape = |range: Range<usize>| -> ShapedLine {
             let runs = style.runs(p, range.clone());
+            let size = size_at(range.start);
             ts.shape_line(
                 SharedString::from(p.text[range].to_string()),
-                style.size,
+                size,
                 &runs,
                 None,
             )
@@ -341,6 +398,25 @@ impl ParagraphLayout {
             if seg_start < line.end {
                 segments.push((seg_start..line.end, false));
             }
+            let segments: Vec<(Range<usize>, bool)> = segments
+                .into_iter()
+                .flat_map(|(seg, is_box)| {
+                    if is_box {
+                        return vec![(seg, true)];
+                    }
+                    let mut cuts = vec![seg.start, seg.end];
+                    for c in &code_spans {
+                        for e in [c.start, c.end] {
+                            if e > seg.start && e < seg.end {
+                                cuts.push(e);
+                            }
+                        }
+                    }
+                    cuts.sort();
+                    cuts.dedup();
+                    cuts.windows(2).map(|w| (w[0]..w[1], false)).collect()
+                })
+                .collect();
             let mut atoms = Vec::new();
             for (seg, is_box) in segments {
                 if is_box {
@@ -372,8 +448,14 @@ impl ParagraphLayout {
                             shaped.x_for_index(end) - shaped.x_for_index(a)
                         }
                     };
-                    let w = measure(b);
-                    let inked = measure(trimmed);
+                    let mut w = measure(b);
+                    let mut inked = measure(trimmed);
+                    if let Some(c) = code_of(seg.start).map(|i| &code_spans[i]) {
+                        let (first, last) = (seg.start + a == c.start, seg.start + b == c.end);
+                        let padding = pad * (first as u8 + last as u8) as f32;
+                        w += padding;
+                        inked += padding;
+                    }
                     atoms.push(Atom {
                         range: seg.start + a..seg.start + b,
                         width: w,
@@ -431,17 +513,29 @@ impl ParagraphLayout {
                 let mut x = px(0.);
                 let mut above = text_baseline;
                 let mut below = lh - text_baseline;
-                // Text between boxes is shaped as one piece.
+                // Text between boxes and code spans' edges is shaped as one piece.
                 let mut text_run: Option<Range<usize>> = None;
                 let flush =
                     |run: &mut Option<Range<usize>>, x: &mut Pixels, pieces: &mut Vec<Piece>| {
                         if let Some(r) = run.take() {
                             let line = shape(r.clone());
-                            let w = line.width;
+                            let code = code_of(r.start).map(|i| code_spans[i].clone());
+                            let pads = match &code {
+                                Some(c) => (
+                                    if r.start == c.start { pad } else { px(0.) },
+                                    if r.end == c.end { pad } else { px(0.) },
+                                ),
+                                None => (px(0.), px(0.)),
+                            };
+                            let baseline = (lh - line.ascent - line.descent) / 2. + line.ascent;
+                            let w = pads.0 + line.width + pads.1;
                             pieces.push(Piece::Text {
                                 range: r,
                                 x: *x,
                                 line: Box::new(line),
+                                pad: pads,
+                                baseline,
+                                code: code.is_some(),
                             });
                             *x += w;
                         }
@@ -461,6 +555,12 @@ impl ParagraphLayout {
                         above = above.max(b.baseline);
                         below = below.max(b.height - b.baseline);
                     } else {
+                        // A new piece where code starts or ends.
+                        if let Some(t) = &text_run
+                            && code_of(t.start) != code_of(r.start)
+                        {
+                            flush(&mut text_run, &mut x, &mut pieces);
+                        }
                         text_run = Some(match text_run {
                             Some(t) => t.start..r.end,
                             None => r.clone(),
@@ -475,7 +575,14 @@ impl ParagraphLayout {
                 };
                 // Trailing spaces hang past the edge, as in browsers: alignment ignores them.
                 let inked = pieces.last().map_or(px(0.), |pc| match pc {
-                    Piece::Text { range, x, line } => {
+                    Piece::Text {
+                        range,
+                        x,
+                        line,
+                        pad,
+                        ..
+                    } => {
+                        let x = &(*x + pad.0);
                         let t = &p.text[range.clone()];
                         if t.chars().any(is_rtl) {
                             // Offsets don't measure right-to-left text; its shaped width does.
@@ -510,7 +617,9 @@ impl ParagraphLayout {
         Self {
             rows,
             pieces: pieces_by_row,
-            text_baseline,
+            code_fill: style.code_background,
+            code_radius: style.code.radius,
+            code_pad_y: style.code.padding / 2.,
             line_height: lh,
             width,
             height: top.max(lh),
@@ -610,9 +719,13 @@ impl ParagraphLayout {
         for pc in pieces {
             if p.x < pc.x() + pc.width() {
                 return match pc {
-                    Piece::Text { range, x, line } => {
-                        range.start + line.closest_index_for_x(p.x - *x)
-                    }
+                    Piece::Text {
+                        range,
+                        x,
+                        line,
+                        pad,
+                        ..
+                    } => range.start + line.closest_index_for_x((p.x - *x - pad.0).max(px(0.))),
                     Piece::Box { offset, x, b } => {
                         if p.x - *x < b.width / 2. {
                             *offset
@@ -691,11 +804,36 @@ impl ParagraphLayout {
     pub fn paint(&self, origin: Point<Pixels>, window: &mut Window, cx: &mut App) {
         let lh = self.line_height;
         for (row, pieces) in self.rows.iter().zip(&self.pieces) {
-            // The text's line, placed so its baseline is the row's.
-            let y = row.top + row.baseline - self.text_baseline;
             for pc in pieces {
-                if let Piece::Text { x, line, .. } = pc {
-                    let at = origin + point(*x, y);
+                if let Piece::Text {
+                    x,
+                    line,
+                    pad,
+                    baseline,
+                    code,
+                    ..
+                } = pc
+                {
+                    let base = row.top + row.baseline;
+                    // Inline code's fill: round its ink, padded.
+                    if *code {
+                        let top = base - line.ascent - self.code_pad_y;
+                        let bottom = base + line.descent + self.code_pad_y;
+                        let b = Bounds::from_corners(
+                            origin + point(*x, top),
+                            origin + point(*x + pad.0 + line.width + pad.1, bottom),
+                        );
+                        window.paint_quad(gpui::quad(
+                            b,
+                            self.code_radius,
+                            self.code_fill,
+                            px(0.),
+                            gpui::transparent_black(),
+                            Default::default(),
+                        ));
+                    }
+                    // The text's line, placed so its baseline is the row's.
+                    let at = origin + point(*x + pad.0, base - *baseline);
                     let _ = line.paint_background(at, lh, TextAlign::Left, None, window, cx);
                     let _ = line.paint(at, lh, TextAlign::Left, None, window, cx);
                 }

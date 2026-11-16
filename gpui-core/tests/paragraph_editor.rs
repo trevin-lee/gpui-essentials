@@ -51,6 +51,7 @@ fn style() -> ParagraphStyle {
         code_family: "Menlo".into(),
         code_background: hsla(0., 0., 0.2, 1.),
         align: TextAlign::Left,
+        code: Default::default(),
     }
 }
 
@@ -374,4 +375,49 @@ fn bands_follow_rows_of_different_heights() {
         assert_eq!(band.top(), row.top);
         assert_eq!(band.size.height, row.height);
     }
+}
+
+#[test]
+fn inline_code_takes_its_padding_and_its_own_size_on_the_rows_baseline() {
+    let mut p = Paragraph::default();
+    p.push("ab ", Marks::default());
+    p.push(
+        "code",
+        Marks {
+            code: true,
+            ..Default::default()
+        },
+    );
+    p.push(" cd", Marks::default());
+    let plain = layout(&p, &style(), 400.);
+    let mut s = style();
+    s.code = gpui_core::text::paragraph::CodeStyle {
+        size: Some(px(12.)),
+        padding: px(6.),
+        radius: px(4.),
+        color: None,
+    };
+    let coded = layout(&p, &s, 400.);
+    assert_eq!(coded.rows().len(), 1);
+    // The padding is room before the code, not drawn over the text beside it: the gap from "b"
+    // to the code's first character grows by the padding.
+    let (start, end) = (3, 7);
+    let gap = |l: &ParagraphLayout| {
+        l.caret(start, Affinity::Downstream).left() - l.caret(2, Affinity::Downstream).left()
+    };
+    assert!(
+        (gap(&coded) - gap(&plain) - px(6.)).abs() < px(0.5),
+        "{:?} vs {:?}",
+        gap(&coded),
+        gap(&plain)
+    );
+    let before = coded.caret(start, Affinity::Downstream).left();
+    let code_w = coded.caret(end, Affinity::Downstream).left() - before;
+    // Smaller code is narrower than the same code at the text's size.
+    let plain_w = plain.caret(end, Affinity::Downstream).left()
+        - plain.caret(start, Affinity::Downstream).left();
+    assert!(code_w < plain_w, "{code_w:?} vs {plain_w:?}");
+    // A press in the padding before the code lands at the code's start.
+    let mid = coded.rows()[0].height / 2.;
+    assert_eq!(coded.index_for(point(before - px(3.), mid)), start);
 }
