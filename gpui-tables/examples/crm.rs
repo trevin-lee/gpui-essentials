@@ -227,7 +227,7 @@ impl Host {
             Edit::RowsDeleted { row_ids } => {
                 for id in row_ids {
                     if let Some((d, i)) = row(&mut dbs, id) {
-                        dbs[d].rows[i].deleted = true;
+                        dbs[d].rows[i].deleted = Some(NOW);
                     }
                 }
             }
@@ -322,7 +322,7 @@ impl TableHost for Host {
         let mut rows: Vec<RelatedRow> = db
             .rows
             .iter()
-            .filter(|r| !r.deleted)
+            .filter(|r| !r.is_deleted())
             .map(|r| RelatedRow {
                 id: r.id.clone(),
                 title: r.title.clone(),

@@ -52,6 +52,37 @@ fn the_people_table_sorts_by_name_and_leaves_out_the_deleted_row() {
 }
 
 #[test]
+fn a_tombstone_is_left_out_whatever_form_its_time_takes() {
+    let docs = docs("people.json");
+    let (db, mut rows) = (docs[0].database.as_ref().unwrap(), docs[1..].to_vec());
+    let all = view(db, "All people");
+    let count = |rows: &[Doc]| query(db, all, rows, &Context::new(now())).rows.len();
+    let live = count(&rows);
+    // The fixture's deleted row comes back once its time is cleared, as an undone delete does.
+    let gone = rows
+        .iter()
+        .position(|r| r.title == "Duplicate of Rowan")
+        .unwrap();
+    assert_eq!(rows[gone].deleted, Some(1_793_613_600_000));
+    rows[gone].deleted = None;
+    assert_eq!(count(&rows), live + 1);
+    // Ana, deleted at a time, at the epoch (purged), or by an older host's `true`.
+    let ana = rows
+        .iter()
+        .position(|r| r.title == "Ana Sofía Durán")
+        .unwrap();
+    for deleted in [json!(now()), json!(0), json!(true)] {
+        let mut json = serde_json::to_value(&rows[ana]).unwrap();
+        json["deleted"] = deleted.clone();
+        rows[ana] = serde_json::from_value(json).unwrap();
+        assert!(rows[ana].is_deleted(), "{deleted}");
+        let out = query(db, all, &rows, &Context::new(now()));
+        assert_eq!(out.rows.len(), live, "{deleted}");
+        assert!(!titles(&rows, &out.rows).contains(&"Ana Sofía Durán".to_owned()));
+    }
+}
+
+#[test]
 fn the_pipeline_board_groups_by_stage() {
     let docs = docs("people.json");
     let (db, rows) = (docs[0].database.as_ref().unwrap(), &docs[1..]);
