@@ -8,13 +8,16 @@
 //!
 //! - [`model`], [`engine`] and [`order`] have no GPUI in them: with `default-features = false`
 //!   they're all that builds, for a server or the non-UI part of an app.
-//! - The views (the default `gpui` feature) come next; the README says what they'll be.
+//! - [`view`] (the default `gpui` feature) is the table view, drawn with GPUI and gpui-core.
+//!   Boards and lists come next; the README says what they'll be.
 //!
 //! The README is the design note, with the JSON and an example.
 
 pub mod engine;
 pub mod model;
 pub mod order;
+#[cfg(feature = "gpui")]
+pub mod view;
 
 pub use model::*;
 

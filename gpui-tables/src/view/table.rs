@@ -1,0 +1,1811 @@
+//! The table view's state: the docs, the active view, what it shows (worked out again only when
+//! the docs or the view change), the focused cell, and what the controls do.
+
+use std::cell::Cell as StdCell;
+use std::rc::Rc;
+
+use gpui::{
+    App, Bounds, Context, FocusHandle, Focusable, Pixels, ScrollStrategy, UniformListScrollHandle,
+    Window, point, px, size,
+};
+
+use super::host::{HostLookup, TableHost, TextEdit, TextReply, TextTarget, person_label};
+use super::ops::{self, ColumnLayout};
+use super::{TableTheme, format};
+use crate::engine::{self, Context as EngineContext, Group, GroupKey, Issue, relation, time};
+use crate::model::{
+    Condition, DateValue, Direction, Doc, Edit, FilterOp, Person, Property, PropertyType,
+    TableEvent, Value, View, ViewType, new_id,
+};
+
+/// One line of the table: a group's header, a row, or the New row at the end of a group (or
+/// of the table, when it isn't grouped).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Item {
+    /// A group's header, by its place in [`TableView::groups`].
+    Group(usize),
+    /// A row: its place in the rows given, and the group it's drawn in.
+    Row { row: usize, group: Option<usize> },
+    /// The New row of a group, or of the table.
+    New(Option<usize>),
+}
+
+/// The focused cell: a line of the table and a column (columns don't matter on a group's header
+/// or a New row).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellRef {
+    pub item: usize,
+    pub column: usize,
+}
+
+/// What a menu entry does.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Action {
+    Sort(Direction),
+    Unsort,
+    Filter(Condition),
+    FilterText(FilterOp),
+    ClearFilter,
+    Hide,
+    MoveBy(isize),
+    ToggleColumn(String),
+    SetSelect(Option<String>),
+    ToggleOption(String),
+    TogglePerson(Person),
+    ToggleRelation(String),
+    ClearValue,
+}
+
+/// One entry of a menu or picker.
+#[derive(Clone, Debug)]
+pub(crate) struct Entry {
+    pub label: String,
+    /// A section's heading when None: it does nothing and the keyboard skips it.
+    pub action: Option<Action>,
+    pub icon: Option<gpui_core::IconName>,
+    /// A check mark's place: shown checked, or an empty place.
+    pub checked: Option<bool>,
+    /// Drawn as an option's chip in this colour.
+    pub chip: Option<crate::model::Color>,
+}
+
+impl Entry {
+    fn heading(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            action: None,
+            icon: None,
+            checked: None,
+            chip: None,
+        }
+    }
+
+    fn act(label: impl Into<String>, action: Action) -> Self {
+        Self {
+            label: label.into(),
+            action: Some(action),
+            icon: None,
+            checked: None,
+            chip: None,
+        }
+    }
+
+    fn icon(mut self, icon: gpui_core::IconName) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    fn checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
+        self
+    }
+
+    fn chip(mut self, color: crate::model::Color) -> Self {
+        self.chip = Some(color);
+        self
+    }
+}
+
+/// A menu or picker open over the table.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Popover {
+    /// A column's menu: sort, filter, hide, move.
+    Header { column: usize, highlight: usize },
+    /// The list of every property, to show and hide columns.
+    Columns { highlight: usize },
+    /// A cell's picker: options, people or related rows.
+    Picker { cell: CellRef, highlight: usize },
+    /// A cell's day grid, showing `month` (its first day) with `day` highlighted.
+    Date { cell: CellRef, month: i64, day: i64 },
+}
+
+/// A drag in progress.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Drag {
+    /// A column's edge, from `start_x` (window pixels) and `start` points wide.
+    Resize {
+        column: usize,
+        start_x: Pixels,
+        start: f32,
+        width: f32,
+        touch: bool,
+    },
+    /// A column's header, pressed at `start_x` and now at `x`; `moved` once it went far
+    /// enough to be a drag rather than a press.
+    Header {
+        column: usize,
+        start_x: Pixels,
+        x: Pixels,
+        moved: bool,
+    },
+}
+
+/// What the view shows, worked out from the docs and the active view.
+#[derive(Default)]
+pub(crate) struct Shown {
+    pub view: Option<View>,
+    pub columns: Vec<ColumnLayout>,
+    pub items: Vec<Item>,
+    pub groups: Vec<Group>,
+    pub collapsed: Vec<bool>,
+    pub rows: Vec<usize>,
+    pub issues: Vec<Issue>,
+    pub today: i64,
+}
+
+/// A table of a database's rows, with the active view's sort, filter, grouping and columns.
+/// It draws only the rows on screen, works the rows out again only when the docs or the view
+/// change, and hands every change to its [`TableHost`].
+pub struct TableView {
+    pub(crate) host: Rc<dyn TableHost>,
+    pub(crate) database: Doc,
+    pub(crate) rows: Vec<Doc>,
+    pub(crate) view_id: Option<String>,
+    pub(crate) focus: FocusHandle,
+    pub(crate) dirty: bool,
+    pub(crate) shown: Shown,
+    pub(crate) list: UniformListScrollHandle,
+    /// How far the columns after the title are scrolled sideways, in window pixels.
+    pub(crate) scroll_x: Pixels,
+    /// The table's bounds when it last drew.
+    pub(crate) bounds: Rc<StdCell<Bounds<Pixels>>>,
+    /// The window's rem when it last drew.
+    pub(crate) rem: Pixels,
+    /// The theme it last drew with.
+    pub(crate) theme: TableTheme,
+    pub(crate) cell: Option<CellRef>,
+    pub(crate) popover: Option<Popover>,
+    pub(crate) drag: Option<Drag>,
+    text_token: u64,
+    pending_text: Option<u64>,
+    /// What the pending typed value is for.
+    text_target: Option<TextTarget>,
+    /// A row asked for with `rowCreated`, focused when the host hands it back.
+    pending_row: Option<String>,
+}
+
+impl Focusable for TableView {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl TableView {
+    /// A table of `database`'s `rows` (its row docs, in any order; tombstoned ones are left
+    /// out), showing its first table view (or its first view of any kind).
+    pub fn new(
+        host: Rc<dyn TableHost>,
+        database: Doc,
+        rows: Vec<Doc>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let theme = host.theme(cx);
+        Self {
+            host,
+            database,
+            rows,
+            view_id: None,
+            focus: cx.focus_handle(),
+            dirty: true,
+            shown: Shown::default(),
+            list: UniformListScrollHandle::new(),
+            scroll_x: px(0.),
+            bounds: Rc::default(),
+            rem: px(15.),
+            theme,
+            cell: None,
+            popover: None,
+            drag: None,
+            text_token: 0,
+            pending_text: None,
+            text_target: None,
+            pending_row: None,
+        }
+    }
+
+    /// Shows the view `view_id` (a table, or any view drawn as a table).
+    pub fn with_view(mut self, view_id: impl Into<String>) -> Self {
+        self.view_id = Some(view_id.into());
+        self
+    }
+
+    /// The database doc and its rows, after the host applied edits (or anything else changed
+    /// them). The rows are worked out again on the next draw.
+    pub fn set_docs(&mut self, database: Doc, rows: Vec<Doc>, cx: &mut Context<Self>) {
+        self.database = database;
+        self.rows = rows;
+        self.invalidate(cx);
+    }
+
+    /// The database doc alone (its properties or views changed).
+    pub fn set_database(&mut self, database: Doc, cx: &mut Context<Self>) {
+        self.database = database;
+        self.invalidate(cx);
+    }
+
+    /// The rows alone.
+    pub fn set_rows(&mut self, rows: Vec<Doc>, cx: &mut Context<Self>) {
+        self.rows = rows;
+        self.invalidate(cx);
+    }
+
+    /// Shows another of the database's views.
+    pub fn set_view(&mut self, view_id: impl Into<String>, cx: &mut Context<Self>) {
+        self.view_id = Some(view_id.into());
+        self.cell = None;
+        self.popover = None;
+        self.scroll_x = px(0.);
+        self.list.scroll_to_item(0, ScrollStrategy::Top);
+        self.invalidate(cx);
+    }
+
+    pub fn database(&self) -> &Doc {
+        &self.database
+    }
+
+    pub fn rows(&self) -> &[Doc] {
+        &self.rows
+    }
+
+    /// The view shown: the one asked for, else the first table view, else the first view.
+    pub fn view(&self) -> Option<&View> {
+        let fields = self.database.database.as_ref()?;
+        if let Some(id) = &self.view_id
+            && let Some(v) = fields.view(id)
+        {
+            return Some(v);
+        }
+        let views = fields.views_in_order();
+        views
+            .iter()
+            .find(|v| v.kind == ViewType::Table)
+            .or(views.first())
+            .copied()
+    }
+
+    /// The rows shown (indexes into [`TableView::rows`]), in the view's order: those that pass
+    /// its filter, whether or not their group is folded.
+    pub fn shown_rows(&mut self) -> &[usize] {
+        self.ensure();
+        &self.shown.rows
+    }
+
+    /// The lines of the table, in order.
+    pub fn items(&mut self) -> &[Item] {
+        self.ensure();
+        &self.shown.items
+    }
+
+    /// The view's groups, when it groups.
+    pub fn groups(&mut self) -> &[Group] {
+        self.ensure();
+        &self.shown.groups
+    }
+
+    /// The columns shown, in order (the title's first), and their widths in points.
+    pub fn columns(&mut self) -> Vec<(String, f32)> {
+        self.ensure();
+        self.shown
+            .columns
+            .iter()
+            .map(|c| (c.property_id.clone(), c.width))
+            .collect()
+    }
+
+    /// What the engine couldn't use in the view.
+    pub fn issues(&mut self) -> &[Issue] {
+        self.ensure();
+        &self.shown.issues
+    }
+
+    /// The focused cell, if any.
+    pub fn focused_cell(&self) -> Option<CellRef> {
+        self.cell
+    }
+
+    /// The focused cell as a row id and property id, when it's a row's cell.
+    pub fn focused_row_cell(&mut self) -> Option<(String, String)> {
+        self.ensure();
+        let c = self.cell?;
+        let Item::Row { row, .. } = *self.shown.items.get(c.item)? else {
+            return None;
+        };
+        let col = self.shown.columns.get(c.column)?;
+        Some((self.rows[row].id.clone(), col.property_id.clone()))
+    }
+
+    /// Focuses a row's cell, scrolling it into view.
+    pub fn focus_cell(&mut self, row_id: &str, property_id: &str, cx: &mut Context<Self>) {
+        self.ensure();
+        let item = self
+            .shown
+            .items
+            .iter()
+            .position(|i| matches!(i, Item::Row { row, .. } if self.rows[*row].id == row_id));
+        let column = self
+            .shown
+            .columns
+            .iter()
+            .position(|c| c.property_id == property_id);
+        if let (Some(item), Some(column)) = (item, column) {
+            self.set_cell(CellRef { item, column }, cx);
+        }
+    }
+
+    /// Scrolls the columns after the title sideways to `x` window pixels (within what they can).
+    pub fn set_scroll_x(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        self.scroll_x = x;
+        self.clamp_scroll();
+        cx.notify();
+    }
+
+    /// Opens a column's menu (sort, filter, move, hide), as pressing its header does.
+    pub fn open_column_menu(&mut self, property_id: &str, cx: &mut Context<Self>) {
+        self.ensure();
+        if let Some(c) = self
+            .shown
+            .columns
+            .iter()
+            .position(|c| c.property_id == property_id)
+        {
+            self.open_header_menu(c, cx);
+        }
+    }
+
+    /// Edits a row's cell as Enter (or a second press) does: a picker, the day grid, a toggle,
+    /// or a typed value through the host.
+    pub fn edit(
+        &mut self,
+        row_id: &str,
+        property_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.focus_cell(row_id, property_id, cx);
+        if let Some(c) = self.cell {
+            self.edit_cell(c, window, cx);
+        }
+    }
+
+    /// Closes an open menu or picker.
+    pub fn close_popover(&mut self, cx: &mut Context<Self>) {
+        if self.popover.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// How far the columns after the title are scrolled sideways, in window pixels.
+    pub fn scroll_x(&self) -> Pixels {
+        self.scroll_x
+    }
+
+    /// Whether a menu or picker is open.
+    pub fn has_popover(&self) -> bool {
+        self.popover.is_some()
+    }
+
+    fn invalidate(&mut self, cx: &mut Context<Self>) {
+        self.dirty = true;
+        cx.notify();
+    }
+
+    /// Works out what the view shows, if the docs or the view changed since it last did.
+    pub(crate) fn ensure(&mut self) {
+        if !self.dirty {
+            return;
+        }
+        self.dirty = false;
+        let previous_row = self.cell.and_then(|c| match self.shown.items.get(c.item) {
+            Some(Item::Row { row, .. }) => self.rows.get(*row).map(|r| r.id.clone()),
+            _ => None,
+        });
+        let previous_item = self
+            .cell
+            .and_then(|c| self.shown.items.get(c.item).copied());
+        let host = self.host.clone();
+        let lookup = HostLookup(host.as_ref());
+        let mut ecx = EngineContext::new(host.now()).with_lookup(&lookup);
+        ecx.utc_offset_minutes = host.utc_offset_minutes();
+        ecx.week_starts_monday = host.week_starts_monday();
+        ecx.limits = host.limits();
+        let today = ecx.today();
+        let Some(fields) = self.database.database.as_ref() else {
+            self.shown = Shown {
+                today,
+                ..Shown::default()
+            };
+            return;
+        };
+        let view = self.view().cloned().unwrap_or_else(|| {
+            View::new(new_id(), "Table", ViewType::Table, crate::order::first())
+        });
+        let s = &self.theme.sizes;
+        let columns = ops::layout(
+            fields,
+            &view,
+            s.column_width,
+            s.title_width,
+            s.min_column_width,
+            s.max_column_width,
+        );
+        let result = engine::query(fields, &view, &self.rows, &ecx);
+        let mut items = Vec::with_capacity(result.rows.len() + 1);
+        let mut collapsed = Vec::new();
+        let groups = result.groups.unwrap_or_default();
+        if view.group_by.is_some() && !groups.is_empty() {
+            for (gi, g) in groups.iter().enumerate() {
+                let folded = view.collapsed_groups.contains(&g.key.to_string());
+                collapsed.push(folded);
+                items.push(Item::Group(gi));
+                if !folded {
+                    items.extend(g.rows.iter().map(|&row| Item::Row {
+                        row,
+                        group: Some(gi),
+                    }));
+                    items.push(Item::New(Some(gi)));
+                }
+            }
+        } else {
+            items.extend(
+                result
+                    .rows
+                    .iter()
+                    .map(|&row| Item::Row { row, group: None }),
+            );
+            items.push(Item::New(None));
+        }
+        self.shown = Shown {
+            view: Some(view),
+            columns,
+            items,
+            groups,
+            collapsed,
+            rows: result.rows,
+            issues: result.issues,
+            today,
+        };
+        // The focus follows its row (or a pending new row), or stays on the same kind of line.
+        let wanted = self.pending_row.clone().or(previous_row);
+        if let Some(id) = wanted {
+            let found = self
+                .shown
+                .items
+                .iter()
+                .position(|i| matches!(i, Item::Row { row, .. } if self.rows[*row].id == id));
+            if let Some(item) = found {
+                let column = if self.pending_row.as_deref() == Some(id.as_str()) {
+                    self.pending_row = None;
+                    0
+                } else {
+                    self.cell.map_or(0, |c| c.column)
+                };
+                self.cell = Some(CellRef { item, column });
+                self.list.scroll_to_item(item, ScrollStrategy::Nearest);
+            } else if self.pending_row.is_none() {
+                self.cell = None;
+            }
+        } else if let (Some(c), Some(prev)) = (self.cell, previous_item) {
+            let same = self.shown.items.iter().position(|i| *i == prev);
+            self.cell = same.map(|item| CellRef { item, ..c });
+        }
+        if let Some(c) = &mut self.cell {
+            c.column = c.column.min(self.shown.columns.len().saturating_sub(1));
+            if c.item >= self.shown.items.len() {
+                self.cell = None;
+            }
+        }
+        // A popover on a line that's gone closes.
+        if let Some(Popover::Picker { cell, .. } | Popover::Date { cell, .. }) = &self.popover
+            && self.cell != Some(*cell)
+        {
+            self.popover = None;
+        }
+        if let Some(Popover::Header { column, .. }) = &self.popover
+            && *column >= self.shown.columns.len()
+        {
+            self.popover = None;
+        }
+    }
+
+    // --- Geometry ---------------------------------------------------------------------------
+
+    /// A line's height in window pixels: the theme's row height, or the touch minimum.
+    /// (Its lower border is a pixel more, so what's pressable in it is the full height.)
+    pub(crate) fn row_height(&self) -> Pixels {
+        self.theme.hit(self.theme.sizes.row_height, self.rem) + px(1.)
+    }
+
+    /// The header row's height in window pixels, its lower border included.
+    pub(crate) fn header_height(&self) -> Pixels {
+        self.theme.hit(self.theme.sizes.header_height, self.rem) + px(1.)
+    }
+
+    /// A column's width in window pixels (a column being resized at its new width).
+    pub(crate) fn column_px(&self, column: usize) -> Pixels {
+        let points = match &self.drag {
+            Some(Drag::Resize {
+                column: c, width, ..
+            }) if *c == column => *width,
+            _ => self.shown.columns.get(column).map_or(0., |c| c.width),
+        };
+        self.theme.pixels(points, self.rem)
+    }
+
+    /// The columns after the title, in pixels.
+    pub(crate) fn strip_width(&self) -> Pixels {
+        (1..self.shown.columns.len()).fold(px(0.), |w, c| w + self.column_px(c))
+            + self.theme.hit(32., self.rem)
+    }
+
+    /// The farthest the columns can scroll sideways.
+    pub(crate) fn max_scroll_x(&self) -> Pixels {
+        let b = self.bounds.get();
+        let room = b.size.width - self.column_px(0);
+        (self.strip_width() - room).max(px(0.))
+    }
+
+    pub(crate) fn clamp_scroll(&mut self) {
+        self.scroll_x = self.scroll_x.clamp(px(0.), self.max_scroll_x());
+    }
+
+    /// A column's left edge in the window.
+    fn column_left(&self, column: usize) -> Pixels {
+        let origin = self.bounds.get().origin.x;
+        if column == 0 {
+            return origin;
+        }
+        let before = (1..column).fold(px(0.), |w, c| w + self.column_px(c));
+        origin + self.column_px(0) + before - self.scroll_x
+    }
+
+    /// A column header's bounds in the window.
+    pub(crate) fn header_bounds(&self, column: usize) -> Bounds<Pixels> {
+        let top = self.bounds.get().origin.y;
+        Bounds::new(
+            point(self.column_left(column), top),
+            size(self.column_px(column), self.header_height()),
+        )
+    }
+
+    /// A cell's bounds in the window (as the list is scrolled now).
+    pub(crate) fn cell_bounds(&self, cell: CellRef) -> Bounds<Pixels> {
+        let b = self.bounds.get();
+        let scrolled = self.list.0.borrow().base_handle.offset().y;
+        let top =
+            b.origin.y + self.header_height() + self.row_height() * cell.item as f32 + scrolled;
+        Bounds::new(
+            point(self.column_left(cell.column), top),
+            size(self.column_px(cell.column), self.row_height()),
+        )
+    }
+
+    // --- Focus and keys ---------------------------------------------------------------------
+
+    pub(crate) fn set_cell(&mut self, cell: CellRef, cx: &mut Context<Self>) {
+        self.ensure();
+        if cell.item >= self.shown.items.len() {
+            return;
+        }
+        let cell = CellRef {
+            column: cell.column.min(self.shown.columns.len().saturating_sub(1)),
+            ..cell
+        };
+        self.cell = Some(cell);
+        self.list.scroll_to_item(cell.item, ScrollStrategy::Nearest);
+        self.reveal_column(cell.column);
+        cx.notify();
+    }
+
+    /// Scrolls sideways so a column is in view (the title's always is).
+    fn reveal_column(&mut self, column: usize) {
+        if column == 0 || self.bounds.get().size.width <= px(0.) {
+            return;
+        }
+        let start = (1..column).fold(px(0.), |w, c| w + self.column_px(c));
+        let end = start + self.column_px(column);
+        let room = (self.bounds.get().size.width - self.column_px(0)).max(px(0.));
+        if start < self.scroll_x {
+            self.scroll_x = start;
+        } else if end > self.scroll_x + room {
+            self.scroll_x = (end - room).min(start);
+        }
+        self.clamp_scroll();
+    }
+
+    pub(crate) fn move_cell(&mut self, d_item: isize, d_col: isize, cx: &mut Context<Self>) {
+        self.ensure();
+        let n = self.shown.items.len();
+        if n == 0 {
+            return;
+        }
+        let cols = self.shown.columns.len().max(1);
+        let c = self.cell.unwrap_or(CellRef { item: 0, column: 0 });
+        if self.cell.is_none() {
+            self.set_cell(c, cx);
+            return;
+        }
+        let item = (c.item as isize + d_item).clamp(0, n as isize - 1) as usize;
+        let column = (c.column as isize + d_col).clamp(0, cols as isize - 1) as usize;
+        self.set_cell(CellRef { item, column }, cx);
+    }
+
+    /// Tab: the next cell, on to the next line after a line's last (or back, with shift).
+    pub(crate) fn tab(&mut self, back: bool, cx: &mut Context<Self>) {
+        self.ensure();
+        let n = self.shown.items.len();
+        let cols = self.shown.columns.len().max(1);
+        let Some(c) = self.cell else {
+            self.move_cell(0, 0, cx);
+            return;
+        };
+        let wide = matches!(self.shown.items.get(c.item), Some(Item::Row { .. }));
+        let (item, column) = if back {
+            if wide && c.column > 0 {
+                (c.item, c.column - 1)
+            } else if c.item > 0 {
+                (c.item - 1, cols - 1)
+            } else {
+                (0, 0)
+            }
+        } else if wide && c.column + 1 < cols {
+            (c.item, c.column + 1)
+        } else if c.item + 1 < n {
+            (c.item + 1, 0)
+        } else {
+            (c.item, c.column)
+        };
+        self.set_cell(CellRef { item, column }, cx);
+    }
+
+    // --- Events -----------------------------------------------------------------------------
+
+    /// Hands an event to the host after the current update, so the host can change the table
+    /// in its handler.
+    pub(crate) fn emit(&self, event: TableEvent, window: &mut Window, cx: &mut App) {
+        let host = self.host.clone();
+        window.defer(cx, move |window, cx| host.event(event, window, cx));
+    }
+
+    pub(crate) fn emit_edits(&self, edits: Vec<Edit>, window: &mut Window, cx: &mut App) {
+        if !edits.is_empty() {
+            self.emit(TableEvent::Edits { edits }, window, cx);
+        }
+    }
+
+    fn database_id(&self) -> String {
+        self.database.id.clone()
+    }
+
+    /// Shows a changed view at once and hands it to the host as a `viewChanged`.
+    pub(crate) fn change_view(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shown.view.as_ref() == Some(&view) {
+            return;
+        }
+        if let Some(fields) = self.database.database.as_mut() {
+            match fields.views.iter_mut().find(|v| v.id == view.id) {
+                Some(v) => *v = view.clone(),
+                None => fields.views.push(view.clone()),
+            }
+        }
+        self.view_id = Some(view.id.clone());
+        self.emit_edits(
+            vec![Edit::ViewChanged {
+                database_id: self.database_id(),
+                view,
+            }],
+            window,
+            cx,
+        );
+        self.invalidate(cx);
+    }
+
+    /// Opens a row's page.
+    pub(crate) fn open_row(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(r) = self.rows.get(row) {
+            self.emit(
+                TableEvent::OpenRow {
+                    row_id: r.id.clone(),
+                },
+                window,
+                cx,
+            );
+        }
+    }
+
+    /// The row and property of a cell, when it's a row's.
+    pub(crate) fn cell_target(&self, cell: CellRef) -> Option<(usize, &Property)> {
+        let Item::Row { row, .. } = *self.shown.items.get(cell.item)? else {
+            return None;
+        };
+        let col = self.shown.columns.get(cell.column)?;
+        let p = self
+            .database
+            .database
+            .as_ref()?
+            .properties
+            .get(col.property)?;
+        Some((row, p))
+    }
+
+    /// Enter: opens a row from its title, edits any other cell, folds a group, makes a row.
+    pub(crate) fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure();
+        let Some(c) = self.cell else {
+            self.move_cell(0, 0, cx);
+            return;
+        };
+        match self.shown.items.get(c.item).copied() {
+            Some(Item::Group(g)) => self.toggle_group(g, window, cx),
+            Some(Item::New(g)) => self.new_row(g, window, cx),
+            Some(Item::Row { row, .. }) => {
+                let is_title = self
+                    .cell_target(c)
+                    .is_some_and(|(_, p)| p.kind == PropertyType::Title);
+                if is_title {
+                    self.open_row(row, window, cx);
+                } else {
+                    self.edit_cell(c, window, cx);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Edits a cell in the way its type edits: a checkbox toggles, an option, person or relation
+    /// opens a picker, a date the day grid, and a typed value asks the host for a field.
+    pub(crate) fn edit_cell(&mut self, cell: CellRef, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure();
+        let Some((row, p)) = self.cell_target(cell) else {
+            return;
+        };
+        let p = p.clone();
+        self.cell = Some(cell);
+        match p.kind {
+            PropertyType::Checkbox => {
+                let on = self.rows[row]
+                    .value(&p.id)
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let edit = Edit::RowValueChanged {
+                    row_id: self.rows[row].id.clone(),
+                    property_id: p.id.clone(),
+                    value: Some(Value::Bool(!on)),
+                };
+                self.emit_edits(vec![edit], window, cx);
+            }
+            PropertyType::Select
+            | PropertyType::MultiSelect
+            | PropertyType::Person
+            | PropertyType::Relation => {
+                self.popover = Some(Popover::Picker { cell, highlight: 0 });
+                let entries = self.entries();
+                let first = entries
+                    .iter()
+                    .position(|e| e.checked == Some(true))
+                    .unwrap_or_else(|| self.first_action(0, 1));
+                if let Some(Popover::Picker { highlight, .. }) = &mut self.popover {
+                    *highlight = first;
+                }
+            }
+            PropertyType::Date => {
+                let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
+                let day = self.rows[row]
+                    .value(&p.id)
+                    .and_then(Value::as_date)
+                    .map_or(self.shown.today, |d| time::days_of(d, offset).0);
+                let (y, m, _) = time::civil_from_days(day);
+                self.popover = Some(Popover::Date {
+                    cell,
+                    month: time::days_from_civil(y, m, 1),
+                    day,
+                });
+            }
+            PropertyType::Title
+            | PropertyType::Text
+            | PropertyType::Number
+            | PropertyType::Url
+            | PropertyType::Email
+            | PropertyType::Phone => {
+                let r = &self.rows[row];
+                let text = match p.kind {
+                    PropertyType::Title => r.title.clone(),
+                    PropertyType::Number => r
+                        .value(&p.id)
+                        .and_then(Value::as_number)
+                        .map(|x| format::number_for_editing(x, &p.config))
+                        .unwrap_or_default(),
+                    _ => r
+                        .value(&p.id)
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                };
+                let target = TextTarget::Cell {
+                    row_id: r.id.clone(),
+                    property_id: p.id.clone(),
+                };
+                let bounds = self.cell_bounds(cell);
+                self.begin_text(target, &p, text, bounds, window, cx);
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    fn begin_text(
+        &mut self,
+        target: TextTarget,
+        p: &Property,
+        text: String,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.text_token += 1;
+        self.pending_text = Some(self.text_token);
+        self.text_target = Some(target.clone());
+        let limits = self.host.limits();
+        let max_chars = match p.kind {
+            PropertyType::Title => Some(limits.title_chars),
+            _ => limits.text_limit(&p.kind),
+        };
+        let edit = TextEdit {
+            target,
+            kind: p.kind.clone(),
+            label: p.name.clone(),
+            text,
+            max_chars,
+            bounds,
+            reply: TextReply {
+                view: cx.entity().downgrade(),
+                token: self.text_token,
+            },
+        };
+        let host = self.host.clone();
+        window.defer(cx, move |window, cx| host.edit_text(edit, window, cx));
+    }
+
+    /// A host's answer to [`TableHost::edit_text`].
+    pub(crate) fn finish_text_edit(
+        &mut self,
+        token: u64,
+        text: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pending_text != Some(token) {
+            return;
+        }
+        self.pending_text = None;
+        window.focus(&self.focus, cx);
+        let Some(text) = text else {
+            return;
+        };
+        let Some(fields) = self.database.database.clone() else {
+            return;
+        };
+        let limits = self.host.limits();
+        let target = self.text_target.take();
+        match target {
+            Some(TextTarget::Cell {
+                row_id,
+                property_id,
+            }) => {
+                let (Some(r), Some(p)) = (
+                    self.rows.iter().find(|r| r.id == row_id),
+                    fields.property(&property_id),
+                ) else {
+                    return;
+                };
+                let edit = match p.kind {
+                    PropertyType::Title => {
+                        let title = limits.clamp_title(text.trim()).to_owned();
+                        (title != r.title).then(|| Edit::RowTitleChanged {
+                            row_id: row_id.clone(),
+                            title,
+                        })
+                    }
+                    PropertyType::Number => {
+                        let value = if text.trim().is_empty() {
+                            None
+                        } else {
+                            match format::parse_number(&text, &p.config) {
+                                Some(x) => Some(Value::number(x)),
+                                None => return,
+                            }
+                        };
+                        (value.as_ref() != r.value(&p.id)).then(|| Edit::RowValueChanged {
+                            row_id: row_id.clone(),
+                            property_id: p.id.clone(),
+                            value,
+                        })
+                    }
+                    _ => {
+                        let t = text.trim();
+                        let value = (!t.is_empty()).then(|| limits.clamp_value(p, Value::text(t)));
+                        (value.as_ref() != r.value(&p.id)).then(|| Edit::RowValueChanged {
+                            row_id: row_id.clone(),
+                            property_id: p.id.clone(),
+                            value,
+                        })
+                    }
+                };
+                self.emit_edits(edit.into_iter().collect(), window, cx);
+            }
+            Some(TextTarget::Filter { property_id, op }) => {
+                let Some(p) = fields.property(&property_id) else {
+                    return;
+                };
+                let value = if p.kind == PropertyType::Number {
+                    match format::parse_number(&text, &p.config) {
+                        Some(x) => crate::model::Value::number(x).to_json(),
+                        None => return,
+                    }
+                } else {
+                    let t = text.trim();
+                    if t.is_empty() {
+                        return;
+                    }
+                    serde_json::Value::String(t.to_owned())
+                };
+                if let Some(view) = self.shown.view.clone() {
+                    let view = ops::filter(
+                        &view,
+                        Condition {
+                            property_id,
+                            op,
+                            value,
+                        },
+                    );
+                    self.change_view(view, window, cx);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Delete: empties a cell (a title becomes empty, a checkbox unchecked; created and edited
+    /// times can't be emptied).
+    pub(crate) fn clear_cell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.ensure();
+        let Some(c) = self.cell else { return };
+        let Some((row, p)) = self.cell_target(c) else {
+            return;
+        };
+        let r = &self.rows[row];
+        let edits = match p.kind {
+            PropertyType::CreatedTime | PropertyType::EditedTime => Vec::new(),
+            PropertyType::Title if r.title.is_empty() => Vec::new(),
+            PropertyType::Title => vec![Edit::RowTitleChanged {
+                row_id: r.id.clone(),
+                title: String::new(),
+            }],
+            PropertyType::Relation => {
+                let old = r
+                    .value(&p.id)
+                    .and_then(Value::as_ids)
+                    .unwrap_or(&[])
+                    .to_vec();
+                relation::set(&r.id, p, &old, Vec::new(), &self.host.limits())
+            }
+            _ if r.value(&p.id).is_none_or(Value::is_empty)
+                && !matches!(r.value(&p.id), Some(Value::Bool(true))) =>
+            {
+                Vec::new()
+            }
+            _ => vec![Edit::RowValueChanged {
+                row_id: r.id.clone(),
+                property_id: p.id.clone(),
+                value: None,
+            }],
+        };
+        self.emit_edits(edits, window, cx);
+    }
+
+    /// Escape: closes a menu, else lets go of the focused cell.
+    pub(crate) fn cancel(&mut self, cx: &mut Context<Self>) {
+        if self.popover.take().is_none() && self.drag.take().is_none() {
+            self.cell = None;
+        }
+        cx.notify();
+    }
+
+    /// Folds or unfolds a group.
+    pub(crate) fn toggle_group(
+        &mut self,
+        group: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure();
+        let (Some(view), Some(g)) = (self.shown.view.clone(), self.shown.groups.get(group)) else {
+            return;
+        };
+        let view = ops::toggle_group(&view, &g.key, &self.host.limits());
+        self.change_view(view, window, cx);
+    }
+
+    /// Asks for a new row at the end of a group (or the table), with the values that keep it
+    /// there and an order key after every row's.
+    pub(crate) fn new_row(
+        &mut self,
+        group: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure();
+        let (Some(fields), Some(view)) =
+            (self.database.database.as_ref(), self.shown.view.as_ref())
+        else {
+            return;
+        };
+        let key: Option<GroupKey> = group
+            .and_then(|g| self.shown.groups.get(g))
+            .map(|g| g.key.clone());
+        let values = ops::prefill(fields, view, key.as_ref(), self.shown.today);
+        let order = ops::append_order(self.rows.iter().map(|r| r.order.as_str()));
+        let row_id = new_id();
+        self.pending_row = Some(row_id.clone());
+        let edit = Edit::RowCreated {
+            row_id,
+            database_id: self.database_id(),
+            order,
+            title: String::new(),
+            values,
+        };
+        self.emit_edits(vec![edit], window, cx);
+    }
+
+    // --- Menus ------------------------------------------------------------------------------
+
+    /// Opens a column's menu.
+    pub(crate) fn open_header_menu(&mut self, column: usize, cx: &mut Context<Self>) {
+        self.ensure();
+        if column >= self.shown.columns.len() {
+            return;
+        }
+        self.popover = Some(Popover::Header {
+            column,
+            highlight: 0,
+        });
+        let first = self.first_action(0, 1);
+        self.popover = Some(Popover::Header {
+            column,
+            highlight: first,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn open_columns_menu(&mut self, cx: &mut Context<Self>) {
+        self.popover = Some(Popover::Columns { highlight: 0 });
+        let first = self.first_action(0, 1);
+        self.popover = Some(Popover::Columns { highlight: first });
+        cx.notify();
+    }
+
+    /// The entries of the open menu or picker.
+    pub(crate) fn entries(&self) -> Vec<Entry> {
+        let Some(fields) = self.database.database.as_ref() else {
+            return Vec::new();
+        };
+        let Some(view) = self.shown.view.as_ref() else {
+            return Vec::new();
+        };
+        use gpui_core::IconName as I;
+        match &self.popover {
+            Some(Popover::Header { column, .. }) => {
+                let Some(col) = self.shown.columns.get(*column) else {
+                    return Vec::new();
+                };
+                let Some(p) = fields.properties.get(col.property) else {
+                    return Vec::new();
+                };
+                let mut out = Vec::new();
+                let sorted = view.sort.iter().find(|s| s.property_id == p.id);
+                out.push(
+                    Entry::act("Sort ascending", Action::Sort(Direction::Ascending))
+                        .icon(I::ArrowUp)
+                        .checked(sorted.is_some_and(|s| s.direction == Direction::Ascending)),
+                );
+                out.push(
+                    Entry::act("Sort descending", Action::Sort(Direction::Descending))
+                        .icon(I::ArrowDown)
+                        .checked(sorted.is_some_and(|s| s.direction == Direction::Descending)),
+                );
+                if sorted.is_some() {
+                    out.push(Entry::act("Remove sort", Action::Unsort).icon(I::X));
+                }
+                out.push(Entry::heading("Filter"));
+                out.extend(self.filter_entries(p, view));
+                if ops::filters_by(view, &p.id) {
+                    out.push(Entry::act("Clear filter", Action::ClearFilter).icon(I::X));
+                }
+                out.push(Entry::heading("Column"));
+                if *column > 0 {
+                    if *column > 1 {
+                        out.push(Entry::act("Move left", Action::MoveBy(-1)).icon(I::ArrowLeft));
+                    }
+                    if *column + 1 < self.shown.columns.len() {
+                        out.push(Entry::act("Move right", Action::MoveBy(1)).icon(I::ArrowRight));
+                    }
+                    out.push(Entry::act("Hide", Action::Hide).icon(I::EyeOff));
+                }
+                out.push(
+                    Entry::act(
+                        "Show and hide properties",
+                        Action::ToggleColumn(String::new()),
+                    )
+                    .icon(I::Columns3),
+                );
+                out
+            }
+            Some(Popover::Columns { .. }) => {
+                let shown: Vec<&str> = self
+                    .shown
+                    .columns
+                    .iter()
+                    .map(|c| c.property_id.as_str())
+                    .collect();
+                let title = fields.title_property().map(|p| p.id.as_str());
+                let mut out = vec![Entry::heading("Properties")];
+                out.extend(
+                    ops::all_columns(fields, view)
+                        .into_iter()
+                        .filter(|c| Some(c.property_id.as_str()) != title)
+                        .filter_map(|c| {
+                            let p = fields.property(&c.property_id)?;
+                            Some(
+                                Entry::act(p.name.clone(), Action::ToggleColumn(p.id.clone()))
+                                    .icon(type_icon(&p.kind))
+                                    .checked(shown.contains(&p.id.as_str())),
+                            )
+                        }),
+                );
+                out
+            }
+            Some(Popover::Picker { cell, .. }) => {
+                let Some((row, p)) = self.cell_target(*cell) else {
+                    return Vec::new();
+                };
+                let value = self.rows[row].value(&p.id);
+                match p.kind {
+                    PropertyType::Select => {
+                        let current = value.and_then(Value::as_str);
+                        let mut out: Vec<Entry> = p
+                            .options()
+                            .iter()
+                            .map(|o| {
+                                Entry::act(o.name.clone(), Action::SetSelect(Some(o.id.clone())))
+                                    .chip(o.color.clone())
+                                    .checked(current == Some(o.id.as_str()))
+                            })
+                            .collect();
+                        if current.is_some() {
+                            out.push(Entry::act("Clear", Action::SetSelect(None)).icon(I::X));
+                        }
+                        out
+                    }
+                    PropertyType::MultiSelect => {
+                        let current = value.and_then(Value::as_ids).unwrap_or(&[]);
+                        let mut out: Vec<Entry> = p
+                            .options()
+                            .iter()
+                            .map(|o| {
+                                Entry::act(o.name.clone(), Action::ToggleOption(o.id.clone()))
+                                    .chip(o.color.clone())
+                                    .checked(current.contains(&o.id))
+                            })
+                            .collect();
+                        if !current.is_empty() {
+                            out.push(Entry::act("Clear", Action::ClearValue).icon(I::X));
+                        }
+                        out
+                    }
+                    PropertyType::Person => {
+                        let current = value.and_then(Value::as_people).unwrap_or(&[]);
+                        let kinds = p.person_kinds();
+                        let mut out: Vec<Entry> = self
+                            .host
+                            .people(p)
+                            .into_iter()
+                            .filter(|person| person.kind().is_some_and(|k| kinds.contains(&k)))
+                            .map(|person| {
+                                let on = current.contains(&person);
+                                Entry::act(
+                                    person_label(self.host.as_ref(), &person),
+                                    Action::TogglePerson(person),
+                                )
+                                .icon(I::User)
+                                .checked(on)
+                            })
+                            .collect();
+                        if !current.is_empty() {
+                            out.push(Entry::act("Clear", Action::ClearValue).icon(I::X));
+                        }
+                        out
+                    }
+                    PropertyType::Relation => {
+                        let current = value.and_then(Value::as_ids).unwrap_or(&[]);
+                        let Some(target) = p.relation() else {
+                            return Vec::new();
+                        };
+                        let mut out: Vec<Entry> = self
+                            .host
+                            .relation_rows(target.database_id)
+                            .into_iter()
+                            .map(|r| {
+                                let on = current.contains(&r.id);
+                                let title = if r.title.is_empty() {
+                                    "Untitled".into()
+                                } else {
+                                    r.title
+                                };
+                                Entry::act(title, Action::ToggleRelation(r.id))
+                                    .icon(I::FileText)
+                                    .checked(on)
+                            })
+                            .collect();
+                        if !current.is_empty() {
+                            out.push(Entry::act("Clear", Action::ClearValue).icon(I::X));
+                        }
+                        out
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The header menu's filter choices for a property.
+    fn filter_entries(&self, p: &Property, view: &View) -> Vec<Entry> {
+        use gpui_core::IconName as I;
+        let current: Vec<&Condition> = ops::top_conditions(view)
+            .into_iter()
+            .filter(|c| c.property_id == p.id)
+            .collect();
+        let is = |op: &FilterOp, value: &serde_json::Value| {
+            current.iter().any(|c| c.op == *op && c.value == *value)
+        };
+        let cond = |op: FilterOp, value: serde_json::Value| Condition {
+            property_id: p.id.clone(),
+            op,
+            value,
+        };
+        let pick = |label: String, op: FilterOp, value: serde_json::Value| {
+            let on = is(&op, &value);
+            Entry::act(label, Action::Filter(cond(op, value))).checked(on)
+        };
+        let mut out = Vec::new();
+        match &p.kind {
+            PropertyType::Select | PropertyType::MultiSelect => {
+                let op = if p.kind == PropertyType::Select {
+                    FilterOp::Is
+                } else {
+                    FilterOp::Contains
+                };
+                for o in p.options() {
+                    out.push(
+                        pick(o.name.clone(), op.clone(), o.id.clone().into()).chip(o.color.clone()),
+                    );
+                }
+            }
+            PropertyType::Checkbox => {
+                out.push(pick(
+                    "Checked".into(),
+                    FilterOp::IsChecked,
+                    serde_json::Value::Null,
+                ));
+                out.push(pick(
+                    "Unchecked".into(),
+                    FilterOp::IsNotChecked,
+                    serde_json::Value::Null,
+                ));
+            }
+            PropertyType::Person => {
+                let kinds = p.person_kinds();
+                for person in self.host.people(p) {
+                    if !person.kind().is_some_and(|k| kinds.contains(&k)) {
+                        continue;
+                    }
+                    let Some(key) = person.key() else { continue };
+                    out.push(
+                        pick(
+                            person_label(self.host.as_ref(), &person),
+                            FilterOp::Contains,
+                            key.into(),
+                        )
+                        .icon(I::User),
+                    );
+                }
+            }
+            PropertyType::Relation => {
+                if let Some(t) = p.relation() {
+                    for r in self.host.relation_rows(t.database_id).into_iter().take(50) {
+                        let title = if r.title.is_empty() {
+                            "Untitled".into()
+                        } else {
+                            r.title
+                        };
+                        out.push(pick(title, FilterOp::Contains, r.id.into()).icon(I::FileText));
+                    }
+                }
+            }
+            PropertyType::Date | PropertyType::CreatedTime | PropertyType::EditedTime => {
+                for (label, w) in [
+                    ("Today", "today"),
+                    ("Past week", "pastWeek"),
+                    ("Past month", "pastMonth"),
+                    ("Next week", "nextWeek"),
+                    ("Next month", "nextMonth"),
+                ] {
+                    out.push(pick(label.into(), FilterOp::Within, w.into()).icon(I::Calendar));
+                }
+            }
+            PropertyType::Number => {
+                for (label, op) in [
+                    ("Equals…", FilterOp::Is),
+                    ("Greater than…", FilterOp::Greater),
+                    ("Less than…", FilterOp::Less),
+                ] {
+                    let on = current.iter().any(|c| c.op == op);
+                    out.push(Entry::act(label, Action::FilterText(op)).checked(on));
+                }
+            }
+            k if k.is_text() => {
+                let on = current.iter().any(|c| c.op == FilterOp::Contains);
+                out.push(
+                    Entry::act("Contains…", Action::FilterText(FilterOp::Contains)).checked(on),
+                );
+            }
+            _ => {}
+        }
+        if !matches!(
+            p.kind,
+            PropertyType::Checkbox | PropertyType::CreatedTime | PropertyType::EditedTime
+        ) {
+            out.push(pick(
+                "Is empty".into(),
+                FilterOp::IsEmpty,
+                serde_json::Value::Null,
+            ));
+            out.push(pick(
+                "Is not empty".into(),
+                FilterOp::IsNotEmpty,
+                serde_json::Value::Null,
+            ));
+        }
+        out
+    }
+
+    /// The first entry from `from` (going `step` either way) that does something.
+    pub(crate) fn first_action(&self, from: usize, step: isize) -> usize {
+        let entries = self.entries();
+        let n = entries.len() as isize;
+        let mut i = from as isize;
+        while i >= 0 && i < n {
+            if entries[i as usize].action.is_some() {
+                return i as usize;
+            }
+            i += step;
+        }
+        from.min(entries.len().saturating_sub(1))
+    }
+
+    /// Moves the open menu's highlight.
+    pub(crate) fn move_highlight(&mut self, step: isize, cx: &mut Context<Self>) {
+        let n = self.entries().len();
+        let current = match &self.popover {
+            Some(Popover::Header { highlight, .. })
+            | Some(Popover::Columns { highlight })
+            | Some(Popover::Picker { highlight, .. }) => *highlight,
+            _ => return,
+        };
+        let mut next = current as isize + step;
+        let entries = self.entries();
+        while next >= 0 && (next as usize) < n && entries[next as usize].action.is_none() {
+            next += step;
+        }
+        if next < 0 || next as usize >= n {
+            return;
+        }
+        if let Some(
+            Popover::Header { highlight, .. }
+            | Popover::Columns { highlight }
+            | Popover::Picker { highlight, .. },
+        ) = &mut self.popover
+        {
+            *highlight = next as usize;
+        }
+        cx.notify();
+    }
+
+    /// Does the highlighted entry of the open menu.
+    pub(crate) fn activate_highlight(
+        &mut self,
+        add: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let highlight = match &self.popover {
+            Some(Popover::Header { highlight, .. })
+            | Some(Popover::Columns { highlight })
+            | Some(Popover::Picker { highlight, .. }) => *highlight,
+            Some(Popover::Date { day, .. }) => {
+                let day = *day;
+                self.pick_day(Some(day), window, cx);
+                return;
+            }
+            None => return,
+        };
+        if let Some(action) = self.entries().get(highlight).and_then(|e| e.action.clone()) {
+            self.activate(action, add, window, cx);
+        }
+    }
+
+    /// Does what a menu entry says. `add` is a shift-click (a sort added to the others).
+    pub(crate) fn activate(
+        &mut self,
+        action: Action,
+        add: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure();
+        let Some(fields) = self.database.database.clone() else {
+            return;
+        };
+        let Some(view) = self.shown.view.clone() else {
+            return;
+        };
+        let limits = self.host.limits();
+        let header_property = match &self.popover {
+            Some(Popover::Header { column, .. }) => self
+                .shown
+                .columns
+                .get(*column)
+                .map(|c| (*column, c.property_id.clone())),
+            _ => None,
+        };
+        let close = !matches!(
+            action,
+            Action::ToggleOption(_)
+                | Action::TogglePerson(_)
+                | Action::ToggleRelation(_)
+                | Action::ToggleColumn(_)
+        );
+        match action {
+            Action::Sort(direction) => {
+                if let Some((_, pid)) = &header_property {
+                    let v = ops::sort(&view, pid, direction, add, &limits);
+                    self.change_view(v, window, cx);
+                }
+            }
+            Action::Unsort => {
+                if let Some((_, pid)) = &header_property {
+                    self.change_view(ops::unsort(&view, pid), window, cx);
+                }
+            }
+            Action::Filter(c) => self.change_view(ops::filter(&view, c), window, cx),
+            Action::ClearFilter => {
+                if let Some((_, pid)) = &header_property {
+                    self.change_view(ops::clear_filter(&view, pid), window, cx);
+                }
+            }
+            Action::FilterText(op) => {
+                if let Some((column, pid)) = header_property.clone()
+                    && let Some(p) = fields.property(&pid)
+                {
+                    let current = ops::top_conditions(&view)
+                        .into_iter()
+                        .find(|c| c.property_id == pid && c.op == op)
+                        .map(|c| match &c.value {
+                            serde_json::Value::String(s) => s.clone(),
+                            serde_json::Value::Number(n) => n.to_string(),
+                            _ => String::new(),
+                        })
+                        .unwrap_or_default();
+                    let bounds = self.header_bounds(column);
+                    self.begin_text(
+                        TextTarget::Filter {
+                            property_id: pid,
+                            op,
+                        },
+                        p,
+                        current,
+                        bounds,
+                        window,
+                        cx,
+                    );
+                }
+            }
+            Action::Hide => {
+                if let Some((_, pid)) = &header_property {
+                    self.change_view(ops::set_hidden(&fields, &view, pid, true), window, cx);
+                }
+            }
+            Action::MoveBy(d) => {
+                if let Some((column, pid)) = &header_property {
+                    let to = (*column as isize + d).max(1) as usize;
+                    self.change_view(ops::move_column(&fields, &view, pid, to), window, cx);
+                }
+            }
+            Action::ToggleColumn(pid) if pid.is_empty() => {
+                self.open_columns_menu(cx);
+                return;
+            }
+            Action::ToggleColumn(pid) => {
+                let shown = self.shown.columns.iter().any(|c| c.property_id == pid);
+                self.change_view(ops::set_hidden(&fields, &view, &pid, shown), window, cx);
+            }
+            Action::SetSelect(id) => self.set_value(id.map(Value::text), window, cx),
+            Action::ToggleOption(id) => {
+                if let Some((row, p)) = self.picker_target() {
+                    let mut ids = self.rows[row]
+                        .value(&p.id)
+                        .and_then(Value::as_ids)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    match ids.iter().position(|x| *x == id) {
+                        Some(i) => {
+                            ids.remove(i);
+                        }
+                        None => ids.push(id),
+                    }
+                    let value = (!ids.is_empty()).then(|| limits.clamp_value(&p, Value::Ids(ids)));
+                    self.set_value(value, window, cx);
+                }
+            }
+            Action::TogglePerson(person) => {
+                if let Some((row, p)) = self.picker_target() {
+                    let mut people = self.rows[row]
+                        .value(&p.id)
+                        .and_then(Value::as_people)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    match people.iter().position(|x| *x == person) {
+                        Some(i) => {
+                            people.remove(i);
+                        }
+                        None => people.push(person),
+                    }
+                    let value =
+                        (!people.is_empty()).then(|| limits.clamp_value(&p, Value::People(people)));
+                    self.set_value(value, window, cx);
+                }
+            }
+            Action::ToggleRelation(id) => {
+                if let Some((row, p)) = self.picker_target() {
+                    let r = &self.rows[row];
+                    let old = r
+                        .value(&p.id)
+                        .and_then(Value::as_ids)
+                        .unwrap_or(&[])
+                        .to_vec();
+                    let mut new = old.clone();
+                    match new.iter().position(|x| *x == id) {
+                        Some(i) => {
+                            new.remove(i);
+                        }
+                        None => new.push(id),
+                    }
+                    let edits = relation::set(&r.id, &p, &old, new, &limits);
+                    self.emit_edits(edits, window, cx);
+                }
+            }
+            Action::ClearValue => {
+                if let Some((row, p)) = self.picker_target() {
+                    if p.kind == PropertyType::Relation {
+                        let r = &self.rows[row];
+                        let old = r
+                            .value(&p.id)
+                            .and_then(Value::as_ids)
+                            .unwrap_or(&[])
+                            .to_vec();
+                        let edits = relation::set(&r.id, &p, &old, Vec::new(), &limits);
+                        self.emit_edits(edits, window, cx);
+                    } else {
+                        self.set_value(None, window, cx);
+                    }
+                }
+            }
+        }
+        if close {
+            self.popover = None;
+        }
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    fn picker_target(&self) -> Option<(usize, Property)> {
+        let cell = match &self.popover {
+            Some(Popover::Picker { cell, .. } | Popover::Date { cell, .. }) => *cell,
+            _ => return None,
+        };
+        self.cell_target(cell).map(|(r, p)| (r, p.clone()))
+    }
+
+    /// Sets the open picker's cell to `value` (None clears it), if that changes it.
+    fn set_value(&mut self, value: Option<Value>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((row, p)) = self.picker_target() else {
+            return;
+        };
+        let r = &self.rows[row];
+        if r.value(&p.id) == value.as_ref() {
+            return;
+        }
+        let edit = Edit::RowValueChanged {
+            row_id: r.id.clone(),
+            property_id: p.id.clone(),
+            value,
+        };
+        self.emit_edits(vec![edit], window, cx);
+    }
+
+    /// The day grid's choice: a day (keeping a time of day the value had), or none to clear.
+    pub(crate) fn pick_day(
+        &mut self,
+        day: Option<i64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((row, p)) = self.picker_target() else {
+            return;
+        };
+        let value = day.map(|day| {
+            let old = self.rows[row]
+                .value(&p.id)
+                .and_then(Value::as_date)
+                .copied();
+            let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
+            match old {
+                Some(d) if d.include_time => {
+                    let local = d.start.saturating_add(offset);
+                    let time_of_day = local.rem_euclid(engine::DAY_MS);
+                    let start = day * engine::DAY_MS + time_of_day - offset;
+                    let end = d.end.map(|e| e - d.start + start).filter(|e| *e >= start);
+                    Value::Date(DateValue {
+                        start,
+                        end,
+                        include_time: true,
+                    })
+                }
+                Some(d) => {
+                    let start = day * engine::DAY_MS;
+                    let end = d.end.map(|e| e - d.start + start).filter(|e| *e >= start);
+                    Value::Date(DateValue {
+                        start,
+                        end,
+                        include_time: false,
+                    })
+                }
+                None => Value::date_on_day(day),
+            }
+        });
+        self.set_value(value, window, cx);
+        self.popover = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Moves the day grid's highlight by `days`, turning the month when it leaves it.
+    pub(crate) fn move_day(&mut self, days: i64, cx: &mut Context<Self>) {
+        if let Some(Popover::Date { month, day, .. }) = &mut self.popover {
+            *day += days;
+            let (y, m, _) = time::civil_from_days(*day);
+            *month = time::days_from_civil(y, m, 1);
+            cx.notify();
+        }
+    }
+
+    /// Turns the day grid's month.
+    pub(crate) fn turn_month(&mut self, months: i64, cx: &mut Context<Self>) {
+        if let Some(Popover::Date { month, day, .. }) = &mut self.popover {
+            *month = time::add_months(*month, months);
+            *day = time::add_months(*day, months);
+            cx.notify();
+        }
+    }
+
+    // --- Columns ----------------------------------------------------------------------------
+
+    /// Where a dragged header would land: the column whose place the pointer is over (never
+    /// before the title's).
+    pub(crate) fn drop_index(&self, x: Pixels) -> usize {
+        let n = self.shown.columns.len();
+        let mut left = self.column_left(1);
+        for c in 1..n {
+            let w = self.column_px(c);
+            if x < left + w / 2. {
+                return c;
+            }
+            left += w;
+        }
+        n.saturating_sub(1).max(1)
+    }
+
+    /// Ends a column drag: a resize or a move becomes a `viewChanged`; a header pressed and
+    /// let go without moving opens its menu.
+    pub(crate) fn end_drag(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.drag.take() else {
+            return;
+        };
+        self.ensure();
+        let (Some(fields), Some(view)) = (self.database.database.clone(), self.shown.view.clone())
+        else {
+            return;
+        };
+        match drag {
+            Drag::Resize {
+                column,
+                width,
+                start,
+                ..
+            } => {
+                if (width - start).abs() >= 0.5
+                    && let Some(c) = self.shown.columns.get(column)
+                {
+                    let pid = c.property_id.clone();
+                    self.change_view(ops::resize(&fields, &view, &pid, width), window, cx);
+                }
+            }
+            Drag::Header {
+                column, x, moved, ..
+            } => {
+                if moved {
+                    let to = self.drop_index(x);
+                    if to != column
+                        && let Some(c) = self.shown.columns.get(column)
+                    {
+                        let pid = c.property_id.clone();
+                        self.change_view(ops::move_column(&fields, &view, &pid, to), window, cx);
+                    }
+                } else {
+                    self.open_header_menu(column, cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+}
+
+/// The icon of a property type, for headers and menus.
+pub(crate) fn type_icon(kind: &PropertyType) -> gpui_core::IconName {
+    use gpui_core::IconName as I;
+    match kind {
+        PropertyType::Title => I::Type,
+        PropertyType::Text => I::TextAlignStart,
+        PropertyType::Number => I::Hash,
+        PropertyType::Select => I::CircleChevronDown,
+        PropertyType::MultiSelect => I::Tags,
+        PropertyType::Date => I::Calendar,
+        PropertyType::Checkbox => I::SquareCheck,
+        PropertyType::Url => I::Link,
+        PropertyType::Email => I::AtSign,
+        PropertyType::Phone => I::Phone,
+        PropertyType::Person => I::User,
+        PropertyType::Relation => I::ArrowUpRight,
+        PropertyType::CreatedTime | PropertyType::EditedTime => I::Clock,
+        PropertyType::Other(_) => I::Circle,
+    }
+}

@@ -1,11 +1,13 @@
 name: gpui-tables
 
-# Runs when gpui-tables, or something every crate shares, changes.
+# Runs when gpui-tables, gpui-core (which its views draw with), or something every crate shares,
+# changes.
 on:
   push:
     branches: [main]
     paths:
       - "gpui-tables/**"
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -13,6 +15,7 @@ on:
   pull_request:
     paths:
       - "gpui-tables/**"
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -42,7 +45,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then echo own=true >> "$GITHUB_OUTPUT"; exit 0; fi
           gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename' > files
-          if grep -qE '^(gpui\-tables/|\.github/workflows/gpui\-tables\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
+          if grep -qE '^(gpui\-tables/|gpui\-core/|\.github/workflows/gpui\-tables\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
@@ -60,10 +63,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt -p gpui-tables --check
       - run: cargo clippy -p gpui-tables --locked --all-targets -- -D warnings
+      - if: needs.changes.outputs.own == 'true'
+        run: cargo clippy -p gpui-tables --locked --all-targets --features shots -- -D warnings
       # Unit, fixture, engine and performance tests, and the README's examples compiled.
       - run: cargo test -p gpui-tables --locked
       # The performance bounds, as the README measures them.
-      - run: cargo test -p gpui-tables --locked --release --test performance
+      - run: cargo test -p gpui-tables --locked --release --test performance --test view_performance
       - run: cargo doc -p gpui-tables --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
