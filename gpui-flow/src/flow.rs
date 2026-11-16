@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 
-use crate::geometry::{distance_to_polyline, edge_path};
+use crate::geometry::{EdgePath, distance_to_polyline, edge_path, longest_middle, rounded_path};
 use crate::graph;
 use crate::node::{
     EdgeLine, FRAME_BORDER, FRAME_TITLE, Measured, NodeContext, NodeInput as _, NodeRenderer,
@@ -159,6 +159,9 @@ pub struct FlowOptions {
     /// move the selection, a node dropped on another becomes its child, and delete takes a
     /// node's subtree with it.
     pub layout: Layout,
+    /// Step and smooth step edges go round the nodes in their way, where that's quick to work
+    /// out (see `routing`); otherwise they take their usual route.
+    pub avoid_nodes: bool,
     /// How far (in points on screen) a pressed node must move before it counts as a drag.
     pub node_drag_threshold: f32,
     /// How long the viewport takes to get where the controls, a fit or a double click send it.
@@ -197,6 +200,7 @@ impl Default for FlowOptions {
             pointer_mode: PointerMode::Edit,
             touch_target_size: 44.,
             layout: Layout::Free,
+            avoid_nodes: false,
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
             fit_padding: 0.1,
@@ -927,6 +931,30 @@ impl Flow {
             self.options.connection_mode == ConnectionMode::Loose,
         )
         .map(|(p, _)| p)
+    }
+
+    /// An edge's line as it was last drawn, as points in the flow (its curves flattened). None
+    /// for an edge that wasn't drawn: hidden, off screen, or missing a handle.
+    pub fn edge_line(&self, id: &str) -> Option<Vec<XY>> {
+        let v = self.shared.viewport.get();
+        self.shared
+            .edges
+            .borrow()
+            .iter()
+            .find(|l| l.id.as_ref() == id)
+            .map(|l| l.points.iter().map(|p| v.to_flow(*p)).collect())
+    }
+
+    /// Where an edge's label was last drawn, centred, in the flow.
+    pub fn edge_label_point(&self, id: &str) -> Option<XY> {
+        let v = self.shared.viewport.get();
+        self.shared
+            .edges
+            .borrow()
+            .iter()
+            .find(|l| l.id.as_ref() == id)
+            .and_then(|l| l.label)
+            .map(|p| v.to_flow(p))
     }
 
     /// A point in the window as a flow point.
@@ -3565,6 +3593,17 @@ impl Flow {
 
     /// What the edge canvases need of each edge, so they don't hold the flow while they paint.
     fn edge_draws(&self, colors: &FlowColors) -> Vec<EdgeDraw> {
+        // What routed edges go round: every node drawn but frames and groups, which edges run
+        // inside of.
+        let obstacles: Option<Rc<Vec<Rect>>> = self.options.avoid_nodes.then(|| {
+            Rc::new(
+                self.nodes
+                    .iter()
+                    .filter(|n| self.shown(n) && !is_frame(n) && n.kind != "group")
+                    .filter_map(|n| self.node_rect(&n.id))
+                    .collect(),
+            )
+        });
         self.edges
             .iter()
             .filter(|e| !e.hidden)
@@ -3594,8 +3633,21 @@ impl Flow {
                     color: if e.selected {
                         colors.selected
                     } else {
-                        e.color.map(|c| rgb(c).into()).unwrap_or(colors.edge)
+                        e.color.map(|c| rgb(c).into()).unwrap_or_else(|| {
+                            e.pencil
+                                .as_deref()
+                                .and_then(|k| colors.palette.get(k))
+                                .unwrap_or(colors.edge)
+                        })
                     },
+                    dash: e.dash,
+                    label_color: match e.pencil.as_deref() {
+                        Some(k) if colors.palette.get(k).is_some() => colors.pencil(Some(k)).text,
+                        _ => colors.edge_label,
+                    },
+                    obstacles: matches!(e.kind, EdgeKind::Step | EdgeKind::SmoothStep)
+                        .then(|| obstacles.clone())
+                        .flatten(),
                     width: e.stroke_width.unwrap_or(1.) + if e.selected { 0.5 } else { 0. },
                     reach: e.interaction_width.unwrap_or(INTERACTION_WIDTH) / 2.,
                     anchors: self.tree_anchors(e),
@@ -3660,7 +3712,15 @@ impl Flow {
                     let Some(((from, from_side), (to, to_side))) = ends else {
                         continue;
                     };
-                    let path = edge_path(&edge.kind, from, from_side, to, to_side);
+                    let path = match &edge.obstacles {
+                        Some(obstacles) => {
+                            routed_path(&shared, edge, from, from_side, to, to_side, obstacles)
+                                .unwrap_or_else(|| {
+                                    edge_path(&edge.kind, from, from_side, to, to_side)
+                                })
+                        }
+                        None => edge_path(&edge.kind, from, from_side, to, to_side),
+                    };
                     // Off screen, an edge costs nothing more.
                     if !path.bounds().intersects(&seen) && !seen.contains(from) {
                         continue;
@@ -3672,10 +3732,23 @@ impl Flow {
                         .collect();
                     let width = (edge.width * zoom).max(0.75);
                     if edge.animated {
-                        ink.dashed(&line, width, DASH * zoom, phase, edge.color);
+                        ink.dashed(&line, width, DASH * zoom, DASH * zoom, phase, edge.color);
                         animated = true;
                     } else {
-                        ink.line(&line, width, edge.color);
+                        match edge.dash {
+                            EdgeDash::Solid => ink.line(&line, width, edge.color),
+                            EdgeDash::Dashed => {
+                                ink.dashed(&line, width, 6. * zoom, 4. * zoom, 0., edge.color)
+                            }
+                            EdgeDash::Dotted => ink.dashed(
+                                &line,
+                                width,
+                                width.max(1.5 * zoom),
+                                4. * zoom,
+                                0.,
+                                edge.color,
+                            ),
+                        }
                     }
                     let n = line.len();
                     if n >= 2 {
@@ -3687,19 +3760,20 @@ impl Flow {
                         }
                     }
                     if let Some(label) = &edge.label {
-                        labels.push((label, viewport.to_pane(path.label)));
+                        labels.push((label, viewport.to_pane(path.label), edge.label_color));
                     }
                     lines.push(EdgeLine {
                         id: edge.id.clone(),
                         z,
                         reach: (edge.reach * zoom).max(MIN_REACH),
                         points: line,
+                        label: edge.label.as_ref().map(|_| viewport.to_pane(path.label)),
                     });
                 }
                 // Every line first, as a path or two, and then the labels over them.
                 ink.paint(window);
-                for (label, at) in labels {
-                    paint::paint_label(origin, label, at, zoom, &colors, window, cx);
+                for (label, at, color) in labels {
+                    paint::paint_label(origin, label, at, zoom, &colors, color, window, cx);
                 }
                 drop(measured);
                 shared.edges.borrow_mut().extend(lines);
@@ -3856,6 +3930,10 @@ struct EdgeDraw {
     reach: f32,
     /// Where a tree edge meets its nodes, set by the layout rather than by handles.
     anchors: Option<((XY, Side), (XY, Side))>,
+    dash: EdgeDash,
+    label_color: Hsla,
+    /// The nodes a routed edge goes round, in the flow; none for an edge that isn't routed.
+    obstacles: Option<Rc<Vec<Rect>>>,
 }
 
 /// A node drawn as a plain box, in pane coordinates.
@@ -4048,6 +4126,14 @@ impl Render for Flow {
         } else {
             Vec::new()
         };
+        // Routes of edges that are gone are let go of.
+        if self.options.avoid_nodes && self.shared.routes.borrow().len() > self.edges.len() {
+            let ids: HashSet<&EdgeId> = self.edges.iter().map(|e| &e.id).collect();
+            self.shared
+                .routes
+                .borrow_mut()
+                .retain(|id, _| ids.contains(id));
+        }
         draws.sort_by_key(|d| d.z);
         let mut levels: Vec<(i64, Vec<EdgeDraw>)> = Vec::new();
         for draw in draws {
@@ -4365,4 +4451,67 @@ fn now(cx: &App) -> Instant {
 /// Whether a node is a frame: the built-in kind that holds other nodes.
 fn is_frame(node: &Node) -> bool {
     node.kind == "frame"
+}
+
+/// A routed edge's line: round the nodes in its way, as it was last worked out unless its ends
+/// or a node near it moved. None to take the usual route: nothing in the way, or too much.
+fn routed_path(
+    shared: &Shared,
+    edge: &EdgeDraw,
+    from: XY,
+    from_side: Side,
+    to: XY,
+    to_side: Side,
+    obstacles: &[Rect],
+) -> Option<EdgePath> {
+    use std::hash::{Hash, Hasher};
+    // Only what's near the edge's two ends counts.
+    let reach = 160.;
+    let area = Rect::from_corners(from, to);
+    let area = Rect::new(
+        area.x - reach,
+        area.y - reach,
+        area.w + reach * 2.,
+        area.h + reach * 2.,
+    );
+    let near: Vec<Rect> = obstacles
+        .iter()
+        .filter(|r| r.intersects(&area))
+        .copied()
+        .collect();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut put = |v: f32| ((v * 2.).round() as i64).hash(&mut hasher);
+    for v in [from.x, from.y, to.x, to.y] {
+        put(v);
+    }
+    for r in &near {
+        for v in [r.x, r.y, r.w, r.h] {
+            put(v);
+        }
+    }
+    (from_side as u8, to_side as u8).hash(&mut hasher);
+    let key = hasher.finish();
+    let cached = shared
+        .routes
+        .borrow()
+        .get(&edge.id)
+        .filter(|(k, _)| *k == key)
+        .map(|(_, points)| points.clone());
+    let points = match cached {
+        Some(points) => points,
+        None => {
+            let points = crate::routing::route(from, from_side, to, to_side, &near, 12.);
+            shared
+                .routes
+                .borrow_mut()
+                .insert(edge.id.clone(), (key, points.clone()));
+            points
+        }
+    }?;
+    let radius = if edge.kind == EdgeKind::SmoothStep {
+        5.
+    } else {
+        0.
+    };
+    Some(rounded_path(&points, radius, longest_middle(&points)))
 }
