@@ -137,9 +137,10 @@ fn main() {
   iCalendar's DTEND: a one-day event on the 14th ends on the 15th. Your app supplies the events
   for the range it's told about in `RangeChange`.
 - **The calendar never changes an event.** Making, moving, resizing and deleting are proposals,
-  sent as `CalendarEvent::{Create, Move, Resize, Delete}`. `Create` says which calendar
-  (`default_calendar`, or the first visible one that can be edited); the others carry an
-  `EventRef` with the event's id, its series and its calendar. `Select` and `Open` report clicks.
+  sent as `CalendarEvent::{Create, Move, Resize, Delete}`. `Create` says which calendar:
+  `default_calendar` if it's shown and can be edited, or else the first that is. The others
+  carry an `EventRef` with the event's id, its series and its calendar. `Select` and `Open`
+  report clicks.
   Your app agrees by calling `set_events` or `upsert_event`, or `remove_event` for a delete.
 - **Links:** `Event::link(EventLink::doc(id, label))` or `EventLink::agent(id, label)`. A
   click on one sends `CalendarEvent::OpenLink { event, link }`; the calendar never fetches or
