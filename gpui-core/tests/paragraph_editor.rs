@@ -1,4 +1,4 @@
-//! What the block editor (gpui-blocks' fork of gpui-kit-markdown-editor) needs from the paragraph
+//! What the block editor (gpui-blocks' engine, `gpui-blocks/engine`) needs from the paragraph
 //! layer to draw and edit its text with it: carets and hit tests that agree, rows for ↑ ↓ Home
 //! and End, inline boxes (pictures, mention chips) on the baseline, marks that don't move text,
 //! aligned table cells, and nothing that overflows or panics on hostile text.

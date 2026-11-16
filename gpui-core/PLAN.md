@@ -11,7 +11,7 @@ a host still linking the kit links the same GPUI during the migration.
 GPUI Kit is a facade over four layers: GPUI (`gpui-pre`, re-exported at its root), `gpui-base`
 (~138k lines), `gpui-component` (~113k lines) and `gpui-kit-assets` (1,830 Lucide icons). The
 crates use only a small part of it. The inventory below comes from `rg` over the four crates,
-gpui-blocks' markdown-editor fork (`trevin-lee/gpui-kit-markdown-editor@0ce34f8`) and the Mac
+gpui-blocks' engine (`gpui-blocks/engine`) and the Mac
 app (`open-cloud-agents/clients/desktop`), on 2026-11-15.
 
 | Item (kit path) | flow | calendar | chatwidgets | blocks (+fork) | Mac app |
