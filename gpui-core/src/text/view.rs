@@ -958,6 +958,13 @@ impl IntoElement for ViewElement {
     }
 }
 
+impl Leaf {
+    /// The paragraph's laid-out size.
+    fn layout_size(&self) -> gpui::Size<Pixels> {
+        size(self.layout.width, self.layout.height)
+    }
+}
+
 impl ViewLayout {
     /// The place nearest `p`, from the view's top left.
     fn pos_at(&self, p: Point<Pixels>) -> Option<Pos> {
@@ -1092,12 +1099,17 @@ impl Element for ViewElement {
             s.layout = Some(l.clone());
             s.bounds = bounds;
         });
-        // The text takes an I-beam; links, above it, a pointing hand.
+        // The text takes an I-beam; links, above it, a pointing hand: those in view.
         let body = self
             .selectable
             .then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
+        let seen = window.content_mask().bounds;
         let mut links = Vec::new();
         for leaf in &l.leaves {
+            let at = Bounds::new(bounds.origin + leaf.origin, leaf.layout_size());
+            if !at.intersects(&seen) {
+                continue;
+            }
             for (r, m) in &leaf.paragraph.spans {
                 if m.link.is_some() {
                     for b in leaf.layout.bands(r.clone()) {
@@ -1129,6 +1141,8 @@ impl Element for ViewElement {
         let l = &prepainted.layout;
         let theme = cx.theme().clone();
         let o = bounds.origin;
+        // Only what's in view is painted: a long message scrolled mostly away costs what shows.
+        let seen = window.content_mask().bounds;
         let (focused, selection) = {
             let s = self.state.read(cx);
             (s.focus.is_focused(window), s.selection())
@@ -1141,6 +1155,7 @@ impl Element for ViewElement {
                 border_width,
                 radius,
             } = d
+                && Bounds::new(o + b.origin, b.size).intersects(&seen)
             {
                 window.paint_quad(quad(
                     Bounds::new(o + b.origin, b.size),
@@ -1154,6 +1169,9 @@ impl Element for ViewElement {
         }
         if focused && let Some(((l0, o0), (l1, o1))) = selection {
             for (i, leaf) in l.leaves.iter().enumerate().take(l1 + 1).skip(l0) {
+                if !Bounds::new(o + leaf.origin, leaf.layout_size()).intersects(&seen) {
+                    continue;
+                }
                 let len = leaf.paragraph.text.len();
                 let r = (if i == l0 { o0 } else { 0 })..(if i == l1 { o1 } else { len });
                 for b in leaf.layout.bands(r) {
@@ -1165,7 +1183,9 @@ impl Element for ViewElement {
             }
         }
         for d in &l.decos {
-            if let Deco::Text { origin, layout } = d {
+            if let Deco::Text { origin, layout } = d
+                && Bounds::new(o + *origin, size(layout.width, layout.height)).intersects(&seen)
+            {
                 layout.paint(o + *origin, window, cx);
             }
         }
@@ -1181,6 +1201,11 @@ impl Element for ViewElement {
                 o + leaf.origin - point(ink, ink),
                 size(leaf.layout.width + ink * 2., leaf.layout.height + ink * 2.),
             );
+            if !clip.intersects(&seen) {
+                continue;
+            }
+            #[cfg(test)]
+            tests::PAINTED.with(|n| n.set(n.get() + 1));
             window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
                 leaf.layout.paint(o + leaf.origin, window, cx)
             });
@@ -1284,5 +1309,58 @@ impl Element for ViewElement {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use gpui::{
+        AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, Window, div, px,
+    };
+
+    use crate::{Root, TextView};
+
+    thread_local! {
+        /// How many paragraphs have been painted.
+        pub(super) static PAINTED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    struct Long(String);
+
+    impl Render for Long {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("scroller")
+                    .h(px(120.))
+                    .w(px(300.))
+                    .overflow_y_scroll()
+                    .child(TextView::markdown("long", self.0.clone())),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn only_the_paragraphs_in_view_are_painted(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let source = (0..200)
+            .map(|i| format!("Paragraph number {i}, a [link](https://x.test/{i})."))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Long(source));
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        PAINTED.with(|n| n.set(0));
+        vcx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        let painted = PAINTED.with(|n| n.get());
+        assert!(painted > 0 && painted < 20, "{painted} of 200 painted");
     }
 }
