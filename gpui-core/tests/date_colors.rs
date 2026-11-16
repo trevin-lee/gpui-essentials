@@ -94,6 +94,7 @@ const COLORS: DatePickerColors = DatePickerColors {
     range: Some(PINK),
     hover: None,
     today: None,
+    today_ring: None,
     muted: Some(YELLOW),
     cursor: None,
 };
@@ -283,4 +284,39 @@ fn the_focused_fields_border_and_ring_take_their_own_colours() {
     });
     assert!(borders.iter().any(|c| near(*c, GREEN)), "the border");
     assert!(shadows.iter().any(|c| near(*c, BLUE)), "the ring");
+}
+
+struct Ringed(Entity<DatePickerState>);
+
+impl Render for Ringed {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().child(MonthGrid::new(&self.0).colors(DatePickerColors {
+            today_ring: Some(PINK),
+            ..Default::default()
+        }))
+    }
+}
+
+#[test]
+fn today_takes_the_hosts_ring_and_the_keyboards_day_keeps_its_own() {
+    let today = NaiveDate::from_ymd_opt(2030, 6, 12).unwrap();
+    let ringed = |cursor: NaiveDate| {
+        let mut cx = app();
+        cx.update(gpui_core::init);
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let state = cx.new(|cx| {
+                let mut s = DatePickerState::new(window, cx).today(today);
+                s.show_month(cursor, cx);
+                s
+            });
+            let v = cx.new(|_| Ringed(state));
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        draw(vcx).borders.iter().any(|c| near(*c, PINK))
+    };
+    // The keyboard on the 20th: today is ringed.
+    assert!(ringed(NaiveDate::from_ymd_opt(2030, 6, 20).unwrap()));
+    // The keyboard on today: its own border, not the ring.
+    assert!(!ringed(today));
 }
