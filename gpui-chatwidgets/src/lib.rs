@@ -9,6 +9,8 @@
 //! - [`CardView`] (the default `gpui` feature) is a GPUI entity that draws one card in the
 //!   host's [`CardTheme`], asks the host for images, and hands every press back to it through
 //!   [`CardHost`]: the crate makes no network request and opens nothing itself.
+//! - [`StreamingMarkdown`] (the `gpui` feature) draws a reply in Markdown as it streams in, a
+//!   delta at a time, laying out each finished block once.
 //!
 //! The README has a complete host, compiled as a doctest.
 
@@ -19,12 +21,16 @@ mod draw;
 #[cfg(feature = "gpui")]
 mod host;
 #[cfg(feature = "gpui")]
+mod stream;
+#[cfg(feature = "gpui")]
 mod theme;
 #[cfg(feature = "gpui")]
 mod view;
 
 #[cfg(feature = "gpui")]
 pub use host::{CardEvent, CardHost, ImageLoad, ImageReply, Limits};
+#[cfg(feature = "gpui")]
+pub use stream::{StreamStats, StreamingMarkdown};
 #[cfg(feature = "gpui")]
 pub use theme::{
     CardColors, CardFonts, CardTheme, CodeColors, Radii, Spacing, TextSizes, ToneColors,
