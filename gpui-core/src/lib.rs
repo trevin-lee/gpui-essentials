@@ -33,11 +33,13 @@
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+pub mod icon;
 mod press;
 mod root;
 mod size;
 pub mod theme;
 
+pub use icon::{Icon, IconName, Icons};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
 pub use size::{Disableable, Selectable, Sizable, Size};
