@@ -131,6 +131,9 @@ fn problems(texts: &[drawn::Text], canvas: Bounds<Pixels>) -> Vec<String> {
                 ));
             }
         }
+        if t.text.ends_with('…') && crate::paint::kept_chars(&t.text) < crate::paint::MIN_KEPT {
+            out.push(format!("{:?} is cut to almost nothing", t.text));
+        }
         shown.push((t, seen));
     }
     for (i, (a, sa)) in shown.iter().enumerate() {
@@ -197,12 +200,63 @@ fn no_text_runs_over_at_desktop_widths() {
     check_widths(&views, &[720., 900., 1024., 1280., 1600., 2200.], 820.);
 }
 
-/// The agenda is the phone's layout: it fits from the narrowest iPhone up.
+/// Every view fits a phone, from the narrowest iPhone up.
 #[test]
-fn the_agenda_fits_phone_widths() {
-    check_widths(
-        &[CalendarView::AGENDA],
-        &[320., 375., 390., 430., 520.],
-        844.,
-    );
+fn no_text_runs_over_at_phone_widths() {
+    let views = [
+        CalendarView::Day,
+        CalendarView::Days(3),
+        CalendarView::Week,
+        CalendarView::Month,
+        CalendarView::AGENDA,
+    ];
+    check_widths(&views, &[320., 375., 390., 430., 520.], 844.);
+}
+
+/// The header fits too: its title gives way (with an ellipsis) before its buttons run out of
+/// the calendar, from a phone to a wide window.
+#[test]
+fn the_header_fits_at_every_width() {
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_events(worst_week())
+    });
+    let mut found = Vec::new();
+    for w in [320., 375., 390., 430., 520., 599., 600., 720., 1024., 1600.] {
+        vcx.simulate_resize(size(px(w), px(800.)));
+        for view in [
+            CalendarView::Day,
+            CalendarView::Week,
+            CalendarView::Month,
+            CalendarView::AGENDA,
+            CalendarView::Agenda(1),
+            CalendarView::Agenda(40),
+        ] {
+            calendar.update(vcx, |c, cx| c.set_view(view, cx));
+            // Twice: the first frame finds the width, the second draws the header for it.
+            for _ in 0..2 {
+                vcx.run_until_parked();
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+            }
+            let title = vcx.debug_bounds("calendar-title").expect("a title");
+            let controls = vcx.debug_bounds("calendar-controls").expect("controls");
+            let tolerance = px(0.5);
+            if controls.right() > px(w) + tolerance
+                || title.left() < -tolerance
+                || title.right() > controls.left() + tolerance
+            {
+                found.push(format!(
+                    "{w}px, {view:?}: title {title:?}, controls {controls:?}"
+                ));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
 }
