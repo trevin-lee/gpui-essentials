@@ -43,6 +43,7 @@ jobs:
           restore-keys: ${{ runner.os }}-gpui-core-
       - run: cargo fmt -p gpui-core --check
       - run: cargo clippy -p gpui-core --locked --all-targets -- -D warnings
+      - run: cargo clippy -p gpui-core --locked --all-targets --features shots -- -D warnings
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-core --locked
       - run: cargo doc -p gpui-core --locked --no-deps
