@@ -318,7 +318,9 @@ impl Draw<'_, '_> {
                                 },
                                 self.regular(),
                             ));
-                        self.on_press(press, true, edit).into_any_element()
+                        // No touch square: the cells touch, so it would only take the edge of
+                        // the one above or below.
+                        press.on_click(edit).into_any_element()
                     }
                 };
                 line = line.child(cell(self, c).child(content));
@@ -373,7 +375,7 @@ impl Draw<'_, '_> {
                 },
                 self.regular(),
             ));
-        let save = self.on_press(save, dirty, save_it);
+        let save = self.on_press(save, save_it);
         let more = state.rows.len().saturating_sub(rows.len());
         div()
             .w_full()

@@ -14,8 +14,6 @@ mod form;
 mod layout;
 mod table;
 
-use std::rc::Rc;
-
 use gpui_core::Press;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -407,52 +405,16 @@ impl Draw<'_, '_> {
     }
 
     /// Hands a press what it does. When the theme's `min_hit` is larger than the press may be
-    /// drawn, invisible areas over it (across its width, down its height and a square in its
-    /// middle, each `min_hit` deep and centred on it) take the same press, so it can be hit
-    /// across at least `min_hit` each way while it looks and lays out the same. For presses
-    /// that hold only a label or an icon: the areas lie over what's in them.
+    /// drawn, it takes presses across a `min_hit` square centred on it too (gpui-core's
+    /// [`Press::min_hit`]), so a finger can hit it while it looks and lays out the same.
     pub fn on_press(
         &self,
         press: Press,
-        enabled: bool,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Press {
-        if self.t.min_hit <= 0. || !enabled {
-            return press.on_click(handler);
-        }
-        let side = px(self.t.min_hit);
-        let handler = Rc::new(handler);
-        let area = |name: &'static str| {
-            let h = handler.clone();
-            div().id(name).absolute().on_click(move |e, window, cx| {
-                cx.stop_propagation();
-                h(e, window, cx)
-            })
-        };
-        let across = area("hit-across")
-            .left_0()
-            .right_0()
-            .top(relative(0.5))
-            .mt(-side / 2.)
-            .h(side);
-        let down = area("hit-down")
-            .top_0()
-            .bottom_0()
-            .left(relative(0.5))
-            .ml(-side / 2.)
-            .w(side);
-        let middle = area("hit-middle")
-            .top(relative(0.5))
-            .left(relative(0.5))
-            .mt(-side / 2.)
-            .ml(-side / 2.)
-            .size(side);
         press
-            .relative()
-            .child(across)
-            .child(down)
-            .child(middle)
-            .on_click(move |e, window, cx| handler(e, window, cx))
+            .when(self.t.min_hit > 0., |p| p.min_hit(px(self.t.min_hit)))
+            .on_click(handler)
     }
 
     /// One component, by kind.

@@ -13,6 +13,7 @@ use std::time::Duration;
 use common::*;
 use gpui_chatwidgets::CardTheme;
 use gpui_kit::*;
+use serde_json::json;
 // The built-in #[test] (which GPUI's test attribute expands to), not GPUI's, which
 // gpui_kit::* brings in.
 use std::prelude::v1::test;
@@ -46,6 +47,12 @@ fn tap(cx: &mut VisualTestContext, at: Point<Pixels>) {
     touch(cx, TouchPhase::Started, at);
     touch(cx, TouchPhase::Ended, at);
     draw(cx);
+}
+
+/// A tap in the middle of what's marked `what`.
+fn tap_on(cx: &mut VisualTestContext, what: &str) {
+    let at = bounds(cx, what).center();
+    tap(cx, at);
 }
 
 /// A finger dragged `by` from `from` in steps a frame apart, held still, then lifted (so it
@@ -128,6 +135,79 @@ fn with_a_mouse_a_control_takes_presses_only_where_it_is_drawn(cx: &mut TestAppC
     cx.simulate_click(at, Modifiers::none());
     draw(cx);
     assert!(host.sent.borrow().is_empty(), "{:?}", host.sent.borrow());
+}
+
+/// A key pressed and let go.
+fn key(cx: &mut VisualTestContext, key: &'static str) {
+    let keystroke = Keystroke::parse(key).unwrap();
+    cx.simulate_event(KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(KeyUpEvent { keystroke });
+    draw(cx);
+}
+
+#[gpui_kit::test]
+fn a_tap_on_a_tab_an_arrow_a_chip_or_copy_leaves_the_focus_in_a_text_field(
+    cx: &mut TestAppContext,
+) {
+    let host = host(true);
+    let program = r#"root = Stack([q, tabs, tools, carousel])
+q = Input("q", "Search")
+tabs = Tabs([TabItem("a", "One", [TextContent("First")]), TabItem("b", "Two", [CodeBlock("bash", "ls -la")])])
+tools = Chips("tools", "multiple", [ChipItem("figma", "Figma"), ChipItem("slack", "Slack")])
+carousel = Carousel([[TextContent("Slide one")], [TextContent("Slide two")]])"#;
+    let (card, cx) = open(cx, program, &host, Some(400.));
+    let field = cx
+        .debug_bounds("field:t:r.c0.field")
+        .expect("the text field");
+    tap(cx, field.center());
+    // Each one does what it does, and the field keeps the focus (on a phone, the keyboard
+    // stays up).
+    tap_on(cx, "tab:Two");
+    tap_on(cx, "copy:r.c1.s1.0");
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+        Some("ls -la")
+    );
+    tap_on(cx, "chip:Figma");
+    assert_eq!(
+        card.read_with(cx, |c, _| c.store().field(None, "tools")),
+        Some(json!(["figma"]))
+    );
+    tap_on(cx, "r.c3:next");
+    assert!(drawn(cx, "r.c3:slide1"));
+    cx.simulate_input("still here");
+    draw(cx);
+    assert_eq!(
+        card.read_with(cx, |c, _| c.store().field(None, "q")),
+        Some(json!("still here")),
+        "the typing went to the field"
+    );
+    // The keyboard still reaches them: Tab from the field to the first tab, and Enter picks it.
+    key(cx, "tab");
+    key(cx, "enter");
+    assert!(
+        !drawn(cx, "copy:r.c1.s1.0"),
+        "the first tab is chosen again"
+    );
+}
+
+#[gpui_kit::test]
+fn a_tap_at_the_edge_of_a_select_option_picks_that_option(cx: &mut TestAppContext) {
+    let host = host(true);
+    let (card, cx) = open(cx, &sample("form-contact"), &host, Some(400.));
+    tap_on(cx, "select:r.c1/f2");
+    let first = bounds(cx, "pick:United States");
+    assert!(first.size.height < px(CardTheme::TOUCH_HIT));
+    tap(cx, point(first.center().x, first.bottom() - px(2.)));
+    assert_eq!(
+        card.read_with(cx, |c, _| c.store().field(Some("contact"), "country")),
+        Some(json!("us")),
+        "not the option under it"
+    );
 }
 
 #[gpui_kit::test]

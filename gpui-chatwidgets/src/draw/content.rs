@@ -702,7 +702,7 @@ impl Draw<'_, '_> {
                             move || sel
                         })
                         .child(row.child(action_side));
-                    let press = self.on_press(press, true, go);
+                    let press = self.on_press(press, go);
                     let wrap = div()
                         .w_full()
                         .min_w_0()
