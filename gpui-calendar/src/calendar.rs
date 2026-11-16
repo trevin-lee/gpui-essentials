@@ -20,6 +20,8 @@ use crate::find::Query;
 use crate::layout::{self, Column};
 use crate::model::*;
 use crate::overlay::{Popover, Sheet};
+
+mod panel;
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
 use crate::theme::{CalendarColors, palette_color};
 use crate::time::{self, DstChange};
@@ -130,6 +132,20 @@ pub enum CalendarEvent {
     },
     /// Delete or Backspace was pressed with this event selected.
     Delete { event: EventRef, scope: EditScope },
+    /// The event panel's Edit: the host opens its own editor.
+    Edit(EventRef),
+    /// The event panel moved the event to another calendar.
+    ChangeCalendar {
+        event: EventRef,
+        calendar: CalendarId,
+        scope: EditScope,
+    },
+    /// The event panel answered the invitation for the attendee marked `me`.
+    Rsvp {
+        event: EventRef,
+        response: Response,
+        scope: EditScope,
+    },
     /// One of an event's links was clicked: the host opens what it points at.
     OpenLink { event: EventRef, link: EventLink },
     /// ⌘F (Ctrl-F off the Mac): focus the host's search field, and call
@@ -140,12 +156,22 @@ pub enum CalendarEvent {
     QueryChange(SharedString),
 }
 
+/// The event panel: which event, where it hangs from, and whether its calendar list is open.
+#[derive(Clone, Debug)]
+pub(crate) struct Panel {
+    id: EventId,
+    anchor: Bounds<Pixels>,
+    picking_calendar: bool,
+}
+
 /// Which edit is waiting for the recurring-event question's answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EditKind {
     Move,
     Resize,
     Delete,
+    ChangeCalendar(CalendarId),
+    Rsvp(Response),
 }
 
 /// An edit to an occurrence of a recurring event, held until the person says which
@@ -363,6 +389,8 @@ pub struct Calendar {
     neighbour: Option<Rc<Laid>>,
     /// An edit to a recurring event waiting for "this, following or all".
     asking: Option<Asking>,
+    /// The event whose details the panel shows, and where it hangs from.
+    panel: Option<Panel>,
     /// Where the pointer or finger last was in a drag.
     last_point: Point<Pixels>,
     /// What the events are filtered by, if anything.
@@ -429,6 +457,7 @@ impl Calendar {
             settle: None,
             neighbour: None,
             asking: None,
+            panel: None,
             last_point: Point::default(),
             query: None,
             typing: false,
@@ -584,7 +613,7 @@ impl Calendar {
 
     // Find.
 
-    /// Filters by text: the events whose title, place or link labels contain every word of
+    /// Filters by text: the events whose title, place, notes or link labels contain every word of
     /// `query`, ignoring case and accents. The time grid dims the others and marks what it
     /// found; the month and the agenda show only what it found. An empty query shows all.
     pub fn set_query(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -720,6 +749,11 @@ impl Calendar {
     fn load(&mut self, events: Vec<Event>) {
         self.events = events;
         self.version += 1;
+        if let Some(p) = &self.panel
+            && !self.events.iter().any(|e| e.id == p.id)
+        {
+            self.panel = None;
+        }
         self.by_id = self
             .events
             .iter()
@@ -1342,10 +1376,14 @@ impl Calendar {
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(window, cx);
-        // A press outside the question drops it, and does nothing else.
+        // A press outside the question drops it, and does nothing else. One outside the panel
+        // closes it and goes on to do what it does.
         if self.asking.is_some() {
             self.dismiss_question(cx);
             return;
+        }
+        if self.panel.is_some() {
+            self.close_panel(cx);
         }
         let Some(geo) = self.shared.geo.get() else {
             return;
@@ -1356,7 +1394,7 @@ impl Calendar {
             Target::Event { id, .. } => {
                 self.select(Some(Selection::Event(id.clone())), cx);
                 if double {
-                    cx.emit(CalendarEvent::Open(id.clone()));
+                    self.open_event(id.clone(), cx);
                     return;
                 }
             }
@@ -1777,7 +1815,7 @@ impl Calendar {
                         ..
                     }) = self.drag.take()
                 {
-                    cx.emit(CalendarEvent::Open(id));
+                    self.open_event(id, cx);
                     cx.notify();
                     return true;
                 }
@@ -1902,6 +1940,8 @@ impl Calendar {
     fn cancel(&mut self, cx: &mut Context<Self>) {
         if self.asking.is_some() {
             self.dismiss_question(cx);
+        } else if self.panel.is_some() {
+            self.close_panel(cx);
         } else if self.drag.take().is_some() {
             cx.notify();
         } else if self.selection.is_some() {
@@ -2091,7 +2131,7 @@ impl Calendar {
 
     fn open_selected(&mut self, cx: &mut Context<Self>) {
         match self.selection.clone() {
-            Some(Selection::Event(id)) => cx.emit(CalendarEvent::Open(id)),
+            Some(Selection::Event(id)) => self.open_event(id, cx),
             Some(Selection::Slot { date, minute }) => {
                 let tz = self.options.time_zone;
                 let time = if self.view == CalendarView::Month {
@@ -2163,8 +2203,78 @@ impl Calendar {
         cx.emit(match (kind, time) {
             (EditKind::Move, Some(time)) => CalendarEvent::Move { event, time, scope },
             (EditKind::Resize, Some(time)) => CalendarEvent::Resize { event, time, scope },
+            (EditKind::ChangeCalendar(calendar), _) => CalendarEvent::ChangeCalendar {
+                event,
+                calendar,
+                scope,
+            },
+            (EditKind::Rsvp(response), _) => CalendarEvent::Rsvp {
+                event,
+                response,
+                scope,
+            },
             _ => CalendarEvent::Delete { event, scope },
         });
+    }
+
+    // The event panel.
+
+    /// What opening an event does: tells the host, and shows the panel if it's on.
+    fn open_event(&mut self, id: EventId, cx: &mut Context<Self>) {
+        cx.emit(CalendarEvent::Open(id.clone()));
+        if self.options.event_panel {
+            self.open_panel(id, cx);
+        }
+    }
+
+    /// Shows an event's details in the panel, whether or not `event_panel` is on.
+    pub fn open_panel(&mut self, id: EventId, cx: &mut Context<Self>) {
+        if self.event(&id).is_none() {
+            return;
+        }
+        let anchor = self.event_bounds(&id).unwrap_or_else(|| {
+            self.shared.geo.get().map_or(Bounds::default(), |g| {
+                Bounds::new(g.bounds.center(), size(px(1.), px(1.)))
+            })
+        });
+        self.panel = Some(Panel {
+            id,
+            anchor,
+            picking_calendar: false,
+        });
+        cx.notify();
+    }
+
+    pub fn close_panel(&mut self, cx: &mut Context<Self>) {
+        if self.panel.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The event the panel shows, if it's open.
+    pub fn panel_event(&self) -> Option<&EventId> {
+        self.panel.as_ref().map(|p| &p.id)
+    }
+
+    /// A panel action that edits the event: the panel closes, and the edit goes to the host or
+    /// first asks which occurrences, for a repeating event.
+    fn panel_edit(&mut self, kind: EditKind, cx: &mut Context<Self>) {
+        let Some(p) = self.panel.clone() else { return };
+        let Some(event) = self.event(&p.id).map(Event::to_ref) else {
+            return;
+        };
+        // An answer to an invitation doesn't need the event to be editable.
+        let allowed = matches!(kind, EditKind::Rsvp(_)) || self.editable(&p.id).is_some();
+        if !allowed {
+            return;
+        }
+        // An answer to a one-off invitation keeps the panel open; anything that asks closes it,
+        // so the question has the event to itself.
+        if !(matches!(kind, EditKind::Rsvp(_)) && event.series.is_none()) {
+            self.panel = None;
+        }
+        self.propose_edit(kind, event, None, None, p.anchor, cx);
+        cx.notify();
     }
 
     /// Whether the calendar is asking which occurrences of a recurring event an edit is for.
@@ -2205,6 +2315,8 @@ impl Calendar {
             EditKind::Move => "Move a repeating event",
             EditKind::Resize => "Change a repeating event",
             EditKind::Delete => "Delete a repeating event",
+            EditKind::ChangeCalendar(_) => "Move a repeating event to another calendar",
+            EditKind::Rsvp(_) => "Answer for a repeating event",
         };
         let this = cx.entity().downgrade();
         let rows = EditScope::ALL.into_iter().enumerate().map(|(i, scope)| {
@@ -2225,8 +2337,12 @@ impl Calendar {
                 .when(highlighted && !touch, |d| d.bg(c.accent))
                 .hover(|d| d.bg(c.accent))
                 .debug_selector(move || format!("scope-{i}"))
-                .on_click(move |_, _, cx| {
-                    this.update(cx, |c, cx| c.answer(scope, cx)).ok();
+                .on_click(move |_, window, cx| {
+                    this.update(cx, |c, cx| {
+                        c.answer(scope, cx);
+                        c.focus.focus(window, cx);
+                    })
+                    .ok();
                 })
                 .child(div().truncate().child(scope.label()))
         });
@@ -2616,6 +2732,7 @@ impl Render for Calendar {
         let body = paint::body(scene, self.shared.clone(), this);
         let question = self.render_question(cx);
         let query = self.render_query(colors, cx);
+        let panel = self.render_panel(window, cx);
         div()
             .id("calendar")
             .relative()
@@ -2683,6 +2800,7 @@ impl Render for Calendar {
                     .child(body)
                     .children(query),
             )
+            .children(panel)
             .children(question)
     }
 }
