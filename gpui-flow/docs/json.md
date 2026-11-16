@@ -245,6 +245,28 @@ and applying (`apply`) send nothing, and neither do selecting, panning and zoomi
 it isn't sent: only a root's `position` is. Adding a child is its `addNode` and the `addEdge`
 from its parent.
 
+## Limits
+
+What Docs stores, checked by `gpui_flow::limits::Limits` on a document (`check`) and on a batch
+of edits (`check_batch`). A server applies a batch to a copy of the document and checks the
+copy, refusing the batch if it has a problem the document didn't. `tests/fixtures/limits` has
+the cases a server tests against, with the exact problem each gives.
+
+| Limit | Default |
+|---|---|
+| Nodes in a document, frames included | 10,000 |
+| Edges in a document | 20,000 |
+| Operations in a batch | 30,000 |
+| An id, `parentId`, edge `source`, `target` or handle | 128 characters |
+| A text: `data.label`, an edge's `label`, `media.alt`, `card.title`, `card.description`, `card.site` | 10,000 characters |
+| An address: `link`, `media.src`, `card.url`, `card.image` | 2,048 characters |
+| Frames a node is inside | 16 |
+| One node as compact JSON | 1 MiB |
+| One edge as compact JSON | 64 KiB |
+
+Strings count Unicode characters. The flow itself draws whatever it's given, within reason:
+the limits are for what's stored.
+
 ## React Flow
 
 Without `format`, `version` and `layout`, a document is React Flow's own `{ nodes, edges,
