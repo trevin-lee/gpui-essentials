@@ -1,4 +1,5 @@
-// Changed in Trevin Lee's fork (2026): block motion, the dragged copy, toggle chevron clicks.
+// Changed in Trevin Lee's fork (2026): block motion, the dragged copy, toggle chevron clicks,
+// touch input.
 //! `BlockEditor` view (design §7).
 //!
 //! `render` takes the cached projection and renders it with gpui-kit's own
@@ -15,10 +16,10 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, DefiniteLength, DispatchPhase, Edges, Element, ElementId,
     ElementInputHandler, Entity, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Refineable, RenderOnce, Role, StatefulInteractiveElement,
-    Style, StyleRefinement, Styled, TextStyle, Window, canvas, deferred, div, fill, point, px,
-    size,
+    InteractiveElement, IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Refineable, RenderOnce, Role,
+    StatefulInteractiveElement, Style, StyleRefinement, Styled, TextStyle, Window, canvas,
+    deferred, div, fill, point, px, size,
 };
 
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
@@ -893,6 +894,11 @@ impl Element for EditorRoot {
             entity.update(cx, |state, cx| {
                 let focus = state.focus_handle.clone();
                 window.focus(&focus, cx);
+                // A tap asks for the on-screen keyboard; the platform only shows one in answer
+                // to a gesture.
+                if window.last_input_was_touch() && !state.is_readonly() {
+                    window.request_virtual_keyboard();
+                }
                 if secondary_modifier().is_subset_of(&event.modifiers)
                     && state.follow_link_at(event.position, cx)
                 {
@@ -934,6 +940,38 @@ impl Element for EditorRoot {
                     state.mouse_at(event.position, true, cx);
                 }
             });
+        });
+        // Touch: a long press selects the word under the finger, and moving before letting go
+        // extends the selection. Taps arrive as mouse presses.
+        let entity = self.state.clone();
+        let hitbox = prepaint.hitbox.clone();
+        window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            match event.phase {
+                gpui::TouchPhase::Started => {
+                    if window.default_prevented() || !hitbox.bounds.contains(&event.start_position)
+                    {
+                        return;
+                    }
+                    window.prevent_default();
+                    window.capture_long_press(&entity);
+                    cx.stop_propagation();
+                    entity.update(cx, |state, cx| {
+                        let focus = state.focus_handle.clone();
+                        window.focus(&focus, cx);
+                        state.dragging = false;
+                        state.mouse_at(event.start_position, false, cx);
+                        state.select_unit(false, cx);
+                    });
+                }
+                gpui::TouchPhase::Moved if window.has_long_press_capture(&entity) => {
+                    cx.stop_propagation();
+                    entity.update(cx, |state, cx| state.mouse_at(event.position, true, cx));
+                }
+                _ => {}
+            }
         });
         let entity = self.state.clone();
         window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {

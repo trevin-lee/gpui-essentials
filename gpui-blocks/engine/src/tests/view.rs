@@ -4746,3 +4746,97 @@ fn blocks_with_no_text_report_where_they_were_drawn(cx: &mut TestAppContext) {
         "first\n\n<div>widget</div>\n\nlast\n\n---"
     );
 }
+
+/// The middle of the caret box at `offset` in the first leaf.
+fn point_at(
+    editor: &Entity<BlockEditorState>,
+    cx: &mut VisualTestContext,
+    offset: usize,
+) -> gpui::Point<Pixels> {
+    editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.position_bounds(BlockPosition::new(id, offset))
+            .expect("laid out")
+            .center()
+    })
+}
+
+fn text_selection(editor: &Entity<BlockEditorState>, cx: &VisualTestContext) -> (usize, usize) {
+    editor.read_with(cx, |e, _| match e.selection() {
+        BlockSelection::Text { anchor, head } => (anchor.offset, head.offset),
+        other => panic!("{other:?}"),
+    })
+}
+
+#[gpui::test]
+fn positions_and_their_bounds_agree(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "hello world");
+    for offset in [0, 3, 6, 11] {
+        let at = point_at(&editor, cx, offset);
+        let pos = editor.read_with(cx, |e, _| e.position_at(at)).unwrap();
+        assert_eq!(pos.offset, offset);
+    }
+}
+
+#[gpui::test]
+fn a_touch_tap_puts_the_caret_there(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "hello world");
+    caret_at(&editor, cx, 0, 0);
+    draw(cx);
+    let at = point_at(&editor, cx, 8);
+    for phase in [gpui::TouchPhase::Started, gpui::TouchPhase::Ended] {
+        cx.simulate_event(gpui::TouchEvent {
+            id: gpui::TouchId(1),
+            phase,
+            position: at,
+            predicted_position: None,
+            force: None,
+        });
+    }
+    draw(cx);
+    assert_eq!(text_selection(&editor, cx), (8, 8));
+    assert!(cx.update(|window, cx| editor.read(cx).focus_handle.is_focused(window)));
+}
+
+#[gpui::test]
+fn a_long_press_selects_a_word_and_moving_extends_it(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "hello world");
+    let start = point_at(&editor, cx, 8);
+    cx.simulate_event(gpui::LongPressEvent {
+        phase: gpui::TouchPhase::Started,
+        start_position: start,
+        position: start,
+    });
+    draw(cx);
+    assert_eq!(
+        text_selection(&editor, cx),
+        (6, 11),
+        "the word under the finger"
+    );
+    let back = point_at(&editor, cx, 2);
+    cx.simulate_event(gpui::LongPressEvent {
+        phase: gpui::TouchPhase::Moved,
+        start_position: start,
+        position: back,
+    });
+    draw(cx);
+    assert_eq!(text_selection(&editor, cx), (6, 2));
+    cx.simulate_event(gpui::LongPressEvent {
+        phase: gpui::TouchPhase::Ended,
+        start_position: start,
+        position: back,
+    });
+    assert_eq!(source(&editor, cx), "hello world");
+}
+
+#[gpui::test]
+fn a_read_only_document_takes_no_text_input(cx: &mut TestAppContext) {
+    use gpui::EntityInputHandler as _;
+    let (editor, cx) = open(cx, "ab");
+    let accepts = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| editor.update(cx, |e, cx| e.accepts_text_input(window, cx)))
+    };
+    assert!(accepts(cx));
+    editor.update(cx, |e, cx| e.set_readonly(true, cx));
+    assert!(!accepts(cx));
+}

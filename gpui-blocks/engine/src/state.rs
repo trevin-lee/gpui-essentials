@@ -1,4 +1,5 @@
-// Changed in Trevin Lee's fork (2026): host hooks, the toggle chevron, block motion.
+// Changed in Trevin Lee's fork (2026): host hooks, the toggle chevron, block motion, touch
+// selection.
 //! `BlockEditorState`: the entity around [`BlockEditorModel`] (design §6).
 
 use super::input_rule::RuleKind;
@@ -1732,6 +1733,20 @@ impl BlockEditorState {
         })
     }
 
+    /// The text position drawn nearest the window point `at`, as a click there would put the
+    /// caret (`None` before the first frame). For a host's selection handles.
+    pub fn position_at(&self, at: Point<Pixels>) -> Option<BlockPosition> {
+        self.frame.borrow().hit_test(at)
+    }
+
+    /// The caret's box at `pos` in window coordinates, as last drawn (`None` when `pos` isn't
+    /// laid out). For drawing a host's selection handles at a selection's ends.
+    pub fn position_bounds(&self, pos: BlockPosition) -> Option<Bounds<Pixels>> {
+        self.frame
+            .borrow()
+            .caret_bounds(pos, self.style.caret_width())
+    }
+
     /// The caret's box in window coordinates, as last drawn (`None` before
     /// the first frame or with whole blocks selected). For anchoring a
     /// popup, such as a slash menu, at the caret.
@@ -2934,6 +2949,11 @@ pub(crate) fn byte_to_utf16(text: &str, byte: usize) -> usize {
 }
 
 impl EntityInputHandler for BlockEditorState {
+    /// A read-only document takes no typing, so the platform shows no keyboard for it.
+    fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        !self.readonly
+    }
+
     fn text_for_range(
         &mut self,
         range16: Range<usize>,
