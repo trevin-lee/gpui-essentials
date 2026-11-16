@@ -202,6 +202,11 @@ pub(crate) struct RowStyle {
     pub touch: bool,
     pub height: Option<gpui::AbsoluteLength>,
     pub text_size: Option<gpui::AbsoluteLength>,
+    /// Headings' text size.
+    pub heading_size: Option<gpui::AbsoluteLength>,
+    /// The check in a column before the label, every entry keeping room for it, rather than
+    /// after the label.
+    pub check_leading: bool,
 }
 
 /// A menu's colours, each over the theme's when given.
@@ -293,6 +298,19 @@ impl PopupMenu {
     /// The entries' text size (the theme's small size unless given).
     pub fn text_size(mut self, size: impl Into<gpui::AbsoluteLength>) -> Self {
         self.row.text_size = Some(size.into());
+        self
+    }
+
+    /// The headings' text size (the theme's extra-small size unless given).
+    pub fn heading_size(mut self, size: impl Into<gpui::AbsoluteLength>) -> Self {
+        self.row.heading_size = Some(size.into());
+        self
+    }
+
+    /// Puts the check in a column before each label, as Notion's menus do, every entry keeping
+    /// room for it so the labels line up; by default it follows the label.
+    pub fn check_leading(mut self, leading: bool) -> Self {
+        self.row.check_leading = leading;
         self
     }
 
@@ -548,6 +566,7 @@ pub(crate) fn rows(
                         .pt(css(6.))
                         .pb(css(2.))
                         .text_xs()
+                        .when_some(row_style.heading_size, |d, size| d.text_size(size))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(colors.heading.unwrap_or(muted))
                         .overflow_hidden()
@@ -608,38 +627,54 @@ pub(crate) fn rows(
             if let Some(checked) = item.checked {
                 row = row.selected(checked);
             }
-            row.when_some(item.chip, |r, chip| r.child(chip))
-                .when_some(item.icon, |r, icon| {
-                    r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
-                })
-                .child(
+            let id_for_check = item.id.clone();
+            let check = || Icon::new(IconName::Check).when_some(colors.check, |i, c| i.color(c));
+            let checked = item.checked == Some(true);
+            row.when(row_style.check_leading, |r| {
+                // The column: the check, or the room for it.
+                r.child(
                     div()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
-                        // Room either side for ink past a glyph's advance.
-                        .px(css(3.))
-                        .mx(css(-3.))
-                        .map(|d| match item.label_element {
-                            Some(el) => d.flex().items_center().child(el),
-                            None => d.child(item.label),
-                        }),
+                        .flex_none()
+                        .w(css(16.))
+                        .flex()
+                        .justify_center()
+                        .debug_selector({
+                            let id = id_for_check.clone();
+                            move || format!("menu-check-{id}")
+                        })
+                        .when(checked, |d| d.child(check())),
                 )
-                .when_some(item.shortcut, |r, s| {
-                    r.child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .text_color(if on { highlight_text } else { muted })
-                            .child(s),
-                    )
-                })
-                .when(item.checked == Some(true), |r| {
-                    r.child(Icon::new(IconName::Check).when_some(colors.check, |i, c| i.color(c)))
-                })
-                .into_any_element()
+            })
+            .when_some(item.chip, |r, chip| r.child(chip))
+            .when_some(item.icon, |r, icon| {
+                r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    // Room either side for ink past a glyph's advance.
+                    .px(css(3.))
+                    .mx(css(-3.))
+                    .map(|d| match item.label_element {
+                        Some(el) => d.flex().items_center().child(el),
+                        None => d.child(item.label),
+                    }),
+            )
+            .when_some(item.shortcut, |r, s| {
+                r.child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(if on { highlight_text } else { muted })
+                        .child(s),
+                )
+            })
+            .when(checked && !row_style.check_leading, |r| r.child(check()))
+            .into_any_element()
         })
         .collect()
 }
