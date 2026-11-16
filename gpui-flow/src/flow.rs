@@ -154,7 +154,9 @@ pub struct FlowOptions {
     pub elevate_edges_on_select: bool,
     /// Leaves out nodes that are wholly off screen.
     pub only_render_visible: bool,
-    /// Below this zoom, nodes are drawn as plain boxes of their size and colors; 0 never does.
+    /// Below this zoom, nodes are drawn as boxes of their size, shape and colors (strokes as
+    /// they are) instead of being built; 0 never does. 0.5 by default, where 12-point text is
+    /// 6 points high: building the nodes in view there is what costs most.
     pub simplify_below_zoom: f32,
     /// What presses, scrolling and pinches on the canvas do: edit it, only move about it, or
     /// nothing, leaving them to a view laid over it.
@@ -162,6 +164,10 @@ pub struct FlowOptions {
     /// How large (in points) the area is that a finger can take a handle or a resizer's grip
     /// by, at least: Apple's 44 by default. A finger takes an edge from up to half that away.
     pub touch_target_size: f32,
+    /// Whether nodes, handles and resizers have finger-sized targets round them. On by default
+    /// on iOS; elsewhere they're built only once a finger has touched the canvas, since each
+    /// is an element more for every node in view.
+    pub touch_targets: bool,
     /// Where nodes go: where they're put, or laid out as a tree read from the edges (a mind
     /// map). In a tree, tab adds a child to the selected node and enter a sibling, the arrows
     /// move the selection, a node dropped on another becomes its child, and delete takes a
@@ -209,9 +215,10 @@ impl Default for FlowOptions {
             elevate_nodes_on_select: true,
             elevate_edges_on_select: false,
             only_render_visible: true,
-            simplify_below_zoom: 0.3,
+            simplify_below_zoom: 0.5,
             pointer_mode: PointerMode::Edit,
             touch_target_size: 44.,
+            touch_targets: cfg!(target_os = "ios"),
             layout: Layout::Free,
             avoid_nodes: false,
             alignment_guides: false,
@@ -3192,6 +3199,11 @@ impl Flow {
         cx: &mut Context<Self>,
     ) -> bool {
         self.shared.touch.set(true);
+        if !self.options.touch_targets {
+            // A finger, where there weren't any: they're built from the next frame.
+            self.options.touch_targets = true;
+            cx.notify();
+        }
         let mode = self.options.pointer_mode;
         if mode == PointerMode::Off || self.drag.is_some() || self.touch.is_some() {
             return false;
@@ -4750,6 +4762,7 @@ impl Flow {
             zoom,
             colors,
             touch_size: px(self.options.touch_target_size.max(0.)),
+            touch_targets: self.options.touch_targets,
             depth: self.tree_layout().map(|_| self.tree.depth(&node.id)),
             children: self.tree.children_of(&node.id).len(),
             collapsed: node.collapsed,
@@ -4804,12 +4817,14 @@ impl Flow {
                     }
                 }
             })
-            .child(touch_target(
-                this.clone(),
-                TouchTarget::Node(node.id.clone()),
-                px(0.),
-                Reach::Around,
-            ))
+            .when(self.options.touch_targets, |d| {
+                d.child(touch_target(
+                    this.clone(),
+                    TouchTarget::Node(node.id.clone()),
+                    px(0.),
+                    Reach::Around,
+                ))
+            })
             .when_some(self.collapse_chip(node, &ctx, this), |d, chip| {
                 d.child(chip)
             })

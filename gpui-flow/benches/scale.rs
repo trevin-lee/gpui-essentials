@@ -2,9 +2,14 @@
 //! edges (labelled boxes, whiteboard shapes, frames holding some of them, ink strokes, and
 //! edges of every kind, a tenth labelled), panned, zoomed out to show all of it, dragged, and
 //! edited. Offscreen, with Core Text laying the text out as on screen, so it runs anywhere,
-//! CI included. The window's own frame (the GPU's part) isn't counted: this is the flow's work.
+//! CI included. A frame is timed in the CPU time of the thread that lays it out and paints
+//! it, so a busy machine doesn't count against it; the GPU's part isn't counted: this is the
+//! flow's work.
 //!
-//! cargo bench -p gpui-flow --bench scale [-- --nodes 5000]
+//! Every scenario must keep 95 frames in 100 within 8.3 ms, a frame at 120 Hz; the run exits
+//! with an error if one doesn't.
+//!
+//! cargo bench -p gpui-flow --bench scale [-- --nodes 5000] [-- --only <scenario>]
 
 #[cfg(not(target_os = "macos"))]
 fn main() {
@@ -111,14 +116,26 @@ mod mac {
         (nodes, edges)
     }
 
+    /// The CPU time this thread has used: what a frame costs the flow, without the time the
+    /// thread spent waiting for a core on a busy machine.
+    fn cpu() -> Duration {
+        let mut t = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: `t` is a valid timespec for the call to fill in.
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+        Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+    }
+
     fn draw(cx: &mut VisualTestContext) -> Duration {
         cx.run_until_parked();
-        let t = Instant::now();
+        let t = cpu();
         cx.update(|window, cx| {
             window.refresh();
             let _ = window.draw(cx);
         });
-        let spent = t.elapsed();
+        let spent = cpu() - t;
         cx.run_until_parked();
         spent
     }
@@ -148,15 +165,26 @@ mod mac {
         report(name, ms);
     }
 
+    /// A frame's budget at 120 Hz, as on the Macs and iPads it's for. Every scenario passes
+    /// when 95 frames in 100 are within it.
+    const BUDGET_MS: f64 = 1000. / 120.;
+
+    static FAILED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     fn report(name: &str, mut ms: Vec<f64>) {
         ms.sort_by(f64::total_cmp);
         let at = |q: f64| ms[((ms.len() - 1) as f64 * q) as usize];
+        let pass = at(0.95) <= BUDGET_MS;
+        if !pass {
+            FAILED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         println!(
-            "{name:<22} median {:6.2} ms  p95 {:6.2} ms  max {:6.2} ms  ({} frames)",
+            "{name:<22} median {:6.2} ms  p95 {:6.2} ms  max {:6.2} ms  ({} frames)  {}",
             at(0.5),
             at(0.95),
             at(1.),
-            ms.len()
+            ms.len(),
+            if pass { "pass" } else { "OVER" }
         );
     }
 
@@ -195,6 +223,16 @@ mod mac {
             fl.update(cx, |f, cx| {
                 f.set_viewport(
                     Viewport::new(40. - 600. * t.sin(), 60. - 400. * (t * 1.3).cos(), 1.),
+                    cx,
+                )
+            });
+        });
+        // Just above where nodes turn into boxes: the most built in full.
+        scenario(cx, "pan at 55%", &mut |i, cx| {
+            let t = i as f32 / 20.;
+            fl.update(cx, |f, cx| {
+                f.set_viewport(
+                    Viewport::new(40. - 600. * t.sin(), 60. - 400. * (t * 1.3).cos(), 0.55),
                     cx,
                 )
             });
@@ -253,5 +291,11 @@ mod mac {
             let to = gpui::point(gpui::px(200. + (i % 40) as f32 * 15.), gpui::px(300.));
             cx.simulate_mouse_move(to, None, Modifiers::none());
         });
+        let failed = FAILED.load(std::sync::atomic::Ordering::Relaxed);
+        if failed > 0 {
+            println!("{failed} over the {BUDGET_MS:.1} ms budget at p95");
+            std::process::exit(1);
+        }
+        println!("every scenario within {BUDGET_MS:.1} ms at p95");
     }
 }

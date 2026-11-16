@@ -59,3 +59,5 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features =
 # Its shaders compiled when the window opens, so tests and the example build without Xcode's
 # separate Metal Toolchain. Only here: what apps ship stays on precompiled shaders.
 gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
+# The scale benchmark times frames in the thread's CPU time.
+libc = "0.2"

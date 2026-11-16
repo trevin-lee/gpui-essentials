@@ -2727,6 +2727,7 @@ dependencies = [
  "gpui-pre-macos",
  "gpui-pre-platform",
  "image",
+ "libc",
  "resvg 0.46.0",
  "serde",
  "serde_json",
