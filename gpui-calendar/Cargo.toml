@@ -36,3 +36,9 @@ name = "calendar"
 
 [dev-dependencies]
 gpui-kit = { workspace = true, features = ["test-support"] }
+
+# The overflow test lays text out with Core Text and Inter, as on screen, rather than with the
+# test platform's stand-in widths. runtime_shaders: no Metal toolchain needed to build; tests
+# never draw with Metal.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }

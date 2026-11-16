@@ -95,6 +95,50 @@ impl EventTime {
     }
 }
 
+/// What an event's link points at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LinkKind {
+    /// A page or other doc in the host app.
+    Doc,
+    /// One of the host's agents.
+    Agent,
+}
+
+/// A link on an event: to a doc or an agent. The calendar shows it and reports a click on it
+/// ([`crate::CalendarEvent::OpenLink`]); it never fetches or opens anything itself.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct EventLink {
+    pub kind: LinkKind,
+    /// The host's id for what it points at.
+    pub target: SharedString,
+    /// What it's called on screen.
+    pub label: SharedString,
+}
+
+impl EventLink {
+    pub fn new(
+        kind: LinkKind,
+        target: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+    ) -> Self {
+        Self {
+            kind,
+            target: target.into(),
+            label: label.into(),
+        }
+    }
+
+    /// A link to a doc.
+    pub fn doc(target: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        Self::new(LinkKind::Doc, target, label)
+    }
+
+    /// A link to an agent.
+    pub fn agent(target: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        Self::new(LinkKind::Agent, target, label)
+    }
+}
+
 /// One event, as the host supplies it for the range on screen. A recurring event comes
 /// expanded: one `Event` per occurrence, each with an id of its own and the series' id.
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +159,8 @@ pub struct Event {
     /// This one event can't be moved, resized or deleted, whatever its calendar allows (it can
     /// still be selected and opened).
     pub read_only: bool,
+    /// Links to docs and agents, shown on the event in the order given.
+    pub links: Vec<EventLink>,
 }
 
 impl Event {
@@ -148,6 +194,7 @@ impl Event {
             color: None,
             location: None,
             read_only: false,
+            links: Vec::new(),
         }
     }
 
@@ -183,6 +230,12 @@ impl Event {
 
     pub fn read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
+        self
+    }
+
+    /// Adds a link to a doc or an agent.
+    pub fn link(mut self, link: EventLink) -> Self {
+        self.links.push(link);
         self
     }
 }

@@ -19,6 +19,8 @@
 mod calendar;
 pub mod layout;
 mod model;
+#[cfg(test)]
+mod overflow;
 mod paint;
 mod theme;
 pub mod time;

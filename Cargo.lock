@@ -2290,6 +2290,7 @@ dependencies = [
  "chrono-tz",
  "gpui-kit",
  "gpui-pre",
+ "gpui-pre-apple",
  "gpui-pre-macos",
  "image",
 ]

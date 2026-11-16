@@ -13,7 +13,7 @@ use gpui_kit::*;
 
 use crate::calendar::{Calendar, Chip, Laid, SpanPiece};
 use crate::layout;
-use crate::model::{CalendarOptions, EventId, EventTime, Selection};
+use crate::model::{CalendarOptions, EventId, EventLink, EventTime, LinkKind, Selection};
 use crate::theme::{CalendarColors, ChipColors, mix};
 use crate::time::{self, DstChange};
 
@@ -32,6 +32,10 @@ const TITLE_LEADING: f32 = 15.;
 const SMALL: f32 = 11.25;
 const SMALL_LEADING: f32 = 14.;
 const LABEL: f32 = 13.125;
+/// A link's row in a chip tall enough to list them.
+const LINK_ROW: f32 = 17.;
+/// A link's mark: a page for a doc, a ring for an agent, a chain for several links.
+const GLYPH: f32 = 11.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -65,6 +69,13 @@ pub(crate) enum Target {
     Date(NaiveDate),
     /// "+N" in the all-day row, which opens the row to show everything.
     Expand,
+    /// One of an event's links.
+    Link {
+        id: EventId,
+        index: usize,
+        area: Area,
+        read_only: bool,
+    },
     Grid {
         date: NaiveDate,
         minute: f32,
@@ -88,6 +99,16 @@ pub(crate) struct Hit {
     pub read_only: bool,
 }
 
+/// Where one of an event's links was drawn.
+#[derive(Clone, Debug)]
+pub(crate) struct LinkHit {
+    pub id: EventId,
+    pub index: usize,
+    pub bounds: Bounds<Pixels>,
+    pub area: Area,
+    pub read_only: bool,
+}
+
 /// What the canvas and the mouse handlers share.
 #[derive(Default)]
 pub(crate) struct Shared {
@@ -95,6 +116,7 @@ pub(crate) struct Shared {
     /// The minute at the top of the time grid; none until the first frame places it.
     pub scroll: Cell<Option<f32>>,
     pub hits: RefCell<Vec<Hit>>,
+    pub links: RefCell<Vec<LinkHit>>,
     pub mores: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub dates: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub expand: RefCell<Vec<Bounds<Pixels>>>,
@@ -338,6 +360,21 @@ pub(crate) fn target_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> Target 
     if !geo.bounds.contains(&p) {
         return Target::Nothing;
     }
+    // Links are drawn over their events.
+    if let Some(link) = shared
+        .links
+        .borrow()
+        .iter()
+        .rev()
+        .find(|l| l.bounds.contains(&p))
+    {
+        return Target::Link {
+            id: link.id.clone(),
+            index: link.index,
+            area: link.area,
+            read_only: link.read_only,
+        };
+    }
     if let Some(hit) = shared
         .hits
         .borrow()
@@ -395,9 +432,11 @@ pub(crate) fn cursor_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> CursorS
                 CursorStyle::ResizeLeftRight
             }
         }
-        Target::Event { .. } | Target::More(_) | Target::Date(_) | Target::Expand => {
-            CursorStyle::PointingHand
-        }
+        Target::Event { .. }
+        | Target::Link { .. }
+        | Target::More(_)
+        | Target::Date(_)
+        | Target::Expand => CursorStyle::PointingHand,
         _ => CursorStyle::Arrow,
     }
 }
@@ -420,6 +459,7 @@ pub(crate) fn body(
         move |bounds, (scene, geo, hitbox), window, cx| {
             window.set_cursor_style(scene.cursor, &hitbox);
             shared.hits.borrow_mut().clear();
+            shared.links.borrow_mut().clear();
             shared.mores.borrow_mut().clear();
             shared.dates.borrow_mut().clear();
             shared.expand.borrow_mut().clear();
@@ -451,6 +491,36 @@ pub(crate) fn body(
     .size_full()
 }
 
+/// Every line of text a frame draws, kept by the overflow tests.
+#[cfg(test)]
+pub(crate) mod drawn {
+    use std::cell::RefCell;
+
+    use gpui_kit::{Bounds, Pixels};
+
+    #[derive(Clone, Debug)]
+    pub struct Text {
+        pub text: String,
+        pub bounds: Bounds<Pixels>,
+        /// The content mask it was drawn under: past it, the text is cut off.
+        pub mask: Bounds<Pixels>,
+    }
+
+    thread_local! {
+        pub static TEXTS: RefCell<Option<Vec<Text>>> = const { RefCell::new(None) };
+    }
+
+    /// Starts keeping the text drawn on this thread.
+    pub fn record() {
+        TEXTS.with(|t| *t.borrow_mut() = Some(Vec::new()));
+    }
+
+    /// The text drawn since `record`, and starts again.
+    pub fn take() -> Vec<Text> {
+        TEXTS.with(|t| t.borrow_mut().replace(Vec::new()).unwrap_or_default())
+    }
+}
+
 /// The pen: quads and text at the calendar's scale.
 struct Ink<'a> {
     window: &'a mut Window,
@@ -462,6 +532,21 @@ struct Ink<'a> {
 impl Ink<'_> {
     fn u(&self, v: f32) -> Pixels {
         px(v * self.s)
+    }
+
+    /// Notes a line of text for the overflow tests; nothing outside them.
+    #[cfg_attr(not(test), allow(unused_variables))]
+    fn note(&self, text: &str, at: Point<Pixels>, width: Pixels, height: Pixels) {
+        #[cfg(test)]
+        drawn::TEXTS.with(|t| {
+            if let Some(log) = t.borrow_mut().as_mut() {
+                log.push(drawn::Text {
+                    text: text.to_string(),
+                    bounds: Bounds::new(at, size(width, height)),
+                    mask: self.window.content_mask().bounds,
+                });
+            }
+        });
     }
 
     fn fill(&mut self, b: Bounds<Pixels>, color: Hsla) {
@@ -551,11 +636,15 @@ impl Ink<'_> {
             line = cut;
             run = next;
         }
-        Some(
-            self.window
-                .text_system()
-                .shape_line(line, font_size, &[run], None),
-        )
+        let shaped = self
+            .window
+            .text_system()
+            .shape_line(line, font_size, &[run], None);
+        // Too narrow for even the ellipsis: draw nothing rather than spill over.
+        if max_w.is_some_and(|w| shaped.width > w) {
+            return None;
+        }
+        Some(shaped)
     }
 
     /// One line of text from its top left, cut with an ellipsis at `max_w`. Returns its width.
@@ -575,6 +664,7 @@ impl Ink<'_> {
         };
         let width = shaped.width;
         let leading = self.u(leading);
+        self.note(text, at, width, leading);
         let _ = shaped.paint(at, leading, TextAlign::Left, None, self.window, self.cx);
         width
     }
@@ -596,6 +686,7 @@ impl Ink<'_> {
         };
         let width = shaped.width;
         let leading = self.u(leading);
+        self.note(text, point(right - width, top), width, leading);
         let _ = shaped.paint(
             point(right - width, top),
             leading,
@@ -644,6 +735,12 @@ impl Ink<'_> {
         let mut used = 0;
         let mut y = at.y;
         for line in lines {
+            self.note(
+                text,
+                point(at.x, y),
+                line.width(),
+                line.size(leading).height,
+            );
             let _ = line.paint(
                 point(at.x, y),
                 leading,
@@ -664,18 +761,125 @@ fn is_weekend(d: NaiveDate) -> bool {
     matches!(d.weekday(), Weekday::Sat | Weekday::Sun)
 }
 
-/// A timed event's chip on the grid.
-#[allow(clippy::too_many_arguments)]
+/// What a chip says.
+pub(crate) struct ChipText<'a> {
+    pub title: &'a str,
+    pub time: &'a str,
+    pub location: Option<&'a str>,
+    pub links: &'a [EventLink],
+}
+
+/// A link's mark, or the mark for several.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Glyph {
+    Doc,
+    Agent,
+    Links,
+}
+
+impl From<LinkKind> for Glyph {
+    fn from(kind: LinkKind) -> Self {
+        match kind {
+            LinkKind::Doc => Glyph::Doc,
+            LinkKind::Agent => Glyph::Agent,
+        }
+    }
+}
+
+/// Draws a mark `GLYPH` high with its left edge at `x`, centred on `mid`.
+fn paint_glyph(ink: &mut Ink, glyph: Glyph, x: Pixels, mid: Pixels, color: Hsla) {
+    let g = ink.u(GLYPH);
+    let stroke = ink.u(1.2).max(px(1.));
+    match glyph {
+        Glyph::Doc => {
+            // A page: an outline with two lines of text on it.
+            let w = g * 0.78;
+            let page = Bounds::new(point(x + (g - w) / 2., mid - g / 2.), size(w, g));
+            ink.outlined(page, ink.u(1.5), transparent_black(), stroke, color);
+            for k in 1..3 {
+                let y = page.top() + g * (k as f32 * 0.3);
+                ink.fill(
+                    Bounds::new(point(page.left() + w * 0.25, y), size(w * 0.5, stroke)),
+                    color,
+                );
+            }
+        }
+        Glyph::Agent => {
+            // A ring with a dot: someone, rather than something.
+            let ring = Bounds::new(point(x, mid - g / 2.), size(g, g));
+            ink.outlined(ring, g / 2., transparent_black(), stroke, color);
+            let d = g * 0.36;
+            ink.rounded(
+                Bounds::new(point(x + (g - d) / 2., mid - d / 2.), size(d, d)),
+                d / 2.,
+                color,
+            );
+        }
+        Glyph::Links => {
+            // A chain: two links side by side.
+            let (w, h) = (g * 0.66, g * 0.46);
+            for k in 0..2 {
+                let link = Bounds::new(point(x + g * 0.34 * k as f32, mid - h / 2.), size(w, h));
+                ink.outlined(link, h / 2., transparent_black(), stroke, color);
+            }
+        }
+    }
+}
+
+/// How wide [`paint_badge`] would draw.
+fn badge_width(ink: &mut Ink, links: &[EventLink]) -> Pixels {
+    match links.len() {
+        0 => px(0.),
+        1 => ink.u(GLYPH),
+        n => ink.u(GLYPH + 3.) + ink.measure(&n.to_string(), SMALL, FontWeight::MEDIUM),
+    }
+}
+
+/// The links on a chip too small to list them: one link's mark, or a chain and the count.
+/// Right-aligned at `right`; returns where it starts.
+fn paint_badge(
+    ink: &mut Ink,
+    links: &[EventLink],
+    right: Pixels,
+    mid: Pixels,
+    color: Hsla,
+) -> Pixels {
+    let w = badge_width(ink, links);
+    let x = right - w;
+    match links {
+        [] => {}
+        [one] => paint_glyph(ink, one.kind.into(), x, mid, color),
+        many => {
+            paint_glyph(ink, Glyph::Links, x, mid, color);
+            ink.text(
+                &many.len().to_string(),
+                SMALL,
+                SMALL_LEADING,
+                FontWeight::MEDIUM,
+                color,
+                point(x + ink.u(GLYPH + 3.), mid - ink.u(SMALL_LEADING) / 2.),
+                None,
+            );
+        }
+    }
+    x
+}
+
+/// Where a chip drew its links, as (bounds, index) pairs. A badge for a single link is that
+/// link; a badge for several isn't a link (a click on it selects the event).
+type LinkRects = Vec<(Bounds<Pixels>, usize)>;
+
+/// A timed event's chip on the grid. Tall enough, it lists its links under its text; smaller,
+/// it shows a badge.
 fn paint_timed_chip(
     ink: &mut Ink,
     rect: Bounds<Pixels>,
-    title: &str,
-    time_label: &str,
-    location: Option<&str>,
+    text: &ChipText,
     cc: ChipColors,
     background: Hsla,
     faded: bool,
-) {
+) -> LinkRects {
+    let mut out = Vec::new();
     let alpha = if faded { 0.35 } else { 1. };
     let r = ink.u(4.);
     // A hairline of the background round each chip keeps overlapping ones apart.
@@ -697,10 +901,10 @@ fn paint_timed_chip(
     let x = rect.left() + ink.u(9.);
     let w = rect.size.width - ink.u(12.);
     if w < ink.u(14.) {
-        return;
+        return out;
     }
     let h = rect.size.height;
-    let (text, muted) = (cc.text.opacity(alpha), cc.muted_text.opacity(alpha));
+    let (fg, muted) = (cc.text.opacity(alpha), cc.muted_text.opacity(alpha));
     ink.window
         .with_content_mask(Some(ContentMask { bounds: rect }), |window| {
             let mut ink = Ink {
@@ -710,29 +914,50 @@ fn paint_timed_chip(
                 family: ink.family.clone(),
             };
             let pad = ink.u(3.);
+            let links = text.links;
             if h >= ink.u(TITLE_LEADING + SMALL_LEADING + 5.) {
-                // The title over as many lines as leave room for the time.
-                let room = h - pad * 2. - ink.u(SMALL_LEADING);
+                // Links listed under the text when every one of them fits, and the chip is wide
+                // enough for a label; otherwise a badge by the title.
+                let rows = ink.u(LINK_ROW) * links.len() as f32;
+                let list = !links.is_empty()
+                    && w >= ink.u(60.)
+                    && h >= pad * 2. + ink.u(TITLE_LEADING + SMALL_LEADING) + rows;
+                let badge = if links.is_empty() || list || w < ink.u(48.) {
+                    px(0.)
+                } else {
+                    badge_width(&mut ink, links) + ink.u(6.)
+                };
+                let reserved = if list { rows } else { px(0.) };
+                // The title over as many lines as leave room for the time (and the links).
+                let room = h - pad * 2. - ink.u(SMALL_LEADING) - reserved;
                 // Narrow chips keep the title to a line: wrapping there breaks words apart.
-                let lines = if w < ink.u(84.) {
+                let lines = if w < ink.u(84.) || badge > px(0.) {
                     1
                 } else {
                     ((f32::from(room) / f32::from(ink.u(TITLE_LEADING))).floor() as usize)
                         .clamp(1, 3)
                 };
+                let top = rect.top() + pad;
                 let used = ink.wrapped(
-                    title,
+                    text.title,
                     TITLE,
                     TITLE_LEADING,
                     FontWeight::MEDIUM,
-                    text,
-                    point(x, rect.top() + pad),
-                    w,
+                    fg,
+                    point(x, top),
+                    w - badge,
                     lines,
                 );
-                let mut y = rect.top() + pad + ink.u(TITLE_LEADING) * used.max(1) as f32;
+                if badge > px(0.) {
+                    let mid = top + ink.u(TITLE_LEADING) / 2.;
+                    let at = paint_badge(&mut ink, links, x + w, mid, muted);
+                    if links.len() == 1 {
+                        out.push((badge_hit(&ink, at, x + w, mid), 0));
+                    }
+                }
+                let mut y = top + ink.u(TITLE_LEADING) * used.max(1) as f32;
                 ink.text(
-                    time_label,
+                    text.time,
                     SMALL,
                     SMALL_LEADING,
                     FontWeight::NORMAL,
@@ -741,8 +966,8 @@ fn paint_timed_chip(
                     Some(w),
                 );
                 y += ink.u(SMALL_LEADING);
-                if let Some(location) = location
-                    && y + ink.u(SMALL_LEADING) <= rect.bottom()
+                if let Some(location) = text.location
+                    && y + ink.u(SMALL_LEADING) + reserved <= rect.bottom() - pad
                 {
                     ink.text(
                         location,
@@ -753,24 +978,51 @@ fn paint_timed_chip(
                         point(x, y),
                         Some(w),
                     );
+                    y += ink.u(SMALL_LEADING);
+                }
+                if list {
+                    for (i, link) in links.iter().enumerate() {
+                        let row = Bounds::new(point(x, y), size(w, ink.u(LINK_ROW)));
+                        let mid = row.top() + row.size.height / 2.;
+                        paint_glyph(&mut ink, link.kind.into(), x, mid, muted);
+                        let lx = x + ink.u(GLYPH + 5.);
+                        ink.text(
+                            &link.label,
+                            SMALL,
+                            SMALL_LEADING,
+                            FontWeight::MEDIUM,
+                            fg,
+                            point(lx, mid - ink.u(SMALL_LEADING) / 2.),
+                            Some(x + w - lx),
+                        );
+                        out.push((row, i));
+                        y += ink.u(LINK_ROW);
+                    }
                 }
             } else {
-                // One line: the title, then the time if there's room.
+                // One line: the title, then the time if there's room, and the links' badge at
+                // the end.
                 let y = rect.top() + ((h - ink.u(TITLE_LEADING)) / 2.).max(px(0.));
+                let mid = y + ink.u(TITLE_LEADING) / 2.;
+                let badge = if links.is_empty() || w < ink.u(48.) {
+                    px(0.)
+                } else {
+                    badge_width(&mut ink, links) + ink.u(6.)
+                };
                 let used = ink.text(
-                    title,
+                    text.title,
                     TITLE,
                     TITLE_LEADING,
                     FontWeight::MEDIUM,
-                    text,
+                    fg,
                     point(x, y),
-                    Some(w),
+                    Some(w - badge),
                 );
                 let gap = ink.u(6.);
-                let left = w - used - gap;
+                let left = w - badge - used - gap;
                 if left > ink.u(28.) {
                     ink.text(
-                        time_label,
+                        text.time,
                         SMALL,
                         TITLE_LEADING,
                         FontWeight::NORMAL,
@@ -779,8 +1031,24 @@ fn paint_timed_chip(
                         Some(left),
                     );
                 }
+                if badge > px(0.) {
+                    let at = paint_badge(&mut ink, links, x + w, mid, muted);
+                    if links.len() == 1 {
+                        out.push((badge_hit(&ink, at, x + w, mid), 0));
+                    }
+                }
             }
         });
+    out
+}
+
+/// The clickable area round a badge: a little more than the mark.
+fn badge_hit(ink: &Ink, left: Pixels, right: Pixels, mid: Pixels) -> Bounds<Pixels> {
+    let half = ink.u(LINK_ROW) / 2.;
+    Bounds::from_corners(
+        point(left - ink.u(3.), mid - half),
+        point(right + ink.u(3.), mid + half),
+    )
 }
 
 /// A chip across days: the all-day row, and spans in the month.
@@ -789,11 +1057,13 @@ fn paint_span_chip(
     ink: &mut Ink,
     rect: Bounds<Pixels>,
     title: &str,
+    links: &[EventLink],
     cc: ChipColors,
     open_left: bool,
     open_right: bool,
     faded: bool,
-) {
+) -> LinkRects {
+    let mut out = Vec::new();
     let alpha = if faded { 0.35 } else { 1. };
     let r = ink.u(4.);
     let corners = Corners {
@@ -819,6 +1089,12 @@ fn paint_span_chip(
     let x = rect.left() + ink.u(if open_left { 6. } else { 9. });
     let w = rect.right() - x - ink.u(4.);
     let y = rect.top() + ((rect.size.height - ink.u(TITLE_LEADING)) / 2.).max(px(0.));
+    let mid = rect.top() + rect.size.height / 2.;
+    let badge = if links.is_empty() || w < ink.u(48.) {
+        px(0.)
+    } else {
+        badge_width(ink, links) + ink.u(6.)
+    };
     ink.text(
         title,
         TITLE,
@@ -826,8 +1102,15 @@ fn paint_span_chip(
         FontWeight::MEDIUM,
         cc.text.opacity(alpha),
         point(x, y),
-        Some(w),
+        Some(w - badge),
     );
+    if badge > px(0.) {
+        let at = paint_badge(ink, links, x + w, mid, cc.muted_text.opacity(alpha));
+        if links.len() == 1 {
+            out.push((badge_hit(ink, at, x + w, mid), 0));
+        }
+    }
+    out
 }
 
 /// A ghost: the drag's proposal, outlined in its colour.
@@ -986,16 +1269,14 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 let selected = scene.selected(&chip.id);
                 let faded = scene.moving(&chip.id);
                 let cc = ChipColors::new(chip.color, c, selected, scene.past(chip));
-                paint_timed_chip(
-                    &mut ink,
-                    rect,
-                    &chip.title,
-                    &chip.time,
-                    chip.location.as_deref(),
-                    cc,
-                    c.background,
-                    faded,
-                );
+                let text = ChipText {
+                    title: &chip.title,
+                    time: &chip.time,
+                    location: chip.location.as_deref(),
+                    links: &chip.links,
+                };
+                let links = paint_timed_chip(&mut ink, rect, &text, cc, c.background, faded);
+                push_links(shared, chip, links, &grid_area, Area::Grid);
                 let resize = (piece.ends && !chip.read_only).then(|| {
                     Bounds::from_corners(
                         point(rect.left(), rect.bottom() - ink.u(6.)),
@@ -1031,16 +1312,13 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                             point(x0 + px(1.), geo.y_of(top)),
                             point(x0 + geo.col_w - margin, geo.y_of(bottom)),
                         );
-                        paint_timed_chip(
-                            &mut ink,
-                            rect,
-                            &ghost.title,
-                            &ghost.label,
-                            None,
-                            ghost_cc,
-                            c.background,
-                            false,
-                        );
+                        let text = ChipText {
+                            title: &ghost.title,
+                            time: &ghost.label,
+                            location: None,
+                            links: &[],
+                        };
+                        paint_timed_chip(&mut ink, rect, &text, ghost_cc, c.background, false);
                         ink.outlined(rect, ink.u(4.), transparent_black(), ink.u(1.5), accent);
                     }
                     d += Duration::days(1);
@@ -1268,11 +1546,21 @@ fn paint_span(
         let x0 = geo.col_x(a) + if open_left { px(0.) } else { ink.u(3.) };
         let x1 = geo.col_x(z + 1) - if open_right { px(0.) } else { ink.u(4.) };
         let rect = Bounds::from_corners(point(x0, top), point(x1, top + lane_h - ink.u(2.)));
-        if span.dot {
-            paint_dot_row(ink, rect, chip, cc, selected, faded);
+        let links = if span.dot {
+            paint_dot_row(ink, rect, chip, cc, selected, faded)
         } else {
-            paint_span_chip(ink, rect, &chip.title, cc, open_left, open_right, faded);
-        }
+            paint_span_chip(
+                ink,
+                rect,
+                &chip.title,
+                &chip.links,
+                cc,
+                open_left,
+                open_right,
+                faded,
+            )
+        };
+        push_links(shared, chip, links, &geo.bounds, area);
         let resize =
             (chip.all_day && !chip.read_only && z == span.last && !span.cont_right).then(|| {
                 Bounds::from_corners(
@@ -1298,7 +1586,8 @@ fn paint_dot_row(
     cc: ChipColors,
     selected: bool,
     faded: bool,
-) {
+) -> LinkRects {
+    let mut out = Vec::new();
     let alpha = if faded { 0.35 } else { 1. };
     let r = ink.u(4.);
     if selected {
@@ -1317,6 +1606,18 @@ fn paint_dot_row(
     let x = rect.left() + ink.u(15.);
     let y = mid - ink.u(TITLE_LEADING) / 2.;
     let w = rect.right() - x - ink.u(3.);
+    let badge = if chip.links.is_empty() || w < ink.u(60.) {
+        px(0.)
+    } else {
+        badge_width(ink, &chip.links) + ink.u(6.)
+    };
+    if badge > px(0.) {
+        let at = paint_badge(ink, &chip.links, x + w, mid, cc.muted_text.opacity(alpha));
+        if chip.links.len() == 1 {
+            out.push((badge_hit(ink, at, x + w, mid), 0));
+        }
+    }
+    let w = w - badge;
     let tw = ink.text(
         &chip.time,
         SMALL,
@@ -1336,6 +1637,24 @@ fn paint_dot_row(
         point(x + tw + gap, y),
         Some(w - tw - gap),
     );
+    out
+}
+
+/// Keeps where a chip drew its links, for the mouse.
+fn push_links(shared: &Shared, chip: &Chip, links: LinkRects, clip: &Bounds<Pixels>, area: Area) {
+    let mut hits = shared.links.borrow_mut();
+    for (bounds, index) in links {
+        let bounds = bounds.intersect(clip);
+        if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
+            hits.push(LinkHit {
+                id: chip.id.clone(),
+                index,
+                bounds,
+                area,
+                read_only: chip.read_only,
+            });
+        }
+    }
 }
 
 /// The ghost of an all-day drag: the days it would cover, tinted, and its chip over the
@@ -1365,7 +1684,7 @@ fn paint_span_ghost(ink: &mut Ink, scene: &Scene, geo: &Geo, ghost: &Ghost, row:
         point(geo.col_x(z - lo + 1) - ink.u(4.), top + lane - ink.u(2.)),
     );
     let label = format!("{}  {}", ghost.title, ghost.label);
-    paint_span_chip(ink, rect, &label, cc, false, false, false);
+    paint_span_chip(ink, rect, &label, &[], cc, false, false, false);
     ink.outlined(rect, ink.u(4.), transparent_black(), ink.u(1.5), accent);
 }
 
