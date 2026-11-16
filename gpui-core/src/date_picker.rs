@@ -85,6 +85,8 @@ pub struct DatePickerState {
     focus: FocusHandle,
     /// The day weeks start on.
     week_start: Weekday,
+    /// Today, when the host keeps its own clock or zone; the Mac's local date otherwise.
+    today: Option<NaiveDate>,
 }
 
 impl EventEmitter<DatePickerEvent> for DatePickerState {}
@@ -127,7 +129,32 @@ impl DatePickerState {
             cursor: today(),
             focus: cx.focus_handle().tab_stop(true),
             week_start: Weekday::Sun,
+            today: None,
         }
+    }
+
+    /// Today, for a host whose day isn't the Mac's local date (a display time zone of its own,
+    /// a pinned clock): it's the day marked as today, and where the keyboard starts with nothing
+    /// picked.
+    pub fn today(mut self, date: NaiveDate) -> Self {
+        self.today = Some(date);
+        if self.value.start.is_none() {
+            self.cursor = date;
+        }
+        self
+    }
+
+    /// Changes today (`None` for the Mac's local date), as when the host's day turns over.
+    pub fn set_today(&mut self, date: Option<NaiveDate>, cx: &mut Context<Self>) {
+        if self.today != date {
+            self.today = date;
+            cx.notify();
+        }
+    }
+
+    /// The day marked as today.
+    pub fn today_date(&self) -> NaiveDate {
+        self.today.unwrap_or_else(today)
     }
 
     /// The day weeks start on (Sunday unless told otherwise).
@@ -179,7 +206,7 @@ impl DatePickerState {
     fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = !self.open;
         if self.open {
-            self.cursor = self.value.start.unwrap_or_else(today);
+            self.cursor = self.value.start.unwrap_or_else(|| self.today_date());
         }
         window.focus(&self.focus, cx);
         cx.notify();
@@ -540,9 +567,9 @@ fn month_view(
     options: &MonthOptions,
     cx: &App,
 ) -> gpui::Div {
-    let (cursor, value, week_start) = {
+    let (cursor, value, week_start, today) = {
         let st = s.read(cx);
-        (st.cursor, st.value, st.week_start)
+        (st.cursor, st.value, st.week_start, st.today_date())
     };
     let month = first_of_month(cursor);
     let start = grid_start(month, week_start);
@@ -551,7 +578,6 @@ fn month_view(
     } else {
         css(36.).into()
     };
-    let today = today();
     let dots = options.dots.clone();
     let day_button = |d: NaiveDate| {
         let in_month = d.month() == month.month();
