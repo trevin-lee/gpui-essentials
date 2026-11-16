@@ -508,9 +508,17 @@ impl Element for PopoverElement {
             }
             return;
         }
+        let seen = visible.intersect(&view);
         if !shown {
             // Held at the edge of the view nearest where it hangs from.
-            anchor = hold_inside(anchor, visible.intersect(&view));
+            anchor = hold_inside(anchor, seen);
+        } else if anchor.size.width > px(0.) {
+            // Partly scrolled off (a table's cell half under its frozen column): hung from the
+            // part that's seen, so it never starts off the view.
+            let part = anchor.intersect(&seen);
+            if part.size.width > px(0.) && part.size.height > px(0.) {
+                anchor = part;
+            }
         }
 
         let rem = window.rem_size();
