@@ -44,10 +44,11 @@ pub mod tree;
 mod types;
 
 pub use flow::{
-    AddChild, AddSibling, Cancel, CanvasTransform, ContextTarget, DeleteSelected, EdgeDefaults,
-    FitView, Flow, FlowEvent, FlowOptions, FrameSelection, HandleRef, MoveDown, MoveDownFar,
-    MoveLeft, MoveLeftFar, MoveRight, MoveRightFar, MoveUp, MoveUpFar, OpenLink, PanelPosition,
-    PointerMode, SelectAll, Unframe, ZoomIn, ZoomOut, ZoomReset, bind_keys,
+    AddChild, AddSibling, Align, Cancel, CanvasTransform, ContextTarget, DeleteSelected,
+    Distribute, EdgeDefaults, FitView, Flow, FlowEvent, FlowOptions, FrameSelection, Guide,
+    HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar, MoveUp,
+    MoveUpFar, OpenLink, PanelPosition, PointerMode, SelectAll, Unframe, ZoomIn, ZoomOut,
+    ZoomReset, bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, frame_node, group_node,
