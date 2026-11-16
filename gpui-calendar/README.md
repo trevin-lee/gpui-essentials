@@ -101,7 +101,8 @@ their look.
   (or `g`) opens it in a popover, or a sheet of 44-point days on touch. It shows the calendar's
   period and keeps in step as that changes, starts weeks on `week_start`, dots the days your
   app's shown events fall on (it never fetches anything), and a pick goes to that date (sending
-  `RangeChange`). Escape closes it.
+  `RangeChange`). Escape closes it. Its today is the calendar's: by its clock (or `with_now`) in
+  `time_zone`, not the Mac's local date, and it turns over at that zone's midnight.
 - **Find:** `set_query(text)` filters the events by text: those whose title, place, notes or
   link labels contain every word, ignoring case and accents ("cafe zurich" finds "Café Zürich").
   The time grid dims the rest, rings what it found and marks the found words; the month and
