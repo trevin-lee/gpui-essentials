@@ -30,6 +30,8 @@ struct Args {
     bench: bool,
     /// A grid of this many plain nodes, each joined to the next, in place of the sample.
     nodes: usize,
+    /// A mind map in place of the sample: tab, enter and the arrows grow and walk it.
+    mindmap: bool,
 }
 
 fn args() -> Args {
@@ -38,6 +40,7 @@ fn args() -> Args {
         scene: "overview".into(),
         bench: false,
         nodes: 0,
+        mindmap: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -45,6 +48,7 @@ fn args() -> Args {
             "--shot" => out.shot = it.next().map(PathBuf::from),
             "--scene" => out.scene = it.next().unwrap_or_default(),
             "--bench" => out.bench = true,
+            "--mindmap" => out.mindmap = true,
             "--nodes" => out.nodes = it.next().and_then(|n| n.parse().ok()).unwrap_or(0),
             _ => {}
         }
@@ -242,6 +246,41 @@ fn note_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .into_any_element()
 }
 
+/// A mind map of planning a trip: a root with ideas both ways, one of them folded away.
+fn mind_map() -> (Vec<Node>, Vec<Edge>) {
+    let topics = [
+        ("trip", "Kyoto in April", None),
+        ("stay", "Where to stay", Some("trip")),
+        ("ryokan", "A ryokan in Higashiyama", Some("stay")),
+        ("hotel", "A hotel by the station", Some("stay")),
+        ("see", "What to see", Some("trip")),
+        ("temples", "Temples at dawn", Some("see")),
+        ("bamboo", "Arashiyama's bamboo", Some("see")),
+        ("blossom", "Cherry blossom", Some("see")),
+        ("eat", "Where to eat", Some("trip")),
+        ("market", "Nishiki market", Some("eat")),
+        ("kaiseki", "One kaiseki dinner", Some("eat")),
+        ("get", "Getting there", Some("trip")),
+        ("rail", "A rail pass", Some("get")),
+        ("flights", "Flights", Some("get")),
+    ];
+    let nodes = topics
+        .iter()
+        .map(|(id, label, _)| {
+            let n = Node::new(*id, xy(0., 0.)).kind("topic").label(*label);
+            if *id == "get" { n.collapsed(true) } else { n }
+        })
+        .collect();
+    let edges = topics
+        .iter()
+        .filter_map(|(id, _, parent)| {
+            let parent = (*parent)?;
+            Some(Edge::new(format!("{parent}-{id}"), parent, *id))
+        })
+        .collect();
+    (nodes, edges)
+}
+
 /// A grid of plain nodes, each joined to the next: something large to measure with.
 fn grid(count: usize) -> (Vec<Node>, Vec<Edge>) {
     let columns = (count as f32).sqrt().ceil() as usize;
@@ -302,8 +341,11 @@ struct Root {
 impl Root {
     fn new(args: &Args, cx: &mut Context<Self>) -> Self {
         let root = cx.entity().downgrade();
+        let mindmap = args.mindmap;
         let (nodes, edges) = if args.nodes > 0 {
             grid(args.nodes)
+        } else if mindmap {
+            mind_map()
         } else {
             (sample_nodes(), sample_edges())
         };
@@ -319,6 +361,11 @@ impl Root {
                     o.max_zoom = 4.;
                     o.transition = std::time::Duration::from_millis(180);
                     o.edge_defaults.marker_end = Some(Marker::arrow_closed());
+                    if mindmap {
+                        o.layout =
+                            Layout::Tree(TreeLayout::default().direction(TreeDirection::Both));
+                        o.edge_defaults.marker_end = None;
+                    }
                 })
                 // Nothing may connect into a node from itself.
                 .with_connection_check(|c, _| c.source != c.target)
@@ -374,7 +421,12 @@ impl Root {
                 started: Rc::default(),
             }),
             flow,
-            status: "Drag from a handle to connect; shift-drag to select; delete removes".into(),
+            status: if args.mindmap {
+                "Tab adds a child, enter a sibling; the arrows move; drop a topic on another to move it"
+            } else {
+                "Drag from a handle to connect; shift-drag to select; delete removes"
+            }
+            .into(),
             saved: None,
             variant: 0,
             added: 0,

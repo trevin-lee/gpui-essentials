@@ -294,6 +294,9 @@ pub struct Node {
     /// Higher is drawn later. A child is always drawn above its parent.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub z_index: i32,
+    /// In a tree layout (a mind map), whether what's under the node is folded away.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub collapsed: bool,
     /// Fields of React Flow's (`style`, `className`, `measured`, …) and any of the host's that
     /// this crate doesn't read. They're kept so a saved flow loads and saves without loss.
     #[serde(flatten)]
@@ -357,6 +360,7 @@ impl Node {
             parent: None,
             extent: None,
             z_index: 0,
+            collapsed: false,
             extra: Map::new(),
         }
     }
@@ -435,6 +439,12 @@ impl Node {
 
     pub fn z_index(mut self, z: i32) -> Self {
         self.z_index = z;
+        self
+    }
+
+    /// Folds away what's under the node in a tree layout.
+    pub fn collapsed(mut self, on: bool) -> Self {
+        self.collapsed = on;
         self
     }
 

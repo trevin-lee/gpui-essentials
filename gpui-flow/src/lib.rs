@@ -38,20 +38,22 @@ pub mod graph;
 pub mod node;
 mod paint;
 mod theme;
+pub mod tree;
 mod types;
 
 pub use flow::{
-    Cancel, CanvasTransform, ContextTarget, DeleteSelected, EdgeDefaults, FitView, Flow, FlowEvent,
-    FlowOptions, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar,
-    MoveUp, MoveUpFar, PanelPosition, PointerMode, SelectAll, ZoomIn, ZoomOut, ZoomReset,
-    bind_keys,
+    AddChild, AddSibling, Cancel, CanvasTransform, ContextTarget, DeleteSelected, EdgeDefaults,
+    FitView, Flow, FlowEvent, FlowOptions, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar,
+    MoveRight, MoveRightFar, MoveUp, MoveUpFar, PanelPosition, PointerMode, SelectAll, ZoomIn,
+    ZoomOut, ZoomReset, bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, group_node, labeled_node,
-    units,
+    topic_node, units,
 };
 pub use paint::{BackgroundVariant, FlowBackground};
 pub use theme::FlowColors;
+pub use tree::{Layout, Tree, TreeDirection, TreeLayout};
 pub use types::*;
 
 /// Sets the flow up: its key bindings. Call once, after `gpui_core::init`.
