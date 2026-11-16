@@ -240,6 +240,43 @@ pub enum PointerMode {
     Off,
 }
 
+/// What a press on the canvas does while editing: select and move, draw a stroke, or rub
+/// strokes out. (With the pointer mode `Navigate` or `Off`, it does what that says.)
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Tool {
+    #[default]
+    Select,
+    /// A press anywhere, on a node too, draws a stroke with this pen; the stroke is added as an
+    /// `ink` node when the button comes up.
+    Pen(Pen),
+    /// A drag rubs out every stroke it touches (a stroke at a time, as PencilKit's object
+    /// eraser does): one edit for the whole drag.
+    Eraser,
+}
+
+/// A pen: its tool, its colour as `0xRRGGBBAA`, and its width in points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pen {
+    pub tool: crate::ink::InkTool,
+    pub color: u32,
+    pub width: f32,
+}
+
+impl Pen {
+    pub fn new(tool: crate::ink::InkTool, color: u32, width: f32) -> Self {
+        Self { tool, color, width }
+    }
+
+    /// A ball pen in the palette's colour of this name (black for none or `default`), as
+    /// `colors` draws it. The stored colour is fixed: it doesn't follow the theme.
+    pub fn palette(key: Option<&str>, width: f32, colors: &FlowColors) -> Self {
+        Self::new(crate::ink::InkTool::Ball, colors.ink(key), width)
+    }
+}
+
+/// How far (in points) the eraser reaches from the pointer.
+const ERASER_REACH: f32 = 8.;
+
 /// Where the canvas is in the window and how the flow is scaled in it: what a view laid over
 /// the canvas needs to line up with the flow. A flow point `p` is at
 /// `pane.origin + p * viewport.zoom + (viewport.x, viewport.y)` in the window.
@@ -522,6 +559,19 @@ enum Drag {
         moved: bool,
     },
     Minimap,
+    /// Drawing a stroke: its points so far, in the flow, and when it began.
+    Draw {
+        pen: Pen,
+        points: Vec<crate::ink::InkPoint>,
+        began: Instant,
+    },
+    /// Rubbing out: where the pointer was, and what's been rubbed out so far (put back if it's
+    /// cancelled).
+    Erase {
+        last: XY,
+        gone: Vec<(usize, Node)>,
+        edges: Vec<Edge>,
+    },
 }
 
 /// A finger the flow took, until it lifts.
@@ -618,6 +668,8 @@ pub struct Flow {
     /// Whether the nodes or edges may have changed since the last look for edits; what only
     /// pans, zooms, hovers or selects leaves it alone, so those cost no look.
     edited: bool,
+    /// What a press does while editing.
+    tool: Tool,
     /// The batches that take back the edits sent, newest last, and those that make edits
     /// taken back again.
     undo_stack: Vec<Vec<Op>>,
@@ -805,6 +857,7 @@ impl Flow {
             stored_nodes: HashMap::new(),
             stored_edges: HashMap::new(),
             edited: false,
+            tool: Tool::Select,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             replay: Replay::Edit,
@@ -1840,7 +1893,10 @@ impl Flow {
         if !self.edited && !cfg!(debug_assertions) {
             return false;
         }
-        if matches!(self.drag, Some(Drag::Nodes { .. } | Drag::Resize { .. })) {
+        if matches!(
+            self.drag,
+            Some(Drag::Nodes { .. } | Drag::Resize { .. } | Drag::Erase { .. })
+        ) {
             return false;
         }
         self.follow_ink();
@@ -2662,7 +2718,109 @@ impl Flow {
                 }
                 Some(true)
             }
+            PointerMode::Edit if self.tool != Tool::Select && self.drag.is_none() => {
+                if event.button != MouseButton::Left {
+                    return None;
+                }
+                window.focus(&self.focus, cx);
+                self.transition = None;
+                let pane = self.shared.pane_point(event.position);
+                self.start_ink(pane, cx);
+                Some(true)
+            }
             PointerMode::Edit => None,
+        }
+    }
+
+    /// What a press does while editing.
+    pub fn tool(&self) -> Tool {
+        self.tool
+    }
+
+    /// Sets what a press does while editing: select, draw with a pen, or rub out.
+    pub fn set_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
+        if self.tool != tool {
+            self.tool = tool;
+            cx.notify();
+        }
+    }
+
+    /// Begins drawing or rubbing out at this point of the pane, as the tool says.
+    fn start_ink(&mut self, pane: XY, cx: &mut Context<Self>) {
+        let at = self.viewport.to_flow(pane);
+        self.drag_button = MouseButton::Left;
+        match self.tool {
+            Tool::Pen(pen) => {
+                self.drag = Some(Drag::Draw {
+                    pen,
+                    points: vec![crate::ink::InkPoint::at(at.x, at.y, 0., pen.width)],
+                    began: now(cx),
+                });
+            }
+            Tool::Eraser => {
+                self.drag = Some(Drag::Erase {
+                    last: at,
+                    gone: Vec::new(),
+                    edges: Vec::new(),
+                });
+                self.erase(at, at);
+            }
+            Tool::Select => {}
+        }
+        cx.notify();
+    }
+
+    /// Rubs out every stroke within reach of the line from `a` to `b` that may be deleted.
+    fn erase(&mut self, a: XY, b: XY) {
+        let reach = ERASER_REACH / self.viewport.zoom.max(0.01);
+        let span = Rect::from_corners(a, b);
+        let hit: Vec<usize> = (0..self.nodes.len())
+            .filter(|&i| {
+                let n = &self.nodes[i];
+                if n.kind != "ink" || !n.deletable.unwrap_or(true) || !self.shown(n) {
+                    return false;
+                }
+                let (Some(r), Some(drawn), Some(abs)) = (
+                    self.node_rect(&n.id),
+                    self.shared.ink(n),
+                    self.absolute_position(&n.id),
+                ) else {
+                    return false;
+                };
+                if r.right() < span.x - reach
+                    || r.x > span.right() + reach
+                    || r.bottom() < span.y - reach
+                    || r.y > span.bottom() + reach
+                {
+                    return false;
+                }
+                // Along the pointer's path, a step at a time.
+                let d = b - a;
+                let steps = ((d.x * d.x + d.y * d.y).sqrt() / reach).ceil().max(1.) as usize;
+                (0..=steps).any(|k| {
+                    let t = k as f32 / steps as f32;
+                    drawn.distance(xy(a.x + d.x * t, a.y + d.y * t) - abs) <= reach
+                })
+            })
+            .collect();
+        if hit.is_empty() {
+            return;
+        }
+        self.edited = true;
+        let ids: HashSet<NodeId> = hit.iter().map(|&i| self.nodes[i].id.clone()).collect();
+        let mut taken = Vec::new();
+        for &i in hit.iter().rev() {
+            taken.push((i, self.nodes.remove(i)));
+        }
+        let (cut, kept): (Vec<Edge>, Vec<Edge>) = std::mem::take(&mut self.edges)
+            .into_iter()
+            .partition(|e| ids.contains(&e.source) || ids.contains(&e.target));
+        self.edges = kept;
+        self.reindex();
+        self.forget_removed();
+        if let Some(Drag::Erase { gone, edges, .. }) = &mut self.drag {
+            gone.extend(taken);
+            edges.extend(cut);
         }
     }
 
@@ -3579,6 +3737,15 @@ impl Flow {
         let pane = self.shared.pane_point(event.position);
         if mode == PointerMode::Edit
             && event.button == MouseButton::Left
+            && self.tool != Tool::Select
+        {
+            window.focus(&self.focus, cx);
+            self.transition = None;
+            self.start_ink(pane, cx);
+            return;
+        }
+        if mode == PointerMode::Edit
+            && event.button == MouseButton::Left
             && let Some(id) = self.simple_node_at(pane)
         {
             self.node_mouse_down(&id, event, window, cx);
@@ -3830,7 +3997,6 @@ impl Flow {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
-        self.edited = true;
         let Some(mut drag) = self.drag.take() else {
             return;
         };
@@ -3843,6 +4009,27 @@ impl Flow {
         let pane = self.shared.pane_point(event.position);
         let pointer = self.viewport.to_flow(pane);
         match &mut drag {
+            Drag::Draw { pen, points, began } => {
+                let t = now(cx).saturating_duration_since(*began).as_secs_f32();
+                if points.len() < crate::ink::MAX_POINTS {
+                    points.push(crate::ink::InkPoint::at(pointer.x, pointer.y, t, pen.width));
+                }
+                self.drag = Some(drag);
+                cx.notify();
+                return;
+            }
+            Drag::Erase { last, .. } => {
+                let from = std::mem::replace(last, pointer);
+                self.drag = Some(drag);
+                self.erase(from, pointer);
+                cx.notify();
+                return;
+            }
+            _ => {}
+        }
+        match &mut drag {
+            // Taken above.
+            Drag::Draw { .. } | Drag::Erase { .. } => {}
             Drag::Pan {
                 start, last, moved, ..
             } => {
@@ -3867,6 +4054,7 @@ impl Flow {
                 pointer: at,
                 ..
             } => {
+                self.edited = true;
                 *at = pointer;
                 if !*moved
                     && (pane - *start).distance(xy(0., 0.)) < self.options.node_drag_threshold
@@ -3967,6 +4155,7 @@ impl Flow {
                 moved,
                 ..
             } => {
+                self.edited = true;
                 if !*moved {
                     *moved = true;
                     cx.emit(FlowEvent::NodeResizeStart(node.clone()));
@@ -4027,6 +4216,21 @@ impl Flow {
             return;
         };
         match drag {
+            Drag::Draw { pen, points, .. } => {
+                // Smoothed and thinned to what shows at the zoom it was drawn at.
+                let tolerance = 0.35 / self.viewport.zoom.max(0.01);
+                let points = crate::ink::smooth(&points, tolerance);
+                let stroke =
+                    crate::ink::InkStroke::new(pen.tool, pen.color, pen.width as f64, points);
+                self.edited = true;
+                self.nodes.push(Node::ink(json::new_id(), &stroke));
+                self.reindex();
+                cx.notify();
+            }
+            Drag::Erase { .. } => {
+                self.edited = true;
+                cx.notify();
+            }
             Drag::Pan {
                 start,
                 moved,
@@ -4209,6 +4413,16 @@ impl Flow {
         self.edited = true;
         self.guides.clear();
         match self.drag.take() {
+            Some(Drag::Draw { .. }) => {}
+            Some(Drag::Erase { gone, edges, .. }) => {
+                // Back where they were, in the order they came out.
+                for (i, node) in gone.into_iter().rev() {
+                    let i = i.min(self.nodes.len());
+                    self.nodes.insert(i, node);
+                }
+                self.edges.extend(edges);
+                self.reindex();
+            }
             Some(Drag::Nodes { origins, moved, .. }) => {
                 for (id, origin) in &origins {
                     if let Some(i) = self.index_of(id) {
@@ -4406,13 +4620,16 @@ impl Flow {
             .when_some(node.width, |d, w| d.w(units(w)))
             .when_some(node.height, |d, h| d.h(units(h)))
             .when(!self.ready, |d| d.opacity(0.))
-            .when(editing && self.draggable(node), |d| {
-                d.cursor(if dragging {
-                    CursorStyle::ClosedHand
-                } else {
-                    CursorStyle::OpenHand
-                })
-            })
+            .when(
+                editing && self.tool == Tool::Select && self.draggable(node),
+                |d| {
+                    d.cursor(if dragging {
+                        CursorStyle::ClosedHand
+                    } else {
+                        CursorStyle::OpenHand
+                    })
+                },
+            )
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                 let took = flow
                     .update(cx, |flow, cx| flow.node_mouse_down(&id, event, window, cx))
@@ -5174,6 +5391,25 @@ impl Render for Flow {
                                 .collect();
                             paint::stroke(origin, &line, zoom.max(0.75), color, window);
                         }
+                        Some(Drag::Draw { pen, points, .. }) => {
+                            let stroke = crate::ink::InkStroke::new(
+                                pen.tool,
+                                pen.color,
+                                pen.width as f64,
+                                points.clone(),
+                            );
+                            let color = paint::ink_color(pen.color, pen.tool, &colors);
+                            let outline: Vec<(XY, f32)> = stroke
+                                .outline()
+                                .into_iter()
+                                // In pane points over the zoom: the painter scales them back.
+                                .map(|(p, r)| {
+                                    let q = viewport.to_pane(p);
+                                    (xy(q.x / zoom, q.y / zoom), r)
+                                })
+                                .collect();
+                            paint::paint_ink(&outline, origin, zoom, color, None, window);
+                        }
                         Some(Drag::Select { start, current, .. }) => {
                             let (a, b) = (viewport.to_pane(*start), viewport.to_pane(*current));
                             let area = Bounds::from_corners(
@@ -5329,6 +5565,10 @@ impl Render for Flow {
                     CursorStyle::OpenHand
                 })
             })
+            .when(
+                self.tool != Tool::Select && self.options.pointer_mode == PointerMode::Edit,
+                |d| d.cursor(CursorStyle::Crosshair),
+            )
             .on_mouse_down(MouseButton::Left, cx.listener(Self::pane_mouse_down))
             .on_mouse_down(MouseButton::Middle, cx.listener(Self::pane_mouse_down))
             .on_mouse_down(

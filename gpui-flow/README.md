@@ -54,6 +54,12 @@ Run the example with `cargo run --release --example flow` from this folder.
   a transform), so the same strokes show on iPad and Mac (`ink::InkStroke`, `Node::ink`).
   Strokes are drawn with their width at each point, smoothed, take a press only on their ink,
   and move by their transform, never their points.
+- **A pen and an eraser** on the Mac (`Flow::set_tool`: `Tool::Pen(Pen)`, `Tool::Eraser`).
+  With a pen, a drag anywhere draws, smoothed and thinned when the button comes up, in a
+  palette colour (`Pen::palette`) or any `#RRGGBBAA`, at any width, as a pen, marker or the
+  other PencilKit tools; the stroke is one edit. The eraser rubs out every stroke it passes
+  over, as one edit, and escape puts back what it took. The example's toolbar has them, and
+  `--scene draw` takes a picture of them in use.
 - **Limits.** `limits::Limits` checks a document or a batch against what Docs stores (10,000
   nodes, 20,000 edges, 10,000-character texts, frames 16 deep, …), and
   `tests/fixtures/limits` has the cases a server tests against too, with the exact problem
