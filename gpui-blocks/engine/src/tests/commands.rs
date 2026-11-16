@@ -860,3 +860,62 @@ fn indent_feasibility_matches_the_commands() {
     caret_in(&mut m, 3, 0); // a paragraph
     assert!(!m.can_indent() && !m.can_outdent());
 }
+
+#[test]
+fn a_block_is_replaced_in_place_as_one_undo_step() {
+    let mut m = model("before\n\n> one\n>\n> two\n\nafter");
+    caret_in(&mut m, 0, 0);
+    let quote = m.document().root().children().nth(1).unwrap();
+    let two = quote.children().nth(1).unwrap().id();
+    m.run(EditorCommand::ReplaceBlock {
+        block: two,
+        markdown: "## Two\n\nthree".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        m.source(),
+        "before\n\n> one\n>\n> ## Two\n>\n> three\n\nafter"
+    );
+    assert_eq!(m.caret().unwrap().offset, 0, "the caret elsewhere stays");
+    assert!(m.undo());
+    assert_eq!(m.source(), "before\n\n> one\n>\n> two\n\nafter");
+}
+
+#[test]
+fn a_selected_block_stays_selected_when_replaced() {
+    let mut m = model("a\n\n---\n\nb");
+    let rule = m.document().root().children().nth(1).unwrap().id();
+    m.set_selection(BlockSelection::Blocks {
+        anchor: rule,
+        head: rule,
+    })
+    .unwrap();
+    m.run(EditorCommand::ReplaceBlock {
+        block: rule,
+        markdown: "```\ncode\n```".into(),
+    })
+    .unwrap();
+    assert_eq!(m.source(), "a\n\n```\ncode\n```\n\nb");
+    let code = m.document().root().children().nth(1).unwrap().id();
+    assert_eq!(
+        *m.selection(),
+        BlockSelection::Blocks {
+            anchor: code,
+            head: code
+        }
+    );
+}
+
+#[test]
+fn replacing_the_root_or_a_missing_block_fails() {
+    let mut m = model("a");
+    let root = m.document().root().id();
+    assert!(
+        m.run(EditorCommand::ReplaceBlock {
+            block: root,
+            markdown: "b".into()
+        })
+        .is_err()
+    );
+    assert_eq!(m.source(), "a");
+}
