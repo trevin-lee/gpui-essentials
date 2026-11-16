@@ -111,7 +111,6 @@ actions!(
         MoveParagraphEnd,
         SelectParagraphStart,
         SelectParagraphEnd,
-        ToggleToolbar,
     ]
 );
 
@@ -423,8 +422,6 @@ struct Marked {
 }
 
 pub struct BlockEditorState {
-    /// Hidden by [`ToggleToolbar`] / [`Self::set_toolbar_hidden`].
-    pub(crate) toolbar_hidden: bool,
     pub(crate) model: BlockEditorModel,
     pub(crate) focus_handle: FocusHandle,
     pub(crate) blink_cursor: Entity<BlinkCursor>,
@@ -524,7 +521,6 @@ impl BlockEditorState {
             block_drag: None,
             reorder: Default::default(),
             readonly: false,
-            toolbar_hidden: false,
             image_policy: super::ImagePolicy::default(),
             image_source: None,
             code_highlighter: None,
@@ -839,29 +835,6 @@ impl BlockEditorState {
     pub fn set_readonly(&mut self, readonly: bool, cx: &mut Context<Self>) {
         self.readonly = readonly;
         cx.notify();
-    }
-
-    /// Whether the optional toolbar is hidden. Only matters when the host
-    /// shows one (`component::BlockEditor::toolbar` or `EditorToolbar`).
-    pub fn is_toolbar_hidden(&self) -> bool {
-        self.toolbar_hidden
-    }
-
-    /// Hide or show the optional toolbar.
-    pub fn set_toolbar_hidden(&mut self, hidden: bool, cx: &mut Context<Self>) {
-        if self.toolbar_hidden != hidden {
-            self.toolbar_hidden = hidden;
-            cx.notify();
-        }
-    }
-
-    pub(crate) fn on_toggle_toolbar(
-        &mut self,
-        _: &ToggleToolbar,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.set_toolbar_hidden(!self.toolbar_hidden, cx);
     }
 
     /// Focus the editor.
