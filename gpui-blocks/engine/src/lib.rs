@@ -82,9 +82,7 @@ mod undo;
 #[cfg(test)]
 mod tests;
 
-pub mod component;
 pub mod surfaces;
-mod toolbar;
 
 pub use command::{CommandError, EditorCommand};
 pub use direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
@@ -94,9 +92,6 @@ pub use element::BlockEditor;
 pub use extension::{CustomNode, Extension, Extensions, InlineContext};
 pub use input_rule::InputRule;
 pub use kind::ColumnAlign;
-/// Shows or hides the optional toolbar. Unbound by default; bind it in the
-/// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
-pub use state::ToggleToolbar;
 pub use state::{
     BlockEditorEvent, BlockEditorState, ClipboardPolicy, CodeHighlightFn, ImageSourceFn,
     PasteRequest, SubmitPolicy,
@@ -108,7 +103,6 @@ pub mod actions {
 }
 pub use style::BlockEditorStyle;
 pub use table::{TableEdit, TableLine};
-pub use toolbar::EditorToolbar;
 
 /// Registers the editor's key bindings. Call once at startup, after `gpui_kit::init`.
 pub fn init(cx: &mut gpui::App) {
