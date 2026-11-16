@@ -36,6 +36,7 @@ struct ReadmeDoctests;
 mod a11y;
 mod button;
 pub mod icon;
+pub mod input;
 mod press;
 mod root;
 mod size;
@@ -46,6 +47,7 @@ mod tooltip;
 
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use icon::{Icon, IconName, Icons};
+pub use input::{Input, InputEvent, InputState};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
@@ -63,6 +65,7 @@ pub fn init(cx: &mut App) {
         Theme::set(Theme::dark(), cx);
     }
     root::init(cx);
+    input::init(cx);
 }
 
 /// Opens a window with `build`'s view inside a [`Root`], and returns the window and the view.
