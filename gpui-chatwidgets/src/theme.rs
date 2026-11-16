@@ -31,8 +31,8 @@ pub struct CardColors {
     pub line: Hsla,
     /// The edge of something that can be pressed or typed in.
     pub line_strong: Hsla,
-    /// The ring around a button, tab or chip focused from the keyboard, drawn as given (the
-    /// web's `ring-3 ring-ring/50`: the ring colour at half strength).
+    /// The ring around a button, tab, chip, the slider or a field focused from the keyboard,
+    /// drawn as given (the web's `ring-3 ring-ring/50`: the ring colour at half strength).
     pub focus_ring: Hsla,
     /// A recessed area: a sunk card, the tab strip, a list's number box.
     pub sunk: Hsla,

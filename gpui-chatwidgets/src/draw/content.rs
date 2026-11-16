@@ -189,15 +189,15 @@ impl Draw<'_, '_> {
             .into_any_element()
     }
 
-    /// Markdown as text, selectable, through gpui-core's text view, laid out as the web lays
-    /// it out. It loads nothing: HTML reads as the text it is, an image as its alt text, and a
-    /// link goes to the host as an event. The text takes the card's colour from around it, and
-    /// everything else (links, markers, lines, code, the selection) the card's theme.
+    /// Markdown as text, selectable, through gpui-core's text view, laid out as OpenUI's web
+    /// renderer lays it out (its `markDownRenderer.css` over Tailwind's reset, measured in
+    /// Chromium). It loads nothing: HTML reads as the text it is, an image as its alt text,
+    /// and a link goes to the host as an event. The text takes the card's colour from around
+    /// it, and everything else (links, markers, lines, code, the selection) the card's theme.
     pub fn markdown(&mut self, md: &str, size: f32, weight: f32, path: &str) -> Div {
         let t = self.t;
         let rem = self.window.rem_size();
         let css = |v: f32| t.px(v).to_pixels(rem);
-        let heading = t.text.md;
         let mut code = StyleRefinement::default()
             .bg(t.colors.sunk)
             .border_1()
@@ -211,30 +211,38 @@ impl Draw<'_, '_> {
             line_height: Some(self.px(t.text.code * 1.6).into()),
             ..Default::default()
         };
-        // A heading's line is the body's leading at its size, where the web's is 1.35: the
-        // gaps around it give back the difference, so the text sits where the web's does.
-        let leading = heading * (t.text.body_leading - 1.35) / 2.;
+        // The web's margins are pixels, whatever the text's size (TextContent's small and
+        // large change only the body's font).
         let style = TextViewStyle {
-            paragraph_gap: self.px(size * 0.75),
-            heading_base_font_size: Some(css(heading)),
+            // 18px between paragraphs (`p:has(+p)`).
+            paragraph_gap: self.px(18.),
+            // Every level is the web's heading-xs: semibold at the body's medium size, 1.25 tall.
+            heading_base_font_size: Some(css(t.text.md)),
             heading_font_size: Some(Arc::new(|_, base| base)),
+            heading_line_height: Some(1.25),
+            // Nothing above a heading (Tailwind's reset, and OpenUI sets no top margin), and 8px
+            // to the paragraph under it (`h1:has(+p)`).
+            heading_margin_top: Some(px(0.)),
+            heading_margin_bottom: Some(css(8.)),
             code_block: code,
-            // Bullets and numbers in a 1.4em column, items 0.25em apart.
-            list_indent: Some(css(size * 1.4)),
-            list_item_gap: Some(css(size * 0.25)),
-            // A heading starts a section (1.4 of its size above it) and leads into what
-            // follows it (0.35 below).
-            heading_margin_top: Some(css(heading * 1.4 - leading)),
-            heading_margin_bottom: Some(css(heading * 0.35 - leading)),
-            // `code`: the card's mono type at 0.875em, in a rounded box 4px either side.
+            // Bullets and numbers outside a 20px padding, items 8px apart, and each marker a
+            // space (the marker's "• " in Inter, 0.27em) before its text.
+            list_indent: Some(css(20.)),
+            list_item_gap: Some(css(8.)),
+            list_marker_gap: Some(css(size * 0.27)),
+            // A table's container has the web's radius-2xl corners and no header fill.
+            table_radius: Some(css(t.radii.xl)),
+            // `code`: the body's own font at its size (`font: var(--openui-text-body-default)`),
+            // on sunk in a 4px-cornered box, 4px either side and 2px above and below the font's
+            // ascent and descent, with a 1px border the fill here takes in.
             inline_code: InlineCodeStyle {
-                family: Some(t.fonts.mono.clone()),
-                size: Some(0.875),
-                padding: Some(css(4.)),
+                family: Some(t.fonts.body.clone()),
+                size: Some(1.),
+                padding: Some(css(5.)),
+                padding_y: Some(css(3.)),
                 radius: Some(css(4.)),
                 background: Some(t.colors.sunk),
                 color: None,
-                ..Default::default()
             },
             colors: TextViewColors {
                 link: Some(t.colors.text),
@@ -242,9 +250,9 @@ impl Draw<'_, '_> {
                 rule: Some(t.colors.line),
                 quote_bar: Some(t.colors.line),
                 table_line: Some(t.colors.line),
+                table_header: None,
                 selection: Some(t.colors.accent.opacity(0.3)),
                 muted: Some(t.colors.text_muted),
-                ..Default::default()
             },
             ..Default::default()
         };

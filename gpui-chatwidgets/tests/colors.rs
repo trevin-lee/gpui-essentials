@@ -1,4 +1,4 @@
-//! A light card in a dark app: gpui-core's text field and slider, which the card embeds, take
+//! A light card in a dark app: gpui-core's text field, slider and date picker, which the card embeds, take
 //! the card's colours, not the app's global gpui-core `Theme`. Read from the scene the window
 //! drew, with Core Text laying the text out (so the placeholder has glyphs to read).
 
@@ -181,4 +181,93 @@ fn a_light_card_s_slider_takes_the_card_s_colours_in_a_dark_app() {
         "no track in the dark theme's input colour"
     );
     assert!(!bar(global.primary), "no fill in the dark theme's primary");
+}
+
+const DATES: &str = r#"root = Form("f", Buttons([]), [FormControl("Day", DatePicker("day", "single", null, $d)), FormControl("Stay", DatePicker("stay", "range", null, $r))])
+$d = "2026-03-04"
+$r = {from: "2026-01-10", to: "2026-01-14"}"#;
+
+#[test]
+fn a_light_card_s_date_picker_takes_the_card_s_colours_in_a_dark_app() {
+    let mut cx = app_with_text();
+    cx.update(|cx| gpui_core::Theme::set(gpui_core::Theme::dark(), cx));
+    let host = light_host();
+    let (_, vcx) = open(&mut cx, DATES, &host, Some(400.));
+    let card = host.theme.colors.clone();
+    let global = gpui_core::Theme::dark();
+
+    // The fields: 36 CSS pixels tall (gpui-core's fifteenths of a rem), edged in the card's
+    // strong line and unfilled on a light card, as its text fields are.
+    let drawn = scene(vcx);
+    let field = |pick: &dyn Fn(Hsla, Hsla) -> bool| {
+        drawn.quads.iter().any(|(fill, size, edge)| {
+            pick(*fill, *edge) && (f32::from(size.height) - 36. * 16. / 15.).abs() < 0.5
+        })
+    };
+    assert!(
+        field(&|_, edge| near(edge, card.line_strong)),
+        "a date field edged in the card's strong line"
+    );
+    assert!(
+        !field(&|_, edge| near(edge, global.input)),
+        "no field edged in the dark theme's input colour"
+    );
+    assert!(
+        !field(&|fill, _| near(fill, global.input.opacity(0.3))),
+        "no field filled as the dark theme's"
+    );
+
+    // The single date's month: on the card's popover, the stored day on the accent.
+    let at = vcx
+        .debug_bounds("field:t:r/f0.date")
+        .expect("the date field")
+        .center();
+    vcx.simulate_click(at, Modifiers::none());
+    let drawn = scene(vcx);
+    let filled = |c: Hsla| drawn.quads.iter().any(|(fill, ..)| near(*fill, c));
+    assert!(
+        vcx.debug_bounds("day-2026-03-04").is_some(),
+        "the month is open"
+    );
+    assert!(filled(card.popover), "the month on the card's popover");
+    assert!(
+        !filled(global.popover),
+        "no month on the dark theme's popover"
+    );
+    assert!(filled(card.accent), "the picked day on the card's accent");
+    assert!(
+        !filled(global.primary),
+        "no day on the dark theme's primary"
+    );
+    assert!(
+        drawn.glyphs.iter().any(|c| near(*c, card.on_accent)),
+        "the picked day's number in the card's on-accent colour"
+    );
+    vcx.simulate_keystrokes("escape");
+
+    // The range's month: the days between its ends at the accent's low strength.
+    let at = vcx
+        .debug_bounds("field:t:r/f1.date")
+        .expect("the range field")
+        .center();
+    vcx.simulate_click(at, Modifiers::none());
+    let drawn = scene(vcx);
+    assert!(
+        vcx.debug_bounds("day-2026-01-12").is_some(),
+        "the range's month is open"
+    );
+    assert!(
+        drawn
+            .quads
+            .iter()
+            .any(|(fill, ..)| near(*fill, card.accent.opacity(0.04))),
+        "the days between in the card's accent at 4%"
+    );
+    assert!(
+        !drawn
+            .quads
+            .iter()
+            .any(|(fill, ..)| near(*fill, global.accent)),
+        "no days between in the dark theme's accent"
+    );
 }
