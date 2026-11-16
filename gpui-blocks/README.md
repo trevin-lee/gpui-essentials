@@ -228,7 +228,9 @@ comments, search. Text inside blocks stays inline Markdown.
 ```
 
 `gpui_blocks::json::Document` converts to and from Markdown without an editor, and lists the
-documents one links to (`links()`, `pages()`). [docs/json.md](docs/json.md) describes every block
+documents one links to (`links()`, `pages()`). `json::merge(base, ours, theirs)` merges two edits of one
+document by block id, reporting what it couldn't apply, and `json::diff` and `json::apply` give
+the changes as block operations. [docs/json.md](docs/json.md) describes every block
 type, for reading the JSON without this crate.
 
 ## Importing notes

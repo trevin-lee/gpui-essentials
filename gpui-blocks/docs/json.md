@@ -103,3 +103,56 @@ a new id.
 
 `Document::from_markdown` and `Document::to_markdown` convert without an editor, for importing
 and exporting. Markdown has no ids, so `from_markdown` makes new ones every time.
+
+## Merging two saves
+
+When a save is refused because someone else saved first, merge the two edits and save the
+result. `gpui_blocks::json::merge(base, ours, theirs)` does a three-way merge by block id, where
+`base` is the revision both edits started from:
+
+- A change one side made to a block the other left alone applies: an edit, a move, a deletion,
+  or a new block, which keeps its place after the block it followed.
+- Both edited the text of the same paragraph, heading, cell or code block: the edits merge
+  when they don't overlap (by character). When they do, ours is kept.
+- One side deleted a block the other edited: the edit is kept. One side deleted a block the
+  other put something new inside: the block is kept for it.
+- Both moved a block to different places: ours is kept.
+
+It returns the merged document and a list of conflicts, one for each change of theirs it set
+aside and each deletion it overrode, so nothing is lost without a report:
+
+| `type` | Fields | |
+|---|---|---|
+| `content` | `id`, `theirs` (their version of the block) | Both changed the block's content in ways that overlap |
+| `deleted_changed` | `id`, `deleted_by` (`ours` or `theirs`) | The change was kept |
+| `restored` | `id`, `deleted_by` | Kept because something stays inside it |
+| `moved` | `id`, `parent`, `after` (where theirs put it) | Both moved it |
+| `front_matter` | `theirs` | Both changed the front matter |
+
+Merging with an unchanged side gives the other side. Apart from which side wins a conflict,
+swapping `ours` and `theirs` gives the same document. Blocks put at the same place by both
+sides go in id order.
+
+## Operations
+
+`diff(a, b)` gives the changes from `a` to `b` as a list of operations, and `apply(a, ops)`
+makes them; `apply(a, diff(a, b))` is `b`. They're for sending edits rather than whole pages.
+
+```json
+[
+  { "op": "insert", "id": "n1", "type": "paragraph", "text": "New", "parent": null, "after": "a" },
+  { "op": "move", "id": "b", "parent": "q", "after": null },
+  { "op": "update", "id": "c", "type": "heading", "level": 2, "text": "Renamed" },
+  { "op": "delete", "id": "d" },
+  { "op": "front_matter", "front_matter": "---\ntitle: x\n---\n" }
+]
+```
+
+- `insert` adds one block, without children, in `parent` (`null` for the top level) after the
+  block `after` (`null` for first). Its children come as their own inserts.
+- `move` takes a block and everything in it to `parent` after `after`.
+- `update` replaces a block's content (its fields besides `id` and `children`).
+- `delete` removes a block and everything in it.
+
+`apply` refuses an operation on a missing block, an insert of an id already there, an `after`
+that isn't in that parent, and a move into the block itself, and then changes nothing.
