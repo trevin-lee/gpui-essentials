@@ -93,7 +93,9 @@ pub use input_rule::InputRule;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
 /// `"BlockEditor"` key context, e.g. `KeyBinding::new("cmd-shift-t", ToggleToolbar, Some("BlockEditor"))`.
 pub use state::ToggleToolbar;
-pub use state::{BlockEditorEvent, BlockEditorState, ClipboardPolicy, PasteRequest, SubmitPolicy};
+pub use state::{
+    BlockEditorEvent, BlockEditorState, ClipboardPolicy, ImageSourceFn, PasteRequest, SubmitPolicy,
+};
 /// The editor's clipboard and selection actions, for a host's own menu (an edit menu over a touch
 /// selection, say) to dispatch to the focused editor.
 pub mod actions {

@@ -85,7 +85,11 @@ impl RenderOnce for BlockEditor {
         let theme = gpui_kit::base::Theme::global(cx);
         // Links are followed by the editor itself (Cmd/Ctrl-click); the shared
         // renderer must never open a URL on its own.
-        let render_cx = RenderContext::from_app(cx).on_link_click(|_, _, _, _| {});
+        let mut render_cx = RenderContext::from_app(cx).on_link_click(|_, _, _, _| {});
+        // Pictures load through the host's loader when it gives one.
+        if let Some(source) = self.state.read(cx).image_source() {
+            render_cx = render_cx.with_image_source(move |uri| source(uri));
+        }
         let text_style = render_cx.style().clone();
         let mut style = self.state.read(cx).style.resolved(&theme.tokens);
         if style.selection_is_default() {

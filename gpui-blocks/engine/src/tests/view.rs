@@ -4840,3 +4840,41 @@ fn a_read_only_document_takes_no_text_input(cx: &mut TestAppContext) {
     editor.update(cx, |e, cx| e.set_readonly(true, cx));
     assert!(!accepts(cx));
 }
+
+#[gpui::test]
+fn pictures_load_through_the_hosts_loader(cx: &mut TestAppContext) {
+    use std::sync::{Arc, Mutex};
+    cx.update(crate::init_for_tests);
+    let asked: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen = asked.clone();
+    let source: crate::ImageSourceFn = Arc::new(move |uri: &gpui::SharedUri| {
+        seen.lock().unwrap().push(uri.to_string());
+        gpui::ImageSource::Image(Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Svg,
+            b"<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>".to_vec(),
+        )))
+    });
+    let (root, cx) = cx.add_window_view(move |window, cx| {
+        Root(cx.new(|cx| {
+            BlockEditorState::new(window, cx)
+                .with_image_source(source)
+                .with_source("Before ![a picture](https://example.test/p.png) after")
+        }))
+    });
+    draw(cx);
+    assert!(
+        asked
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|u| u == "https://example.test/p.png"),
+        "{:?}",
+        asked.lock().unwrap()
+    );
+    // Cleared, the loader isn't asked again.
+    let editor = root.read_with(cx, |root, _| root.0.clone());
+    editor.update(cx, |e, cx| e.set_image_source(None, cx));
+    asked.lock().unwrap().clear();
+    draw(cx);
+    assert!(asked.lock().unwrap().is_empty());
+}

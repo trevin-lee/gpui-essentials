@@ -1,5 +1,5 @@
 // Changed in Trevin Lee's fork (2026): host hooks, the toggle chevron, block motion, touch
-// selection.
+// selection, the host's image loader.
 //! `BlockEditorState`: the entity around [`BlockEditorModel`] (design §6).
 
 use super::input_rule::RuleKind;
@@ -29,6 +29,10 @@ use crate::support::BlinkCursor;
 use gpui_kit::base::text::MarkdownExtensions;
 
 pub(crate) const CONTEXT: &str = "BlockEditor";
+
+/// A host's image loader: a picture's address to the image to draw.
+pub type ImageSourceFn =
+    std::sync::Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>;
 /// Side of the whole-table corner handle, in px.
 pub(crate) const TABLE_HANDLE_SIZE: f32 = 14.;
 /// How far the handle sits up and left of the table frame's corner; the
@@ -432,6 +436,7 @@ pub struct BlockEditorState {
     pub(crate) reorder: super::reorder::Reorder,
     readonly: bool,
     image_policy: super::ImagePolicy,
+    image_source: Option<ImageSourceFn>,
     submit_policy: SubmitPolicy,
     clipboard_policy: ClipboardPolicy,
     paste_sequence: u64,
@@ -504,6 +509,7 @@ impl BlockEditorState {
             readonly: false,
             toolbar_hidden: false,
             image_policy: super::ImagePolicy::default(),
+            image_source: None,
             submit_policy: SubmitPolicy::default(),
             clipboard_policy: ClipboardPolicy::default(),
             paste_sequence: 0,
@@ -686,6 +692,23 @@ impl BlockEditorState {
     }
     pub fn image_policy(&self) -> super::ImagePolicy {
         self.image_policy
+    }
+    /// Builder: how pictures' addresses become images, for a host that loads them itself (from
+    /// its own cache or storage, with its own rules about the network). Without one, GPUI's
+    /// loader is handed the address.
+    pub fn with_image_source(mut self, source: ImageSourceFn) -> Self {
+        self.image_source = Some(source);
+        self
+    }
+    /// Sets or clears the host's image loader (see [`Self::with_image_source`]), and draws the
+    /// pictures again.
+    pub fn set_image_source(&mut self, source: Option<ImageSourceFn>, cx: &mut Context<Self>) {
+        self.image_source = source;
+        self.projection.invalidate();
+        cx.notify();
+    }
+    pub(crate) fn image_source(&self) -> Option<ImageSourceFn> {
+        self.image_source.clone()
     }
 
     pub fn caret_prefix_snapshot(&self) -> Option<SharedString> {
