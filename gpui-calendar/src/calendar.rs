@@ -13,14 +13,13 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariants as _, DatePickerState, IconName, Press, Selectable as _,
-    Sizable as _, Theme,
+    Button, ButtonGroup, ButtonVariants as _, DatePickerState, DismissReason, IconName, Popover,
+    Press, Selectable as _, Sheet, Sizable as _, Theme,
 };
 
 use crate::find::Query;
 use crate::layout::{self, Column};
 use crate::model::*;
-use crate::overlay::{Popover, Sheet};
 
 mod mini;
 mod panel;
@@ -2439,7 +2438,7 @@ impl Calendar {
             .child(title);
         let dismiss = {
             let this = this.clone();
-            move |_: &mut Window, cx: &mut App| {
+            move |_: &DismissReason, _: &mut Window, cx: &mut App| {
                 this.update(cx, |c, cx| c.dismiss_question(cx)).ok();
             }
         };
@@ -2463,17 +2462,27 @@ impl Calendar {
             };
             Sheet::new("calendar-question")
                 .open(true)
+                .take_focus(false)
                 .on_dismiss(dismiss)
                 .child(heading)
                 .child(div().flex().flex_col().children(rows))
                 .child(cancel)
                 .into_any_element()
         } else {
+            // Below the edit's ghost, or above it, never over it; hung from its left edge, so
+            // a ghost across a week doesn't make the question as wide.
+            let a = asking.anchor;
             Popover::new("calendar-question")
                 .open(true)
-                .anchor(asking.anchor)
-                .height(140.)
+                .anchor(Bounds::new(
+                    a.origin,
+                    size(a.size.width.min(px(1.)), a.size.height),
+                ))
+                .take_focus(false)
                 .on_dismiss(dismiss)
+                .p(rems(4. / 15.))
+                .min_w(rems(14.))
+                .max_w(rems(20.))
                 .child(heading)
                 .child(div().flex().flex_col().children(rows))
                 .into_any_element()

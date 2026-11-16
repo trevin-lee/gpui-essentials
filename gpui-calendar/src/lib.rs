@@ -23,7 +23,6 @@ pub mod layout;
 mod model;
 #[cfg(test)]
 mod overflow;
-mod overlay;
 mod paint;
 mod theme;
 pub mod time;

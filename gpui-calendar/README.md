@@ -223,8 +223,9 @@ fn main() {
   where it was dropped while it asks; Escape, a click outside or Cancel drops the edit and the
   event stays put. The arrow keys and Enter answer too. An event that doesn't repeat isn't asked
   about: its edits carry `EditScope::This`. `is_asking()`, `answer(scope)` and
-  `dismiss_question()` let a host drive the question itself. The popover and the sheet are the
-  calendar's own for now, stand-ins for gpui-core's coming `Popover` and `Sheet`.
+  `dismiss_question()` let a host drive the question itself. The popover and the sheet are
+  gpui-core's `Popover` and `Sheet`, opened without taking the keyboard: it stays with the
+  calendar, which handles Escape.
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
   `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.

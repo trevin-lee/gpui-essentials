@@ -6,19 +6,44 @@ use chrono::{Datelike, Duration};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariants as _, ControlSize, Icon, IconName, Press, Selectable as _,
-    Sizable as _, Theme,
+    Button, ButtonGroup, ButtonVariants as _, ControlSize, DismissReason, Icon, IconName, Popover,
+    PopoverAnchor, Press, Selectable as _, Sheet, Sizable as _, Theme,
 };
 
 use super::{Calendar, CalendarEvent, EditKind};
 use crate::model::*;
-use crate::overlay::{Popover, Sheet};
 use crate::time;
 
 /// The height of a line of the panel's text, and of its title's, in CSS pixels: what its icons
 /// centre on.
 const LINE: f32 = 20.;
 const TITLE_LINE: f32 = 22.;
+
+/// How wide the panel's content is, in CSS pixels.
+const WIDTH: f32 = 284.;
+
+/// Where a panel `width` wide and about `tall` high hangs beside `event`: right of it, else left
+/// of it, top-aligned with it and moved up as far as it must to end inside the window (never
+/// above its top). None where neither side has room. The point is for gpui-core's `Popover`,
+/// which puts the panel `gap` below it.
+fn beside(
+    event: Bounds<Pixels>,
+    width: Pixels,
+    tall: Pixels,
+    view: Size<Pixels>,
+    gap: Pixels,
+) -> Option<Point<Pixels>> {
+    let (space, edge) = (px(6.), px(8.));
+    let top = event.top().min(view.height - edge - tall).max(edge);
+    let x = if view.width - event.right() - space - edge >= width {
+        event.right() + space
+    } else if event.left() - space - edge >= width {
+        event.left() - space - width
+    } else {
+        return None;
+    };
+    Some(point(x, top - gap))
+}
 
 impl Calendar {
     /// When an event happens, in words: "Wednesday, November 18 · 11 AM – 12 PM".
@@ -521,24 +546,40 @@ impl Calendar {
             .child(footer.debug_selector(|| "panel-footer".into()));
         let dismiss = {
             let this = this.clone();
-            move |_: &mut Window, cx: &mut App| {
+            move |_: &DismissReason, _: &mut Window, cx: &mut App| {
                 this.update(cx, |c, cx| c.close_panel(cx)).ok();
             }
         };
         Some(if sheet {
             Sheet::new("calendar-panel")
                 .open(true)
+                .take_focus(false)
                 .on_dismiss(dismiss)
                 .child(content)
                 .into_any_element()
         } else {
+            // Beside the event where there's room; below or above it (never over it) where
+            // there isn't.
+            let pad = 4.;
+            let width = px((WIDTH + pad * 2.) * scale + 2.);
+            let tall = body_max + px(190. * scale);
+            let gap = px(4. * scale);
+            let anchor: PopoverAnchor = match beside(panel.anchor, width, tall, view, gap) {
+                Some(p) => p.into(),
+                // From the event's left edge, so a long span doesn't widen it.
+                None => {
+                    let a = panel.anchor;
+                    Bounds::new(a.origin, size(a.size.width.min(px(1.)), a.size.height)).into()
+                }
+            };
             Popover::new("calendar-panel")
                 .open(true)
-                .anchor(panel.anchor)
-                .beside()
-                .height(f32::from(body_max) / scale + 190.)
+                .anchor(anchor)
+                .take_focus(false)
+                .max_height(rems((f32::from(tall) / scale + 20.) / 15.))
                 .on_dismiss(dismiss)
-                .child(div().w(rems(284. / 15.)).child(content))
+                .p(rems(pad / 15.))
+                .child(div().w(rems(WIDTH / 15.)).child(content))
                 .into_any_element()
         })
     }
