@@ -195,6 +195,24 @@ fn editor(markdown: &str, window: &mut Window, cx: &mut App) -> Entity<Editor> {
 never opens anything itself. After your documents change, call `editor.refresh_docs(cx)` to
 draw the links again.
 
+## As JSON
+
+`editor.document(cx)` gives the document as a tree of blocks, each with an id that stays the same
+while the block is edited and moved, and `editor.set_document(..)` loads one back with its ids.
+Store this when something has to point at a block across saves: links between documents,
+comments, search. Text inside blocks stays inline Markdown.
+
+```json
+{ "format": "gpui-blocks", "version": 1, "blocks": [
+  { "id": "Zr81mXbT0qvN", "type": "paragraph", "text": "The plan is in [Roadmap](doc:4f2a)." },
+  { "id": "c7HhQ2wLx5Ke", "type": "page", "doc": "9c1e", "title": "Last week" }
+] }
+```
+
+`gpui_blocks::json::Document` converts to and from Markdown without an editor, and lists the
+documents one links to (`links()`, `pages()`). [docs/json.md](docs/json.md) describes every block
+type, for reading the JSON without this crate.
+
 ## The Markdown it writes
 
 CommonMark, with GitHub's tables and task lists:

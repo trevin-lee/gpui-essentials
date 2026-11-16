@@ -199,7 +199,7 @@ pub enum EditorEvent {
 
 /// Splits YAML front matter (between `---` lines at the very top) from the document, so the
 /// editor never parses it and [`Editor::markdown`] writes it back as it was.
-fn split_front_matter(markdown: &str) -> (String, &str) {
+pub(crate) fn split_front_matter(markdown: &str) -> (String, &str) {
     let Some(rest) = markdown
         .strip_prefix("---\n")
         .or_else(|| markdown.strip_prefix("---\r\n"))
@@ -249,6 +249,8 @@ pub struct Editor {
     open_on_next_change: bool,
     /// The top-level block the side menu is beside.
     hovered: Option<BlockId>,
+    /// The blocks' ids in [`Editor::document`].
+    ids: crate::json::Ids,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -319,6 +321,7 @@ impl Editor {
             dismissed: None,
             open_on_next_change: false,
             hovered: None,
+            ids: Default::default(),
             _subscriptions: vec![subscription],
         }
     }
@@ -348,10 +351,26 @@ impl Editor {
         let _ = self
             .state
             .update(cx, |state, cx| state.set_source(body, cx));
+        self.ids.clear();
         self.slash = None;
         self.dismissed = None;
         self.hovered = None;
         cx.notify();
+    }
+
+    /// The document as blocks with ids (see [`crate::json`]). A block keeps its id while it's
+    /// edited and moved, until the document is replaced; a new block gets a new one.
+    pub fn document(&mut self, cx: &App) -> crate::json::Document {
+        let state = self.state.read(cx);
+        crate::json::Document::from_model(state.model(), self.front_matter.clone(), &mut self.ids)
+    }
+
+    /// Replaces the document with `document`, keeping its blocks' ids. Undo history starts over,
+    /// and no [`EditorEvent::Changed`] is sent.
+    pub fn set_document(&mut self, document: &crate::json::Document, cx: &mut Context<Self>) {
+        self.set_markdown(&document.to_markdown(), cx);
+        let state = self.state.read(cx);
+        self.ids.adopt(state.model(), &document.blocks);
     }
 
     /// Whether the document can be edited.
@@ -1151,6 +1170,50 @@ mod tests {
         cx.simulate_keystrokes("cmd-z cmd-z");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "one\n\ntwo\n\n- a\n- b");
+    }
+
+    #[gpui_kit::test]
+    fn blocks_keep_their_ids_through_edits_moves_and_a_reload(cx: &mut TestAppContext) {
+        use crate::json::Kind;
+        let (editor, cx) = open(cx, "one\n\ntwo");
+        let ids = |editor: &Entity<Editor>, cx: &mut VisualTestContext| -> Vec<(String, String)> {
+            editor.update(cx, |e, cx| {
+                e.document(cx)
+                    .blocks
+                    .into_iter()
+                    .map(|b| match b.kind {
+                        Kind::Paragraph { text } => (text, b.id),
+                        other => (format!("{other:?}"), b.id),
+                    })
+                    .collect()
+            })
+        };
+        let first = ids(&editor, cx);
+        assert_eq!(ids(&editor, cx), first, "asking again changes nothing");
+        // Typing keeps the block's id.
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_input("!");
+        draw(cx);
+        let typed = ids(&editor, cx);
+        assert_eq!(typed[0], ("one!".into(), first[0].1.clone()));
+        // Moving keeps both.
+        cx.simulate_keystrokes("cmd-shift-down");
+        draw(cx);
+        let moved = ids(&editor, cx);
+        assert_eq!(moved, [typed[1].clone(), typed[0].clone()]);
+        // A new line gets a new id.
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("three");
+        draw(cx);
+        let added = ids(&editor, cx);
+        assert_eq!(added.len(), 3);
+        assert!(added[2].1 != moved[0].1 && added[2].1 != moved[1].1);
+        // Stored and loaded again, every block has the id it had.
+        let stored = editor.update(cx, |e, cx| e.document(cx).to_json());
+        editor.update(cx, |e, cx| e.set_markdown("something else", cx));
+        let doc = crate::json::Document::from_json(&stored).unwrap();
+        editor.update(cx, |e, cx| e.set_document(&doc, cx));
+        assert_eq!(ids(&editor, cx), added);
     }
 
     #[gpui_kit::test]
