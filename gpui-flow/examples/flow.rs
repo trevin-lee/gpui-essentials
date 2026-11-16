@@ -20,6 +20,7 @@ use std::time::Instant;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::Theme;
+use gpui_flow::ink::InkTool;
 use gpui_flow::*;
 use serde_json::json;
 
@@ -680,6 +681,34 @@ fn toolbar(root: &WeakEntity<Root>, this: &Flow, cx: &mut App) -> AnyElement {
         .border_color(c.border)
         .bg(c.popover)
         .text_color(c.foreground)
+        // The tools: a press selects, draws with a pen or a marker, or rubs strokes out.
+        .child(button(
+            "Select",
+            this.tool() == Tool::Select,
+            on_flow(|f, cx| f.set_tool(Tool::Select, cx)),
+        ))
+        .child(button(
+            "Pen",
+            matches!(this.tool(), Tool::Pen(p) if p.tool == InkTool::Ball),
+            on_flow(|f, cx| {
+                let colors = FlowColors::from_theme(cx);
+                f.set_tool(Tool::Pen(Pen::palette(Some("blue"), 3., &colors)), cx)
+            }),
+        ))
+        .child(button(
+            "Marker",
+            matches!(this.tool(), Tool::Pen(p) if p.tool == InkTool::Highlighter),
+            on_flow(|f, cx| {
+                let colors = FlowColors::from_theme(cx);
+                let yellow = colors.ink(Some("yellow"));
+                f.set_tool(Tool::Pen(Pen::new(InkTool::Highlighter, yellow, 14.)), cx)
+            }),
+        ))
+        .child(button(
+            "Eraser",
+            this.tool() == Tool::Eraser,
+            on_flow(|f, cx| f.set_tool(Tool::Eraser, cx)),
+        ))
         .child(button("Add node", false, on_root(|r, cx| r.add_node(cx))))
         .child(button(
             ["Dots", "Lines", "Cross", "Plain"][variant],
@@ -954,6 +983,54 @@ mod shots {
         settle(window, cx).await;
     }
 
+    async fn release(window: AnyWindowHandle, cx: &mut AsyncApp, at: Point<Pixels>) {
+        send(
+            window,
+            cx,
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: at,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+            }),
+        );
+        settle(window, cx).await;
+    }
+
+    /// A line drawn by hand with the tool given: down at `from`, a wave across, up again
+    /// unless `lift` is false.
+    #[allow(clippy::too_many_arguments)]
+    async fn sketch(
+        window: AnyWindowHandle,
+        cx: &mut AsyncApp,
+        flow: &Entity<Flow>,
+        tool: Tool,
+        from: XY,
+        to: XY,
+        wave: f32,
+        lift: bool,
+    ) {
+        let points: Vec<Point<Pixels>> = flow.update(cx, |f, cx| {
+            f.set_tool(tool, cx);
+            (0..=60)
+                .map(|i| {
+                    let t = i as f32 / 60.;
+                    f.flow_to_screen(xy(
+                        from.x + (to.x - from.x) * t,
+                        from.y + (to.y - from.y) * t + (t * 9.).sin() * wave,
+                    ))
+                })
+                .collect()
+        });
+        press(window, cx, points[0], Modifiers::none()).await;
+        for p in &points[1..] {
+            drag_to(window, cx, *p, Modifiers::none()).await;
+        }
+        if lift {
+            release(window, cx, points[60]).await;
+        }
+    }
+
     /// A picture of the window, rendered offscreen, then quits.
     pub fn shot(
         window: AnyWindowHandle,
@@ -1004,6 +1081,29 @@ mod shots {
                     });
                     press(window, cx, a, Modifiers::shift()).await;
                     drag_to(window, cx, b, Modifiers::shift()).await;
+                }
+                // A blue pen's wave and a marker under it, drawn and let go, then a red pen
+                // half way through its line.
+                "draw" => {
+                    let colors = cx.update(|cx| FlowColors::from_theme(cx));
+                    let blue = Pen::palette(Some("blue"), 3., &colors);
+                    let marker = Pen::new(InkTool::Highlighter, colors.ink(Some("yellow")), 14.);
+                    let red = Pen::palette(Some("red"), 4., &colors);
+                    // In the empty space at the top left of the window.
+                    let p = flow.read_with(cx, |f, _| {
+                        [
+                            (40., 90.),
+                            (290., 110.),
+                            (40., 160.),
+                            (290., 160.),
+                            (40., 300.),
+                            (250., 380.),
+                        ]
+                        .map(|(x, y)| f.screen_to_flow(point(px(x), px(y))))
+                    });
+                    sketch(window, cx, &flow, Tool::Pen(blue), p[0], p[1], 12., true).await;
+                    sketch(window, cx, &flow, Tool::Pen(marker), p[2], p[3], 1.5, true).await;
+                    sketch(window, cx, &flow, Tool::Pen(red), p[4], p[5], 20., false).await;
                 }
                 "zoom" => {
                     let _ = cx.update_window(window, |_, _, cx| {

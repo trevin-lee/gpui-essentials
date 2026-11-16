@@ -148,6 +148,17 @@ impl FlowColors {
         }
     }
 
+    /// The ink colour of the palette's colour named `key`, as `0xRRGGBBAA`: black for none,
+    /// `default` or a name the palette doesn't have (black is drawn light on a dark canvas).
+    pub fn ink(&self, key: Option<&str>) -> u32 {
+        let Some(c) = key.and_then(|k| self.palette.get(k)) else {
+            return 0x0000_00ff;
+        };
+        let c = c.to_rgb();
+        let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+        byte(c.r) << 24 | byte(c.g) << 16 | byte(c.b) << 8 | 0xff
+    }
+
     /// How a node of the color named `key` is drawn: the plain node colors for `default` or
     /// a name the palette doesn't have.
     pub fn pencil(&self, key: Option<&str>) -> Pencil {
