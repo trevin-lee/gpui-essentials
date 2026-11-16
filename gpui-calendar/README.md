@@ -3,8 +3,10 @@
 Day, week, N-day and month calendar views for [GPUI](https://www.gpui.rs) apps built with
 [GPUI Kit](https://github.com/longbridge/gpui-kit) 0.9. GPUI Kit has a date picker and a month
 picker; this adds the time grid and the views a calendar app needs. You drag empty time to make
-an event, drag an event to move it, and drag its edge to change its length, and every change
-comes back to your app as a proposal.
+an event, drag an event to move it, drag its edge to change its length, and press Delete to
+delete it, and every change comes back to your app as a proposal. Your app supplies the calendars
+(their colours, which are shown, which are read-only) and the events, recurring ones already
+expanded, and the crate never touches a network.
 
 It uses GPUI Kit's types throughout (GPUI Kit builds on `gpui-pre`, a snapshot of Zed's GPUI), so
 it works in GPUI Kit apps but not with Zed's own `gpui` crate. It follows how FullCalendar,
@@ -30,17 +32,18 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
   and drag its bottom edge to change its end (an all-day event's right edge, in the all-day row
   and the month). Drags snap to 15 minutes (`snap_minutes`), show a ghost of where the event would
   land with the original faded, and Escape drops them. Near the grid's top or bottom a drag
-  scrolls it. Read-only events can be selected and opened but not moved.
+  scrolls it. Read-only events, and events in read-only calendars, can be selected and opened
+  but not moved.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event. With nothing selected, ← and → change the period. `j` or `n` goes to the
   next period and `k` or `p` to the previous one. `t` goes to today, and `d`, `w` and `m` switch
-  views. Enter opens the selected event or makes one in the selected slot, Delete asks to delete,
-  and Escape drops a drag or the selection.
+  views. Enter opens the selected event or makes one in the selected slot, Delete or Backspace
+  asks to delete the selected event, and Escape drops a drag or the selection.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
   database, so a DST day doesn't depend on the machine's zone files.
-- **Theming:** colours per calendar, the week's first day, 12- or 24-hour time, and colours from
-  GPUI Kit's theme. It scales with the window's rem, so it follows an app's zoom.
+- **Theming:** each calendar's colour, the week's first day, 12- or 24-hour time, and colours
+  from GPUI Kit's theme. It scales with the window's rem, so it follows an app's zoom.
 
 | Overlapping events | The month |
 |---|---|
@@ -60,7 +63,7 @@ Pin a commit: until it's on crates.io, any commit can change the API.
 
 ```rust,no_run
 use chrono::{Duration, Utc};
-use gpui_calendar::{Calendar, CalendarEvent, CalendarView, Event};
+use gpui_calendar::{Calendar, CalendarEvent, CalendarSource, CalendarView, Event};
 use gpui_kit::*;
 
 fn main() {
@@ -78,22 +81,31 @@ fn main() {
                             o.time_zone = chrono_tz::America::Los_Angeles;
                             o.week_start = chrono::Weekday::Sun;
                         })
-                        .with_calendar_color("work", 0x5b8def)
+                        .with_calendars(vec![
+                            CalendarSource::new("work", "Work", 0x5b8def),
+                            CalendarSource::new("holidays", "Holidays", 0x8b8b93).read_only(true),
+                        ])
                         .with_view(CalendarView::Week)
                         .with_events(vec![
-                            Event::timed("standup", "Standup", now, now + Duration::minutes(15))
-                                .calendar("work"),
+                            // One occurrence of a recurring event: its own id and its series'.
+                            Event::timed("standup@1", "Standup", now, now + Duration::minutes(15))
+                                .calendar("work")
+                                .series("standup"),
                         ])
                 });
                 cx.subscribe(&calendar, |calendar, event: &CalendarEvent, cx| match event {
                     // The app owns the events: it agrees to a move by setting the event again.
-                    CalendarEvent::Move { id, time } | CalendarEvent::Resize { id, time } => {
+                    // `event.series` says it's one occurrence of a recurring event.
+                    CalendarEvent::Move { event, time } | CalendarEvent::Resize { event, time } => {
                         calendar.update(cx, |c, cx| {
-                            if let Some(mut e) = c.event(id).cloned() {
+                            if let Some(mut e) = c.event(&event.id).cloned() {
                                 e.time = *time;
                                 c.upsert_event(e, cx);
                             }
                         });
+                    }
+                    CalendarEvent::Delete(event) => {
+                        calendar.update(cx, |c, cx| c.remove_event(&event.id, cx));
                     }
                     // Fetch the events in this range, then call `set_events`.
                     CalendarEvent::RangeChange { .. } => {}
@@ -109,18 +121,29 @@ fn main() {
 
 ## Putting it in an app
 
-- **Events:** an `Event` has an id, a title, an `EventTime`, a calendar id or its own colour, a
-  location and a read-only flag. An `EventTime` is either two instants or all-day dates. The end
-  is exclusive, as iCalendar's DTEND: a one-day event on the 14th ends on the 15th. Your app
-  supplies the events for the range it's told about in `RangeChange`.
+- **Calendars:** a `CalendarSource` has an id, a name, a colour and two flags, `visible` and
+  `read_only`. Give the list with `with_calendars` or `set_calendars` (say, when someone hides
+  one in your sidebar). An event takes its calendar's colour. A hidden calendar's events aren't
+  drawn, selected or counted. A read-only calendar's events can be selected and opened but not
+  moved, resized or deleted, and new events never go in it. An event whose calendar isn't in
+  the list is shown, editable, and gets a palette colour chosen by its calendar id.
+- **Events:** an `Event` has an id, a series id for an occurrence of a recurring event, a title,
+  an `EventTime`, a calendar id, a location, a read-only flag of its own and, rarely, a colour of
+  its own. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
+  iCalendar's DTEND: a one-day event on the 14th ends on the 15th. Your app supplies the events
+  for the range it's told about in `RangeChange`.
 - **The calendar never changes an event.** Making, moving, resizing and deleting are proposals,
-  sent as `CalendarEvent::{Create, Move, Resize, Delete}`. `Select` and `Open` report clicks.
-  Your app agrees by calling `set_events` or `upsert_event`.
+  sent as `CalendarEvent::{Create, Move, Resize, Delete}`. `Create` says which calendar
+  (`default_calendar`, or the first visible one that can be edited); the others carry an
+  `EventRef` with the event's id, its series and its calendar. `Select` and `Open` report clicks.
+  Your app agrees by calling `set_events` or `upsert_event`, or `remove_event` for a delete.
 - **Recurring events:** your app expands them, supplying each occurrence in the range as an
-  event of its own.
+  event of its own, with an id of its own and the series' id in `series`. An edit names the
+  occurrence it touched and its series, and your app decides whether it changes that one or all
+  of them.
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
-  `scroll_time`, `calendar_colors`, `dim_past` and `all_day_rows`.
+  `scroll_time`, `default_calendar`, `dim_past` and `all_day_rows`.
 - **The header:** the title, Today, previous and next, and Day / Week / Month are GPUI Kit's
   buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
@@ -200,7 +223,9 @@ Early, and used for one app so far. It's tested on macOS. GPUI also runs on Linu
 but this crate hasn't been tried there.
 
 Not done yet:
-- Recurrence editing (expanding recurring events is the app's job, as above).
+- Recurrence editing (expanding recurring events, and asking "this event or all of them", is
+  the app's job, as above).
+- A context menu (Delete is the key for now).
 - Agenda, year, resource and timeline views.
 - Dragging a timed event into the all-day row, or back.
 - A scrollbar on the grid.
