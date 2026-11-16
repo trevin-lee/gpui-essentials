@@ -51,7 +51,7 @@ pub(crate) fn selection_markdown(doc: &EditorDocument, range: ResolvedSelection)
     if blocks.is_empty() {
         return None;
     }
-    let mut scratch = EditorDocument::empty(doc.extensions.clone());
+    let mut scratch = EditorDocument::empty(doc.ext.clone());
     let count = blocks.len();
     let root = scratch.root;
     let mut tx = TransactionBuilder::new(&mut scratch);

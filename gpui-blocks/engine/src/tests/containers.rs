@@ -1,7 +1,6 @@
 //! Callouts (`> [!NOTE]`) and toggles (`<details><summary>`).
 
 use super::*;
-use crate::surfaces::with_default_surfaces;
 
 fn kinds(m: &BlockEditorModel) -> Vec<BlockKind> {
     m.document().root().children().map(|b| b.kind()).collect()
@@ -10,7 +9,7 @@ fn kinds(m: &BlockEditorModel) -> Vec<BlockKind> {
 /// A model whose extensions register the default callout and toggle
 /// surfaces, as a host's do: only registered names are callouts.
 fn surfaced(source: &str) -> BlockEditorModel {
-    BlockEditorModel::from_markdown(source, with_default_surfaces(Default::default())).unwrap()
+    BlockEditorModel::from_markdown(source, crate::Extensions::default()).unwrap()
 }
 
 fn leaf_count(m: &BlockEditorModel) -> usize {
@@ -37,8 +36,7 @@ fn callout_from_a_registered_surface_round_trips() {
     // With the containers registered, the parser hands top-level callouts
     // over as surfaces; they import the same.
     let source = "> [!NOTE]\n> Hello\n>\n> more";
-    let m =
-        BlockEditorModel::from_markdown(source, with_default_surfaces(Default::default())).unwrap();
+    let m = BlockEditorModel::from_markdown(source, crate::Extensions::default()).unwrap();
     assert_eq!(kinds(&m), vec![BlockKind::Callout]);
     assert_eq!(m.source(), source);
 }

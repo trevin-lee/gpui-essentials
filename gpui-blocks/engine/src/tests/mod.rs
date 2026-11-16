@@ -10,10 +10,9 @@ mod undo;
 mod view;
 
 use super::*;
-use gpui_kit::base::text::MarkdownExtensions;
 
 pub(super) fn model(source: &str) -> BlockEditorModel {
-    BlockEditorModel::from_markdown(source, MarkdownExtensions::default()).unwrap()
+    BlockEditorModel::from_markdown(source, crate::Extensions::bare()).unwrap()
 }
 
 /// Caret at `offset` in the `ix`-th caret leaf.

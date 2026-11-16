@@ -4397,9 +4397,7 @@ fn open_with_surfaces<'a>(
     let (root, cx) = cx.add_window_view(move |window, cx| {
         Root(cx.new(|cx| {
             BlockEditorState::new(window, cx)
-                .with_markdown_extensions(
-                    crate::surfaces::with_default_surfaces(Default::default()),
-                )
+                .with_markdown_extensions(crate::Extensions::default())
                 .with_source(&source)
         }))
     });
