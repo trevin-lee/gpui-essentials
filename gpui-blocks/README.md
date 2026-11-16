@@ -88,6 +88,10 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   a field for the link, then call `set_link` on `editor.state()`. `LinkClicked { url }` on
   ⌘-click: the editor never opens links itself. The events for links to other documents are
   under [Links to other documents](#links-to-other-documents).
+- **Pictures:** `Options::images(..)` loads them: it turns a picture's address into the image
+  to draw, from your app's files, cache or storage, under your rules about the network. Without
+  it a picture is drawn as its description, and the editor never reads a file or fetches an
+  address a document names. The example loads image files from the open document's folder.
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor
