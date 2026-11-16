@@ -286,8 +286,8 @@ A view of type `list` draws as a list: again the same `TableView` entity, `Table
 
 ![The Companies directory in the light theme, each company with its industry, size, annual value and people](docs/list-light.png)
 
-- **Lines.** One per row: the doc's icon if it has one (its `icon` field, as `Doc::icon` reads
-  it), the title, then the view's `cardProperties` to the right, each drawn as the table draws its
+- **Lines.** One per row: the doc's emoji icon if it has one (its `icon` field, as `Doc::icon`
+  reads it; an image icon draws nothing for now), the title, then the view's `cardProperties` to the right, each drawn as the table draws its
   cell: chips for selects and multi-selects, dates in the viewer's zone, people and related rows
   by name, a checkbox with its property's name. Empty values are left out. The title has the room
   it needs first (up to three fifths of the line); the values that fit after it are shown in
@@ -337,7 +337,7 @@ Everything is a doc in the host's tree, the same shape for pages, databases and 
 | `parentDocId` | The page it's under, or null. A row's is its database. |
 | `parentObjectId` | For an inline database, the block in its parent page that embeds it. |
 | `cover`, `favorite`, `agents` | The host's; carried, never read. |
-| `icon` | Optional: an emoji the host shows with the doc. A list draws a row's before its title (`Doc::icon`); carried in `extra`. |
+| `icon` | Optional, on every kind of doc: a string or null, written last-write-wins like the other fields, never in `values` ([Icons](#icons)). |
 | `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`. A row's `createdBy` and `editedBy` properties show them. An older doc may have no `updatedBy`. |
 | `created`, `updated` | Milliseconds since the Unix epoch. |
 | `rev`, `seq` | The host's revision and sequence numbers; carried, never read. |
@@ -358,6 +358,21 @@ Option<DatabaseFields>` and `values: Option<Values>`. Every type keeps the JSON 
 know in an `extra` map, and every enum keeps strings it doesn't know as `Other(String)`, so a doc
 from a newer host or an agent reads and writes back unchanged. The round-trip tests check this
 for every fixture.
+
+### Icons
+
+A doc's `icon` is null (no icon) or a string, one of:
+
+- **An emoji:** one grapheme cluster of at most 16 bytes (`"☕"`, `"✉️"`, `"🇯🇵"`, `"👍🏽"`,
+  `"👩‍👧"`). A family of three (18 bytes) is too long.
+- **An image:** `asset:` and the image's SHA-256 in 64 lowercase hex characters. A string
+  starting with `asset:` is never an emoji, whatever follows.
+
+`Doc::icon` gives the emoji, and None for anything else (an image, an empty or invalid string,
+or a value that isn't a string), so an image's or a bad icon's text is never drawn.
+`Doc::icon_asset` gives an image icon's SHA-256 for a host that draws images; the views draw
+nothing for one yet. `Limits::check_doc` reports an icon that's neither ([Limits](#limits)). The
+crate carries the field in `Doc::extra`.
 
 ## Properties and values
 
@@ -617,6 +632,11 @@ person of a kind the property doesn't allow, a date range ending before it start
 stored for a derived property (a created or edited time, created by or edited by). A filter
 depth of 4 is three levels of nested groups and their conditions, as Notion allows.
 
+A doc's `icon` ([Icons](#icons)) is checked too: an emoji of more than one grapheme cluster or
+over 16 bytes, an empty string, an `asset:` value that isn't followed by 64 lowercase hex
+characters, or a value that isn't a string or null. Icons count graphemes and bytes, not
+characters.
+
 ## The host's part
 
 The host is the app around the views. It:
@@ -737,7 +757,7 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
 - `tests/model.rs`: every fixture reads into the typed model and writes back as the same JSON;
   values read as their types; the fixtures are within the limits and their relations agree on
   both sides; unknown fields and kinds survive; over-limit and malformed input is reported or
-  clamped.
+  clamped; icons read as an emoji only when valid, and `asset:` icons never do.
 - `tests/engine.rs`: the fixtures' saved views work out as a person would expect; every operator
   on every type; sorts, groups and their keys; relations and back edits; what the engine leaves
   out and reports; and hostile values (every shape in every property, every operator with every
@@ -762,11 +782,11 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   fold, drags within a group (order keys) and across (the value and the key in one batch), drops
   on headers and New lines, sorted lists refusing reorder, multi-select swaps, new rows with
   their group's and filter's values, a long press carrying a row while a pan scrolls, 44-point
-  targets on touch, and no frames while idle.
+  targets on touch, no frames while idle, and no icon drawn for an `asset:` or invalid one.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu at 360, 700 and
   1400 wide, columns at their widths and their narrowest, on a board's cards, columns and
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
-  (grouped or not, focused, with a finger's sizes, and icons of the worst kind), laid out with
+  (grouped or not, focused, with a finger's sizes, and the worst valid icons), laid out with
   Core Text; no glyph leaves its place.
 - `tests/view_performance.rs`: the table, the board and the list with 10,000 rows, timed, as
   above.

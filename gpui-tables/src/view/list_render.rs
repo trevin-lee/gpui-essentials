@@ -242,6 +242,7 @@ impl TableView {
         let empty = r.title.is_empty();
         let title = self.card_title(r);
         let words = self.card_words(r);
+        // An emoji icon only: an image icon (`asset:`) or an invalid one draws nothing for now.
         let glyph = r.icon().map(str::to_owned);
         let values: Vec<AnyElement> = self
             .line_values(r, width)
@@ -339,8 +340,10 @@ impl TableView {
                     .items_center()
                     .gap(t.px(6.))
                     .when_some(glyph, |d, g| {
+                        let sel = format!("icon:{rid}");
                         d.child(
                             div()
+                                .debug_selector(move || sel)
                                 .flex_none()
                                 .size(m.icon)
                                 .flex()

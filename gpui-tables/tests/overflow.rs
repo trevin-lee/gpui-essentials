@@ -381,7 +381,8 @@ fn no_card_column_or_folded_line_lets_its_text_out() {
 }
 
 /// People's "By stage" list with every property on its lines, grouped by stage or not, and
-/// every row with an icon of the worst kind.
+/// every row with an icon of the worst valid kind (a long ZWJ sequence, a very wide glyph, a
+/// 16-byte flag). Longer icons are invalid, and draw nothing.
 fn hostile_list(grouped: bool) -> (Doc, Vec<Doc>) {
     const BY_STAGE: &str = "29bdd0f4-6c47-4d20-8928-78be9f6ae20b";
     let (mut db, mut rows) = hostile();
@@ -395,11 +396,12 @@ fn hostile_list(grouped: bool) -> (Doc, Vec<Doc>) {
     }
     for (i, r) in rows.iter_mut().enumerate() {
         let icon = match i % 3 {
-            0 => "👩🏽‍💻".to_owned(),
-            1 => format!("{WORD}{WORD}"),
-            _ => "🏳️‍🌈🎓📚✅🚀".to_owned(),
+            0 => "👩🏽‍💻",
+            1 => "\u{FDFD}",
+            _ => "\u{1F3F3}\u{FE0F}\u{200D}\u{26A7}\u{FE0F}",
         };
         r.extra.insert("icon".into(), icon.into());
+        assert_eq!(r.icon(), Some(icon));
     }
     (db, rows)
 }
