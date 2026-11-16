@@ -38,6 +38,7 @@ mod button;
 mod date_picker;
 pub mod icon;
 pub mod input;
+mod popover;
 mod press;
 mod root;
 mod size;
@@ -51,6 +52,7 @@ pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateValue, MonthGrid};
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
+pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
@@ -79,6 +81,7 @@ pub fn init(cx: &mut App) {
     root::init(cx);
     date_picker::init(cx);
     input::init(cx);
+    popover::init(cx);
     text::init(cx);
 }
 
