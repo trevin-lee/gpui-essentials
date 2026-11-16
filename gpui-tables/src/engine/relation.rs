@@ -218,7 +218,7 @@ impl<'a> RowIndex<'a> {
     /// A row by id, unless it's tombstoned.
     pub fn get(&self, id: &str) -> Option<&'a Doc> {
         let row = &self.rows[*self.by_id.get(id)?];
-        (!row.deleted).then_some(row)
+        (!row.is_deleted()).then_some(row)
     }
 
     /// The rows a relation value names, in its order, skipping ids it can't find.

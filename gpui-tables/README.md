@@ -72,7 +72,7 @@ let database: Doc = serde_json::from_str(r#"{
     "order": "a0", "folderId": null, "parentDocId": null, "parentObjectId": null,
     "cover": null, "favorite": false, "agents": [], "author": {"kind": "owner"},
     "updatedBy": {"kind": "owner"}, "created": 1793000000000, "updated": 1793000000000,
-    "rev": 1, "seq": 10, "deleted": false,
+    "rev": 1, "seq": 10, "deleted": null,
     "database": {
         "properties": [
             {"id": "name", "name": "Name", "type": "title", "config": {}, "order": "a0"},
@@ -390,7 +390,7 @@ Everything is a doc in the host's tree, the same shape for pages, databases and 
 | `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`. A row's `createdBy` and `editedBy` properties show them. An older doc may have no `updatedBy`. |
 | `created`, `updated` | Milliseconds since the Unix epoch. |
 | `rev`, `seq` | The host's revision and sequence numbers; carried, never read. |
-| `deleted` | A tombstone. Views leave deleted rows out. |
+| `deleted` | A tombstone: the time it was deleted, in milliseconds since the Unix epoch, or null while it isn't. Views leave deleted rows out. The crate reads it as `Option<i64>` (`Doc::is_deleted` says whether it's set) and writes the number or null. For older data it also reads `false` as null and `true` as 0 (deleted at an unknown time). |
 | `database` | Only on a database: `{properties: [Property], views: [View]}`. |
 | `values` | Only on a row: `{propertyId: value}`. |
 
@@ -557,7 +557,7 @@ The crate never changes the host's data. Everything a person does in a view come
 | `rowValueChanged` | `rowId`, `propertyId`, `value` | patches the row's `values` for that one property (null removes it) |
 | `relationChanged` | `rowId`, `propertyId`, `databaseId`, `backPropertyId`, `added`, `removed` | writes the other side of a two-way relation ([Relations](#relations)) |
 | `rowsMoved` | `rowIds`, `orders` | sets each row's `order` (`orders[i]` for `rowIds[i]`) |
-| `rowsDeleted` | `rowIds` | tombstones the rows |
+| `rowsDeleted` | `rowIds` | tombstones the rows: sets each one's `deleted` to the time now |
 | `propertyCreated`, `propertyChanged` | `databaseId`, `property` | writes the whole property into the database's `database.properties` |
 | `propertyDeleted` | `databaseId`, `propertyId` | removes it (rows' values for it may stay; they're ignored) |
 | `viewCreated`, `viewChanged` | `databaseId`, `view` | writes the whole view |
@@ -578,8 +578,9 @@ How the host writes them to the server:
     keys.
   - An agent and a person editing different cells of one row don't overwrite each other.
 - **New rows** (`rowCreated`) are the only time a row's `values` are written whole.
-- **Moving and deleting rows** set the docs' `order` and `deleted`, never their `values` (so a
-  `put` of the doc is safe: it leaves `values` alone).
+- **Moving and deleting rows** set the docs' `order` and `deleted` (the time of the delete),
+  never their `values` (so a `put` of the doc is safe: it leaves `values` alone). Undoing a
+  delete sets `deleted` back to null.
 - **Properties and views are last-write-wins** inside the database doc's `database` field, and
   their edits carry the whole property or view.
 - **One action, one batch.** Dropping a card in another board column is a `rowsMoved` and a
@@ -701,7 +702,8 @@ The host is the app around the views. It:
 
 - **Stores everything.** It hands the views the database doc and its row docs, applies the edits
   they emit (to its store and its server), and hands back the changed docs. The views redraw only
-  when it does.
+  when it does. It deletes a row by setting its `deleted` to the time (`rowsDeleted`); the views
+  leave out every doc whose `deleted` is set.
 - **Opens rows.** On `openRow` it shows the row's page, with gpui-blocks in the docs app. The crate
   never navigates and knows nothing of page content.
 - **Knows people and agents.** Through a host trait it gives the names of the owner and agents,

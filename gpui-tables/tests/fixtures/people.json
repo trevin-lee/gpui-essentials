@@ -22,7 +22,7 @@
     "updated": 1794335400000,
     "rev": 14,
     "seq": 2201,
-    "deleted": false,
+    "deleted": null,
     "database": {
       "properties": [
         {
@@ -384,7 +384,7 @@
     "updated": 1793869200000,
     "rev": 1,
     "seq": 2160,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
@@ -435,7 +435,7 @@
     "updated": 1793959200000,
     "rev": 2,
     "seq": 2161,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c"
@@ -492,7 +492,7 @@
     "updated": 1794049200000,
     "rev": 3,
     "seq": 2162,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c"
@@ -538,7 +538,7 @@
     "updated": 1794139200000,
     "rev": 4,
     "seq": 2163,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "353c631c-dfd4-4f37-9200-339d068739fa"
@@ -592,7 +592,7 @@
     "updated": 1794229200000,
     "rev": 5,
     "seq": 2164,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "a268aa87-2607-479d-a050-914a9d33a01c"
@@ -636,7 +636,7 @@
     "updated": 1794319200000,
     "rev": 6,
     "seq": 2165,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [],
       "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Independent consultant",
@@ -681,7 +681,7 @@
     "updated": 1794409200000,
     "rev": 7,
     "seq": 2166,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "a268aa87-2607-479d-a050-914a9d33a01c"
@@ -731,7 +731,7 @@
     "updated": 1793894400000,
     "rev": 8,
     "seq": 2167,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "a170b338-3926-4059-b28c-105d1fb17c23": [
         "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
@@ -781,7 +781,7 @@
     "updated": 1793613600000,
     "rev": 4,
     "seq": 2199,
-    "deleted": true,
+    "deleted": 1793613600000,
     "values": {
       "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "rowan.pike@kestrel-ceramics.example"
     }

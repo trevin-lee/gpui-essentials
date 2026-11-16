@@ -146,7 +146,7 @@ pub fn query(db: &DatabaseFields, view: &View, rows: &[Doc], cx: &Context) -> Vi
     issues.extend(filter_issues);
 
     let mut indexes: Vec<usize> = (0..rows.len())
-        .filter(|&i| !rows[i].deleted && filter.matches(&rows[i]))
+        .filter(|&i| !rows[i].is_deleted() && filter.matches(&rows[i]))
         .collect();
     sort::manual(rows, &mut indexes);
     issues.extend(sort::sort(db, &view.sort, rows, &mut indexes, cx));

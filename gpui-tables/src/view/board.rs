@@ -720,7 +720,7 @@ impl TableView {
     /// `next`): a `rowsMoved` of every row whose key changes.
     fn renumber(&self, row: usize, prev: Option<usize>, next: Option<usize>) -> Vec<Edit> {
         let mut all: Vec<usize> = (0..self.rows.len())
-            .filter(|&i| !self.rows[i].deleted && i != row)
+            .filter(|&i| !self.rows[i].is_deleted() && i != row)
             .collect();
         engine::sort::manual(&self.rows, &mut all);
         let at = match (prev, next) {

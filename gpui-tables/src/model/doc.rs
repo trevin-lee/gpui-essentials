@@ -202,9 +202,12 @@ pub struct Doc {
     /// The host's sequence number, carried and never read.
     #[serde(default)]
     pub seq: Option<i64>,
-    /// A tombstone: the doc is gone, and views leave it out.
-    #[serde(default)]
-    pub deleted: bool,
+    /// A tombstone: when the doc was deleted, in milliseconds since the Unix epoch, or None
+    /// while it isn't ([`Doc::is_deleted`]). Views leave deleted docs out. Written as the number
+    /// or null. Read as the number, with null or no field as None; older data's bools read too,
+    /// `false` as None and `true` as `Some(0)` (deleted at an unknown time).
+    #[serde(default, deserialize_with = "deleted_time")]
+    pub deleted: Option<i64>,
     /// A database's properties and views (kind "database" only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub database: Option<DatabaseFields>,
@@ -217,6 +220,40 @@ pub struct Doc {
 
 fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
+/// Reads a doc's `deleted`: a time in milliseconds is that time, and null (or no field) is
+/// None. Older data wrote a bool: `false` reads as None and `true` as `Some(0)` (deleted, at an
+/// unknown time; the epoch is also what a purge writes). Anything else is an error.
+fn deleted_time<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    struct Time;
+    impl<'de> serde::de::Visitor<'de> for Time {
+        type Value = Option<i64>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a time in milliseconds since the Unix epoch, or null")
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            Ok(Some(v))
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            i64::try_from(v)
+                .map(Some)
+                .map_err(|_| E::invalid_value(serde::de::Unexpected::Unsigned(v), &self))
+        }
+        fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+            Ok(v.then_some(0))
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+            d.deserialize_any(self)
+        }
+    }
+    d.deserialize_any(Time)
 }
 
 impl Doc {
@@ -239,7 +276,7 @@ impl Doc {
             updated: 0,
             rev: None,
             seq: None,
-            deleted: false,
+            deleted: None,
             database: None,
             values: None,
             extra: Extra::new(),
@@ -259,6 +296,12 @@ impl Doc {
         doc.order = order.into();
         doc.values = Some(values);
         doc
+    }
+
+    /// Whether the doc is a tombstone: its `deleted` holds a time. Views and queries leave it
+    /// out.
+    pub fn is_deleted(&self) -> bool {
+        self.deleted.is_some()
     }
 
     /// A row's value for a property id, if it has one.

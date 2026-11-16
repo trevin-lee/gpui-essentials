@@ -21,7 +21,7 @@
     "updated": 1793697120000,
     "rev": 6,
     "seq": 2150,
-    "deleted": false,
+    "deleted": null,
     "database": {
       "properties": [
         {
@@ -247,7 +247,7 @@
     "updated": 1793534400000,
     "rev": 2,
     "seq": 2100,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://kestrel-ceramics.example",
       "57ee05cd-e009-42c7-bebf-f20686734721": "616499c9-e25a-4605-aec6-f0245bd86d40",
@@ -288,7 +288,7 @@
     "updated": 1793620800000,
     "rev": 3,
     "seq": 2101,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://bluefin-robotics.example",
       "57ee05cd-e009-42c7-bebf-f20686734721": "153e7c2a-26a2-40bd-bb12-87fff52ddf5d",
@@ -326,7 +326,7 @@
     "updated": 1793707200000,
     "rev": 4,
     "seq": 2102,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://cedarpine.example",
       "57ee05cd-e009-42c7-bebf-f20686734721": "a8948c89-3b61-4676-a6bb-7dbd2d1c9af0",
@@ -363,7 +363,7 @@
     "updated": 1793793600000,
     "rev": 5,
     "seq": 2103,
-    "deleted": false,
+    "deleted": null,
     "values": {
       "4cdd2055-930d-4eaf-94f4-733f3e7d1bfb": "https://lumen-freight.example",
       "57ee05cd-e009-42c7-bebf-f20686734721": "d4c28c2e-7c26-447f-8316-909e3bbbe9ea",
