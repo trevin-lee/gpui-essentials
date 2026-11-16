@@ -200,7 +200,7 @@ impl Draw<'_, '_> {
         let copy_it = self
             .cx
             .listener(move |this, _, _, cx| this.copy(&key, &source, cx));
-        let copy = pressable(self.id(&format!("{path}.copy")))
+        let copy = pressable(self.id(&format!("{path}.copy")), self.t)
             .accessibility_label("Copy")
             .flex_none()
             .h(self.px(26.))

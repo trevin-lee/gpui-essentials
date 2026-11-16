@@ -28,10 +28,11 @@ pub(crate) use form::field_key;
 
 /// Something to press: a row centring what's in it, its text one line tall, as every press in
 /// a card is laid out (styles given after it refine these). It takes the focus with Tab,
-/// presses with a click, a tap, Enter or Space, and shows the host's focus ring (gpui-core's
-/// theme) when the keyboard put the focus there.
-pub(crate) fn pressable(id: ElementId) -> Press {
+/// presses with a click, a tap, Enter or Space, and shows the theme's focus ring when the
+/// keyboard put the focus there.
+pub(crate) fn pressable(id: ElementId, t: &CardTheme) -> Press {
     Press::new(id)
+        .focus_ring_color(t.colors.focus_ring)
         .flex()
         .items_center()
         .justify_center()

@@ -690,7 +690,7 @@ impl Draw<'_, '_> {
                     let go = self.cx.listener(move |this, _, window, cx| {
                         this.press(&action, &words, None, None, window, cx)
                     });
-                    let press = pressable(self.id(&format!("{path}.i{i}")))
+                    let press = pressable(self.id(&format!("{path}.i{i}")), self.t)
                         .accessibility_label(it.title.clone())
                         .w_full()
                         .min_w_0()

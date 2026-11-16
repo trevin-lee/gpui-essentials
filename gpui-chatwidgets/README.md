@@ -159,10 +159,8 @@ pixels and are drawn as `rems(size / rem_base)`, so a host that zooms by changin
 rem zooms its cards too. `frame` draws the card in a rounded, bordered box, as a chat bubble.
 
 GPUI Kit's text fields, date picker and slider take their colours from GPUI Kit's own theme,
-which is also the host's. The focus ring around a button, tab or chip focused from the keyboard
-is gpui-core's, in its theme's `ring` colour. To set it in the cards' mode, depend on
-`gpui-core` from this repository at the same commit and call
-`gpui_core::Theme::set(gpui_core::Theme::light(), cx)` (or `dark()`, the default).
+which is also the host's. The ring around a button, tab, chip or choice focused from the
+keyboard is the theme's `colors.focus_ring`.
 
 ### Hooks and events
 
@@ -172,7 +170,7 @@ is gpui-core's, in its theme's `ring` colour. To set it in the cards' mode, depe
 | `send(text)` | A press that reaches the agent (`@ToAssistant`, or a button with no action). The text is the press's words, then any context and the form's values as JSON, as OpenUI's web renderer writes it. |
 | `open_link(link)` | `@OpenUrl`, or a link in Markdown: only http and https, never with a user name or password. |
 | `image(src, reply)` | Once per image reference. Return the bytes, `Pending` (then `reply.deliver`), or `Refused`. |
-| `icon(name)` | A Lucide icon name; return an SVG asset path. `lucide_icon` finds one in GPUI Kit's catalog. |
+| `icon(name)` | A Lucide icon name; return an SVG asset path. `lucide_icon` finds one in gpui-core's Lucide set, which its `Icons` asset source serves. |
 | `scroller(selector)` | Each region that scrolls sideways or clips its own text, for a host's overflow test. |
 | `changed(store)` | The card's state changed; keep `CardView::store` to restore it later with `with_store`. |
 
