@@ -16,6 +16,8 @@ mod view;
 
 pub use doc::{DatabaseFields, Doc, DocKind, Person, PersonKind, Values};
 pub use edit::{Edit, TableEvent};
+#[cfg(feature = "gpui")]
+pub(crate) use limits::truncate_chars;
 pub use limits::{Limits, Problem, ProblemKind};
 pub use property::{Color, NumberFormat, Property, PropertyConfig, PropertyType, SelectOption};
 pub use value::{DateValue, Value};

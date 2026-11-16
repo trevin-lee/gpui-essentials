@@ -57,22 +57,23 @@ use gpui::{App, KeyBinding, actions};
 actions!(
     gpui_tables,
     [
-        /// The cell above, or the menu entry above.
+        /// The cell above. (In a menu or a month, gpui-core's PopupMenu and MonthGrid take the
+        /// arrows, Page Up and Page Down, Enter and Escape themselves.)
         Up,
-        /// The cell below, or the menu entry below.
+        /// The cell below.
         Down,
-        /// The cell to the left (a day back in the date picker).
+        /// The cell to the left.
         Left,
-        /// The cell to the right (a day on in the date picker).
+        /// The cell to the right.
         Right,
         /// The next cell, on to the next line after the last.
         NextCell,
         /// The previous cell.
         PrevCell,
-        /// Opens a row from its title, edits any other cell, folds a group, makes a row, or
-        /// does the highlighted menu entry.
+        /// Opens a row from its title, edits any other cell, folds a group, makes a row.
         Confirm,
-        /// The highlighted menu entry, adding to what's there (a sort added to the others).
+        /// Shift-Enter: as Enter. (In a menu, gpui-core's PopupMenu picks with Shift held, and
+        /// a sort picked so is added to the others.)
         ConfirmAdd,
         /// Closes a menu, else lets go of the focused cell.
         Cancel,
@@ -82,9 +83,9 @@ actions!(
         Edit,
         /// Opens the focused cell's column menu.
         ColumnMenu,
-        /// A page up (a month back in the date picker).
+        /// A page up.
         PageUp,
-        /// A page down (a month on in the date picker).
+        /// A page down.
         PageDown,
     ]
 );

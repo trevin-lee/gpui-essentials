@@ -88,7 +88,7 @@ fn typing_stops_at_a_values_limit() {
 
     // A filter's value, at the limit of a value of its column's type.
     open_menu(cx, "Email");
-    click(cx, "entry:Contains…");
+    click(cx, "menu-item-Contains…");
     assert!(matches!(
         editing(&table, cx),
         Some((TextTarget::Filter { .. }, _))
@@ -128,7 +128,7 @@ fn a_hosts_field_gets_the_limit_and_its_answer_is_cut() {
     // A filter's value, as a cell's: the host's field is told the limit, and what it answers
     // is cut to it.
     open_menu(cx, "Email");
-    click(cx, "entry:Contains…");
+    click(cx, "menu-item-Contains…");
     let edit = host
         .texts
         .borrow_mut()
