@@ -121,6 +121,7 @@ pub struct Popover {
     return_focus: Option<FocusHandle>,
     max_height: Rems,
     match_trigger_width: bool,
+    close_when_scrolled_away: bool,
     colors: Option<PopoverColors>,
     role: Role,
     label: Option<gpui::SharedString>,
@@ -140,6 +141,7 @@ impl Popover {
             return_focus: None,
             max_height: rems(24.),
             match_trigger_width: true,
+            close_when_scrolled_away: true,
             colors: None,
             role: Role::Dialog,
             label: None,
@@ -201,6 +203,14 @@ impl Popover {
     /// its content: a month under a wide field.
     pub fn match_trigger_width(mut self, matching: bool) -> Self {
         self.match_trigger_width = matching;
+        self
+    }
+
+    /// Whether it asks to close when what it hangs from scrolls out of view (on by default).
+    /// Off, it stays open at the edge of the view nearest that, until what it hangs from comes
+    /// back: for a host that scrolls a table's cell under an open menu.
+    pub fn close_when_scrolled_away(mut self, close: bool) -> Self {
+        self.close_when_scrolled_away = close;
         self
     }
 
@@ -307,6 +317,7 @@ impl RenderOnce for Popover {
             panel,
             max_height: self.max_height,
             match_trigger_width: self.match_trigger_width,
+            close_when_scrolled_away: self.close_when_scrolled_away,
             on_dismiss: self.on_dismiss,
         }
     }
@@ -396,6 +407,17 @@ fn place(
     point(x.round(), y.round())
 }
 
+/// `b` moved the least way that puts it inside `inside` (its own size kept, up to that's).
+fn hold_inside(b: Bounds<Pixels>, inside: Bounds<Pixels>) -> Bounds<Pixels> {
+    let size = gpui::size(
+        b.size.width.min(inside.size.width),
+        b.size.height.min(inside.size.height),
+    );
+    let x = b.left().max(inside.left()).min(inside.right() - size.width);
+    let y = b.top().max(inside.top()).min(inside.bottom() - size.height);
+    Bounds::new(point(x, y), size)
+}
+
 /// Draws the trigger in place, and the open panel over everything, placed from where the
 /// trigger (or the anchor) is this frame.
 struct PopoverElement {
@@ -404,6 +426,7 @@ struct PopoverElement {
     panel: Option<Stateful<gpui::Div>>,
     max_height: Rems,
     match_trigger_width: bool,
+    close_when_scrolled_away: bool,
     on_dismiss: Option<DismissFn>,
 }
 
@@ -465,7 +488,7 @@ impl Element for PopoverElement {
         let Some(panel) = self.panel.take() else {
             return;
         };
-        let Some(anchor) = self.anchor.get() else {
+        let Some(mut anchor) = self.anchor.get() else {
             return;
         };
         let view = Bounds::new(Point::default(), window.viewport_size());
@@ -477,13 +500,17 @@ impl Element for PopoverElement {
         // Scrolled out of view (a point anchor counts when it's on the window).
         let shown = anchor.intersects(&visible)
             || (anchor.size.width == px(0.) && visible.contains(&anchor.origin));
-        if !shown {
+        if !shown && self.close_when_scrolled_away {
             if let Some(f) = self.on_dismiss.clone() {
                 window.defer(cx, move |window, cx| {
                     f(&DismissReason::ScrolledAway, window, cx)
                 });
             }
             return;
+        }
+        if !shown {
+            // Held at the edge of the view nearest where it hangs from.
+            anchor = hold_inside(anchor, visible.intersect(&view));
         }
 
         let rem = window.rem_size();
