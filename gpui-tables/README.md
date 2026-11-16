@@ -150,8 +150,8 @@ rendered offscreen).
 
 | | |
 |---|---|
-| ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: sort, filter by an option, move, hide](docs/table-menu.png) |
-| ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked, with Today and Clear](docs/table-date.png) |
+| ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: sort, filter by an option, move, hide, with room for checks before the labels](docs/table-menu.png) |
+| ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked and today ringed, with Today and Clear](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
 | ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | |
 
@@ -227,21 +227,24 @@ rendered offscreen).
   typing). A date's month takes the arrows by days and weeks, Page Up and Page Down by months,
   Enter picks, Escape closes.
 - **Menus.** The column's menu and the Columns menu are gpui-core's `PopupMenu` in a `Popover`:
-  entries with icons and checks under their sections' headings, the picked sort, filters and
-  shown columns checked. A select's, multi-select's, person's or relation's picker is
-  gpui-core's `Picker`: a search field over its choices, an option drawn as its coloured pill as
-  in a cell (its name is still the entry's label, which assistive tech reads and the search
-  matches), the value's checked. A multi-select's (and people's and relations') stays open as
-  choices are toggled, a select's closes on a pick. A select's or multi-select's offers
-  Create “text” while what's typed names no option, up to the options' limit. Rows are 28
-  points at the table's text size (44 on touch). They hang below what opened them, or above it
-  where there's more room, inside the window and scrolling past 520 points, at least a menu's
-  width and as wide as their cell or header, in the theme's popover, text, hover, line and
-  accent (checks) colours. A menu whose column is scrolled out of view stays open at the
-  window's edge.
+  entries with icons under their sections' headings (at the table's small size), the picked sort,
+  filters and shown columns checked, the check in a column before the label as in Notion (every
+  entry keeps its room, so the labels line up). A select's, multi-select's, person's or relation's
+  picker is gpui-core's `Picker`: a search field over its choices, an option drawn as its coloured
+  pill as in a cell (its name is still the entry's label, which assistive tech reads and the search
+  matches), the value's checked, before it as in the menus. Its search field is drawn as the table's
+  fields typed in place: the caret and the selection in the accent, a faint placeholder. A
+  multi-select's (and people's and relations') stays open as choices are toggled, a select's closes
+  on a pick. A select's or multi-select's offers Create “text” while what's typed names no option,
+  up to the options' limit. Rows are 28 points at the table's text size (44 on touch). They hang
+  below what opened them, or above it where there's more room, inside the window and scrolling past
+  520 points, at least a menu's width and as wide as their cell or header, in the theme's popover,
+  text, hover, line and accent (checks) colours. A menu whose column is scrolled out of view stays
+  open at the window's edge.
 - **Dates.** A date's month is gpui-core's `MonthGrid` in a `Popover`, in the week the host
-  starts on, its days 28 points (44 on touch), the picked day in the theme's accent, a range's
-  days between its ends in the selection colour, Today and Clear under it. A pick keeps the
+  starts on, its days 28 points (44 on touch), the picked day in the theme's accent, today
+  ringed in it, a range's days between its ends in the selection colour, Today and Clear under
+  it. A pick keeps the
   value's time of day and its range's length.
 - **New rows.** The New row at the end of the table, or of each group, emits a `rowCreated` with
   an order key after every row's (`order::between`) and the values that keep the row where it was

@@ -1036,6 +1036,218 @@ fn the_month_is_the_tables_with_its_footer_and_ranges(cx: &mut TestAppContext) {
     );
 }
 
+/// The glyphs drawn inside `within`, over the open popover (not the table's under it): where
+/// each is, and its colour.
+fn glyphs(cx: &mut VisualTestContext, within: Bounds<Pixels>) -> Vec<(Bounds<Pixels>, Hsla)> {
+    let popover = TableTheme::dark().colors.popover;
+    cx.update(|window, _| {
+        let s = window.scale_factor();
+        let scene = window.rendered_scene();
+        let to_px = |b: Bounds<ScaledPixels>| {
+            let at = point(px(b.origin.x.as_f32() / s), px(b.origin.y.as_f32() / s));
+            Bounds::new(
+                at,
+                size(
+                    px(b.size.width.as_f32() / s),
+                    px(b.size.height.as_f32() / s),
+                ),
+            )
+        };
+        let over = scene
+            .quads
+            .iter()
+            .filter(|q| q.background.as_solid() == Some(popover))
+            .filter(|q| to_px(q.bounds).contains(&within.center()))
+            .map(|q| q.order)
+            .max()
+            .expect("a popover is open");
+        scene
+            .monochrome_sprites
+            .iter()
+            .map(|g| (g.order, g.bounds, g.color))
+            .chain(
+                scene
+                    .subpixel_sprites
+                    .iter()
+                    .map(|g| (g.order, g.bounds, g.color)),
+            )
+            .map(|(order, b, color)| (order, to_px(b), color))
+            .filter(|(order, b, _)| *order > over && within.contains(&b.center()))
+            .map(|(_, b, color)| (b, color))
+            .collect()
+    })
+}
+
+/// The colour of the border drawn exactly round `what` (a day of the month, say), if any.
+fn ring(cx: &mut VisualTestContext, what: &str) -> Option<Hsla> {
+    let b = rect(cx, what);
+    cx.update(|window, _| {
+        let s = window.scale_factor();
+        let near = |a: f32, b: Pixels| (a - f32::from(b) * s).abs() <= 1.;
+        window
+            .rendered_scene()
+            .quads
+            .iter()
+            .filter(|q| {
+                near(q.bounds.origin.x.as_f32(), b.origin.x)
+                    && near(q.bounds.origin.y.as_f32(), b.origin.y)
+                    && near(q.bounds.size.width.as_f32(), b.size.width)
+                    && near(q.bounds.size.height.as_f32(), b.size.height)
+            })
+            .filter(|q| q.border_widths.left.as_f32() > 0. && q.border_color.a > 0.)
+            .map(|q| q.border_color)
+            .next()
+    })
+}
+
+/// In the open menu's entry `label`: the check's column comes before the label, keeping its
+/// room whether or not the entry is checked, and holds the check only when it is. (GPUI's test
+/// app has no assets, so the icon itself draws nothing: it's seen by the room it takes.)
+/// Returns where the label starts.
+fn check_leads(cx: &mut VisualTestContext, label: &str, checked: bool) -> Pixels {
+    let row = rect(cx, format!("menu-item-{label}"));
+    let column = rect(cx, format!("menu-check-{label}"));
+    assert!(
+        row.contains(&column.center()),
+        "{label}'s check is in its entry"
+    );
+    let rem = cx.update(|window, _| window.rem_size());
+    let room = TableTheme::dark().pixels(16., rem);
+    assert!(
+        (column.size.width - room).abs() < px(0.5),
+        "{label}: {column:?}"
+    );
+    assert!(
+        (column.left() - row.left()) < px(12.),
+        "{label}'s check starts its entry"
+    );
+    assert_eq!(
+        column.size.height > px(0.),
+        checked,
+        "{label}'s check: {column:?}"
+    );
+    // The label: its pill when it has one, else its glyphs.
+    let start = if drawn(cx, format!("pill:{label}")) {
+        rect(cx, format!("pill:{label}")).left()
+    } else {
+        glyphs(cx, row)
+            .iter()
+            .map(|(b, _)| b.left())
+            .min()
+            .unwrap_or_else(|| panic!("{label}'s label is drawn"))
+    };
+    assert!(
+        start >= column.right(),
+        "{label}'s check comes before its label"
+    );
+    start
+}
+
+// Laid out with Core Text, as on screen, so the labels' glyphs are drawn.
+#[test]
+fn checks_lead_the_labels_in_menus_and_pickers() {
+    let mut cx = TestAppContext::build_with_text_system(
+        TestDispatcher::new(0),
+        None,
+        std::sync::Arc::new(gpui_apple::AppleTextSystem::new()),
+    );
+    let host = TestHost::new();
+    let (table, cx) = open_people(&mut cx, &host);
+    // The column's menu: the sort that's on is checked, the other keeps the room, and their
+    // labels line up.
+    menu(cx, "Stage");
+    click(cx, "menu-item-Sort ascending");
+    menu(cx, "Stage");
+    let on = check_leads(cx, "Sort ascending", true);
+    let off = check_leads(cx, "Sort descending", false);
+    assert!(
+        (on - off).abs() <= px(1.),
+        "the labels line up: {on:?}, {off:?}"
+    );
+    keys(cx, "escape");
+    // The Columns menu: a shown column checked, a hidden one not.
+    menu(cx, "Role");
+    click(cx, "menu-item-Hide");
+    click(cx, "columns-button");
+    let on = check_leads(cx, "Stage", true);
+    let off = check_leads(cx, "Role", false);
+    assert!(
+        (on - off).abs() <= px(1.),
+        "the labels line up: {on:?}, {off:?}"
+    );
+    keys(cx, "escape");
+    // A select's picker: its option checked, the others not, their pills lined up. Its search
+    // field is drawn as the table's own fields: the placeholder faint.
+    table.update(cx, |t, cx| t.focus_cell(IMANI, STAGE, cx));
+    keys(cx, "enter");
+    let faint = TableTheme::dark().colors.text_faint;
+    let menu = rect(cx, "menu");
+    let placeholder = glyphs(cx, menu).iter().filter(|(_, c)| *c == faint).count();
+    assert!(
+        placeholder > 10,
+        "the placeholder is faint: {placeholder} glyphs"
+    );
+    let on = check_leads(cx, "Warm", true);
+    let off = check_leads(cx, "Lead", false);
+    assert!(
+        (on - off).abs() < px(0.5),
+        "the pills line up: {on:?}, {off:?}"
+    );
+    keys(cx, "escape");
+    // A multi-select's (Imani is tagged Investor).
+    table.update(cx, |t, cx| t.focus_cell(IMANI, TAGS, cx));
+    keys(cx, "enter");
+    let on = check_leads(cx, "Investor", true);
+    let off = check_leads(cx, "Mentor", false);
+    assert!(
+        (on - off).abs() < px(0.5),
+        "the pills line up: {on:?}, {off:?}"
+    );
+    keys(cx, "escape");
+    // A person's.
+    table.update(cx, |t, cx| t.focus_cell(ANA, OWNER, cx));
+    keys(cx, "enter");
+    click(cx, "menu-item-Career Planning");
+    check_leads(cx, "Career Planning", true);
+    keys(cx, "escape");
+    // A relation's.
+    table.update(cx, |t, cx| t.focus_cell(ANA, COMPANY, cx));
+    keys(cx, "enter");
+    click(cx, "menu-item-Bluefin Robotics");
+    check_leads(cx, "Bluefin Robotics", true);
+    keys(cx, "escape");
+}
+
+#[gpui::test]
+fn the_month_rings_today(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people(cx, &host);
+    let theme = TableTheme::dark();
+    // November 15 is today (NOW): in a month opened on the 20th it's ringed in the accent and
+    // not filled; the picked day is filled and not ringed.
+    let day = engine::time::days_from_civil(2026, 11, 20);
+    table.update(cx, |t, cx| {
+        let db = t.database().clone();
+        let mut rows = t.rows().to_vec();
+        let r = rows.iter_mut().find(|r| r.id == ANA).unwrap();
+        r.values
+            .get_or_insert_with(Default::default)
+            .insert(LAST_CONTACTED.into(), Value::date_on_day(day));
+        t.set_docs(db, rows, cx);
+    });
+    table.update(cx, |t, cx| t.focus_cell(ANA, LAST_CONTACTED, cx));
+    keys(cx, "enter");
+    assert_eq!(
+        NOW.div_euclid(engine::time::DAY_MS),
+        engine::time::days_from_civil(2026, 11, 15)
+    );
+    assert_eq!(ring(cx, "day-2026-11-15"), Some(theme.colors.accent));
+    assert_eq!(fill(cx, "day-2026-11-15"), None);
+    assert_eq!(fill(cx, "day-2026-11-20"), Some(theme.colors.accent));
+    assert_ne!(ring(cx, "day-2026-11-20"), Some(theme.colors.accent));
+    assert_eq!(ring(cx, "day-2026-11-16"), None);
+}
+
 #[gpui::test]
 fn the_keyboard_moves_the_focus_and_opens_rows(cx: &mut TestAppContext) {
     let host = TestHost::new();

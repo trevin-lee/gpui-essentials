@@ -720,6 +720,7 @@ impl TableView {
     /// scrolls), at least a menu's width.
     fn render_editor(&self, e: &super::table::Editor, column: usize) -> AnyElement {
         let t = &self.theme;
+        let field = FieldColors::of(t);
         // A number is typed at the right, where the cell shows it.
         let align = if e.kind == PropertyType::Number {
             TextAlign::Right
@@ -730,9 +731,9 @@ impl TableView {
             .text_align(align)
             .appearance(false)
             .accessibility_label(e.label.clone())
-            .caret_color(t.colors.accent)
-            .selection_color(t.colors.accent.opacity(0.3))
-            .placeholder_color(t.colors.text_faint)
+            .caret_color(field.caret)
+            .selection_color(field.selection)
+            .placeholder_color(field.placeholder)
             .flex_1()
             .min_w_0();
         if !e.multiline() {
@@ -1349,8 +1350,9 @@ impl TableView {
     }
 
     /// The column's menu or the Columns menu as gpui-core's PopupMenu: its sections under their
-    /// headings, rows 28 points tall at the table's text size (44 on touch), opening with its
-    /// first entry highlighted.
+    /// headings (at the table's small size), rows 28 points tall at the table's text size (44 on
+    /// touch), checks in a column before the labels as Notion's, opening with its first entry
+    /// highlighted.
     fn popup_menu(&self, cx: &mut Context<Self>) -> PopupMenu {
         let t = &self.theme;
         let (entries, actions) = self.menu_entries();
@@ -1361,6 +1363,8 @@ impl TableView {
         .touch(t.touch)
         .row_height(t.px(28.))
         .text_size(t.px(t.sizes.text))
+        .heading_size(t.px(t.sizes.small))
+        .check_leading(true)
         .colors(self.menu_colors());
         for e in entries {
             menu = match e {
@@ -1372,10 +1376,13 @@ impl TableView {
     }
 
     /// A cell's picker as gpui-core's Picker: typing searches the options (people, rows), Enter
-    /// picks the first match, and it opens on the current value. A select's or multi-select's
-    /// offers to create an option from what's typed ([`TableView::create_option`]).
+    /// picks the first match, and it opens on the current value. Checks lead the labels, as in
+    /// the menus, and its search field is drawn as the table's other fields ([`FieldColors`]).
+    /// A select's or multi-select's offers to create an option from what's typed
+    /// ([`TableView::create_option`]).
     fn picker(&self, cell: super::CellRef, cx: &mut Context<Self>) -> Picker {
         let t = &self.theme;
+        let field = FieldColors::of(t);
         let (entries, actions) = self.menu_entries();
         let kind = self.cell_target(cell).map(|(_, p)| p.kind.clone());
         let placeholder = match kind {
@@ -1395,6 +1402,10 @@ impl TableView {
         .touch(t.touch)
         .row_height(t.px(28.))
         .text_size(t.px(t.sizes.text))
+        .check_leading(true)
+        .caret_color(field.caret)
+        .selection_color(field.selection)
+        .placeholder_color(field.placeholder)
         .colors(self.menu_colors())
         .on_select(self.on_pick(actions, cx));
         if self.can_create_option() {
@@ -1407,7 +1418,8 @@ impl TableView {
     }
 
     /// The month's colours, from the table's theme: the accent for the picked day (or a
-    /// range's ends), the selection's tint between them, the hover fill.
+    /// range's ends) and the ring round today, the selection's tint between them, the hover
+    /// fill.
     fn month_colors(&self) -> DatePickerColors {
         let t = &self.theme;
         DatePickerColors {
@@ -1418,6 +1430,7 @@ impl TableView {
             muted: Some(t.colors.text_muted),
             cursor: Some(t.colors.line_strong),
             focus_ring: Some(t.colors.focus.opacity(0.5)),
+            today_ring: Some(t.colors.accent),
             ..Default::default()
         }
     }
@@ -1459,6 +1472,7 @@ impl TableView {
     /// field. Enter, Tab or pressing elsewhere applies it, Escape closes it.
     fn render_filter_value(&self, column: usize) -> AnyElement {
         let t = &self.theme;
+        let field = FieldColors::of(t);
         let Some(e) = self.editor.as_ref() else {
             return div().into_any_element();
         };
@@ -1501,14 +1515,33 @@ impl TableView {
                         Input::new(&e.state)
                             .appearance(false)
                             .accessibility_label(label)
-                            .caret_color(t.colors.accent)
-                            .selection_color(t.colors.accent.opacity(0.3))
-                            .placeholder_color(t.colors.text_faint)
+                            .caret_color(field.caret)
+                            .selection_color(field.selection)
+                            .placeholder_color(field.placeholder)
                             .flex_1()
                             .min_w_0(),
                     ),
             )
             .into_any_element()
+    }
+}
+
+/// The colours of every field the table types in (a cell's value in place, a filter's value, a
+/// picker's search), so they all look alike: the caret in the accent, the selection the accent
+/// at 30%, the placeholder faint.
+struct FieldColors {
+    caret: Hsla,
+    selection: Hsla,
+    placeholder: Hsla,
+}
+
+impl FieldColors {
+    fn of(t: &super::TableTheme) -> Self {
+        Self {
+            caret: t.colors.accent,
+            selection: t.colors.accent.opacity(0.3),
+            placeholder: t.colors.text_faint,
+        }
     }
 }
 
