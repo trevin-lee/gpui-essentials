@@ -1,7 +1,28 @@
 // Changed in Trevin Lee's fork (2026): callout and toggle kinds.
 use gpui::SharedString;
 
-use gpui_kit::base::text::editor_host::ColumnAlign;
+/// The alignment of a table column.
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub enum ColumnAlign {
+    /// No alignment in the delimiter row (`---`); drawn like `Left`.
+    #[default]
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+impl From<markdown::mdast::AlignKind> for ColumnAlign {
+    fn from(value: markdown::mdast::AlignKind) -> Self {
+        use markdown::mdast::AlignKind as A;
+        match value {
+            A::None => Self::None,
+            A::Left => Self::Left,
+            A::Center => Self::Center,
+            A::Right => Self::Right,
+        }
+    }
+}
 
 /// Public, payload-light projection of a block's kind, for matching in
 /// toolbar code. Payloads (code language, table alignments, definition

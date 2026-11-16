@@ -10,7 +10,7 @@ use super::{
     state::BlockEditorState,
     table::{TableEdit, TableLine},
 };
-use gpui_kit::base::text::editor_host::ColumnAlign;
+use crate::kind::ColumnAlign;
 
 /// Extra reach around a table where its grips still show.
 const REACH: f32 = 28.;

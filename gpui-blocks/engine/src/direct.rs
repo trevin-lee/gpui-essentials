@@ -14,8 +14,45 @@ use super::{
     kind::BlockKindData,
 };
 use gpui_kit::base::text::editor_host::{
-    BlockNode, BlockState, CodeBlock, InlineNode, Paragraph, Span, Table,
+    self as kit, BlockNode, BlockState, CodeBlock, InlineNode, Paragraph, Span, Table,
 };
+
+/// A mark as GPUI Kit's renderer takes it.
+fn kit_mark(mark: &crate::text_mark::TextMark) -> kit::TextMark {
+    kit::TextMark {
+        bold: mark.bold,
+        italic: mark.italic,
+        strikethrough: mark.strikethrough,
+        underline: mark.underline,
+        code: mark.code,
+        highlight: mark.highlight,
+        link: mark.link.as_ref().map(|link| kit::LinkMark {
+            url: link.url.clone(),
+            identifier: link.identifier.clone(),
+            title: link.title.clone(),
+        }),
+    }
+}
+
+/// A picture as GPUI Kit's renderer takes it.
+fn kit_image(image: &crate::text_mark::ImageNode) -> kit::ImageNode {
+    let mut node = kit::ImageNode::default();
+    node.url = image.url.clone();
+    node.title = image.title.clone();
+    node.alt = image.alt.clone();
+    node
+}
+
+/// A column alignment as GPUI Kit's renderer takes it.
+fn kit_align(align: crate::kind::ColumnAlign) -> kit::ColumnAlign {
+    use crate::kind::ColumnAlign as A;
+    match align {
+        A::None => kit::ColumnAlign::None,
+        A::Left => kit::ColumnAlign::Left,
+        A::Center => kit::ColumnAlign::Center,
+        A::Right => kit::ColumnAlign::Right,
+    }
+}
 
 /// The surface an open toggle is drawn in; see [`crate::surfaces`].
 pub const TOGGLE_OPEN_SURFACE: &str = "editor-toggle-open";
@@ -28,18 +65,18 @@ pub(crate) fn paragraph(inline: &InlineText, id: BlockId, placeholders: bool) ->
     for (range, mark, atom) in inline.pieces() {
         match atom {
             Some(InlineAtom::Image(image)) if placeholders => {
-                paragraph.push(image_placeholder(image).marks(vec![(0..1, mark.clone())]))
+                paragraph.push(image_placeholder(image).marks(vec![(0..1, kit_mark(mark))]))
             }
-            Some(InlineAtom::Image(image)) => paragraph.push(InlineNode::image(image.clone())),
+            Some(InlineAtom::Image(image)) => paragraph.push(InlineNode::image(kit_image(image))),
             Some(InlineAtom::Custom(node)) => {
                 let node = InlineNode::custom(node.clone());
                 let len = node.text().len();
-                paragraph.push(node.marks(vec![(0..len, mark.clone())]));
+                paragraph.push(node.marks(vec![(0..len, kit_mark(mark))]));
             }
             None => {
                 let text = &inline.text()[range];
                 paragraph.push(
-                    InlineNode::new(text.to_string()).marks(vec![(0..text.len(), mark.clone())]),
+                    InlineNode::new(text.to_string()).marks(vec![(0..text.len(), kit_mark(mark))]),
                 );
             }
         }
@@ -50,7 +87,7 @@ pub(crate) fn paragraph(inline: &InlineText, id: BlockId, placeholders: bool) ->
 /// An image atom shown as its alt text, never loading the image. It is a
 /// custom inline object without a renderer, which draws its text fallback and
 /// stays one atomic caret and selection unit.
-fn image_placeholder(image: &gpui_kit::base::text::editor_host::ImageNode) -> InlineNode {
+fn image_placeholder(image: &crate::text_mark::ImageNode) -> InlineNode {
     let label: gpui::SharedString = image
         .alt
         .clone()
@@ -272,7 +309,7 @@ impl NodeCache {
                     .iter()
                     .map(|row| self.row(doc, *row))
                     .collect(),
-                aligns.clone(),
+                aligns.iter().copied().map(kit_align).collect(),
             )),
             BlockKindData::TableRow | BlockKindData::TableCell => return None,
             BlockKindData::HorizontalRule => BlockNode::HorizontalRule { span: None },

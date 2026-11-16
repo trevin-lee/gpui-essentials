@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
+use crate::kind::ColumnAlign;
+use crate::text_mark::TextMark;
 use gpui::StyledImage as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -18,7 +20,6 @@ use gpui::{
 use gpui_core::text::paragraph::{
     Affinity, CodeStyle, InlineBox, Marks, Paragraph, ParagraphLayout, ParagraphStyle,
 };
-use gpui_kit::base::text::editor_host::{ColumnAlign, TextMark};
 
 use super::extension::{CustomNode, Extensions, InlineContext};
 use super::import::SOURCE_INLINE;

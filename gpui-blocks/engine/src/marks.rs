@@ -1,6 +1,6 @@
 use gpui::{Hsla, SharedString};
 
-use gpui_kit::base::text::editor_host::{LinkMark, TextMark};
+use crate::text_mark::{LinkMark, TextMark};
 
 /// A kind of inline mark, keyed on exactly `TextMark`'s attributes (D12).
 #[non_exhaustive]
