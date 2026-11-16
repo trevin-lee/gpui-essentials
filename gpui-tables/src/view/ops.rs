@@ -5,10 +5,10 @@
 use serde_json::Value as Json;
 
 use super::format;
-use crate::engine::GroupKey;
+use crate::engine::{DAY_MS, GroupKey};
 use crate::model::{
-    Column, Condition, DatabaseFields, Direction, Filter, FilterOp, Limits, Person, Property,
-    PropertyType, Sort, Value, Values, View,
+    Column, Condition, DatabaseFields, DateValue, Direction, Filter, FilterOp, Limits, Person,
+    Property, PropertyType, Sort, Value, Values, View,
 };
 use crate::order;
 
@@ -389,4 +389,101 @@ pub fn group_value(p: &Property, key: &GroupKey, today: i64) -> Option<Value> {
 pub fn append_order<'a>(orders: impl IntoIterator<Item = &'a str>) -> String {
     let last = orders.into_iter().filter(|k| order::is_valid(k)).max();
     order::between(last, None).unwrap_or_else(|_| order::first())
+}
+
+/// A date value moved to `day` (days since 1970-01-01, in the viewer's zone): a value with a
+/// time keeps its time of day, a range keeps its length, and no value becomes that whole day.
+pub fn date_on(old: Option<&DateValue>, day: i64, offset_ms: i64) -> Value {
+    match old {
+        Some(d) if d.include_time => {
+            let local = d.start.saturating_add(offset_ms);
+            let time_of_day = local.rem_euclid(DAY_MS);
+            let start = day * DAY_MS + time_of_day - offset_ms;
+            let end = d.end.map(|e| e - d.start + start).filter(|e| *e >= start);
+            Value::Date(DateValue {
+                start,
+                end,
+                include_time: true,
+            })
+        }
+        Some(d) => {
+            let start = day * DAY_MS;
+            let end = d.end.map(|e| e - d.start + start).filter(|e| *e >= start);
+            Value::Date(DateValue {
+                start,
+                end,
+                include_time: false,
+            })
+        }
+        None => Value::date_on_day(day),
+    }
+}
+
+/// The value of `p` (a board's group property) for a card moved from the column `from` to
+/// the column `to`, given its value `old`: Some(None) empties it, and None means the card
+/// can't go there (a derived property, a type that doesn't group, or a date bucket with no one
+/// day, like "Past 7 days").
+///
+/// - A select takes `to`'s option.
+/// - A multi-select or person value swaps `from`'s option or person for `to`'s, in its place
+///   (or just loses `from`'s if it has `to`'s already). Moved to the empty column, it empties.
+/// - A checkbox is checked or not.
+/// - A date moves to the bucket's day, keeping its time of day and length.
+pub fn moved_value(
+    p: &Property,
+    old: Option<&Value>,
+    from: &GroupKey,
+    to: &GroupKey,
+    today: i64,
+    offset_ms: i64,
+) -> Option<Option<Value>> {
+    if p.kind.is_derived() {
+        return None;
+    }
+    match (&p.kind, to) {
+        (PropertyType::Select, GroupKey::Option(id)) => Some(Some(Value::text(id.clone()))),
+        (
+            PropertyType::Select | PropertyType::MultiSelect | PropertyType::Person,
+            GroupKey::Empty,
+        ) => Some(None),
+        (PropertyType::MultiSelect, GroupKey::Option(b)) => {
+            let mut ids = old.and_then(Value::as_ids).unwrap_or(&[]).to_vec();
+            let a = match from {
+                GroupKey::Option(a) => ids.iter().position(|x| x == a),
+                _ => None,
+            };
+            match (a, ids.contains(b)) {
+                (Some(i), false) => ids[i] = b.clone(),
+                (Some(i), true) => {
+                    ids.remove(i);
+                }
+                (None, false) => ids.push(b.clone()),
+                (None, true) => {}
+            }
+            Some((!ids.is_empty()).then_some(Value::Ids(ids)))
+        }
+        (PropertyType::Person, GroupKey::Person(b)) => {
+            let mut people = old.and_then(Value::as_people).unwrap_or(&[]).to_vec();
+            let a = match from {
+                GroupKey::Person(a) => people.iter().position(|x| x == a),
+                _ => None,
+            };
+            match (a, people.contains(b)) {
+                (Some(i), false) => people[i] = b.clone(),
+                (Some(i), true) => {
+                    people.remove(i);
+                }
+                (None, false) => people.push(b.clone()),
+                (None, true) => {}
+            }
+            Some((!people.is_empty()).then_some(Value::People(people)))
+        }
+        (PropertyType::Checkbox, GroupKey::Checked(b)) => Some(Some(Value::Bool(*b))),
+        (PropertyType::Date, GroupKey::Empty) => Some(None),
+        (PropertyType::Date, GroupKey::Date(g)) => {
+            let day = format::group_day(g, today)?;
+            Some(Some(date_on(old.and_then(Value::as_date), day, offset_ms)))
+        }
+        _ => None,
+    }
 }

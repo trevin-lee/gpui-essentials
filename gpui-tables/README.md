@@ -12,10 +12,11 @@ It's being built for a personal CRM in a Notion-like docs app: People, Companies
 databases related to each other, an agent or two logging calls and follow-ups, and every person
 and company a page of notes.
 
-**Status: the model, the engine and the table view.** The JSON model, the engine that filters,
-sorts and groups, fractional-index ordering and the limits on what a database may hold need no
-GPUI. The [table view](#table-view) draws on GPUI and gpui-core, behind the default `gpui`
-feature. Boards and lists come next. This README is the design for all of it.
+**Status: the model, the engine, and the table and board views.** The JSON model, the engine
+that filters, sorts and groups, fractional-index ordering and the limits on what a database may
+hold need no GPUI. The [table view](#table-view) and the [board view](#board-view) draw on GPUI
+and gpui-core, behind the default `gpui` feature. Lists come next. This README is the design for
+all of it.
 
 ![The People database as a table: names, companies, roles, stages and tags, sorted by name](docs/table-people.png)
 
@@ -23,6 +24,7 @@ feature. Boards and lists come next. This README is the design for all of it.
 
 - [Use it](#use-it)
 - [Table view](#table-view)
+- [Board view](#board-view)
 - [Databases and rows are docs](#databases-and-rows-are-docs)
 - [Properties and values](#properties-and-values)
 - [Views](#views)
@@ -141,7 +143,8 @@ let table = cx.new(|cx| TableView::new(Rc::new(Host), database, rows, cx).with_v
 ```
 
 `cargo run --release -p gpui-tables --example crm` opens the CRM in the fixtures with a log of
-every event (the pictures here are its `--shot`s, rendered offscreen).
+every event, and its views (tables and boards) as tabs (the pictures here are its `--shot`s,
+rendered offscreen).
 
 | | |
 |---|---|
@@ -207,6 +210,69 @@ Not in this first table: dragging rows to reorder them, deleting rows, making an
 properties and views, ranges and times in the day grid (it keeps a value's time of day and the
 length of its range), long-press column drags on touch (the menu's Move left and Move right do
 it), and showing the engine's `Issue`s beside the view.
+
+## Board view
+
+A view of type `board` draws as a board: the same `TableView` entity, the same `TableHost` and
+the same `TableEvent`s as a table. `TableView` reads the view's type each time it draws and
+draws a board for `board` and a table for any other type, so a host shows a database's views as
+tabs over one entity and switches with `set_view`.
+
+![People's Pipeline board: a column for each stage, each card a person with their company, last contact and owner](docs/board.png)
+
+| | |
+|---|---|
+| ![A card of Interactions carried from Call to Email: it fades where it was, Email is outlined, and a line shows where it will land](docs/board-drag.png) | ![Worst-case text on the cards, each line ending in an ellipsis](docs/board-worst.png) |
+
+![Companies by industry, in the light theme](docs/board-light.png)
+
+- **Columns** are the view's groups (`groupBy`): a select's options, a multi-select's, people,
+  checked and unchecked, or date buckets, in the engine's order, with the empty group's column
+  ("No Stage") first. Each shows its option's chip (or name) and its count. A board whose
+  `groupBy` is missing, or names a property that can't group, is one column of every row.
+- **Folding.** The button in a column's header folds it: a `viewChanged` with its key in
+  `collapsedGroups`. Folded columns are lines in a "Collapsed" column at the board's end, each
+  with its count; pressing one unfolds it.
+- **Cards** show the title and the view's `cardProperties` under it, each drawn as the table
+  draws its cell (chips in their colours, dates in the viewer's zone, people by name, a checkbox
+  with its property's name); empty values are left out. Every line ends in an ellipsis rather
+  than leave its card. Pressing a card is an `openRow`.
+- **Scrolling.** The board scrolls sideways, and each column up and down on its own (by trackpad,
+  wheel or finger). Only the cards on screen are drawn (a `uniform_list` per column), so every
+  card in a board is the same height: as tall as the view's card properties need.
+- **Dragging.** With a mouse, a card drags through GPUI's drag and drop (`on_drag`, with
+  `on_drag_move` and `on_drop` on the board); with a finger, a long press picks it up and the
+  finger carries it, while a plain pan scrolls. The card fades where it was, a copy of it
+  follows the pointer, the column it would land in is outlined, and a line shows where. Near
+  the board's edges, or a column's top or bottom, each move scrolls them a step. Escape puts it
+  back.
+- **Dropping** is one batch:
+  - Within a column, a `rowsMoved` with a key between its new neighbours' (`order::between`).
+  - In another column, that and a `rowValueChanged` setting the group property: the column's
+    option, person, checkbox or date (a date keeps its time of day and length). A multi-select
+    or person value swaps the column it left for the one it joined, in its place; in the empty
+    column it empties. A column with no one value (a date bucket such as "Past 7 days") and a
+    derived property's columns (created and edited times and people) take no cards from others.
+  - In a **sorted** view the sort places the cards, as in Notion: a drop in another column is
+    the `rowValueChanged` alone, and dragging within a column does nothing.
+  - Neighbours whose keys can't be put between (two the same, an older scheme's) renumber the
+    whole manual order with `order::spread`, in the same `rowsMoved`.
+  - `TableView::move_card` does the same for a host's own control or assistive technology.
+- **New cards.** "New" under each column is a `rowCreated` with the column's value, what the
+  filter asks for, and an order key after every row's. When the host hands it back, the new card
+  is focused.
+- **Keys.** The arrows move between cards (down past the last is its column's New) and across
+  columns at the same height, into the folded ones at the end; Tab goes down the columns in turn.
+  Enter opens a card, makes one from New and unfolds a folded column. Escape lets go.
+- **Touch.** With `TableTheme::with_touch(true)` cards, New buttons and folded columns are at
+  least 44 points each way, and the fold button takes a 44-point press (`Press::min_hit`) while
+  it's drawn small.
+- **The theme** adds `TableColors::card` and `TableSizes::board_column_width` (264 points).
+- **Nothing redraws while nothing changes,** and the board keeps no timers.
+
+Not in this first board: dragging several cards at once, a + in the column header that adds at
+the top, moving whole columns (the options' order is the property's), and showing the view's
+sorts and filters on the board itself.
 
 ## Databases and rows are docs
 
@@ -304,8 +370,7 @@ every person (and agent) sees the same ones.
   `unchecked`, `owner`, `agent:<id>`, `relative:today`, `day:2026-11-15`, `week:2026-11-09`
   (the week's first day), `month:2026-11`, `year:2026`.
 
-How each type will behave (the engine already works out what each shows; the views that draw
-them come next):
+How each type behaves (the table and board are drawn; lists and galleries come next):
 
 - **Table.** A row per row and a column per property. Columns resize by dragging their edge and
   reorder by dragging their header; both are a `viewChanged`. The header's menu sorts, filters,
@@ -316,8 +381,8 @@ them come next):
   the view has no sort (as in Notion, a sorted view can't be reordered by hand).
 - **Board.** Columns of cards, one per group, grouped by a select (or a multi-select, checkbox,
   person or date). Dragging a card to another column changes its value, and its place in the
-  manual order. A card shows its title and `cardProperties`. Each column has a + to add a row with
-  that column's value.
+  manual order (when the view has no sort). A card shows its title and `cardProperties`. Each
+  column has a New to add a row with that column's value. See [Board view](#board-view).
 - **List.** One line per row: the title, then `cardProperties` to the right. Grouping folds as in
   a table.
 - **Gallery.** Cards in a grid. In the JSON from the start, drawn in a later version.
@@ -406,7 +471,8 @@ How the host writes them to the server:
   `rowValueChanged`; changing a two-way relation is a `rowValueChanged` and a `relationChanged`.
   The host applies a batch together, and can undo it by applying the inverse.
 
-For example, Theo dragged from Lead to Warm on the Pipeline board:
+For example, Theo dragged from Lead to Warm, between two cards, on the Pipeline board without
+its sort:
 
 ```json
 {"type": "edits", "edits": [
@@ -554,10 +620,21 @@ nothing draws while nothing changes.
   | A sort, a filter and a group by select, worked out and drawn | 18 ms |
 
   The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one).
-  Boards and lists will draw a virtualized column per group the same way.
-- **No text overflows its cell** at any width: cells, headers, group headers and menus end in
-  an ellipsis. A headless Core Text test, as gpui-chatwidgets has, checks every cell type with
-  the worst text at 360, 700 and 1400 wide.
+- **The board view** draws only the cards on screen in each column (a `uniform_list` each).
+  Measured the same way, the same 10,000 rows as a board of seven columns, each card showing four
+  values:
+
+  | | median |
+  |---|---|
+  | The first draw | 2.3 ms |
+  | A frame while scrolling a column down a page, or the board sideways | 2.3 ms |
+  | A frame while dragging a card across the columns | 2.7 ms |
+
+  The test fails past 50, 12 and 12 ms in a release build.
+- **No text overflows its cell** at any width: cells, headers, group headers, menus and cards
+  end in an ellipsis. A headless Core Text test, as gpui-chatwidgets has, checks every cell type
+  (and a board's cards, with every property on them) with the worst text at 360, 700 and 1400
+  wide.
 
 ## iOS and touch
 
@@ -614,10 +691,16 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   navigation, opening rows, new rows in groups and filters, created-by and edited-by cells
   (named by the host, never edited, filtered and grouped by), 44-point targets on touch, a finger
   resizing a column, swipes both ways with the title in place, and no frames while idle.
+- `tests/board.rs`: the board view driven by mouse, keyboard and finger: its columns and cards,
+  one entity drawing a table or a board by the view's type, drags within a column (order keys)
+  and across (the value and the key in one batch), sorted boards, multi-select swaps, keys that
+  renumber, folding, new cards, opening, keyboard navigation, a long press carrying a card while
+  pans scroll the board and a column, 44-point targets on touch, and no frames while idle.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu at 360, 700 and
-  1400 wide, columns at their widths and their narrowest, laid out with Core Text; no glyph
-  leaves its place.
-- `tests/view_performance.rs`: the table with 10,000 rows, timed, as above.
+  1400 wide, columns at their widths and their narrowest, and on a board's cards, columns and
+  folded columns (scrolled, and with a finger's sizes), laid out with Core Text; no glyph leaves
+  its place.
+- `tests/view_performance.rs`: the table and the board with 10,000 rows, timed, as above.
 - Unit tests for fractional indexes and calendar arithmetic.
 
 ## License

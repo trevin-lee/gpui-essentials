@@ -179,7 +179,7 @@ fn groups_show_counts_and_fold(cx: &mut TestAppContext) {
     let (table, cx) = open_with(
         cx,
         &host,
-        db,
+        as_table(db, PIPELINE),
         rows,
         Some(PIPELINE),
         size(px(1200.), px(700.)),
@@ -600,7 +600,7 @@ fn new_rows_in_a_group_get_its_value_and_the_filters(cx: &mut TestAppContext) {
     let (_, cx) = open_with(
         cx,
         &host,
-        db,
+        as_table(db, PIPELINE),
         rows,
         Some(PIPELINE),
         size(px(1200.), px(800.)),
@@ -729,7 +729,7 @@ fn touch_targets_are_44_points(cx: &mut TestAppContext) {
     let (_, cx) = open_with(
         cx,
         &host,
-        db,
+        as_table(db, PIPELINE),
         rows,
         Some(PIPELINE),
         size(px(1200.), px(900.)),
