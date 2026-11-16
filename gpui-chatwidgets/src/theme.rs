@@ -166,7 +166,8 @@ pub struct CardTheme {
     pub dark: bool,
     /// The smallest target anything pressable takes presses in, in points per side (the
     /// window's pixels, so it doesn't zoom with `rem_base`). A smaller control also takes them
-    /// in an invisible margin around it, centred on it, so it looks and lays out the same. 44
+    /// in an invisible square this size centred on it (gpui-core's `Press::min_hit`), so it
+    /// looks and lays out the same. 44
     /// on iOS and Android, Apple's minimum for a touch target; 0 elsewhere, where a control
     /// takes presses only where it's drawn.
     pub min_hit: f32,

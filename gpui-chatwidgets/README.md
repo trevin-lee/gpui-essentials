@@ -191,8 +191,13 @@ a pan is scroll events locked to the way it started, with momentum after a flick
 
 - **Every control the crate draws can be hit across 44 points each way**, Apple's minimum
   touch target. A smaller one (a carousel's arrows, a modal's close, a small button, a chip, a
-  checkbox row) also takes taps in an invisible margin around it, so it looks and lays out as
-  on the Mac.
+  checkbox row) also takes taps in an invisible 44-point square centred on it (gpui-core's
+  `Press::min_hit`), so it looks and lays out as on the Mac.
+- **A tap that only changes the card's view or picks a value leaves the focus alone**: a tab,
+  a carousel arrow, an accordion section, Copy, a chip, a check box, radio or switch row and an
+  option card. The chat's text field keeps the focus (and the keyboard stays up); Tab and
+  Enter or Space still reach them. Buttons, the select, table cells and a modal's close take
+  the focus as before.
 - **Sideways scrolling follows the finger.** A wide table or a code block moves with a sideways
   pan and keeps it from the chat; an up-and-down pan over it scrolls the chat instead.
 - **A carousel turns with a swipe.** The slide follows the finger and turns past 40 points, or
@@ -222,6 +227,10 @@ Known gaps:
 
 - Where two small controls sit closer than 44 points (icon buttons in a tight row), the one drawn
   later takes the strip between them.
+- A control wider than 44 points but shorter (a 40-point button, a 26-point Copy) takes the
+  extra height only in the middle 44 points of its width, not along its whole length.
+- A select's options and an editable table's cells touch each other, so they take taps only
+  where they're drawn: a square would only take the edge of the one above or below.
 - GPUI Kit's own controls (the date picker and its calendar, the slider's thumb) have GPUI
   Kit's sizes, not `min_hit`.
 - GPUI's text input has no keyboard type yet, so an email or number field shows the ordinary

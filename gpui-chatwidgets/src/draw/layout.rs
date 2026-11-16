@@ -212,6 +212,7 @@ impl Draw<'_, '_> {
             let trigger = pressable(self.id(&format!("{path}.tab{i}")), self.t)
                 .role(Role::Tab)
                 .accessibility_label(s.title.clone())
+                .focus_on_press(false)
                 .flex_1()
                 .min_w_0()
                 .h(self.px(30.))
@@ -230,7 +231,7 @@ impl Draw<'_, '_> {
                     move || sel
                 })
                 .child(label);
-            strip = strip.child(self.on_press(trigger, true, choose));
+            strip = strip.child(self.on_press(trigger, choose));
         }
         let content = self
             .column(
@@ -290,6 +291,7 @@ impl Draw<'_, '_> {
             };
             let trigger = pressable(self.id(&format!("{item_key}.trigger")), self.t)
                 .accessibility_label(s.title.clone())
+                .focus_on_press(false)
                 .w_full()
                 .min_w_0()
                 .justify_between()
@@ -533,6 +535,7 @@ impl Draw<'_, '_> {
             let press = pressable(d.id(&format!("{path}.{name}")), d.t)
                 .accessibility_label(name.to_string())
                 .disabled(!enabled)
+                .focus_on_press(false)
                 .flex_none()
                 .size(d.px(28.))
                 .rounded(d.px(t.radii.sm))
@@ -552,7 +555,7 @@ impl Draw<'_, '_> {
                         t.colors.text_faint
                     },
                 ));
-            d.on_press(press, enabled, turn)
+            d.on_press(press, turn)
         };
         let prev = arrow(
             self,
@@ -642,7 +645,7 @@ impl Draw<'_, '_> {
                 move || sel
             })
             .child(self.glyph(Glyph::Close, 14., t.colors.text_muted));
-        let close_button = self.on_press(close_button, true, close_on_button);
+        let close_button = self.on_press(close_button, close_on_button);
         let (esc_key, esc_open) = (path.to_string(), m.open.clone());
         let panel = div()
             .id(self.id(&format!("{path}.panel")))
