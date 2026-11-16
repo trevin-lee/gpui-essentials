@@ -9,7 +9,7 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["gpui", "database", "table", "kanban", "notion"]
 categories = ["gui", "data-structures"]
-include = ["/src", "/README.md"]
+include = ["/src", "/examples", "/tests/fixtures", "/README.md"]
 
 [lib]
 name = "gpui_tables"
@@ -20,9 +20,37 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # New rows', properties', views' and options' ids: lowercase v4 UUIDs, made by the creator.
 uuid = { version = "1", features = ["v4"] }
+# The views (the gpui feature): GPUI under its own name, pinned exactly in the workspace
+# (gpui-pre 0.3.12), and gpui-core for the theme, Press and icons.
+gpui = { workspace = true, optional = true }
+gpui-core = { path = "../gpui-core", optional = true }
+# Only for the shots feature: the macOS platform with its test support (offscreen rendering)
+# on, and GPUI's version of the image crate to save the picture.
+gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [features]
 default = ["gpui"]
-# The GPUI views. Empty until the table view lands; without it (default-features = false) the
-# crate is the model and engine alone, with no GPUI in the build.
-gpui = []
+# The GPUI views (the table view). Without it (default-features = false) the crate is the model
+# and engine alone, with no GPUI in the build.
+gpui = ["dep:gpui", "dep:gpui-core"]
+# Pictures of the crm example's window rendered offscreen (`--shot`), for the README.
+shots = ["gpui", "gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
+
+[[example]]
+name = "crm"
+required-features = ["gpui"]
+
+# GPUI's test support (a test window, simulated input) and the example's window are the Mac's,
+# so the engine-only build and its tests on Linux never pull GPUI in.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# bench-support: the overflow test reads the drawn scene.
+gpui = { workspace = true, features = ["test-support", "bench-support"] }
+gpui-core = { path = "../gpui-core", features = ["test-support"] }
+# The example's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+# Shaders compiled when a window opens, so tests and the example build without Xcode's separate
+# Metal Toolchain. Only here: what apps ship stays on precompiled shaders.
+gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
+# The overflow test lays text out with Core Text, as on screen.
+gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }
