@@ -9,7 +9,7 @@
 
 use gpui::{App, Div, Hsla, ParentElement as _, Styled as _, Window, div, px, rems};
 use gpui_kit::base::text::MarkdownExtensions;
-use gpui_kit::component::{ActiveTheme as _, Icon};
+use gpui_kit::component::Icon;
 
 use crate::direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
 
@@ -41,13 +41,15 @@ pub fn toggle_container(open: bool, window: &mut Window, cx: &mut App) -> Div {
                     ICON_CHEVRON_RIGHT
                 })
                 .size(icon)
-                .text_color(cx.theme().muted_foreground),
+                .text_color(gpui_core::Theme::global(cx).muted_foreground),
         ),
     )
 }
 
 /// A callout's container: a tinted box with a bar in the alert's colour.
 pub fn callout_container(name: &str, cx: &mut App) -> Div {
+    // GPUI Kit's colours until gpui-core's theme has callout tokens.
+    use gpui_kit::component::ActiveTheme as _;
     let theme = cx.theme();
     let accent: Hsla = match name {
         "tip" => theme.success,

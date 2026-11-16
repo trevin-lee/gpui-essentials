@@ -1,10 +1,8 @@
 use gpui::{Hsla, Pixels};
 
-use gpui_kit::base::SemanticThemeTokens;
-
 /// Presentation seam for [`super::BlockEditor`]. Private fields, `with_*`
 /// setters and readers (ARCHITECTURE.md invariant 12). Unset colours are
-/// transparent and are filled from the theme tokens by [`Self::resolved`],
+/// transparent and are filled from gpui-core's theme by [`Self::resolved`],
 /// mirroring `InputEditorStyle::resolved`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockEditorStyle {
@@ -50,15 +48,15 @@ impl BlockEditorStyle {
     style_field!(with_selection, selection, Hsla);
     style_field!(with_composition_underline, composition_underline, Hsla);
 
-    /// Whether no selection colour was set, so the view uses the text
-    /// renderer's own (`TextViewStyle::selection`).
+    /// Whether no selection colour was set, so the view uses the theme's
+    /// (`gpui_core::Theme::selection`).
     pub(crate) fn selection_is_default(&self) -> bool {
         self.selection.a == 0.
     }
 
-    /// Fill unset colours from the active palette.
-    pub fn resolved(&self, tokens: &SemanticThemeTokens) -> Self {
-        let colors = &tokens.colors;
+    /// Fill unset colours from the theme.
+    pub fn resolved(&self, theme: &gpui_core::Theme) -> Self {
+        let colors = &theme.colors;
         let or = |value: Hsla, fallback: Hsla| if value.a == 0. { fallback } else { value };
         let foreground = or(self.foreground, colors.foreground);
         Self {

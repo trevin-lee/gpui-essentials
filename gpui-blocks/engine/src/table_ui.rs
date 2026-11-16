@@ -266,18 +266,17 @@ pub(crate) fn render_menu(
         InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _, anchored,
         deferred, div,
     };
-    use gpui_kit::component::ActiveTheme as _;
 
     let s = state.read(cx);
     let menu = s.table_menu.clone()?;
-    let theme = cx.theme();
+    let theme = gpui_core::Theme::global(cx);
     let (fg, muted, hover, border, bg, accent) = (
         theme.popover_foreground,
         theme.muted_foreground,
-        theme.list_hover,
+        theme.accent,
         theme.border,
         theme.popover,
-        theme.accent,
+        theme.ring,
     );
     let item = |id: &'static str, label: &'static str, edit: TableEdit| {
         let enabled = s.table_menu_item_state(MenuItem::Edit(edit));
