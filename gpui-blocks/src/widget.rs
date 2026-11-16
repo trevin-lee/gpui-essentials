@@ -21,9 +21,9 @@
 
 use std::sync::Arc;
 
-use gpui_kit::base::text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin};
-use gpui_kit::{AnyElement, App, IntoElement, Window};
+use gpui_kit::{AnyElement, App, Window};
 use markdown::mdast::Node;
+use markdown_editor::{CustomNode, Extension};
 
 /// A block an app draws itself.
 pub trait Widget: Send + Sync + 'static {
@@ -61,7 +61,7 @@ pub(crate) fn fenced_with_info(info: &str, body: &str) -> String {
 /// A widget as a Markdown plugin: it takes the fenced blocks with its name.
 pub(crate) struct WidgetPlugin(pub(crate) Arc<dyn Widget>);
 
-impl MarkdownPlugin for WidgetPlugin {
+impl Extension for WidgetPlugin {
     fn is_block(&self) -> bool {
         true
     }
@@ -70,7 +70,7 @@ impl MarkdownPlugin for WidgetPlugin {
         self.0.name()
     }
 
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node) -> Option<CustomNode> {
         let Node::Code(code) = node else {
             return None;
         };
@@ -88,14 +88,14 @@ impl MarkdownPlugin for WidgetPlugin {
         let source = fenced_with_info(&info, &body);
         let label = self.0.label(&body);
         Some(
-            MarkdownNode::new(self.0.name().to_string(), body)
+            CustomNode::new(self.0.name().to_string(), body)
                 .text(label.clone())
                 .accessibility_label(label)
                 .markdown(source),
         )
     }
 
-    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(&self, node: &CustomNode, window: &mut Window, cx: &mut App) -> AnyElement {
         let body = node
             .data::<String>()
             .map(String::as_str)

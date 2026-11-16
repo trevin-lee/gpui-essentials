@@ -1,5 +1,5 @@
 // Changed in Trevin Lee's fork (2026): the reorder and surfaces modules, toggle surface names,
-// the clipboard actions exported.
+// the clipboard actions exported, the extension module.
 //! A block-based WYSIWYG Markdown editor for GPUI, built on gpui-kit's
 //! public editor host API (`gpui_kit::base::text::editor_host`).
 //!
@@ -51,6 +51,7 @@ mod direct;
 mod document;
 mod editor;
 mod element;
+pub mod extension;
 mod frame;
 mod host;
 mod id;
@@ -88,6 +89,7 @@ pub use direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
 pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
+pub use extension::{CustomNode, Extension, Extensions, InlineContext};
 pub use gpui_kit::base::text::editor_host::ColumnAlign;
 pub use input_rule::InputRule;
 /// Shows or hides the optional toolbar. Unbound by default; bind it in the
