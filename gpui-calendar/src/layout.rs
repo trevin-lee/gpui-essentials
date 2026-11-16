@@ -104,6 +104,59 @@ pub fn columns(intervals: &[(f32, f32)]) -> Vec<Column> {
     out
 }
 
+/// How a group of overlapping events fits a day `width` wide when no column should be
+/// narrower than `min` (both in the same unit).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Squeeze {
+    /// How many of the group's columns show, from the left.
+    pub shown: usize,
+    /// How wide the shown columns are together.
+    pub events: f32,
+    /// How wide the strip at their right for "+N" is: none when every column shows.
+    pub chip: f32,
+}
+
+impl Squeeze {
+    /// Whether some of the group's columns don't show.
+    pub fn hides(&self, columns: usize) -> bool {
+        self.shown < columns
+    }
+
+    /// Where a column shows, as `(left, width)` from the day's left edge, or none if it's one
+    /// of those that don't.
+    pub fn place(&self, c: Column) -> Option<(f32, f32)> {
+        if c.column >= self.shown {
+            return None;
+        }
+        let w = self.events / self.shown as f32;
+        let span = c.span.min(self.shown - c.column);
+        Some((w * c.column as f32, w * span as f32))
+    }
+}
+
+/// Fits a group of `columns` side-by-side columns into `width`, none narrower than `min`: all
+/// of them where they fit; otherwise as many as fit beside a strip for "+N", which is `min`
+/// wide where there's room and gives way down to `strip_min` before the one column left does.
+/// A day narrower than `min` and a strip shows one column, as wide as the strip leaves it.
+pub fn squeeze(columns: usize, width: f32, min: f32, strip_min: f32) -> Squeeze {
+    let columns = columns.max(1);
+    // A lone column takes the day however narrow it is: there's nothing to hide.
+    if columns == 1 || columns as f32 * min <= width {
+        return Squeeze {
+            shown: columns,
+            events: width,
+            chip: 0.,
+        };
+    }
+    let strip = (width - min).clamp(strip_min.min(width / 2.), min);
+    let events = width - strip;
+    Squeeze {
+        shown: ((events / min).floor() as usize).clamp(1, columns - 1),
+        events,
+        chip: strip,
+    }
+}
+
 /// Gives each span of days, `(first, last)` with the last inclusive, the lowest row that's free
 /// on all its days, in the order given (so the caller decides who gets the top rows: longer
 /// spans first, usually).
@@ -336,5 +389,61 @@ mod tests {
                 hidden: 1
             }
         );
+    }
+
+    #[test]
+    fn a_group_that_fits_shows_every_column() {
+        let q = squeeze(3, 150., 36., 16.);
+        assert_eq!(
+            q,
+            Squeeze {
+                shown: 3,
+                events: 150.,
+                chip: 0.
+            }
+        );
+        assert!(!q.hides(3));
+        assert_eq!(q.place(c(1, 2, 3)), Some((50., 100.)));
+    }
+
+    #[test]
+    fn a_group_too_wide_shows_the_columns_that_fit_and_a_strip() {
+        // Eight columns in 150: a 36 strip, and three of 38 beside it.
+        let q = squeeze(8, 150., 36., 16.);
+        assert_eq!(q.shown, 3);
+        assert_eq!(q.chip, 36.);
+        assert_eq!(q.events, 114.);
+        assert!(q.hides(8));
+        assert!(q.events / q.shown as f32 >= 36.);
+        assert_eq!(q.place(c(0, 1, 8)), Some((0., 38.)));
+        // A span reaching past the shown columns stops at their edge.
+        assert_eq!(q.place(c(2, 4, 8)), Some((76., 38.)));
+        assert_eq!(q.place(c(3, 1, 8)), None);
+        // Never fewer than one, and the strip gives way before a column does.
+        let q = squeeze(4, 60., 36., 16.);
+        assert_eq!((q.shown, q.events, q.chip), (1, 36., 24.));
+    }
+
+    #[test]
+    fn a_day_narrower_than_a_column_and_a_strip_keeps_one_column_and_a_narrow_strip() {
+        // A phone's week: 43 wide, 44 apiece. One column, and the strip at its narrowest.
+        let q = squeeze(2, 43., 44., 16.);
+        assert_eq!(
+            q,
+            Squeeze {
+                shown: 1,
+                events: 27.,
+                chip: 16.
+            }
+        );
+        assert!(q.hides(2));
+        assert_eq!(q.place(c(0, 1, 2)), Some((0., 27.)));
+        assert_eq!(q.place(c(1, 1, 2)), None);
+        // A lone event takes the day, however narrow.
+        assert_eq!(squeeze(1, 20., 44., 16.).shown, 1);
+        assert_eq!(squeeze(1, 20., 44., 16.).chip, 0.);
+        // Narrower still, the two halve it.
+        let q = squeeze(3, 20., 44., 16.);
+        assert_eq!((q.shown, q.events, q.chip), (1, 10., 10.));
     }
 }

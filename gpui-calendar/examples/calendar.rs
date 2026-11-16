@@ -12,7 +12,7 @@
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
 //! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
 //! `compact-recurring`, `find`, `compact-find`, `panel`, `compact-panel`, `mini`,
-//! `compact-mini`. Pictures and the bench draw a window that's never shown and never takes the
+//! `compact-mini`, `crowd`. Pictures and the bench draw a window that's never shown and never takes the
 //! keyboard.
 
 use std::path::PathBuf;
@@ -639,7 +639,7 @@ impl Root {
                     "personal",
                 );
             }
-            "dense" if !args.bench => events = dense_week(monday, 160, 5),
+            "dense" | "crowd" if !args.bench => events = dense_week(monday, 160, 5),
             "dst" => {
                 events = dst_events();
                 view = CalendarView::Days(3);
@@ -1209,6 +1209,29 @@ mod shots {
                         .read_with(cx, |c, _| c.point_at(monday + Duration::days(11), 0.))
                         .expect("on screen");
                     drag_to(window, cx, point(grab.x + (to.x - grab.x) * 0.0, to.y));
+                }
+                // The busy week with Thursday's "+N" open: the events that didn't fit.
+                "crowd" => {
+                    let _ = cx.update_window(window, |_, _, cx| {
+                        calendar.update(cx, |c, cx| {
+                            let thursday = time::day_start(monday + Duration::days(3), TZ);
+                            let ids: Vec<EventId> = c
+                                .events()
+                                .iter()
+                                .filter(|e| {
+                                    matches!(e.time, EventTime::Timed { start, .. }
+                                        if start >= thursday
+                                            && start < thursday + Duration::days(1))
+                                })
+                                .map(|e| e.id.clone())
+                                .collect();
+                            for id in ids {
+                                if c.open_hidden(&id, cx) {
+                                    break;
+                                }
+                            }
+                        })
+                    });
                 }
                 // Selected on a phone: the handle that changes its end.
                 "compact" => {

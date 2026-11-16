@@ -733,3 +733,114 @@ fn the_mini_month_fits_beside_the_calendar() {
         assert!(!busy.contains(&(day(0) + chrono::Duration::days(60))));
     });
 }
+
+/// A packed week: twenty events a day between 8 and 6, many at once, from a fixed seed.
+fn dense_week() -> Vec<Event> {
+    let mut seed: u64 = 7;
+    let mut next = move |n: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) % n
+    };
+    let mut out = Vec::new();
+    for d in 0..7 {
+        for k in 0..20 {
+            let start = 8 * 60 + next(40) as u32 * 15;
+            let length = 15 + next(8) as u32 * 15;
+            out.push(Event::timed(
+                format!("dense-{d}-{k}"),
+                format!("Packed event {k}"),
+                at(day(d), start / 60, start % 60),
+                at(day(d), (start + length) / 60, (start + length) % 60),
+            ));
+        }
+    }
+    out
+}
+
+/// Side-by-side events never get narrower than a readable column (36 pixels, 44 points on
+/// touch) where the day has room for one beside the strip for "+N"; every event is either
+/// drawn or behind a "+N"; and nothing runs over. The busy week and the crowded Thursday, at
+/// every width, with the whole day on screen.
+#[test]
+fn crowded_hours_keep_readable_columns_and_count_the_rest() {
+    let mut cx = context();
+    let mut events = worst_week();
+    events.extend(dense_week());
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| {
+                o.time_zone = TZ;
+                o.hour_height = 36.;
+            })
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_events(events)
+    });
+    let mut found = Vec::new();
+    for touch in [false, true] {
+        calendar.update(vcx, |c, cx| c.set_options(|o| o.touch = touch, cx));
+        let narrowest = if touch { 44. } else { 36. };
+        for &w in &[320., 390., 600., 720., 1024., 1280., 1600., 2200.] {
+            vcx.simulate_resize(size(px(w), px(1000.)));
+            for view in [CalendarView::Day, CalendarView::Days(3), CalendarView::Week] {
+                calendar.update(vcx, |c, cx| {
+                    c.set_view(view, cx);
+                    c.scroll_to_minute(0.);
+                });
+                vcx.run_until_parked();
+                drawn::record();
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+                let texts = drawn::take();
+                let at = format!("{w}px, {view:?}, touch {touch}");
+                let (geo, hits, crowds, timed) = calendar.read_with(vcx, |c, _| {
+                    let geo = c.shared.geo.get().expect("drawn");
+                    let (first, days) = c.visible_days();
+                    let last = first + Duration::days(days as i64);
+                    let timed: Vec<EventId> = c
+                        .events()
+                        .iter()
+                        .filter(|e| {
+                            !time::in_all_day_row(&e.time)
+                                && c.is_shown(e)
+                                && matches!(e.time, EventTime::Timed { start, .. }
+                                    if start >= time::day_start(first, TZ)
+                                        && start < time::day_start(last, TZ))
+                        })
+                        .map(|e| e.id.clone())
+                        .collect();
+                    (
+                        geo,
+                        c.shared.hits.borrow().clone(),
+                        c.shared.crowds.borrow().clone(),
+                        timed,
+                    )
+                });
+                for p in problems(&texts, geo.bounds) {
+                    found.push(format!("{at}: {p}"));
+                }
+                // Readable, where the day has room for a column and a strip.
+                let room = f32::from(geo.col_w) - 6. >= narrowest + 18.;
+                for h in hits.iter().filter(|h| h.area == Area::Grid) {
+                    if room && h.bounds.size.width < px(narrowest - 0.5) {
+                        found.push(format!("{at}: {} is {:?} wide", h.id, h.bounds.size.width));
+                    }
+                }
+                // Each event drawn or counted, never both.
+                for id in &timed {
+                    let drawn = hits.iter().any(|h| &h.id == id);
+                    let counted = crowds.iter().any(|(_, ids)| ids.contains(id));
+                    if drawn == counted {
+                        found.push(format!("{at}: {id} drawn {drawn}, counted {counted}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}

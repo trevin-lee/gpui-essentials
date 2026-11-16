@@ -1421,3 +1421,168 @@ fn what_a_screen_reader_is_told_is_what_was_drawn(cx: &mut TestAppContext) {
         "Calendar, November 2026"
     );
 }
+
+/// Six events at once on Thursday afternoon, in a window where Thursday has room for two.
+fn crowded(c: &Entity<Calendar>, cx: &mut VisualTestContext) -> Vec<EventId> {
+    let ids: Vec<EventId> = (0..6).map(|i| format!("crowd-{i}").into()).collect();
+    let mut events = events();
+    for (i, id) in ids.iter().enumerate() {
+        events.push(
+            Event::timed(
+                id.clone(),
+                format!("Crowd {i}"),
+                at(day(3), 14, 0),
+                at(day(3), 15, 0),
+            )
+            .calendar("work"),
+        );
+    }
+    c.update(cx, |c, cx| c.set_events(events, cx));
+    cx.simulate_resize(size(px(700.), px(800.)));
+    draw(cx);
+    draw(cx);
+    ids
+}
+
+#[gpui::test]
+fn side_by_side_events_too_many_for_the_day_show_a_count_that_lists_the_rest(
+    cx: &mut TestAppContext,
+) {
+    let (c, seen, cx) = open(cx);
+    let ids = crowded(&c, cx);
+    // Thursday has room for a few readable columns beside the strip: those show, none
+    // narrower than 36 pixels, and the rest are behind one "+N".
+    let shown: Vec<_> = ids
+        .iter()
+        .filter_map(|id| c.read_with(cx, |c, _| c.event_bounds(id)))
+        .collect();
+    assert!(
+        !shown.is_empty() && shown.len() < ids.len(),
+        "{}",
+        shown.len()
+    );
+    assert!(
+        shown.iter().all(|b| b.size.width >= px(36.) - px(0.5)),
+        "{shown:?}"
+    );
+    let hidden: Vec<_> = ids
+        .iter()
+        .filter(|id| c.read_with(cx, |c, _| c.event_bounds(id)).is_none())
+        .cloned()
+        .collect();
+    let more = c
+        .read_with(cx, |c, _| c.hidden_bounds(&hidden[0]))
+        .expect("a +N");
+    assert!(
+        hidden
+            .iter()
+            .all(|id| c.read_with(cx, |c, _| c.hidden_bounds(id)) == Some(more))
+    );
+
+    // A click on it lists them in a popover beside it, never over it.
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        c.read_with(cx, |c, _| c.crowd_events().map(<[EventId]>::to_vec)),
+        Some(hidden.clone())
+    );
+    let list = cx.debug_bounds("gpui-core-popover").expect("the list");
+    let both = list.intersect(&more);
+    assert!(
+        both.size.width <= px(0.) || both.size.height <= px(0.),
+        "{list:?} over {more:?}"
+    );
+    // A click on "+N" again closes it; Escape does too.
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+
+    // A click on a row opens that event.
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    let row = cx.debug_bounds("crowd-row-0").expect("a row");
+    cx.simulate_click(row.center(), Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+    assert!(has(&seen, &CalendarEvent::Open(hidden[0].clone())));
+}
+
+#[gpui::test]
+fn a_row_of_the_list_drags_its_event_into_the_grid(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let ids = crowded(&c, cx);
+    let hidden = ids
+        .iter()
+        .find(|id| c.read_with(cx, |c, _| c.event_bounds(id)).is_none())
+        .unwrap()
+        .clone();
+    let more = c.read_with(cx, |c, _| c.hidden_bounds(&hidden)).unwrap();
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    let first = c.read_with(cx, |c, _| c.crowd_events().unwrap()[0].clone());
+    let row = cx.debug_bounds("crowd-row-0").expect("a row");
+    // Held by its start: let go at Friday 9 AM, it starts there, as long as it was.
+    let to = spot(&c, cx, day(4), 9, 0);
+    press(cx, row.center());
+    move_to(cx, point(row.center().x + px(10.), row.center().y));
+    // The list gives way to the drag.
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+    move_to(cx, to);
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    let moved = seen.borrow().iter().find_map(|e| match e {
+        CalendarEvent::Move { event, time, .. } if event.id == first => Some(*time),
+        _ => None,
+    });
+    assert_eq!(
+        moved,
+        Some(EventTime::timed(at(day(4), 9, 0), at(day(4), 10, 0)))
+    );
+}
+
+#[gpui::test]
+fn a_screen_reader_hears_how_many_didnt_fit_and_when(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    let ids = crowded(&c, cx);
+    let hidden: Vec<EventId> = ids
+        .iter()
+        .filter(|id| c.read_with(cx, |c, _| c.event_bounds(id)).is_none())
+        .cloned()
+        .collect();
+    let items = c.read_with(cx, |c, _| c.accessibility_items());
+    let more = items
+        .iter()
+        .find(|i| matches!(&i.target, A11yTarget::Crowd(_)))
+        .expect("a node for the +N");
+    assert_eq!(more.role, gpui::Role::Button);
+    assert_eq!(more.target, A11yTarget::Crowd(hidden.clone()));
+    assert_eq!(
+        more.label,
+        format!("{} more events, 2 to 3 PM", hidden.len())
+    );
+    assert_eq!(
+        Some(more.bounds),
+        c.read_with(cx, |c, _| c.hidden_bounds(&hidden[0]))
+    );
+    // Each hidden event is in it, not a node of its own.
+    for id in &hidden {
+        assert!(
+            !items
+                .iter()
+                .any(|i| i.target == A11yTarget::Event(id.clone()))
+        );
+    }
+    // Activating it opens the list, as a click does.
+    let target = more.target.clone();
+    c.update(cx, |c, cx| c.activate(&target, cx));
+    draw(cx);
+    assert_eq!(
+        c.read_with(cx, |c, _| c.crowd_events().map(<[EventId]>::to_vec)),
+        Some(hidden)
+    );
+}

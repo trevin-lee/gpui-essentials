@@ -32,7 +32,16 @@ their look.
 - **Layout:** timed events that overlap sit side by side. Each group of overlapping events gets as
   many columns as it needs at its busiest. Each event takes the leftmost column free when it
   starts, then widens over the columns to its right that stay free for its whole length; this is
-  FullCalendar's and Google Calendar's layout. Events a day or longer, and all-day ones, are spans
+  FullCalendar's and Google Calendar's layout. No column gets narrower than a readable 36
+  pixels (44 points on touch): a group that needs more shows the columns that fit and, in a
+  strip at their right, "+N" for the rest, from the first one's start to the last one's end. A
+  click (a tap) on it lists them in a popover beside it (a sheet on touch), each with its
+  colour, title and time; a click on a row opens that event, and a drag from a row carries the
+  event into the grid, held by its start. `hidden_bounds(id)` says where an event's "+N" is,
+  `open_hidden(id)` opens its list, and `crowd_events()` gives what's listed. VoiceOver hears
+"+N" as "12 more events, 2 to 5 PM", and activating it opens the list. A day too narrow
+  for even one such column beside the strip (a phone's week) keeps one column and a narrower
+  strip. Events a day or longer, and all-day ones, are spans
   stacked in the lowest free row, longer first. A shorter event that crosses midnight is drawn as
   a piece on each day.
 - **Dragging:** drag empty time to make an event, drag an event to move it (to other days too),
@@ -319,8 +328,8 @@ question as a sheet), `compact-find` (the list found by "CS 162"), `compact-pane
 design review's panel as a sheet) and `compact-mini` (the mini month open behind the title); at
 the Mac's size, `zones` is the week with India's hours beside Los Angeles', `recurring` asks
 the recurring question in a popover, `find` finds "lunch" while the calendar takes typing,
-`panel` opens the design review's panel beside it, and `mini` has the mini month beside the
-week. Only `mini` and `compact-mini` are drawn with the mini month, so the other pictures stay
+`panel` opens the design review's panel beside it, `mini` has the mini month beside the
+week, and `crowd` is the busy week with Thursday's "+N" open. Only `mini` and `compact-mini` are drawn with the mini month, so the other pictures stay
 comparable. `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
 presses, drags, swipes and pans.
 
@@ -334,7 +343,9 @@ gpui-core's theme.
 | **Changing an event's end** | **Moving an all-day event in the month** |
 | ![Planning's end dragged to 1:15](docs/resize.png) | ![A trip dragged a week later](docs/month-drag.png) |
 | **A day** | **A busy week (160 events)** |
-| ![Wednesday on its own](docs/day.png) | ![A week packed with overlapping events](docs/dense.png) |
+| ![Wednesday on its own](docs/day.png) | ![A week packed with overlapping events, readable columns and "+N" for the rest](docs/dense.png) |
+| **What didn't fit, listed** | |
+| ![Thursday's "+12" open beside it, twelve events with their times](docs/crowd.png) | |
 | **Links to docs and agents** | **The agenda** |
 | ![Design review listing its notes; shorter events with a link's mark or a count](docs/links.png) | ![Tuesday's events listed with their times, colours and links](docs/agenda.png) |
 | **A day on a phone** | **The agenda on a phone** |
