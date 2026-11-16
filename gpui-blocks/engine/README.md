@@ -1,4 +1,14 @@
-# gpui-kit-markdown-editor
+# gpui-blocks-engine
+
+The block editor [gpui-blocks](../README.md) is built on: Trevin Lee's fork of
+[wabzqem/gpui-kit-markdown-editor](https://github.com/wabzqem/gpui-kit-markdown-editor), developed
+at [trevin-lee/gpui-kit-markdown-editor](https://github.com/trevin-lee/gpui-kit-markdown-editor)
+and brought here with its history. It isn't published (`publish = false`): its API is
+gpui-blocks' internals and changes with it. Use gpui-blocks.
+
+The rest of this README is the upstream crate's, with this fork's changes listed below.
+
+## gpui-kit-markdown-editor
 
 A block-based WYSIWYG Markdown editor for [GPUI](https://www.gpui.rs), built on
 [gpui-kit](https://github.com/longbridge/gpui-kit)'s public editor host API
@@ -144,7 +154,6 @@ blocks; gpui-kit only highlights when one is on:
 | Feature | Effect |
 | --- | --- |
 | `syntect` (default) | About 200 languages, no syntax tree |
-| `tree-sitter` | Tree-sitter highlighting (takes precedence if both are on) |
 
 Disable default features to build without highlighting.
 

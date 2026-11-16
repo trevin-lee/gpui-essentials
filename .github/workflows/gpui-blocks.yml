@@ -58,13 +58,16 @@ jobs:
         with:
           key: gpui-blocks
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo fmt -p gpui-blocks --check
+      - run: cargo fmt -p gpui-blocks -p gpui-blocks-engine --check
       - run: cargo clippy -p gpui-blocks --locked --all-targets -- -D warnings
+      # The engine gpui-blocks is built on (engine/), with its own tests and examples.
+      - run: cargo clippy -p gpui-blocks-engine --locked --all-targets -- -D warnings
       - if: needs.changes.outputs.own == 'true'
         run: cargo clippy -p gpui-blocks --locked --all-targets --features shots -- -D warnings
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-blocks --locked
-      - run: cargo doc -p gpui-blocks --locked --no-deps
+      - run: cargo test -p gpui-blocks-engine --locked --all-targets
+      - run: cargo doc -p gpui-blocks -p gpui-blocks-engine --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 

@@ -13,21 +13,23 @@ examples/fonts/OFL.txt in each.
 gpui-blocks
 -----------
 
-This product depends on gpui-kit-markdown-editor
+gpui-blocks/engine (gpui-blocks-engine) is a fork of gpui-kit-markdown-editor
 (https://github.com/wabzqem/gpui-kit-markdown-editor), Copyright Richard
-Nelson and contributors, licensed under the Apache License, Version 2.0. It
-is used through a fork with changes, Copyright 2026 Trevin Lee
-(https://github.com/trevin-lee/gpui-kit-markdown-editor), whose changed files
-say so.
+Nelson and contributors, licensed under the Apache License, Version 2.0, with
+changes Copyright 2026 Trevin Lee. Its changed files say so. It was developed
+at https://github.com/trevin-lee/gpui-kit-markdown-editor and brought here
+with its history. Its LICENSE-APACHE carries the notice of GPUI Kit, from
+which it derives.
 
-gpui-kit-markdown-editor draws through GPUI Kit
+gpui-blocks-engine draws through GPUI Kit
 (https://github.com/longbridge/gpui-kit), Copyright 2024 - 2026 Longbridge,
 also licensed under the Apache License, Version 2.0.
 
-gpui-kit-markdown-editor includes icons from Lucide (https://lucide.dev),
-Copyright 2026 Lucide Icons and Contributors, licensed under the ISC License,
-some derived from Feather (https://feathericons.com), Copyright 2013-2026 Cole
-Bemis, licensed under the MIT License. See assets/icons/LICENSE-LUCIDE in gpui-kit-markdown-editor.
+gpui-blocks-engine includes icons from Lucide (https://lucide.dev), Copyright
+2026 Lucide Icons and Contributors, licensed under the ISC License, some
+derived from Feather (https://feathericons.com), Copyright 2013-2026 Cole
+Bemis, licensed under the MIT License. See
+gpui-blocks/engine/assets/icons/LICENSE-LUCIDE.
 
 gpui-core
 ---------
