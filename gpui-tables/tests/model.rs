@@ -691,3 +691,112 @@ fn clamping_cuts_values_to_the_limits() {
         Value::Number(3.0)
     );
 }
+
+fn with_icon(icon: Json) -> Doc {
+    let mut doc = Doc::new("p", DocKind::Page, "Notes");
+    doc.extra.insert("icon".into(), icon);
+    doc
+}
+
+#[test]
+fn an_icon_is_one_emoji_of_at_most_16_bytes() {
+    for emoji in [
+        "🧭",
+        "✉️",
+        "🇯🇵",
+        "👍🏽",
+        "👩‍👧",
+        // 🏳️‍⚧️, a flag of five code points and exactly 16 bytes.
+        "\u{1F3F3}\u{FE0F}\u{200D}\u{26A7}\u{FE0F}",
+        "A",
+    ] {
+        let doc = with_icon(json!(emoji));
+        assert_eq!(doc.icon(), Some(emoji), "{emoji}");
+        assert_eq!(doc.icon_asset(), None, "{emoji}");
+        assert!(
+            Limits::default().check_doc(&doc, None).is_empty(),
+            "{emoji}"
+        );
+    }
+    for bad in [
+        json!("☕☕"),
+        json!("hi"),
+        // 👨‍👩‍👧: one grapheme, but 18 bytes.
+        json!("👨‍👩‍👧"),
+        json!(""),
+        json!(" ☕"),
+        json!(7),
+        json!(["☕"]),
+        json!(null),
+    ] {
+        assert_eq!(with_icon(bad.clone()).icon(), None, "{bad}");
+    }
+    assert_eq!(Doc::new("p", DocKind::Page, "").icon(), None);
+}
+
+#[test]
+fn an_asset_icon_is_never_an_emoji() {
+    let hash = "0123456789abcdef".repeat(4);
+    let doc = with_icon(json!(format!("asset:{hash}")));
+    assert_eq!(doc.icon(), None);
+    assert_eq!(doc.icon_asset(), Some(hash.as_str()));
+    assert!(Limits::default().check_doc(&doc, None).is_empty());
+    for bad in [
+        "asset:".to_owned(),
+        format!("asset:{}", &hash[..63]),
+        format!("asset:{hash}0"),
+        format!("asset:{}", hash.to_uppercase()),
+        // Short enough to pass for an emoji's bytes, but still an asset, so never drawn.
+        "asset:☕".to_owned(),
+    ] {
+        let doc = with_icon(json!(bad));
+        assert_eq!(doc.icon(), None, "{bad}");
+        assert_eq!(doc.icon_asset(), None, "{bad}");
+        let problems: Vec<String> = Limits::default()
+            .check_doc(&doc, None)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(
+            problems,
+            ["icon: not asset: and 64 lowercase hex characters"],
+            "{bad}"
+        );
+    }
+    // Case matters: "Asset:" is text, too long for an emoji.
+    assert_eq!(with_icon(json!(format!("Asset:{hash}"))).icon_asset(), None);
+}
+
+#[test]
+fn icon_problems_are_reported() {
+    let check = |icon: Json| -> Vec<String> {
+        let mut p: Vec<String> = Limits::default()
+            .check_doc(&with_icon(icon), None)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        p.sort();
+        p
+    };
+    assert_eq!(check(json!("☕☕")), ["icon: 2 graphemes is more than 1"]);
+    assert_eq!(check(json!("👨‍👩‍👧")), ["icon: 18 bytes is more than 16"]);
+    assert_eq!(
+        check(json!("x".repeat(20))),
+        [
+            "icon: 20 bytes is more than 16",
+            "icon: 20 graphemes is more than 1"
+        ]
+    );
+    assert_eq!(check(json!("")), ["icon: an empty string"]);
+    assert_eq!(check(json!(7)), ["icon: not a string or null"]);
+    assert!(check(json!(null)).is_empty());
+    let kinds: Vec<ProblemKind> = Limits::default()
+        .check_doc(&with_icon(json!("☕☕")), None)
+        .into_iter()
+        .map(|p| p.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [ProblemKind::TooManyGraphemes { limit: 1, found: 2 }]
+    );
+}

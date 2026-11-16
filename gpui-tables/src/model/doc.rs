@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value as Json, json};
 
+use super::limits::{ICON_ASSET, ICON_BYTES, icon_problems, is_sha256};
 use super::{Extra, Property, Value, View, string_enum};
 
 string_enum! {
@@ -276,13 +277,26 @@ impl Doc {
         self.updated_by.as_ref().or(self.author.as_ref())
     }
 
-    /// The doc's icon, when it has one: its `icon` field (an emoji, say), which the host keeps
-    /// and the crate carries in `extra`. A list view draws a row's before its title.
+    /// The doc's emoji icon, when it has a valid one: its `icon` field (which the crate carries
+    /// in `extra`) when that's one grapheme cluster of at most 16 bytes, as
+    /// [`Limits::check_doc`](super::Limits::check_doc) requires. An image icon
+    /// (`asset:<sha256>`, see [`Doc::icon_asset`]), an empty or invalid string, or anything
+    /// that isn't a string is None, so it's never drawn as text. A list view draws a row's
+    /// before its title.
     pub fn icon(&self) -> Option<&str> {
-        self.extra
-            .get("icon")
-            .and_then(Json::as_str)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
+        let icon = self.extra.get("icon")?.as_str()?;
+        // The byte check first, so a long string is never segmented.
+        let valid = icon.len() <= ICON_BYTES
+            && !icon.starts_with(ICON_ASSET)
+            && icon_problems(icon).is_empty();
+        valid.then_some(icon)
+    }
+
+    /// The SHA-256 (64 lowercase hex characters) of the doc's image icon, when its `icon` field
+    /// is a valid `asset:<sha256>`, for a host that draws images. The views don't draw these
+    /// yet.
+    pub fn icon_asset(&self) -> Option<&str> {
+        let hash = self.extra.get("icon")?.as_str()?.strip_prefix(ICON_ASSET)?;
+        is_sha256(hash).then_some(hash)
     }
 }

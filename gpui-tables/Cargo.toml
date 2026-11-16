@@ -20,6 +20,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # New rows', properties', views' and options' ids: lowercase v4 UUIDs, made by the creator.
 uuid = { version = "1", features = ["v4"] }
+# Counting a doc icon's grapheme clusters (an emoji icon is one).
+unicode-segmentation = "1.12"
 # The views (the gpui feature): GPUI under its own name, pinned exactly in the workspace
 # (gpui-pre 0.3.12), and gpui-core for the theme, Press and icons.
 gpui = { workspace = true, optional = true }
