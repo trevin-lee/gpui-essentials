@@ -312,6 +312,15 @@ impl TableView {
             .collect()
     }
 
+    /// A row's cell as words, as assistive technology reads it: an option's name, a person's
+    /// name from the host, a date in the viewer's zone. None for a row or property the table
+    /// hasn't.
+    pub fn cell_words(&self, row_id: &str, property_id: &str) -> Option<String> {
+        let p = self.database.database.as_ref()?.property(property_id)?;
+        let r = self.rows.iter().find(|r| r.id == row_id)?;
+        Some(self.cell_text(r, p))
+    }
+
     /// What the engine couldn't use in the view.
     pub fn issues(&mut self) -> &[Issue] {
         self.ensure();
@@ -984,8 +993,8 @@ impl TableView {
         }
     }
 
-    /// Delete: empties a cell (a title becomes empty, a checkbox unchecked; created and edited
-    /// times can't be emptied).
+    /// Delete: empties a cell (a title becomes empty, a checkbox unchecked; the derived created
+    /// and edited times and people can't be emptied).
     pub(crate) fn clear_cell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure();
         let Some(c) = self.cell else { return };
@@ -994,7 +1003,7 @@ impl TableView {
         };
         let r = &self.rows[row];
         let edits = match p.kind {
-            PropertyType::CreatedTime | PropertyType::EditedTime => Vec::new(),
+            _ if p.kind.is_derived() => Vec::new(),
             PropertyType::Title if r.title.is_empty() => Vec::new(),
             PropertyType::Title => vec![Edit::RowTitleChanged {
                 row_id: r.id.clone(),
@@ -1333,6 +1342,19 @@ impl TableView {
                         pick(
                             person_label(self.host.as_ref(), &person),
                             FilterOp::Contains,
+                            key.into(),
+                        )
+                        .icon(I::User),
+                    );
+                }
+            }
+            PropertyType::CreatedBy | PropertyType::EditedBy => {
+                for person in self.host.people(p) {
+                    let Some(key) = person.key() else { continue };
+                    out.push(
+                        pick(
+                            person_label(self.host.as_ref(), &person),
+                            FilterOp::Is,
                             key.into(),
                         )
                         .icon(I::User),
@@ -1806,6 +1828,8 @@ pub(crate) fn type_icon(kind: &PropertyType) -> gpui_core::IconName {
         PropertyType::Person => I::User,
         PropertyType::Relation => I::ArrowUpRight,
         PropertyType::CreatedTime | PropertyType::EditedTime => I::Clock,
+        PropertyType::CreatedBy => I::UserPlus,
+        PropertyType::EditedBy => I::UserPen,
         PropertyType::Other(_) => I::Circle,
     }
 }

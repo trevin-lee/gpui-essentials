@@ -30,6 +30,11 @@ string_enum! {
         CreatedTime = "createdTime",
         /// The row doc's `updated`, never stored in `values`.
         EditedTime = "editedTime",
+        /// The row doc's `author`, never stored in `values`.
+        CreatedBy = "createdBy",
+        /// The row doc's `updatedBy` (its `author` when that's missing), never stored in
+        /// `values`.
+        EditedBy = "editedBy",
     }
 }
 
@@ -49,7 +54,10 @@ impl PropertyType {
 
     /// Values the crate derives from the row doc, which an edit never sets in `values`.
     pub fn is_derived(&self) -> bool {
-        matches!(self, Self::CreatedTime | Self::EditedTime)
+        matches!(
+            self,
+            Self::CreatedTime | Self::EditedTime | Self::CreatedBy | Self::EditedBy
+        )
     }
 
     /// Whether a view can group by it.
@@ -63,6 +71,8 @@ impl PropertyType {
                 | Self::Date
                 | Self::CreatedTime
                 | Self::EditedTime
+                | Self::CreatedBy
+                | Self::EditedBy
         )
     }
 }

@@ -91,6 +91,7 @@ impl<'p> Sorter<'p> {
         let cell = Cell::read(row, self.field);
         let value = match cell {
             Cell::Time(t) => return Key::Int(t),
+            Cell::Person(p) => return person_label(p, cx).map_or(Key::Empty, |n| text_key(&n)),
             Cell::Text("") => return Key::Empty,
             Cell::Text(s) => return Key::Text(fold(s)),
             Cell::Missing => {

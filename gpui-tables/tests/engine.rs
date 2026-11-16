@@ -204,11 +204,13 @@ fn small() -> Fixture {
             }),
             p("added", PropertyType::CreatedTime),
             p("edited", PropertyType::EditedTime),
+            p("by", PropertyType::CreatedBy),
+            p("editor", PropertyType::EditedBy),
         ],
         ..DatabaseFields::default()
     };
     let today = day(2026, 11, 15);
-    let rows = vec![
+    let mut rows = vec![
         row(
             "r0",
             "Alpha",
@@ -282,6 +284,16 @@ fn small() -> Fixture {
             &[("n", Value::text("12")), ("stage", Value::Number(1.0))],
         ),
     ];
+    // Who made each row and changed it last. r1 is older than `updatedBy`, so its editor is its
+    // author; r3 has neither.
+    for (r, author, editor) in [
+        (0, Some(Person::Owner), Some(Person::agent("inbox-triage"))),
+        (1, Some(Person::agent("career-planning")), None),
+        (2, Some(Person::Owner), Some(Person::Owner)),
+    ] {
+        rows[r].author = author;
+        rows[r].updated_by = editor;
+    }
     Fixture { db, rows }
 }
 
@@ -422,6 +434,78 @@ fn person_and_relation_operators() {
     );
     assert_eq!(f.pass("rel", O::IsEmpty, Json::Null), ["r2", "r3"]);
     assert_eq!(f.pass("rel", O::IsNotEmpty, Json::Null), ["r0", "r1"]);
+}
+
+#[test]
+fn created_by_and_edited_by_operators() {
+    let f = small();
+    use FilterOp as O;
+    assert_eq!(f.pass("by", O::Is, json!("owner")), ["r0", "r2"]);
+    assert_eq!(
+        f.pass("by", O::Contains, json!({"kind": "owner"})),
+        ["r0", "r2"]
+    );
+    assert_eq!(
+        f.pass(
+            "by",
+            O::Is,
+            json!({"kind": "agent", "agentId": "career-planning"})
+        ),
+        ["r1"]
+    );
+    // The negatives match a doc with no author, as a person value's do.
+    assert_eq!(f.pass("by", O::IsNot, json!("owner")), ["r1", "r3"]);
+    assert_eq!(
+        f.pass("by", O::DoesNotContain, json!("owner")),
+        ["r1", "r3"]
+    );
+    assert_eq!(f.pass("by", O::IsEmpty, Json::Null), ["r3"]);
+    assert_eq!(f.pass("by", O::IsNotEmpty, Json::Null), ["r0", "r1", "r2"]);
+
+    assert_eq!(f.pass("editor", O::Is, json!("agent:inbox-triage")), ["r0"]);
+    assert_eq!(f.pass("editor", O::Is, json!("owner")), ["r2"]);
+    // r1 has no updatedBy: its editor is its author.
+    assert_eq!(
+        f.pass("editor", O::Is, json!("agent:career-planning")),
+        ["r1"]
+    );
+    assert_eq!(
+        f.pass("editor", O::IsNot, json!("owner")),
+        ["r0", "r1", "r3"]
+    );
+    assert_eq!(f.pass("editor", O::IsEmpty, Json::Null), ["r3"]);
+
+    // A stored value is ignored: the doc's fields win.
+    let mut f = f;
+    f.rows[3]
+        .values
+        .as_mut()
+        .unwrap()
+        .insert("by".into(), vec![Person::Owner].into());
+    assert_eq!(f.pass("by", O::Is, json!("owner")), ["r0", "r2"]);
+
+    let c = |p: &str, op: FilterOp, v: Json| Filter::condition(p, op, v);
+    assert_eq!(
+        f.issues(c("by", O::StartsWith, json!("o"))),
+        [Issue::OpNotForType {
+            property_id: "by".into(),
+            op: O::StartsWith
+        }]
+    );
+    assert_eq!(
+        f.issues(c("editor", O::Before, json!("2026-11-15"))),
+        [Issue::OpNotForType {
+            property_id: "editor".into(),
+            op: O::Before
+        }]
+    );
+    assert_eq!(
+        f.issues(c("by", O::Is, json!("agent:"))),
+        [Issue::BadValue {
+            property_id: "by".into(),
+            op: O::Is
+        }]
+    );
 }
 
 #[test]
@@ -754,6 +838,45 @@ fn people_and_relations_sort_by_the_hosts_names() {
     );
 }
 
+/// The host's names for the created-by and edited-by sorts: the owner sorts by name, before an
+/// agent named Scout.
+struct Crew;
+
+impl Lookup for Crew {
+    fn person_name(&self, p: &Person) -> Option<String> {
+        Some(match p {
+            Person::Owner => "Avery Lin".into(),
+            Person::Agent(id) if id == "career-planning" => "Scout".into(),
+            _ => return None,
+        })
+    }
+}
+
+#[test]
+fn created_by_and_edited_by_sort_by_the_hosts_names() {
+    let f = small();
+    // Without names: "career-planning" < "owner"; ties keep the manual order; no author last.
+    assert_eq!(
+        sorted(&f, vec![Sort::ascending("by")]),
+        ["r1", "r0", "r2", "r3"]
+    );
+    assert_eq!(
+        sorted(&f, vec![Sort::descending("by")]),
+        ["r0", "r2", "r1", "r3"]
+    );
+    let cx = Context::new(now()).with_lookup(&Crew);
+    // "avery lin" < "scout".
+    assert_eq!(
+        sorted_in(&f, vec![Sort::ascending("by")], &cx),
+        ["r0", "r2", "r1", "r3"]
+    );
+    // "avery lin" (r2) < "inbox-triage" (r0, no name) < "scout" (r1, its author).
+    assert_eq!(
+        sorted_in(&f, vec![Sort::ascending("editor")], &cx),
+        ["r2", "r0", "r1", "r3"]
+    );
+}
+
 fn grouped(
     f: &Fixture,
     by: &str,
@@ -819,6 +942,44 @@ fn grouping_by_select_multi_select_checkbox_and_person() {
             ("owner", &["r0", "r1"]),
             ("agent:inbox-triage", &["r1"])
         ])
+    );
+}
+
+#[test]
+fn grouping_by_created_by_and_edited_by() {
+    let f = small();
+    let cx = Context::new(now());
+    assert_eq!(
+        grouped(&f, "by", None, &cx),
+        g(&[
+            ("empty", &["r3"]),
+            ("owner", &["r0", "r2"]),
+            ("agent:career-planning", &["r1"])
+        ])
+    );
+    assert_eq!(
+        grouped(&f, "editor", None, &cx),
+        g(&[
+            ("empty", &["r3"]),
+            ("owner", &["r2"]),
+            ("agent:career-planning", &["r1"]),
+            ("agent:inbox-triage", &["r0"])
+        ])
+    );
+    // Agents go by the host's names: Scout after inbox-triage.
+    let cx = cx.with_lookup(&Crew);
+    let keys: Vec<String> = grouped(&f, "editor", None, &cx)
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "empty",
+            "owner",
+            "agent:inbox-triage",
+            "agent:career-planning"
+        ]
     );
 }
 
@@ -1112,6 +1273,14 @@ fn hostile_values_never_panic() {
         );
         r.created = [i64::MIN, 0, i64::MAX][i % 3];
         r.updated = -r.created.saturating_add(1);
+        let someone = [
+            None,
+            Some(Person::Owner),
+            Some(Person::agent("")),
+            Some(Person::Other(json!({"kind": "robot"}))),
+        ];
+        r.author = someone[i % 4].clone();
+        r.updated_by = someone[(i / 4) % 4].clone();
         rows.push(r);
     }
     rows.extend(f.rows.iter().cloned());

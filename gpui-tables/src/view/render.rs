@@ -677,7 +677,7 @@ impl TableView {
     }
 
     /// A cell's value as words, for assistive technology.
-    fn cell_text(&self, r: &Doc, p: &Property) -> String {
+    pub(crate) fn cell_text(&self, r: &Doc, p: &Property) -> String {
         let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
         let v = r.value(&p.id);
         match p.kind {
@@ -712,6 +712,8 @@ impl TableView {
             PropertyType::Relation => self.relation_text(p, v),
             PropertyType::CreatedTime => format::instant(r.created, offset),
             PropertyType::EditedTime => format::instant(r.updated, offset),
+            PropertyType::CreatedBy => self.person_text(r.created_by()),
+            PropertyType::EditedBy => self.person_text(r.edited_by()),
             _ => v.and_then(Value::as_str).unwrap_or_default().to_owned(),
         }
     }
@@ -724,6 +726,15 @@ impl TableView {
             .map(|p| person_label(self.host.as_ref(), p))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// A created-by or edited-by: one person, or empty (as a person value leaves out a kind
+    /// it doesn't know).
+    fn person_text(&self, person: Option<&Person>) -> String {
+        person
+            .filter(|p| !matches!(p, Person::Other(_)))
+            .map(|p| person_label(self.host.as_ref(), p))
+            .unwrap_or_default()
     }
 
     fn relation_text(&self, p: &Property, v: Option<&Value>) -> String {
