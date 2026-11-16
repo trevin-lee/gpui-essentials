@@ -186,7 +186,7 @@ global `Theme`:
 | The slider's track, fill and thumb | `line_strong`, `accent`, `background` with an `accent` edge |
 | The slider's keyboard focus ring | `focus_ring` |
 | An icon button's tooltip | `popover`, with `text`, a `line_strong` edge and the `body` font |
-| A date field's edge, fill, text and focus ring | as a text field's: `line_strong`, `sunk` on a dark card (none on a light one), `text`, `focus_ring` (also its edge while focused from the keyboard) |
+| A date field's edge, fill, text and focus ring | as a text field's: `line_strong`, `sunk` on a dark card (none on a light one), `text`, `focus_ring` (also its edge while focused from the keyboard, where the web's is `accent`: gpui-core has no separate colour for it yet) |
 | Its placeholder and calendar icon | `text_muted` |
 | Its month | `popover`, with `text` and a `line_strong` edge |
 | A picked day, a range's ends | `accent` with `on_accent` |
@@ -196,8 +196,9 @@ global `Theme`:
 | Markdown's text and links | `text` |
 | Its list markers and an image's alt text | `text_muted` |
 | Its rules, quote bars and table lines | `line` |
+| Its table's header labels, and every other body row | `text_muted`, `highlight` |
 | Its selection | `accent` at 30% |
-| Its inline code | `sunk` behind the `body` font, as the web's |
+| Its inline code | `sunk` behind the `body` font in a `line` edge, as the web's |
 | A code block | `sunk`, with a `line` edge and the `mono` font |
 
 gpui-core sets itself up when its first Root, text field or date picker is made, so a host
@@ -214,13 +215,18 @@ Tailwind's reset, measured in Chromium), in CSS pixels whatever the text's size:
 
 | | The web's | Here |
 |---|---|---|
-| Paragraphs | 18px apart (`p:has(+p)`) | the same between any two blocks but headings |
+| Paragraphs | 18px apart (`p:has(+p)`) | the same |
 | Headings, every level | heading-xs: 600 16px/1.25 | semibold at `text.md`, 1.25 tall |
-| Above a heading | nothing (the reset's margin, which OpenUI keeps) | nothing |
-| Below a heading | 8px before a paragraph, 18px before anything else | 8px |
+| Above a heading | nothing after a paragraph (the reset's margin, which OpenUI keeps), else the block above's margin | 18px after a paragraph, else the same |
+| Below a heading | 8px before a paragraph, 18px before anything else | the same |
+| Before a list | 8px after a paragraph in TextContent (`p:has(+ul)`), nothing in MarkDownRenderer | 8px |
+| After a list | 24px (`ul`), 20px (`ol`) | the same |
+| Around a table | 20px after it, nothing after a paragraph | 20px after it, 18px after a paragraph |
+| Around a quote or a rule | 25px, 48px (`blockquote`, `hr`) | the same, a rule's line in the middle of its own line's height |
+| Around a code block | nothing (`margin: 0 !important`) | 18px |
 | Lists | markers outside a 20px padding, a space (0.27em) before the text, items 8px apart | the same |
-| Inline code | the body's font and size on `sunk`, padding 2px 4px, a 1px border, 4px corners | the body's font, the fill to the border's outer edge (5px either side, 3px past the font's ascent and descent), 4px corners |
-| A table | radius-2xl (14px) corners, a 1px line, no header fill | `radii.xl` corners, a `line` edge, no header fill |
+| Inline code | the body's font and size on `sunk`, padding 2px 4px, a 1px `border-default` edge, 4px corners: 26px tall | the same; 24px tall in a paragraph's first and last line, where gpui-core clips a paragraph to its lines |
+| A table | radius-2xl (14px) corners, a 1px line, no header fill, muted regular header labels, 12px cell padding, every other body row at `highlight-subtle`, 14px text | `radii.xl` corners, a `line` edge, no header fill, `text_muted` regular header labels, 12px cell padding, every other body row at `highlight`, the body's size |
 
 ### Hooks and events
 
