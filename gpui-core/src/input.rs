@@ -293,6 +293,23 @@ impl InputState {
         self
     }
 
+    /// Masks the text or shows it (a password's Reveal), keeping the text and the selection.
+    /// Masked, it won't copy or cut, and the platform keyboard is told it's secure entry.
+    pub fn set_masked(&mut self, masked: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.masked != masked {
+            self.masked = masked;
+            window.notify_text_input_changed(&self.focus);
+            cx.notify();
+        }
+    }
+
+    /// Selects all its text, as ⌘A does (the field's focus is the host's to give).
+    pub fn select_all(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.selected = 0..self.text.len();
+        self.reversed = false;
+        cx.notify();
+    }
+
     /// The text it starts with.
     pub fn default_value(mut self, text: impl Into<String>) -> Self {
         self.text = sanitize(text.into(), self.multiline);
@@ -855,10 +872,8 @@ impl InputState {
         self.select_to(self.text.len(), cx);
     }
 
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.selected = 0..self.text.len();
-        self.reversed = false;
-        cx.notify();
+    fn on_select_all(&mut self, _: &SelectAll, window: &mut Window, cx: &mut Context<Self>) {
+        self.select_all(window, cx);
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -1484,7 +1499,7 @@ impl RenderOnce for Input {
             .on_action(window.listener_for(&s, InputState::select_line_end))
             .on_action(window.listener_for(&s, InputState::select_doc_start))
             .on_action(window.listener_for(&s, InputState::select_doc_end))
-            .on_action(window.listener_for(&s, InputState::select_all))
+            .on_action(window.listener_for(&s, InputState::on_select_all))
             .on_action(window.listener_for(&s, InputState::copy))
             .on_action(window.listener_for(&s, InputState::cut))
             .on_action(window.listener_for(&s, InputState::paste))

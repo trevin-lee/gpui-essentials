@@ -214,3 +214,36 @@ fn a_press_at_the_right_of_a_right_aligned_field_is_the_end() {
     vcx.simulate_input("!");
     assert_eq!(value(&field, vcx), "12!");
 }
+
+#[test]
+fn the_host_can_select_all() {
+    let mut cx = app();
+    let (field, vcx) = open(&mut cx, TextAlign::Left, with_text("hello"));
+    vcx.update(|window, cx| field.update(cx, |f, cx| f.select_all(window, cx)));
+    assert_eq!(field.read_with(vcx, |f, _| f.selection()), 0..5);
+    vcx.simulate_input("x");
+    assert_eq!(value(&field, vcx), "x");
+}
+
+#[test]
+fn the_host_can_reveal_and_mask_a_field() {
+    let mut cx = app();
+    let (field, vcx) = open(&mut cx, TextAlign::Left, |w, cx| {
+        InputState::new(w, cx).default_value("secret").masked(true)
+    });
+    let copied = |vcx: &mut VisualTestContext| {
+        vcx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("before".into())));
+        vcx.simulate_keystrokes("cmd-a cmd-c");
+        vcx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()))
+    };
+    assert_eq!(copied(vcx).as_deref(), Some("before"), "masked: no copy");
+    vcx.update(|window, cx| field.update(cx, |f, cx| f.set_masked(false, window, cx)));
+    assert_eq!(
+        copied(vcx).as_deref(),
+        Some("secret"),
+        "revealed: it copies"
+    );
+    vcx.update(|window, cx| field.update(cx, |f, cx| f.set_masked(true, window, cx)));
+    assert_eq!(copied(vcx).as_deref(), Some("before"), "masked again");
+    assert_eq!(value(&field, vcx), "secret");
+}
