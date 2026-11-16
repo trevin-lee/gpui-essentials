@@ -96,3 +96,20 @@ fn every_limit_has_a_case_just_over_it() {
         );
     }
 }
+
+#[test]
+fn every_icon_check_has_a_case() {
+    let text: Vec<String> = cases("invalid.json")
+        .iter()
+        .flat_map(|c| c.problems.clone())
+        .collect();
+    for message in [
+        "icon: 2 graphemes is more than 1",
+        "icon: 18 bytes is more than 16",
+        "icon: an empty string",
+        "icon: not asset: and 64 lowercase hex characters",
+        "icon: not a string or null",
+    ] {
+        assert!(text.iter().any(|t| t == message), "{message}");
+    }
+}

@@ -203,6 +203,45 @@ fn a_list_shows_a_line_per_row_with_its_values(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_asset_icon_or_an_invalid_one_draws_nothing(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, mut rows) = load("interactions");
+    let asset = format!("asset:{}", "0123456789abcdef".repeat(4));
+    let mut ids = Vec::new();
+    for (r, icon) in rows
+        .iter_mut()
+        .zip([asset.as_str(), "asset:nothex", "☕☕", "🌲"])
+    {
+        r.extra.insert("icon".into(), icon.into());
+        ids.push(r.id.clone());
+    }
+    let (table, cx) = open_list(cx, &host, (db, rows), RECENT, wide());
+    for id in &ids {
+        assert!(drawn(cx, line(id, "all")), "{id} is drawn");
+    }
+    // An image icon, a malformed one and two emoji have no icon, so no text; the emoji does.
+    for id in &ids[..3] {
+        assert!(!drawn(cx, format!("icon:{id}")), "{id} draws no icon");
+    }
+    assert!(drawn(cx, format!("icon:{}", ids[3])));
+    let (icons, assets) = table.read_with(cx, |t, _| {
+        let row = |id: &str| t.rows().iter().find(|r| r.id == id).unwrap();
+        let icons: Vec<Option<String>> = ids
+            .iter()
+            .map(|id| row(id).icon().map(str::to_owned))
+            .collect();
+        let assets: Vec<Option<String>> = ids
+            .iter()
+            .map(|id| row(id).icon_asset().map(str::to_owned))
+            .collect();
+        (icons, assets)
+    });
+    assert_eq!(icons, [None, None, None, Some("🌲".to_owned())]);
+    assert_eq!(assets[0].as_deref(), asset.strip_prefix("asset:"));
+    assert_eq!(assets[1..], [None, None, None]);
+}
+
+#[gpui::test]
 fn the_same_entity_draws_a_table_a_board_or_a_list(cx: &mut TestAppContext) {
     let host = TestHost::new();
     let (table, cx) = open_people(cx, &host);

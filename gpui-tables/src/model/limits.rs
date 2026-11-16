@@ -6,7 +6,55 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use serde_json::Value as Json;
+use unicode_segmentation::UnicodeSegmentation;
+
 use super::{DatabaseFields, Doc, Filter, Property, PropertyType, Value};
+
+/// The most grapheme clusters an emoji icon may be (a doc's `icon` field): one.
+const ICON_GRAPHEMES: usize = 1;
+/// The most bytes an emoji icon may take: room for a flag, a skin tone or a family of two, not
+/// a family of three (18 bytes).
+pub(crate) const ICON_BYTES: usize = 16;
+/// What starts an image icon: `asset:` and the image's SHA-256 in lowercase hex.
+pub(crate) const ICON_ASSET: &str = "asset:";
+
+/// The problems with a doc's `icon` string: an emoji must be one grapheme cluster of at most 16
+/// bytes, and an image `asset:` and 64 lowercase hex characters. Empty when it's fine
+/// (and it allocates nothing then).
+pub(crate) fn icon_problems(icon: &str) -> Vec<ProblemKind> {
+    let mut problems = Vec::new();
+    if icon.is_empty() {
+        problems.push(ProblemKind::EmptyIcon);
+    } else if let Some(hash) = icon.strip_prefix(ICON_ASSET) {
+        if !is_sha256(hash) {
+            problems.push(ProblemKind::NotAsset);
+        }
+    } else {
+        // Bytes bound graphemes from above, so most icons are never segmented.
+        if icon.len() > ICON_GRAPHEMES {
+            let found = icon.graphemes(true).count();
+            if found > ICON_GRAPHEMES {
+                problems.push(ProblemKind::TooManyGraphemes {
+                    limit: ICON_GRAPHEMES,
+                    found,
+                });
+            }
+        }
+        if icon.len() > ICON_BYTES {
+            problems.push(ProblemKind::TooManyBytes {
+                limit: ICON_BYTES,
+                found: icon.len(),
+            });
+        }
+    }
+    problems
+}
+
+/// A SHA-256 as an `asset:` icon writes it: 64 lowercase hex characters.
+pub(crate) fn is_sha256(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
 
 /// The caps, with defaults sized for a personal CRM with room to spare. Strings count Unicode
 /// characters (scalar values), not bytes.
@@ -122,6 +170,22 @@ pub enum ProblemKind {
     Derived,
     /// A two-way relation whose back property is missing, or doesn't name it back.
     BrokenTwoWay,
+    /// A doc's emoji icon of more than one grapheme cluster.
+    TooManyGraphemes {
+        limit: usize,
+        found: usize,
+    },
+    /// A doc's emoji icon over 16 bytes.
+    TooManyBytes {
+        limit: usize,
+        found: usize,
+    },
+    /// A doc's icon is an empty string (no icon is null).
+    EmptyIcon,
+    /// A doc's icon starts with `asset:` but isn't followed by 64 lowercase hex characters.
+    NotAsset,
+    /// A doc's icon is neither a string nor null.
+    IconNotString,
 }
 
 impl fmt::Display for Problem {
@@ -146,6 +210,15 @@ impl fmt::Display for Problem {
             ProblemKind::EndsBeforeStart => write!(f, "ends before it starts"),
             ProblemKind::Derived => write!(f, "derived, never stored"),
             ProblemKind::BrokenTwoWay => write!(f, "the back property doesn't name this one"),
+            ProblemKind::TooManyGraphemes { limit, found } => {
+                write!(f, "{found} graphemes is more than {limit}")
+            }
+            ProblemKind::TooManyBytes { limit, found } => {
+                write!(f, "{found} bytes is more than {limit}")
+            }
+            ProblemKind::EmptyIcon => write!(f, "an empty string"),
+            ProblemKind::NotAsset => write!(f, "not asset: and 64 lowercase hex characters"),
+            ProblemKind::IconNotString => write!(f, "not a string or null"),
         }
     }
 }
@@ -215,9 +288,9 @@ impl Checker<'_> {
 }
 
 impl Limits {
-    /// Every problem with a doc, with paths from the doc's root: its `id`, `order` and `title`;
-    /// for a database doc, its `database` field (paths `database.properties[2].name` and so
-    /// on, as [`Limits::check_database`]); for a row, its `values` against `database`, the
+    /// Every problem with a doc, with paths from the doc's root: its `id`, `order`, `title` and
+    /// `icon`; for a database doc, its `database` field (paths `database.properties[2].name` and
+    /// so on, as [`Limits::check_database`]); for a row, its `values` against `database`, the
     /// properties of the database it's in (as [`Limits::check_row`]). Without `database`, a
     /// row's values are only counted. `tests/fixtures/limits` holds cases with their expected
     /// problems, each written as [`Problem`]'s `Display` writes it.
@@ -357,9 +430,10 @@ impl Limits {
     }
 
     /// Every problem with a row against its database: the lengths of its id, order and title,
-    /// values over their limits or of the wrong shape, options the property hasn't, people it
-    /// doesn't allow, and values stored for derived properties. Values for properties the database hasn't are
-    /// ignored (a deleted property's), but count toward `properties`.
+    /// its `icon` (as [`Doc::icon`] reads it), values over their limits or of the wrong shape,
+    /// options the property hasn't, people it doesn't allow, and values stored for derived
+    /// properties. Values for properties the database hasn't are ignored (a deleted
+    /// property's), but count toward `properties`.
     pub fn check_row(&self, db: &DatabaseFields, row: &Doc) -> Vec<Problem> {
         let mut c = Checker {
             limits: self,
@@ -368,6 +442,15 @@ impl Limits {
         c.id(|| "id".into(), &row.id);
         c.order(|| "order".into(), &row.order);
         c.text(|| "title".into(), &row.title, self.title_chars);
+        match row.extra.get("icon") {
+            None | Some(Json::Null) => {}
+            Some(Json::String(icon)) => {
+                for kind in icon_problems(icon) {
+                    c.push("icon", kind);
+                }
+            }
+            Some(_) => c.push("icon", ProblemKind::IconNotString),
+        }
         if let Some(values) = &row.values {
             c.count(|| "values".into(), values.len(), self.properties);
             for (id, value) in values {

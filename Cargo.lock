@@ -3293,6 +3293,7 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+ "unicode-segmentation",
  "uuid",
 ]
 

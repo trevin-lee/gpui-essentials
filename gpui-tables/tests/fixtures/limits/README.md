@@ -36,7 +36,8 @@ Indexes count from 0.
 ## Messages
 
 Each message is one of these, with N the number found and L the limit. Strings count Unicode
-characters, not bytes.
+characters, not bytes, except a doc's `icon`, which counts extended grapheme clusters (UAX #29)
+and UTF-8 bytes.
 
 | Message | When |
 |---|---|
@@ -51,6 +52,16 @@ characters, not bytes.
 | `a kind of person this property doesn't allow` | A person not in the property's `kinds`, or of a kind the crate doesn't know |
 | `ends before it starts` | A date range whose `end` is before its `start` |
 | `derived, never stored` | A value stored for a created time, edited time, created-by or edited-by (any value but null) |
+| `N graphemes is more than 1` | An `icon` (not starting with `asset:`) of more than one grapheme cluster |
+| `N bytes is more than 16` | An `icon` (not starting with `asset:`) over 16 bytes in UTF-8 |
+| `an empty string` | An `icon` of `""` (no icon is null) |
+| `not asset: and 64 lowercase hex characters` | An `icon` starting with `asset:` not followed by exactly 64 characters of `0-9a-f` |
+| `not a string or null` | An `icon` that's a number, a bool, an array or an object |
+
+An icon's path is `icon`, on a doc of any kind. A text icon over 16 bytes gives both its
+graphemes and its bytes (`"seventeen letters"`: `icon: 17 graphemes is more than 1` and `icon:
+17 bytes is more than 16`); an `asset:` value is checked only as an asset, never for its
+graphemes or bytes.
 
 Values for properties the database hasn't, and null values, aren't checked (they count toward
 the 200 values a row may have).
