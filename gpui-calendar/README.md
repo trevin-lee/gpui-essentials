@@ -1,6 +1,6 @@
 # gpui-calendar
 
-Day, week, N-day and month calendar views for [GPUI](https://www.gpui.rs) apps built with
+Day, week, N-day, month and agenda calendar views for [GPUI](https://www.gpui.rs) apps built with
 [GPUI Kit](https://github.com/longbridge/gpui-kit) 0.9. GPUI Kit has a date picker and a month
 picker; this adds the time grid and the views a calendar app needs. You drag empty time to make
 an event, drag an event to move it, drag its edge to change its length, and press Delete to
@@ -16,12 +16,19 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
 
 ## What it does
 
-- **Views:** day, week, N days (`CalendarView::Days(n)`) and month. Day and week share a time
+- **Views:** day, week, N days (`CalendarView::Days(n)`), month and agenda
+  (`CalendarView::Agenda(n)`, two weeks from the header's button). Day and week share a time
   grid. It has a row of day names with today marked, an all-day row (three rows of spans, then
   "+N more", which opens the row), hour lines, and a line at the current time with the time in the
   gutter. The grid opens with the current time a third of the way down. The month shows spans for
   all-day and multi-day events, a dot, time and title for the rest, and "+N more", which opens
   that day.
+- **Agenda:** a list of the days that have events (and today), each under a header that stays
+  at the top while its day scrolls by. A row has the time (or "All day", "Day 2 of 3",
+  "Until 2 AM"), the calendar's colour, the title, the place and every link as a pill. It opens
+  at today and scrolls with the wheel or a trackpad. Nothing in it is dragged; a click selects,
+  a double-click opens, a click on a day's header opens that day, and a link opens its link. It
+  is the layout meant for a phone, and it fits from 320 pixels wide.
 - **Layout:** timed events that overlap sit side by side. Each group of overlapping events gets as
   many columns as it needs at its busiest. Each event takes the leftmost column free when it
   starts, then widens over the columns to its right that stay free for its whole length; this is
@@ -41,8 +48,8 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event. With nothing selected, ← and → change the period. `j` or `n` goes to the
-  next period and `k` or `p` to the previous one. `t` goes to today, and `d`, `w` and `m` switch
-  views. Enter opens the selected event or makes one in the selected slot, Delete or Backspace
+  next period and `k` or `p` to the previous one. `t` goes to today, and `d`, `w`, `m` and `a`
+  switch views. In the agenda the arrows go from event to event down the list. Enter opens the selected event or makes one in the selected slot, Delete or Backspace
   asks to delete the selected event, and Escape drops a drag or the selection.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
   database, so a DST day doesn't depend on the machine's zone files.
@@ -186,15 +193,16 @@ cargo run --release --example calendar -- --bench [--events 2000] [--packed]
 cargo run --release --features shots --example calendar -- --shot out.png --scene week
 ```
 
-`cargo test` also draws every view at widths from 720 to 2,200 pixels, with long titles,
-locations and links, laid out with Core Text and Inter as on screen, and fails if any text runs
-out of the area it's drawn in or into other text.
+`cargo test` also draws every view at widths from 720 to 2,200 pixels, and the agenda from 320,
+with long titles, locations and links, laid out with Core Text and Inter as on screen, and fails
+if any text runs out of the area it's drawn in or into other text.
 
 The example is a week of sample events and a host that agrees to every proposal and says what
 happened at the bottom of the window. For pictures and the bench it pretends it's Wednesday 18
 November 2026, 10:40 in Los Angeles. Pictures and the bench draw a window that's never shown and
 never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `drag-create`,
-`drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag` and `links`.
+`drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag`, `links` and `agenda` (drawn
+720 pixels wide).
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from GPUI
@@ -207,8 +215,8 @@ Kit's theme.
 | ![Planning's end dragged to 1:15](docs/resize.png) | ![A trip dragged a week later](docs/month-drag.png) |
 | **A day** | **A busy week (160 events)** |
 | ![Wednesday on its own](docs/day.png) | ![A week packed with overlapping events](docs/dense.png) |
-| **Links to docs and agents** | |
-| ![Design review listing its notes; shorter events with a link's mark or a count](docs/links.png) | |
+| **Links to docs and agents** | **The agenda** |
+| ![Design review listing its notes; shorter events with a link's mark or a count](docs/links.png) | ![Tuesday's events listed with their times, colours and links](docs/agenda.png) |
 
 ## Performance
 
@@ -240,7 +248,7 @@ Not done yet:
 - Recurrence editing (expanding recurring events, and asking "this event or all of them", is
   the app's job, as above).
 - A context menu (Delete is the key for now).
-- Agenda, year, resource and timeline views.
+- Year, resource and timeline views.
 - Dragging a timed event into the all-day row, or back.
 - A scrollbar on the grid.
 - A drag that keeps scrolling while the pointer rests at the grid's edge. Today it scrolls only

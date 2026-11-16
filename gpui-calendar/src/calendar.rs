@@ -37,6 +37,8 @@ actions!(
         DayView,
         WeekView,
         MonthView,
+        /// Shows the agenda: two weeks of events as a list.
+        AgendaView,
         PreviousPeriod,
         NextPeriod,
         /// Opens the selected event, or makes one in the selected slot.
@@ -63,6 +65,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("d", DayView, c),
         KeyBinding::new("w", WeekView, c),
         KeyBinding::new("m", MonthView, c),
+        KeyBinding::new("a", AgendaView, c),
         KeyBinding::new("k", PreviousPeriod, c),
         KeyBinding::new("p", PreviousPeriod, c),
         KeyBinding::new("j", NextPeriod, c),
@@ -203,6 +206,25 @@ pub(crate) struct Laid {
     pub timed: Vec<TimedPiece>,
     pub spans: Vec<SpanPiece>,
     pub dst: Vec<(u32, DstChange)>,
+    /// The agenda's days, in order: only days with events, and today.
+    pub agenda: Vec<AgendaDay>,
+}
+
+/// A day in the agenda and its events, all-day ones first and then by start.
+#[derive(Clone, Debug)]
+pub(crate) struct AgendaDay {
+    pub date: NaiveDate,
+    pub rows: Vec<AgendaRow>,
+}
+
+/// An event's row on one day of the agenda, with what its time column says.
+#[derive(Clone, Debug)]
+pub(crate) struct AgendaRow {
+    pub chip: usize,
+    /// "9:30 AM", "All day" or "Until".
+    pub start: SharedString,
+    /// "10:30 AM", "Day 2 of 3", or nothing.
+    pub end: SharedString,
 }
 
 /// A calendar: day, week, N-day and month views of the host's events.
@@ -638,6 +660,8 @@ impl Calendar {
                 end: range.1,
             });
             self.all_day_expanded = false;
+            // A new agenda opens at today, or at its top.
+            self.shared.agenda_scroll.set(None);
         }
     }
 
@@ -810,7 +834,14 @@ impl Calendar {
             time::day_start(last + Duration::days(1), tz),
         );
         let month = key.view == CalendarView::Month;
+        let agenda = matches!(key.view, CalendarView::Agenda(_));
         let visible = self.events_in(start, end);
+        // Each agenda day's rows, with a key to sort them by: all-day first, then by start.
+        let mut agenda_rows: Vec<Vec<(AgendaRow, (u8, i64))>> = if agenda {
+            vec![Vec::new(); days as usize]
+        } else {
+            Vec::new()
+        };
         let mut chips = Vec::with_capacity(visible.len());
         let mut timed = Vec::new();
         let mut spans: Vec<(SpanPiece, (u8, i64, i64))> = Vec::new();
@@ -826,6 +857,15 @@ impl Calendar {
                 EventTime::Timed { start, .. } => start.timestamp(),
                 EventTime::AllDay { start, .. } => time::day_start(start, tz).timestamp(),
             };
+            if agenda {
+                for c in c0.max(0)..=c1.min(days as i32 - 1) {
+                    let date = first + Duration::days(c as i64);
+                    let row = self.agenda_row(e, chip, date, (d0, d1));
+                    let all_day = (row.start.as_ref() == "All day") as u8;
+                    agenda_rows[c as usize].push((row, (1 - all_day, order_start)));
+                }
+                continue;
+            }
             let push_span = |spans: &mut Vec<_>, row: u32, lo: i32, hi: i32, dot: bool| {
                 let (a, b) = (c0.max(lo), c1.min(hi));
                 if a > b {
@@ -919,7 +959,24 @@ impl Calendar {
             i = j;
         }
 
-        let dst = if month {
+        let today = self.today();
+        let agenda = agenda_rows
+            .into_iter()
+            .enumerate()
+            .filter_map(|(c, mut rows)| {
+                let date = first + Duration::days(c as i64);
+                if rows.is_empty() && date != today {
+                    return None;
+                }
+                rows.sort_by_key(|r| r.1);
+                Some(AgendaDay {
+                    date,
+                    rows: rows.into_iter().map(|r| r.0).collect(),
+                })
+            })
+            .collect();
+
+        let dst = if month || !key.view.is_time_grid() {
             Vec::new()
         } else {
             (0..days)
@@ -935,6 +992,37 @@ impl Calendar {
             timed,
             spans: out_spans,
             dst,
+            agenda,
+        }
+    }
+
+    /// What the agenda's time column says for an event on one of its days.
+    fn agenda_row(
+        &self,
+        e: &Event,
+        chip: usize,
+        date: NaiveDate,
+        (d0, d1): (NaiveDate, NaiveDate),
+    ) -> AgendaRow {
+        let tz = self.options.time_zone;
+        let hour12 = self.options.hour12;
+        let clock = |t: DateTime<Utc>| time::format_time(t.with_timezone(&tz).time(), hour12);
+        let span = (d1 - d0).num_days() + 1;
+        let nth = (date - d0).num_days() + 1;
+        let (start, end) = match e.time {
+            EventTime::AllDay { .. } if span > 1 => {
+                ("All day".into(), format!("Day {nth} of {span}"))
+            }
+            EventTime::AllDay { .. } => ("All day".into(), String::new()),
+            EventTime::Timed { start, end } if d0 == d1 => (clock(start), clock(end)),
+            EventTime::Timed { start, .. } if date == d0 => (clock(start), String::new()),
+            EventTime::Timed { end, .. } if date == d1 => ("Until".into(), clock(end)),
+            EventTime::Timed { .. } => ("All day".into(), format!("Day {nth} of {span}")),
+        };
+        AgendaRow {
+            chip,
+            start: start.into(),
+            end: end.into(),
         }
     }
 
@@ -1012,6 +1100,8 @@ impl Calendar {
         }
         let p = event.position;
         let next = match drag {
+            // The agenda is a list: nothing in it is dragged.
+            Drag::Press { .. } if geo.kind == paint::Kind::Agenda => return,
             Drag::Press { at, target } => {
                 let threshold = 4. * geo.s;
                 let moved = (f32::from(p.x - at.x)).hypot(f32::from(p.y - at.y));
@@ -1204,10 +1294,18 @@ impl Calendar {
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
+        let delta = event.delta.pixel_delta(px(20.)).y;
+        if geo.kind == paint::Kind::Agenda {
+            let at = self.shared.agenda_scroll.get().unwrap_or(0.) - f32::from(delta);
+            self.shared
+                .agenda_scroll
+                .set(Some(at.clamp(0., self.shared.agenda_max.get())));
+            cx.notify();
+            return;
+        }
         if geo.kind != paint::Kind::Grid {
             return;
         }
-        let delta = event.delta.pixel_delta(px(20.)).y;
         let minutes = -f32::from(delta) / f32::from(geo.hour_h) * 60.;
         self.scroll_by(minutes, &geo);
         cx.notify();
@@ -1255,6 +1353,12 @@ impl Calendar {
     /// Arrow keys: a slot moves by a day or a slot (a week in the month); an event selection
     /// moves to the next event that way, or to the slot there when there's none.
     fn move_selection(&mut self, dx: i32, dy: i32, cx: &mut Context<Self>) {
+        if matches!(self.view, CalendarView::Agenda(_))
+            && (dy != 0 || self.selected_event().is_some())
+        {
+            self.move_in_agenda(if dx + dy > 0 { 1 } else { -1 }, cx);
+            return;
+        }
         let month = self.view == CalendarView::Month;
         let slot = self.options.slot_minutes.max(1) as f32;
         let Some((date, minute)) = self.selection_place() else {
@@ -1321,6 +1425,37 @@ impl Calendar {
             )
         };
         self.select_slot(to, minute, cx);
+    }
+
+    /// The arrows in the agenda: the next or previous event in the list, or the first from
+    /// today on when nothing is selected.
+    fn move_in_agenda(&mut self, dir: i32, cx: &mut Context<Self>) {
+        let laid = self.layout();
+        let mut order: Vec<(NaiveDate, EventId)> = Vec::new();
+        for day in &laid.agenda {
+            for row in &day.rows {
+                let id = &laid.chips[row.chip].id;
+                if !order.iter().any(|(_, o)| o == id) {
+                    order.push((day.date, id.clone()));
+                }
+            }
+        }
+        if order.is_empty() {
+            return;
+        }
+        let at = self
+            .selected_event()
+            .and_then(|id| order.iter().position(|(_, o)| o == id));
+        let next = match at {
+            Some(i) => (i as i64 + dir as i64).clamp(0, order.len() as i64 - 1) as usize,
+            None => {
+                let today = self.today();
+                order.iter().position(|(d, _)| *d >= today).unwrap_or(0)
+            }
+        };
+        let id = order[next].1.clone();
+        self.shared.agenda_reveal.replace(Some(id.clone()));
+        self.select(Some(Selection::Event(id)), cx);
     }
 
     fn select_slot(&mut self, date: NaiveDate, minute: f32, cx: &mut Context<Self>) {
@@ -1449,7 +1584,12 @@ impl Calendar {
             }
         };
         let view = self.view;
-        let views = [CalendarView::Day, CalendarView::Week, CalendarView::Month];
+        let views = [
+            CalendarView::Day,
+            CalendarView::Week,
+            CalendarView::Month,
+            CalendarView::AGENDA,
+        ];
         let pick = cx.entity().downgrade();
         div()
             .flex()
@@ -1500,6 +1640,7 @@ impl Calendar {
                             .children(views.into_iter().enumerate().map(|(i, v)| {
                                 let on_view = match (v, view) {
                                     (CalendarView::Week, CalendarView::Days(_)) => true,
+                                    (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
                                     _ => v == view,
                                 };
                                 Button::new(("view", i)).label(v.label()).selected(on_view)
@@ -1532,10 +1673,10 @@ impl Render for Calendar {
         let now = self.now();
         let tz = self.options.time_zone;
         let scene = paint::Scene {
-            kind: if self.view == CalendarView::Month {
-                paint::Kind::Month
-            } else {
-                paint::Kind::Grid
+            kind: match self.view {
+                CalendarView::Month => paint::Kind::Month,
+                CalendarView::Agenda(_) => paint::Kind::Agenda,
+                _ => paint::Kind::Grid,
             },
             first,
             days,
@@ -1579,6 +1720,7 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &DayView, _, cx| c.set_view(CalendarView::Day, cx)))
             .on_action(cx.listener(|c, _: &WeekView, _, cx| c.set_view(CalendarView::Week, cx)))
             .on_action(cx.listener(|c, _: &MonthView, _, cx| c.set_view(CalendarView::Month, cx)))
+            .on_action(cx.listener(|c, _: &AgendaView, _, cx| c.set_view(CalendarView::AGENDA, cx)))
             .on_action(cx.listener(|c, _: &PreviousPeriod, _, cx| c.previous(cx)))
             .on_action(cx.listener(|c, _: &NextPeriod, _, cx| c.next(cx)))
             .on_action(cx.listener(|c, _: &OpenSelected, _, cx| c.open_selected(cx)))

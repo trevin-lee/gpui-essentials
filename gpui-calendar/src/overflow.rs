@@ -147,8 +147,8 @@ fn problems(texts: &[drawn::Text], canvas: Bounds<Pixels>) -> Vec<String> {
     out
 }
 
-/// Draws every view at each width and collects what overflows.
-fn check_widths(widths: &[f32], height: f32) {
+/// Draws these views at each width and collects what overflows.
+fn check_widths(views: &[CalendarView], widths: &[f32], height: f32) {
     let mut cx = context();
     let (calendar, vcx) = cx.add_window_view(|_, cx| {
         let mut c = Calendar::new(cx)
@@ -160,16 +160,10 @@ fn check_widths(widths: &[f32], height: f32) {
         c.scroll_to_minute(8. * 60.);
         c
     });
-    let views = [
-        CalendarView::Day,
-        CalendarView::Days(3),
-        CalendarView::Week,
-        CalendarView::Month,
-    ];
     let mut found = Vec::new();
     for &w in widths {
         vcx.simulate_resize(size(px(w), px(height)));
-        for view in views {
+        for &view in views {
             calendar.update(vcx, |c, cx| c.set_view(view, cx));
             vcx.run_until_parked();
             drawn::record();
@@ -193,5 +187,22 @@ fn check_widths(widths: &[f32], height: f32) {
 
 #[test]
 fn no_text_runs_over_at_desktop_widths() {
-    check_widths(&[720., 900., 1024., 1280., 1600., 2200.], 820.);
+    let views = [
+        CalendarView::Day,
+        CalendarView::Days(3),
+        CalendarView::Week,
+        CalendarView::Month,
+        CalendarView::AGENDA,
+    ];
+    check_widths(&views, &[720., 900., 1024., 1280., 1600., 2200.], 820.);
+}
+
+/// The agenda is the phone's layout: it fits from the narrowest iPhone up.
+#[test]
+fn the_agenda_fits_phone_widths() {
+    check_widths(
+        &[CalendarView::AGENDA],
+        &[320., 375., 390., 430., 520.],
+        844.,
+    );
 }

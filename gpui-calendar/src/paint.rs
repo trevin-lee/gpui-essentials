@@ -11,7 +11,7 @@ use std::rc::Rc;
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc, Weekday};
 use gpui_kit::*;
 
-use crate::calendar::{Calendar, Chip, Laid, SpanPiece};
+use crate::calendar::{AgendaRow, Calendar, Chip, Laid, SpanPiece};
 use crate::layout;
 use crate::model::{CalendarOptions, EventId, EventLink, EventTime, LinkKind, Selection};
 use crate::theme::{CalendarColors, ChipColors, mix};
@@ -41,6 +41,7 @@ const GLYPH: f32 = 11.;
 pub(crate) enum Kind {
     Grid,
     Month,
+    Agenda,
 }
 
 /// Which part of the calendar a drag is in, which decides how it moves things.
@@ -120,6 +121,12 @@ pub(crate) struct Shared {
     pub mores: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub dates: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
     pub expand: RefCell<Vec<Bounds<Pixels>>>,
+    /// How far the agenda is scrolled, in pixels; none until a frame places it (at today).
+    pub agenda_scroll: Cell<Option<f32>>,
+    /// The farthest the agenda scrolls, from the last frame.
+    pub agenda_max: Cell<f32>,
+    /// An event the next agenda frame scrolls into view.
+    pub agenda_reveal: RefCell<Option<EventId>>,
 }
 
 /// A frame's geometry.
@@ -216,6 +223,7 @@ impl Geo {
                     self.row_top(row as u32) + self.row_h / 2.,
                 ))
             }
+            Kind::Agenda => None,
         }
     }
 }
@@ -352,6 +360,23 @@ fn geometry(scene: &Scene, bounds: Bounds<Pixels>, rem: Pixels, shared: &Shared)
                 row_h: (bounds.bottom() - head_bottom) / rows as f32,
             }
         }
+        Kind::Agenda => Geo {
+            kind: Kind::Agenda,
+            bounds,
+            s,
+            first: scene.first,
+            days: scene.days,
+            left: bounds.left(),
+            col_w: bounds.size.width,
+            head_bottom: bounds.top(),
+            all_day_bottom: bounds.top(),
+            grid_top: bounds.top(),
+            grid_bottom: bounds.bottom(),
+            hour_h: px(1.),
+            scroll: 0.,
+            rows: 0,
+            row_h: px(0.),
+        },
     }
 }
 
@@ -359,6 +384,12 @@ fn geometry(scene: &Scene, bounds: Bounds<Pixels>, rem: Pixels, shared: &Shared)
 pub(crate) fn target_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> Target {
     if !geo.bounds.contains(&p) {
         return Target::Nothing;
+    }
+    // The agenda's day headers stay over the rows scrolling under them.
+    if geo.kind == Kind::Agenda
+        && let Some((_, date)) = shared.dates.borrow().iter().find(|(b, _)| b.contains(&p))
+    {
+        return Target::Date(*date);
     }
     // Links are drawn over their events.
     if let Some(link) = shared
@@ -473,6 +504,7 @@ pub(crate) fn body(
                 match scene.kind {
                     Kind::Grid => paint_grid(&mut ink, &scene, &geo, &shared),
                     Kind::Month => paint_month(&mut ink, &scene, &geo, &shared),
+                    Kind::Agenda => paint_agenda(&mut ink, &scene, &geo, &shared),
                 }
             });
             let (on_move, on_up) = (this.clone(), this);
@@ -1842,4 +1874,397 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
             paint_span_ghost(ink, scene, geo, ghost, row, top);
         }
     }
+}
+
+// The agenda: a list of days, each with its events.
+
+const AGENDA_HEAD: f32 = 34.;
+const AGENDA_PAD_X: f32 = 16.;
+const AGENDA_ROW_PAD: f32 = 8.;
+const AGENDA_DAY_GAP: f32 = 6.;
+const AGENDA_EMPTY: f32 = 30.;
+const PILL_H: f32 = 22.;
+const PILL_GAP: f32 = 6.;
+
+/// One row's measurements, worked out before anything is drawn.
+struct AgendaPlace {
+    day: usize,
+    /// None for a day's header, or for "Nothing planned" with `empty`.
+    row: Option<usize>,
+    empty: bool,
+    top: f32,
+    height: f32,
+    title_lines: usize,
+    /// Each link's pill: left and top inside the row's text column, and width.
+    pills: Vec<(f32, f32, f32)>,
+}
+
+/// The agenda's columns at this width, in pixels from the row's left: where the time column,
+/// the colour bar and the text start, and how wide the text is.
+struct AgendaColumns {
+    time_w: Pixels,
+    bar_x: Pixels,
+    text_x: Pixels,
+    text_w: Pixels,
+}
+
+fn agenda_columns(ink: &Ink, width: Pixels) -> AgendaColumns {
+    let narrow = width < ink.u(480.);
+    let pad = ink.u(if narrow { 12. } else { AGENDA_PAD_X });
+    let time_w = ink.u(if narrow { 60. } else { 78. });
+    let bar_x = pad + time_w + ink.u(8.);
+    let text_x = bar_x + ink.u(14.);
+    AgendaColumns {
+        time_w,
+        bar_x,
+        text_x,
+        text_w: (width - text_x - pad).max(px(0.)),
+    }
+}
+
+fn pill_width(ink: &mut Ink, link: &EventLink) -> Pixels {
+    ink.u(8. + GLYPH + 5. + 8.) + ink.measure(&link.label, SMALL, FontWeight::MEDIUM)
+}
+
+/// Where everything in the agenda goes, from its top, unscrolled.
+fn agenda_places(ink: &mut Ink, scene: &Scene, cols: &AgendaColumns) -> (Vec<AgendaPlace>, f32) {
+    let s = ink.s;
+    let text_w = f32::from(cols.text_w);
+    let mut out = Vec::new();
+    let mut y = 0.;
+    for (d, day) in scene.laid.agenda.iter().enumerate() {
+        out.push(AgendaPlace {
+            day: d,
+            row: None,
+            empty: false,
+            top: y,
+            height: AGENDA_HEAD * s,
+            title_lines: 0,
+            pills: Vec::new(),
+        });
+        y += AGENDA_HEAD * s;
+        if day.rows.is_empty() {
+            out.push(AgendaPlace {
+                day: d,
+                row: None,
+                empty: true,
+                top: y,
+                height: AGENDA_EMPTY * s,
+                title_lines: 0,
+                pills: Vec::new(),
+            });
+            y += AGENDA_EMPTY * s;
+        }
+        for (r, row) in day.rows.iter().enumerate() {
+            let chip = &scene.laid.chips[row.chip];
+            let title_w = f32::from(ink.measure(&chip.title, TITLE, FontWeight::MEDIUM));
+            let title_lines = if title_w > text_w { 2 } else { 1 };
+            let mut h = TITLE_LEADING * s * title_lines as f32;
+            if chip.location.is_some() {
+                h += SMALL_LEADING * s;
+            }
+            let mut pills = Vec::new();
+            if !chip.links.is_empty() {
+                let (mut px_, mut py) = (0., h + 4. * s);
+                for link in chip.links.iter() {
+                    let w = f32::from(pill_width(ink, link)).min(text_w);
+                    if px_ > 0. && px_ + w > text_w {
+                        px_ = 0.;
+                        py += (PILL_H + 4.) * s;
+                    }
+                    pills.push((px_, py, w));
+                    px_ += w + PILL_GAP * s;
+                }
+                h = py + PILL_H * s;
+            }
+            let time_h = (TITLE_LEADING + SMALL_LEADING) * s;
+            let height = h.max(time_h) + AGENDA_ROW_PAD * s * 2.;
+            out.push(AgendaPlace {
+                day: d,
+                row: Some(r),
+                empty: false,
+                top: y,
+                height,
+                title_lines,
+                pills,
+            });
+            y += height;
+        }
+        y += AGENDA_DAY_GAP * s;
+    }
+    (out, y)
+}
+
+/// What a day's header says: "Wednesday, November 18", or "Wed, Nov 18" when narrow.
+fn agenda_day_label(date: NaiveDate, narrow: bool) -> String {
+    if narrow {
+        format!(
+            "{}, {} {}",
+            time::weekday_name(date.weekday(), true),
+            time::month_short(date.month()),
+            date.day()
+        )
+    } else {
+        format!(
+            "{}, {} {}",
+            time::weekday_name(date.weekday(), false),
+            time::month_name(date.month()),
+            date.day()
+        )
+    }
+}
+
+fn paint_agenda(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
+    let c = &scene.colors;
+    let b = geo.bounds;
+    ink.fill(b, c.background);
+    let cols = agenda_columns(ink, b.size.width);
+    let narrow = b.size.width < ink.u(480.);
+    let pad = cols.bar_x - cols.time_w - ink.u(8.);
+    let (places, content) = agenda_places(ink, scene, &cols);
+    let view_h = f32::from(b.size.height);
+    let max = (content - view_h).max(0.);
+    shared.agenda_max.set(max);
+
+    if places.is_empty() {
+        ink.text(
+            "No events",
+            TITLE,
+            TITLE_LEADING,
+            FontWeight::MEDIUM,
+            c.muted_text,
+            point(b.left() + pad, b.top() + ink.u(16.)),
+            Some(b.size.width - pad * 2.),
+        );
+        shared.agenda_scroll.set(Some(0.));
+        return;
+    }
+
+    // Where it's scrolled: today's header at the top the first time, then wherever it was
+    // left, with an event the keyboard selected brought into view.
+    let mut scroll = shared.agenda_scroll.get().unwrap_or_else(|| {
+        places
+            .iter()
+            .find(|p| p.row.is_none() && !p.empty && scene.laid.agenda[p.day].date >= scene.today)
+            .map_or(0., |p| p.top)
+    });
+    if let Some(id) = shared.agenda_reveal.borrow_mut().take()
+        && let Some(p) = places.iter().find(|p| {
+            p.row
+                .is_some_and(|r| scene.laid.chips[scene.laid.agenda[p.day].rows[r].chip].id == id)
+        })
+    {
+        let head = AGENDA_HEAD * ink.s;
+        if p.top - head < scroll {
+            scroll = p.top - head;
+        } else if p.top + p.height > scroll + view_h {
+            scroll = p.top + p.height - view_h;
+        }
+    }
+    let scroll = scroll.clamp(0., max);
+    shared.agenda_scroll.set(Some(scroll));
+    let y_of = |top: f32| b.top() + px(top - scroll);
+
+    // The rows, under the band at the top where a day's header always is.
+    let rows_area = Bounds::from_corners(
+        point(b.left(), b.top() + ink.u(AGENDA_HEAD)),
+        b.bottom_right(),
+    );
+    for place in &places {
+        let top = y_of(place.top);
+        let bottom = top + px(place.height);
+        if bottom < rows_area.top() || top > b.bottom() {
+            continue;
+        }
+        let day = &scene.laid.agenda[place.day];
+        if place.empty {
+            ink.text(
+                "Nothing planned",
+                SMALL,
+                SMALL_LEADING,
+                FontWeight::NORMAL,
+                c.muted_text,
+                point(b.left() + cols.text_x, top + ink.u(6.)),
+                Some(cols.text_w),
+            );
+            continue;
+        }
+        let Some(r) = place.row else { continue };
+        let row = &day.rows[r];
+        ink.window
+            .with_content_mask(Some(ContentMask { bounds: rows_area }), |window| {
+                let mut ink = Ink {
+                    window,
+                    cx: ink.cx,
+                    s: ink.s,
+                    family: ink.family.clone(),
+                };
+                paint_agenda_row(&mut ink, scene, shared, &cols, row, place, top, rows_area);
+            });
+    }
+
+    // The days' headers, each held at the top while its day scrolls under it.
+    let heads: Vec<&AgendaPlace> = places
+        .iter()
+        .filter(|p| p.row.is_none() && !p.empty)
+        .collect();
+    for (i, place) in heads.iter().enumerate() {
+        let head_h = px(place.height);
+        let mut top = y_of(place.top).max(b.top());
+        if let Some(next) = heads.get(i + 1) {
+            top = top.min(y_of(next.top) - head_h);
+        }
+        if top + head_h < b.top() || top > b.bottom() {
+            continue;
+        }
+        let rect = Bounds::new(point(b.left(), top), size(b.size.width, head_h));
+        ink.fill(rect, c.background);
+        ink.hline(b.left(), b.right(), rect.bottom() - px(1.), c.faint_line);
+        let date = scene.laid.agenda[place.day].date;
+        let today = date == scene.today;
+        let label = agenda_day_label(date, narrow);
+        let ty = top + (head_h - ink.u(18.)) / 2.;
+        let w = ink.text(
+            &label,
+            LABEL,
+            18.,
+            FontWeight::SEMIBOLD,
+            if today { c.now } else { c.text },
+            point(b.left() + pad, ty),
+            Some(b.size.width - pad * 2.),
+        );
+        if today {
+            let x = b.left() + pad + w + ink.u(8.);
+            ink.text(
+                "Today",
+                SMALL,
+                18.,
+                FontWeight::MEDIUM,
+                c.muted_text,
+                point(x, ty),
+                Some(b.right() - pad - x),
+            );
+        }
+        shared.dates.borrow_mut().push((rect, date));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_agenda_row(
+    ink: &mut Ink,
+    scene: &Scene,
+    shared: &Shared,
+    cols: &AgendaColumns,
+    row: &AgendaRow,
+    place: &AgendaPlace,
+    top: Pixels,
+    b: Bounds<Pixels>,
+) {
+    let c = &scene.colors;
+    let chip = &scene.laid.chips[row.chip];
+    let selected = scene.selected(&chip.id);
+    let cc = ChipColors::new(chip.color, c, false, scene.past(chip));
+    let pad = cols.bar_x - cols.time_w - ink.u(8.);
+    let rect = Bounds::new(
+        point(b.left() + pad / 2., top),
+        size(b.size.width - pad, px(place.height)),
+    );
+    // `b` is the area rows show in: hits outside it are under a header.
+    if selected {
+        ink.rounded(rect, ink.u(6.), mix(c.background, cc.accent, 0.18));
+    }
+    let y = top + ink.u(AGENDA_ROW_PAD);
+    // The time column.
+    let tx = b.left() + pad;
+    ink.text(
+        &row.start,
+        SMALL,
+        TITLE_LEADING,
+        FontWeight::MEDIUM,
+        cc.text,
+        point(tx, y),
+        Some(cols.time_w),
+    );
+    ink.text(
+        &row.end,
+        SMALL,
+        SMALL_LEADING,
+        FontWeight::NORMAL,
+        cc.muted_text,
+        point(tx, y + ink.u(TITLE_LEADING)),
+        Some(cols.time_w),
+    );
+    // The calendar's colour.
+    let bar = Bounds::new(
+        point(b.left() + cols.bar_x, y + ink.u(1.)),
+        size(
+            ink.u(3.),
+            px(place.height) - ink.u(AGENDA_ROW_PAD * 2. + 2.),
+        ),
+    );
+    ink.rounded(bar, ink.u(1.5), cc.accent);
+    // The title, the place and the links.
+    let x = b.left() + cols.text_x;
+    let used = ink.wrapped(
+        &chip.title,
+        TITLE,
+        TITLE_LEADING,
+        FontWeight::MEDIUM,
+        cc.text,
+        point(x, y),
+        cols.text_w,
+        place.title_lines,
+    );
+    let mut ly = y + ink.u(TITLE_LEADING) * used.max(1) as f32;
+    if let Some(location) = &chip.location {
+        ink.text(
+            location,
+            SMALL,
+            SMALL_LEADING,
+            FontWeight::NORMAL,
+            cc.muted_text,
+            point(x, ly),
+            Some(cols.text_w),
+        );
+        ly += ink.u(SMALL_LEADING);
+    }
+    let _ = ly;
+    let mut links = Vec::new();
+    for (i, (link, &(lx, ly, w))) in chip.links.iter().zip(&place.pills).enumerate() {
+        let pill = Bounds::new(point(x + px(lx), y + px(ly)), size(px(w), ink.u(PILL_H)));
+        ink.outlined(
+            pill,
+            ink.u(PILL_H / 2.),
+            mix(c.background, cc.accent, 0.12),
+            px(1.),
+            mix(c.background, cc.accent, 0.35),
+        );
+        let mid = pill.top() + pill.size.height / 2.;
+        paint_glyph(
+            ink,
+            link.kind.into(),
+            pill.left() + ink.u(8.),
+            mid,
+            cc.muted_text,
+        );
+        let label_x = pill.left() + ink.u(8. + GLYPH + 5.);
+        ink.text(
+            &link.label,
+            SMALL,
+            SMALL_LEADING,
+            FontWeight::MEDIUM,
+            cc.text,
+            point(label_x, mid - ink.u(SMALL_LEADING) / 2.),
+            Some(pill.right() - ink.u(8.) - label_x),
+        );
+        links.push((pill, i));
+    }
+    push_links(shared, chip, links, &b, Area::Month);
+    shared.hits.borrow_mut().push(Hit {
+        id: chip.id.clone(),
+        bounds: rect.intersect(&b),
+        area: Area::Month,
+        resize: None,
+        read_only: chip.read_only,
+    });
 }
