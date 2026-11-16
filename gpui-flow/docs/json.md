@@ -107,6 +107,7 @@ required.
 | `image` | A picture, with its label as the caption. |
 | `link` | A card for a web address. |
 | `drawing` | A pen line, `data.points` being `"x,y x,y …"` with each value from 0 to 1 across the node's box. |
+| `ink` | A stroke drawn with a pen or the Pencil, in `data.ink` (see [Ink](#ink)). |
 
 A host can draw kinds of its own. A kind a reader doesn't know is kept, and drawn as a `default`
 node.
@@ -190,6 +191,33 @@ higher `version`. Otherwise it fixes ids as [Ids](#ids) says. On load, the flow 
 or size that isn't a finite number as 0 or absent. Nothing in a document can make the flow fetch,
 open or run anything.
 
+## Ink
+
+A stroke is a node of type `ink` whose `data.ink` is stored exactly as the iPad's Notes stores
+a PencilKit stroke's payload, so the same strokes show on iPad and Mac:
+
+```json
+{ "id": "e0000000-0000-4000-8000-000000000001", "type": "ink",
+  "position": { "x": 70.8, "y": 118.8 }, "width": 238, "height": 16,
+  "data": { "ink": { "tool": "fountain", "color": "#000000FF", "width": 2.4,
+                     "points": "AACQQgAA8EIAAAAAmpkZP83MTD/NzIw/mpkZQA…", "transform": null } } }
+```
+
+| Field of `data.ink` | |
+|---|---|
+| `tool` | `fountain`, `ball`, `brush`, `pencil` or `highlighter`: PencilKit's fountain pen, monoline, pen, pencil and marker. A highlighter's node has `zIndex` -1, under other ink. |
+| `color` | `#RRGGBBAA` in sRGB, uppercase; `#RRGGBB` reads as opaque. |
+| `width` | The tool's width in points: more than 0, at most 200. |
+| `points` | Base64 (standard, padded) of little-endian 32-bit floats, seven a point: `x, y, t, force, azimuth, altitude, size`. `x` and `y` in flow units (points), `t` in seconds from the stroke's start, `force` as PencilKit gives it, `azimuth` and `altitude` in radians, `size` the tip's width. At most 10,000 points, each value finite and within ±20,000. |
+| `transform` | `[a, b, c, d, tx, ty]`, applied after the points (`x' = a·x + c·y + tx`, `y' = b·x + d·y + ty`), or null. |
+
+`x` and `y` are in the coordinates of the node's parent (the flow's, with none). The node's
+`position`, `width` and `height` are the stroke's bounds once transformed, with its width:
+the iPad's `frame`. **A move changes `transform` and `position`, never `points`**, so moving
+a stroke is a small patch. A stroke that doesn't read draws nothing and is kept. The Mac draws
+strokes itself, so the fountain pen's and the pencil's textures differ a little from
+PencilKit's; the points, colours and widths are the same.
+
 ## Edits
 
 The flow tells its host what changed as a batch of operations by id
@@ -263,6 +291,7 @@ the cases a server tests against, with the exact problem each gives.
 | Frames a node is inside | 16 |
 | One node as compact JSON | 1 MiB |
 | One edge as compact JSON | 64 KiB |
+| An ink stroke | 10,000 points, each value within ±20,000; width above 0, at most 200 |
 
 Strings count Unicode characters. The flow itself draws whatever it's given, within reason:
 the limits are for what's stored.

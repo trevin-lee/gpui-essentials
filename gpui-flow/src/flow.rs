@@ -655,6 +655,8 @@ const DASH_SPEED: f32 = 20.;
 /// How wide (in flow units) the band around an edge's line is that takes a press, as React
 /// Flow's `interactionWidth`.
 const INTERACTION_WIDTH: f32 = 20.;
+/// How far (in points) from a stroke's ink a press still takes it.
+const INK_REACH: f32 = 6.;
 /// The least distance (in points) a press may be from a line and take it, at any zoom.
 const MIN_REACH: f32 = 3.;
 /// How far past the pane (in points) edges are still drawn, so lines and arrowheads run off
@@ -1841,6 +1843,7 @@ impl Flow {
         if matches!(self.drag, Some(Drag::Nodes { .. } | Drag::Resize { .. })) {
             return false;
         }
+        self.follow_ink();
         let ops = self.unsent();
         debug_assert!(
             self.edited || ops.is_empty(),
@@ -1976,6 +1979,36 @@ impl Flow {
             if sent {
                 return true;
             }
+        }
+    }
+
+    /// Strokes moved here (dragged, nudged, framed) move by their transform too, as the iPad
+    /// moves them, so their points never change. One whose transform changed as well (an undo,
+    /// someone else's edit) is left as it is.
+    fn follow_ink(&mut self) {
+        for node in &mut self.nodes {
+            if node.kind != "ink" {
+                continue;
+            }
+            let Some(was) = self.stored_nodes.get(&node.id) else {
+                continue;
+            };
+            let d = node.position - was.position;
+            let transform = |n: &Node| n.data.get("ink").and_then(|i| i.get("transform")).cloned();
+            if (d.x == 0. && d.y == 0.) || transform(node) != transform(was) {
+                continue;
+            }
+            let Some(ink) = node.data.get_mut("ink").and_then(|i| i.as_object_mut()) else {
+                continue;
+            };
+            let mut t: Vec<f64> = ink
+                .get("transform")
+                .and_then(|t| serde_json::from_value(t.clone()).ok())
+                .filter(|t: &Vec<f64>| t.len() == 6)
+                .unwrap_or_else(|| vec![1., 0., 0., 1., 0., 0.]);
+            t[4] += d.x as f64;
+            t[5] += d.y as f64;
+            ink.insert("transform".into(), serde_json::json!(t));
         }
     }
 
@@ -3115,6 +3148,16 @@ impl Flow {
     /// and a band along its border; a press inside it is the pane's, so what's under and in it
     /// can be selected and the canvas panned from there.
     fn takes_press(&self, node: &Node, at: XY) -> bool {
+        // A stroke takes a press on its ink, or a few points from it, not across its box.
+        if node.kind == "ink" {
+            let (Some(drawn), Some(abs)) =
+                (self.shared.ink(node), self.absolute_position(&node.id))
+            else {
+                return true;
+            };
+            let reach = INK_REACH / self.viewport.zoom.max(0.01);
+            return drawn.distance(at - abs) <= reach;
+        }
         if !is_frame(node) {
             return true;
         }
