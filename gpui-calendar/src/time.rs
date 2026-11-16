@@ -543,6 +543,25 @@ pub fn zone_label(date: NaiveDate, tz: Tz) -> String {
     }
 }
 
+/// What a second zone's column says at each of the grid's 24 hour lines on `date` (the hour
+/// lines are `primary`'s wall clock): "9 PM" where the zones are whole hours apart, "9:30p" where
+/// they aren't. Each line is turned into an instant and read in `secondary`, so a DST change in
+/// either zone on that day shows as a jump in the labels.
+pub fn secondary_hours(date: NaiveDate, primary: Tz, secondary: Tz, hour12: bool) -> Vec<String> {
+    (0..24)
+        .map(|h| {
+            let t = at_minutes(date, (h * 60) as f32, primary)
+                .with_timezone(&secondary)
+                .time();
+            if t.minute() == 0 {
+                format_hour(t.hour(), hour12)
+            } else {
+                format_time_short(t, hour12)
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -890,6 +909,34 @@ mod tests {
         );
         assert_eq!(short(CalendarView::Agenda(14), a), "Nov 18 – Dec 1");
         assert_eq!(short(CalendarView::Agenda(7), d(2026, 11, 2)), "Nov 2 – 8");
+    }
+
+    #[test]
+    fn a_second_zones_hours() {
+        // Los Angeles and New York: three whole hours apart.
+        let la = secondary_hours(d(2026, 11, 18), Los_Angeles, New_York, true);
+        assert_eq!(la[9], "12 PM");
+        assert_eq!(la[23], "2 AM");
+        // India is half an hour off the hour.
+        let india = secondary_hours(d(2026, 11, 18), Los_Angeles, chrono_tz::Asia::Kolkata, true);
+        assert_eq!(india[0], "1:30p");
+        assert_eq!(india[9], "10:30p");
+        let india24 = secondary_hours(
+            d(2026, 11, 18),
+            Los_Angeles,
+            chrono_tz::Asia::Kolkata,
+            false,
+        );
+        assert_eq!(india24[9], "22:30");
+        // On the day the clocks go back in Los Angeles, 1 AM happens twice: the 2 AM line is
+        // an hour later than it would be, and India's labels jump with it.
+        let fall = secondary_hours(d(2026, 11, 1), Los_Angeles, chrono_tz::Asia::Kolkata, true);
+        assert_eq!(fall[1], "1:30p");
+        assert_eq!(fall[2], "3:30p");
+        // London's own change, seen from New York: its hours keep the gap until it moves.
+        let london = secondary_hours(d(2026, 10, 25), New_York, chrono_tz::Europe::London, true);
+        assert_eq!(london[0], "4 AM");
+        assert_eq!(london[12], "4 PM");
     }
 
     #[test]

@@ -52,7 +52,12 @@ their look.
   switch views. In the agenda the arrows go from event to event down the list. Enter opens the selected event or makes one in the selected slot, Delete or Backspace
   asks to delete the selected event, and Escape drops a drag or the selection.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
-  database, so a DST day doesn't depend on the machine's zone files.
+  database, so a DST day doesn't depend on the machine's zone files. A second zone
+  (`secondary_zone`) adds a column of its hours left of the day and week grids' own, under its
+  abbreviation ("IST", or "+11" where the zone has no letters and the column no room). Each hour
+  line is turned into an instant and read in the second zone, so half-hour zones read "2:30a"
+  and a DST day in either zone shows as a jump. The column stays put during a swipe, with the
+  hours.
 - **Touch** (`touch`, on by default on iOS and Android): GPUI turns touches into taps, long
   presses and pans, the same on every platform, and the calendar takes them so:
   - A tap selects, and a tap on the selected event opens it.
@@ -187,7 +192,7 @@ fn main() {
   of them.
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
-  `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.
+  `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.
 - **The header:** the title, Today, previous and next, and Day / Week / Month / Agenda are
   gpui-core's buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
@@ -235,8 +240,9 @@ never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `dra
 `drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag`, `links`, `agenda` (drawn
 720 pixels wide) and, at an iPhone's 390 by 844 and taken by touch, `compact` (with an event
 selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger
-halfway through a swipe to the next day) and `compact-hold` (a long press on empty time, drawn
-down). `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
+halfway through a swipe to the next day), `compact-hold` (a long press on empty time, drawn
+down) and `compact-zones` (the day with a second zone); `zones` is the week with India's hours
+beside Los Angeles'. `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
 presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
@@ -256,6 +262,8 @@ gpui-core's theme.
 | ![Wednesday at 390 pixels wide, with the compact header](docs/compact.png) | ![Tuesday's list at 390 pixels wide](docs/compact-agenda.png) |
 | **A swipe under way** | **A long press on empty time, drawn down** |
 | ![Wednesday carried left by a finger, Thursday coming in beside it](docs/compact-swipe.png) | ![A new event from 5:30 to 7:15 under a finger](docs/compact-hold.png) |
+| **A second zone, half an hour off** | **On a phone** |
+| ![The week with India's hours beside Los Angeles'](docs/zones.png) | ![Wednesday at 390 pixels wide with a second column of hours](docs/compact-zones.png) |
 
 ## Performance
 

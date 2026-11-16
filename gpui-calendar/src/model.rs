@@ -281,6 +281,9 @@ pub struct CalendarOptions {
     /// The zone times are shown in. Event times are instants, so changing it moves events on
     /// the grid; all-day events stay on their dates.
     pub time_zone: Tz,
+    /// A second zone, shown as its own column of hours beside the day and week grids' (and
+    /// labelled with its abbreviation). Half-hour zones and DST days read right.
+    pub secondary_zone: Option<Tz>,
     /// The first day of a week, for the week and month views.
     pub week_start: Weekday,
     /// 9 AM rather than 09:00.
@@ -314,6 +317,7 @@ impl Default for CalendarOptions {
     fn default() -> Self {
         Self {
             time_zone: chrono_tz::UTC,
+            secondary_zone: None,
             week_start: Weekday::Mon,
             hour12: true,
             snap_minutes: 15,
