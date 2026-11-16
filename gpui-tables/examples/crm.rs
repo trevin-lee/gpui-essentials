@@ -263,7 +263,32 @@ impl Host {
                     }
                 }
             }
-            _ => {}
+            // A property removed: its rows' values for it may stay (the views ignore them), and
+            // so may views' references to it, as the README says.
+            Edit::PropertyDeleted {
+                database_id,
+                property_id,
+            } => {
+                if let Some(fields) = dbs
+                    .iter_mut()
+                    .find(|d| d.doc.id == *database_id)
+                    .and_then(|d| d.doc.database.as_mut())
+                {
+                    fields.properties.retain(|p| p.id != *property_id);
+                }
+            }
+            Edit::ViewDeleted {
+                database_id,
+                view_id,
+            } => {
+                if let Some(fields) = dbs
+                    .iter_mut()
+                    .find(|d| d.doc.id == *database_id)
+                    .and_then(|d| d.doc.database.as_mut())
+                {
+                    fields.views.retain(|v| v.id != *view_id);
+                }
+            }
         }
     }
 }
