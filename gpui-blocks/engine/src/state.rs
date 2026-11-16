@@ -625,7 +625,8 @@ impl BlockEditorState {
     /// custom nodes, and the block surfaces callouts and toggles are drawn
     /// in (see [`crate::surfaces`]). Set before `with_source`; the document
     /// so far is parsed again with them.
-    pub fn with_markdown_extensions(mut self, extensions: MarkdownExtensions) -> Self {
+    pub fn with_markdown_extensions(mut self, extensions: impl Into<MarkdownExtensions>) -> Self {
+        let extensions = extensions.into();
         let source = self.model.source();
         if let Ok(model) = BlockEditorModel::from_markdown(&source, extensions) {
             self.model = model;

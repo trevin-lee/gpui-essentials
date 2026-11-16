@@ -1,3 +1,4 @@
+// Changed in Trevin Lee's fork (2026): extensions given as the engine's own Extensions.
 use std::{
     cell::RefCell,
     sync::{
@@ -41,9 +42,9 @@ impl BlockEditorModel {
     /// Parse Markdown into a model.
     pub fn from_markdown(
         source: &str,
-        extensions: MarkdownExtensions,
+        extensions: impl Into<MarkdownExtensions>,
     ) -> Result<Self, SharedString> {
-        let extensions = super::import::preserve_source_extensions(extensions);
+        let extensions = super::import::preserve_source_extensions(extensions.into());
         let doc = parse_document(source, Arc::new(extensions))?;
         let selection = BlockSelection::caret(doc.first_caret());
         Ok(Self {

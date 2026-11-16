@@ -13,7 +13,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use markdown_editor::{
     BlockEditor, BlockEditorEvent, BlockEditorState, BlockId, BlockKind, BlockPosition,
-    BlockSelection, EditOrigin, EditorCommand, surfaces::with_default_surfaces,
+    BlockSelection, EditOrigin, EditorCommand, Extensions,
 };
 
 use std::path::Path;
@@ -79,7 +79,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
 
 /// The Markdown extensions the editor parses and draws with: the toggles' and callouts'
 /// containers, document links (see [`crate::docs`]) and the widgets.
-pub fn extensions(widgets: &[Arc<dyn Widget>]) -> gpui_kit::base::text::MarkdownExtensions {
+pub fn extensions(widgets: &[Arc<dyn Widget>]) -> Extensions {
     extensions_with(
         widgets,
         DocHooks::default(),
@@ -93,15 +93,15 @@ fn extensions_with(
     hooks: DocHooks,
     toc: TocHooks,
     embeds: EmbedHooks,
-) -> gpui_kit::base::text::MarkdownExtensions {
-    let ext = with_default_surfaces(Default::default())
-        .plugin(TocPlugin(toc))
-        .plugin(EmbedPlugin(embeds))
-        .plugin(PagePlugin(hooks.clone()))
-        .plugin(MentionPlugin(hooks));
+) -> Extensions {
+    let ext = Extensions::default()
+        .with(TocPlugin(toc))
+        .with(EmbedPlugin(embeds))
+        .with(PagePlugin(hooks.clone()))
+        .with(MentionPlugin(hooks));
     widgets
         .iter()
-        .fold(ext, |ext, widget| ext.plugin(WidgetPlugin(widget.clone())))
+        .fold(ext, |ext, widget| ext.with(WidgetPlugin(widget.clone())))
 }
 
 /// Turns a picture picked from the slash menu's Image item into the Markdown destination to

@@ -26,12 +26,10 @@
 
 use std::sync::Arc;
 
-use gpui_kit::base::text::{
-    InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
-};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::*;
 use markdown::mdast::{Link, Node};
+use markdown_editor::{CustomNode, Extension, InlineContext};
 
 /// The link destination's prefix that marks a link to a document.
 pub const SCHEME: &str = "doc:";
@@ -201,12 +199,12 @@ pub(crate) const MENTION: &str = "doc-mention";
 /// The custom node's name for a sub-page.
 pub(crate) const PAGE: &str = "doc-page";
 
-impl MarkdownPlugin for MentionPlugin {
+impl Extension for MentionPlugin {
     fn name(&self) -> &str {
         MENTION
     }
 
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node) -> Option<CustomNode> {
         let Node::Link(link) = node else {
             return None;
         };
@@ -215,7 +213,7 @@ impl MarkdownPlugin for MentionPlugin {
         // Copy as the title, written back as the link.
         let markdown = mention(&doc.id, &doc.title);
         Some(
-            MarkdownNode::new(MENTION, doc.clone())
+            CustomNode::new(MENTION, doc.clone())
                 .text(doc.title.clone())
                 .accessibility_label(label)
                 .markdown(markdown),
@@ -224,17 +222,17 @@ impl MarkdownPlugin for MentionPlugin {
 
     fn render_inline(
         &self,
-        node: &MarkdownNode,
-        context: &InlineRenderContext,
+        node: &CustomNode,
+        line_ctx: InlineContext,
         _: &mut Window,
         cx: &mut App,
-    ) -> Option<InlineElement> {
+    ) -> Option<(AnyElement, Pixels)> {
         let doc = node.data::<DocRef>()?;
         let (title, icon, found) = self.0.info(doc, cx);
         let theme = cx.theme();
         let accent = theme.accent;
-        let size = context.font_size();
-        let line = context.line_height();
+        let size = line_ctx.font_size;
+        let line = line_ctx.line_height;
         let chip = div()
             .debug_selector(|| format!("blocks-mention-{}", doc.id))
             .id(SharedString::from(format!("blocks-mention-{}", doc.id)))
@@ -275,14 +273,14 @@ impl MarkdownPlugin for MentionPlugin {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(self.0.click_handler(doc.id.clone()));
         // The chip is one line tall and its text is centred in it, as the line's own text is.
-        Some(InlineElement::new(chip).with_baseline((line + size * 0.7) / 2.))
+        Some((chip.into_any_element(), (line + size * 0.7) / 2.))
     }
 }
 
 /// Sub-page blocks: a line holding only `[title](doc:id "page")`.
 pub(crate) struct PagePlugin(pub(crate) DocHooks);
 
-impl MarkdownPlugin for PagePlugin {
+impl Extension for PagePlugin {
     fn is_block(&self) -> bool {
         true
     }
@@ -291,7 +289,7 @@ impl MarkdownPlugin for PagePlugin {
         PAGE
     }
 
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node) -> Option<CustomNode> {
         let Node::Paragraph(paragraph) = node else {
             return None;
         };
@@ -305,14 +303,14 @@ impl MarkdownPlugin for PagePlugin {
         let label = format!("Page {}", doc.title);
         let markdown = page(&doc.id, &doc.title);
         Some(
-            MarkdownNode::new(PAGE, doc.clone())
+            CustomNode::new(PAGE, doc.clone())
                 .text(doc.title.clone())
                 .accessibility_label(label)
                 .markdown(markdown),
         )
     }
 
-    fn render(&self, node: &MarkdownNode, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(&self, node: &CustomNode, _: &mut Window, cx: &mut App) -> AnyElement {
         let Some(doc) = node.data::<DocRef>() else {
             return div().into_any_element();
         };
@@ -494,7 +492,7 @@ pub(crate) const EMBED_NODE: &str = "doc-embed";
 /// Embed blocks: a line holding only `[title](doc:id "embed view height")`.
 pub(crate) struct EmbedPlugin(pub(crate) EmbedHooks);
 
-impl MarkdownPlugin for EmbedPlugin {
+impl Extension for EmbedPlugin {
     fn is_block(&self) -> bool {
         true
     }
@@ -503,7 +501,7 @@ impl MarkdownPlugin for EmbedPlugin {
         EMBED_NODE
     }
 
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node) -> Option<CustomNode> {
         let Node::Paragraph(paragraph) = node else {
             return None;
         };
@@ -525,14 +523,14 @@ impl MarkdownPlugin for EmbedPlugin {
         };
         let label = format!("{} embedded", doc.title);
         Some(
-            MarkdownNode::new(EMBED_NODE, data)
+            CustomNode::new(EMBED_NODE, data)
                 .text(doc.title.clone())
                 .accessibility_label(label)
                 .markdown(markdown),
         )
     }
 
-    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(&self, node: &CustomNode, window: &mut Window, cx: &mut App) -> AnyElement {
         let Some(data) = node.data::<EmbedRef>() else {
             return div().into_any_element();
         };

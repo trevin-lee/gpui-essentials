@@ -621,3 +621,56 @@ fn an_item_holding_two_paragraphs_is_spread() {
     let spread: Vec<bool> = list.children().map(|item| item.is_spread()).collect();
     assert_eq!(spread, [true, false]);
 }
+
+#[test]
+fn an_extension_reads_and_writes_back_its_blocks_and_inline_pieces() {
+    use crate::{CustomNode, Extension, Extensions};
+    use markdown::mdast::Node;
+
+    struct Chart;
+    impl Extension for Chart {
+        fn name(&self) -> &str {
+            "chart"
+        }
+        fn is_block(&self) -> bool {
+            true
+        }
+        fn parse(&self, node: &Node) -> Option<CustomNode> {
+            let Node::Code(code) = node else { return None };
+            (code.lang.as_deref() == Some("chart")).then(|| {
+                CustomNode::new("chart", code.value.clone())
+                    .text("a chart")
+                    .markdown(format!("```chart\n{}\n```", code.value))
+            })
+        }
+    }
+    struct Tag;
+    impl Extension for Tag {
+        fn name(&self) -> &str {
+            "tag"
+        }
+        fn parse(&self, node: &Node) -> Option<CustomNode> {
+            let Node::InlineCode(code) = node else {
+                return None;
+            };
+            let tag = code.value.strip_prefix('#')?;
+            Some(
+                CustomNode::new("tag", tag.to_string())
+                    .text(format!("#{tag}"))
+                    .markdown(format!("`#{tag}`")),
+            )
+        }
+    }
+    let source = "Before `#todo` and `code`\n\n```chart\na: 1\n```";
+    let m = BlockEditorModel::from_markdown(source, Extensions::default().with(Chart).with(Tag))
+        .unwrap();
+    let kinds: Vec<BlockKind> = m.document().root().children().map(|b| b.kind()).collect();
+    assert_eq!(kinds, [BlockKind::Paragraph, BlockKind::Custom]);
+    let first = m.document().root().children().next().unwrap();
+    assert_eq!(
+        first.text(),
+        Some("Before \u{FFFC} and code"),
+        "the tag is one unit"
+    );
+    assert_eq!(m.source(), source);
+}
