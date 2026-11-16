@@ -97,6 +97,9 @@ pub(crate) fn init(cx: &mut App) {
 pub struct MenuSelect {
     pub id: SharedString,
     pub modifiers: Modifiers,
+    /// What's typed in a [`Picker`](crate::Picker)'s field as it's picked (none from a
+    /// [`PopupMenu`]): a new property's name, with its type picked below it.
+    pub query: Option<SharedString>,
 }
 
 /// The modifiers a keyboard pick comes with.
@@ -482,6 +485,7 @@ impl RenderOnce for PopupMenu {
                     let pick = MenuSelect {
                         id: id.clone(),
                         modifiers,
+                        query: None,
                     };
                     f(&pick, window, cx);
                 }
@@ -620,6 +624,7 @@ pub(crate) fn rows(
                         let pick = MenuSelect {
                             id: id.clone(),
                             modifiers: e.modifiers(),
+                            query: None,
                         };
                         f(&pick, window, cx);
                     }
