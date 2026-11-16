@@ -177,6 +177,9 @@ struct Snapshot {
     selected: Range<usize>,
 }
 
+/// Room past a one-line field's text for the caret.
+const CARET_ROOM: Pixels = px(2.);
+
 /// The text a typing run started from, so one undo takes back the whole run.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EditKind {
@@ -192,6 +195,8 @@ struct Layout {
     line_height: Pixels,
     /// The text area's bounds on screen.
     bounds: Bounds<Pixels>,
+    /// How far a one-line field's text is moved right by its alignment.
+    dx: Pixels,
 }
 
 /// A text field's text, selection and settings. Make it an entity, draw it with [`Input`], and
@@ -209,6 +214,8 @@ pub struct InputState {
     submit_on_enter: bool,
     /// What the platform keyboard is told, over what the field works out for itself.
     keyboard: Option<TextInputConfiguration>,
+    /// The most characters typing and pasting can make it.
+    max_chars: Option<usize>,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     last_edit: Option<EditKind>,
@@ -252,6 +259,7 @@ impl InputState {
             rows: (1, 1),
             submit_on_enter: false,
             keyboard: None,
+            max_chars: None,
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: None,
@@ -300,7 +308,6 @@ impl InputState {
         self
     }
 
-    /// Whether Enter in a textarea is [`InputEvent::PressEnter`] (Shift-Enter makes a new line).
     /// What the on-screen keyboard offers (autocorrect, capitals, suggestions, its return
     /// key), instead of what the field works out: a sentence-case keyboard with suggestions for
     /// text, none of that for a masked field; Enter on a textarea's return key, Send if it
@@ -310,9 +317,24 @@ impl InputState {
         self
     }
 
+    /// Whether Enter in a textarea is [`InputEvent::PressEnter`] (Shift-Enter makes a new line).
     pub fn submit_on_enter(mut self, submit: bool) -> Self {
         self.submit_on_enter = submit;
         self
+    }
+
+    /// The most characters (Unicode scalar values) typing, pasting and the input method can
+    /// make it, as the web's `maxlength`: past it, typing does nothing and a paste is cut to
+    /// fit, at a whole character as the eye sees it. While the input method is still composing,
+    /// its text isn't counted until it's committed. The host's own `set_value` isn't cut.
+    pub fn max_chars(mut self, max: usize) -> Self {
+        self.max_chars = Some(max);
+        self
+    }
+
+    /// Changes the limit, or removes it with `None`. Text already longer stays.
+    pub fn set_max_chars(&mut self, max: Option<usize>) {
+        self.max_chars = max;
     }
 
     /// Its text.
@@ -589,7 +611,11 @@ impl InputState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let new = sanitize(new.to_string(), self.multiline);
+        let mut new = sanitize(new.to_string(), self.multiline);
+        if let Some(max) = self.max_chars {
+            let kept = self.text.chars().count() - self.text[range.clone()].chars().count();
+            new = fit(&new, max.saturating_sub(kept));
+        }
         if range.is_empty() && new.is_empty() {
             return;
         }
@@ -995,7 +1021,7 @@ impl InputState {
             if shown <= end || last {
                 let local = shown.saturating_sub(*start).min(line.len());
                 let p = line.position_for_index(local, lh)?;
-                return Some(point(p.x, y + p.y));
+                return Some(point(p.x + self.layout.dx, y + p.y));
             }
             y += line.size(lh).height;
         }
@@ -1010,7 +1036,8 @@ impl InputState {
         for (i, (start, line)) in self.layout.lines.iter().enumerate() {
             let h = line.size(lh).height;
             if p.y < y + h || i + 1 == n {
-                let local = point(p.x.max(px(0.)), (p.y - y).clamp(px(0.), h - px(0.01)));
+                let x = (p.x - self.layout.dx).max(px(0.));
+                let local = point(x, (p.y - y).clamp(px(0.), h - px(0.01)));
                 let at = match line.closest_index_for_position(local, lh) {
                     Ok(i) | Err(i) => i,
                 };
@@ -1046,7 +1073,7 @@ impl InputState {
             self.scroll.y = self.scroll.y.clamp(px(0.), max);
             self.scroll.x = px(0.);
         } else {
-            let caret = px(2.);
+            let caret = CARET_ROOM;
             if c.x < self.scroll.x {
                 self.scroll.x = c.x;
             } else if c.x + caret > self.scroll.x + b.width {
@@ -1058,6 +1085,21 @@ impl InputState {
             self.scroll.y = px(0.);
         }
     }
+}
+
+/// As much of `text` as fits in `room` characters, cut between graphemes.
+fn fit(text: &str, room: usize) -> String {
+    let mut out = String::new();
+    let mut used = 0;
+    for g in text.graphemes(true) {
+        let n = g.chars().count();
+        if used + n > room {
+            break;
+        }
+        used += n;
+        out.push_str(g);
+    }
+    out
 }
 
 /// One line, or many: a one-line field takes line breaks as spaces (a pasted address, say).
@@ -1300,6 +1342,7 @@ pub struct Input {
     appearance: bool,
     label: Option<SharedString>,
     colors: InputColors,
+    align: TextAlign,
     style: StyleRefinement,
 }
 
@@ -1321,8 +1364,16 @@ impl Input {
             appearance: true,
             label: None,
             colors: InputColors::default(),
+            align: TextAlign::Left,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// Where a one-line field's text sits while it fits: right for numbers, say. Wider than the
+    /// field, it scrolls from the left as any. A textarea's text stays to the left.
+    pub fn text_align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
     }
 
     /// The caret's colour (otherwise the theme's foreground).
@@ -1338,7 +1389,6 @@ impl Input {
         self
     }
 
-    /// The placeholder's colour (otherwise the theme's muted foreground).
     /// The keyboard focus ring's colour (with `appearance`), drawn as given (otherwise the
     /// theme's ring at half strength).
     pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
@@ -1346,6 +1396,7 @@ impl Input {
         self
     }
 
+    /// The placeholder's colour (otherwise the theme's muted foreground).
     pub fn placeholder_color(mut self, color: impl Into<Hsla>) -> Self {
         self.colors.placeholder = Some(color.into());
         self
@@ -1466,6 +1517,7 @@ impl RenderOnce for Input {
         el.child(TextBox {
             state: s,
             colors: self.colors,
+            align: self.align,
         })
     }
 }
@@ -1474,6 +1526,7 @@ impl RenderOnce for Input {
 struct TextBox {
     state: Entity<InputState>,
     colors: InputColors,
+    align: TextAlign,
 }
 
 impl IntoElement for TextBox {
@@ -1648,6 +1701,7 @@ impl Element for TextBox {
         let lh = window.line_height();
         let focused = self.state.read(cx).focus.is_focused(window);
         let colors = self.colors;
+        let align = self.align;
         self.state.update(cx, |s, _| {
             let shown = s.shown();
             let (text, runs) = runs_for(
@@ -1669,10 +1723,22 @@ impl Element for TextBox {
                     lines.push((start, l));
                 }
             }
+            // A one-line field's text where its alignment puts it, while it fits; past that it
+            // scrolls from the left, as any.
+            let room = bounds.size.width - CARET_ROOM;
+            let dx = match (s.multiline, lines.first()) {
+                (false, Some((_, l))) => match align {
+                    TextAlign::Left => px(0.),
+                    TextAlign::Center => ((room - l.width()) / 2.).max(px(0.)),
+                    TextAlign::Right => (room - l.width()).max(px(0.)),
+                },
+                _ => px(0.),
+            };
             s.layout = Layout {
                 lines,
                 line_height: lh,
                 bounds,
+                dx,
             };
             s.scroll_to_cursor();
         });
@@ -1681,7 +1747,7 @@ impl Element for TextBox {
         let mut y = px(0.);
         let mut origins = Vec::new();
         for (_, l) in &s.layout.lines {
-            origins.push(origin + point(px(0.), y));
+            origins.push(origin + point(s.layout.dx, y));
             y += l.size(lh).height;
         }
         let empty = s.text.is_empty();
