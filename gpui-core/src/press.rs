@@ -186,7 +186,14 @@ impl RenderOnce for Press {
             },
             None => focus_ring(cx),
         };
-        let toggles = matches!(self.role, Role::CheckBox | Role::Switch | Role::RadioButton);
+        let toggles = matches!(
+            self.role,
+            Role::CheckBox
+                | Role::Switch
+                | Role::RadioButton
+                | Role::MenuItemCheckBox
+                | Role::MenuItemRadio
+        );
         let disabled = self.disabled;
         let mut el = self.base;
         // The host's cursor, if it chose one; otherwise a pointing hand while it can be pressed.

@@ -56,6 +56,8 @@ struct Gallery {
     name: Entity<InputState>,
     note: Entity<InputState>,
     more: bool,
+    sort_open: bool,
+    sort: SharedString,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -266,6 +268,46 @@ impl Render for Gallery {
                         .child("Popovers hang from what opens them,")
                         .child("flip above where there's no room below,")
                         .child("and hand the focus back when they close."),
+                ).child(div().w(rems(1.)))
+                .child(
+                    Popover::new("sort")
+                        .open(self.sort_open)
+                        .on_dismiss(cx.listener(|g, _, _, cx| {
+                            g.sort_open = false;
+                            cx.notify();
+                        }))
+                        .trigger(
+                            Button::new("sort-button")
+                                .icon(IconName::ArrowUpDown)
+                                .label("Sort")
+                                .outline()
+                                .on_click(cx.listener(|g, _, _, cx| {
+                                    g.sort_open = !g.sort_open;
+                                    cx.notify();
+                                })),
+                        )
+                        .p(rems(0.25))
+                        .child(
+                            PopupMenu::new("sort-menu")
+                                .items(["name", "date", "size"].map(|k| {
+                                    PopupMenuItem::new(k, match k {
+                                        "name" => "By name",
+                                        "date" => "By date modified",
+                                        _ => "By size",
+                                    })
+                                    .checked(self.sort.as_ref() == k)
+                                }))
+                                .separator()
+                                .item(PopupMenuItem::new("copy", "Copy the list").icon(IconName::Copy).shortcut("⌘C"))
+                                .item(PopupMenuItem::new("delete", "Delete all").icon(IconName::Trash).disabled(true))
+                                .on_select(cx.listener(|g, id: &SharedString, _, cx| {
+                                    if matches!(id.as_ref(), "name" | "date" | "size") {
+                                        g.sort = id.clone();
+                                    }
+                                    g.sort_open = false;
+                                    cx.notify();
+                                })),
+                        ),
                 ),
             )
             .child(heading("A slider (arrows and drag)", &theme))
@@ -407,7 +449,9 @@ fn main() {
                     view: 1,
                     name,
                     note,
-                    more: shot,
+                    more: false,
+                    sort_open: shot,
+                    sort: "name".into(),
                 })
             })
             .expect("the window");
