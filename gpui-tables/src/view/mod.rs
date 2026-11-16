@@ -7,6 +7,8 @@
 //! related rows) and for pickers' choices, edits typed values in place with gpui-core's `Input`
 //! (or in the host's own field), and hands the host every change as a
 //! [`TableEvent`](crate::TableEvent). Call [`init`] once, before opening a window, for its keys.
+//! With [`TableView::with_view_bar`] it draws the database's views as tabs over itself, to
+//! switch, add, rename, duplicate, retype, reorder, set up and delete them.
 //!
 //! ```no_run
 //! use std::rc::Rc;
@@ -47,12 +49,15 @@ mod properties;
 mod render;
 mod table;
 mod theme;
+mod view_bar;
+mod views;
 
 pub use board::{BoardColumn, BoardSpot, CardGhost};
 pub use host::{RelatedDatabase, RelatedRow, TableHost, TextEdit, TextReply, TextTarget};
 pub use properties::PropertyMenu;
 pub use table::{CellRef, Item, TableView};
 pub use theme::{ChipColors, OptionColors, TableColors, TableFonts, TableSizes, TableTheme};
+pub use views::ViewMenu;
 
 use gpui::{App, KeyBinding, actions};
 
@@ -94,6 +99,8 @@ actions!(
         FieldUp,
         /// In such a field: the list's entry below.
         FieldDown,
+        /// In the bar of views: opens the focused tab's menu (⌥↓).
+        TabMenu,
     ]
 );
 
@@ -105,9 +112,13 @@ pub const CONTEXT: &str = "GpuiTablesTable";
 /// the field.
 pub const MENU_FIELD: &str = "GpuiTablesMenuField";
 
+/// The key context of the bar of views ([`TableView::with_view_bar`]): Left and Right move
+/// along the tabs, ⌥↓ opens the focused tab's menu, Down and Escape go back to the view.
+pub const VIEW_BAR: &str = "GpuiTablesViewBar";
+
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
 /// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; and Up and Down in a menu's
-/// field over a list ([`MENU_FIELD`]).
+/// field over a list ([`MENU_FIELD`]); and the bar of views' ([`VIEW_BAR`]).
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -132,5 +143,13 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", FieldUp, f),
         KeyBinding::new("down", FieldDown, f),
+    ]);
+    let b = Some(VIEW_BAR);
+    cx.bind_keys([
+        KeyBinding::new("left", Left, b),
+        KeyBinding::new("right", Right, b),
+        KeyBinding::new("down", Down, b),
+        KeyBinding::new("escape", Cancel, b),
+        KeyBinding::new("alt-down", TabMenu, b),
     ]);
 }

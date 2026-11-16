@@ -506,3 +506,224 @@ pub fn moved_value(
         _ => None,
     }
 }
+
+// --- Views ----------------------------------------------------------------------------------
+
+/// The first select property, in the properties' order: what a new board groups by.
+pub fn first_select(db: &DatabaseFields) -> Option<&Property> {
+    db.properties_in_order()
+        .into_iter()
+        .find(|p| p.kind == PropertyType::Select)
+}
+
+/// The properties a view can group by, in the properties' order.
+pub fn groupable(db: &DatabaseFields) -> Vec<&Property> {
+    db.properties_in_order()
+        .into_iter()
+        .filter(|p| p.kind.can_group())
+        .collect()
+}
+
+/// What a board made from (or changed from) `view` groups by: the view's own `groupBy` when it
+/// can group, else the first select property. None when it has neither: the host is asked to
+/// pick one of [`groupable`], or told there's none.
+pub fn board_group(db: &DatabaseFields, view: Option<&View>) -> Option<String> {
+    view.and_then(|v| v.group_by.as_deref())
+        .and_then(|g| db.property(g))
+        .filter(|p| p.kind.can_group())
+        .or_else(|| first_select(db))
+        .map(|p| p.id.clone())
+}
+
+/// A view type's name, as a new view of it is called and the menus list it.
+pub fn view_type_label(kind: &crate::model::ViewType) -> &str {
+    use crate::model::ViewType as T;
+    match kind {
+        T::Table => "Table",
+        T::Board => "Board",
+        T::List => "List",
+        T::Gallery => "Gallery",
+        T::Other(s) => s,
+    }
+}
+
+/// `base`, or `base 2`, `base 3`, ... whichever no view of `db` is called (case aside).
+pub fn unique_view_name(db: &DatabaseFields, base: &str) -> String {
+    let taken = |name: &str| {
+        let name = name.trim().to_lowercase();
+        db.views
+            .iter()
+            .any(|v| v.name.trim().to_lowercase() == name)
+    };
+    if !taken(base) {
+        return base.to_owned();
+    }
+    (2..)
+        .map(|n| format!("{base} {n}"))
+        .find(|name| !taken(name))
+        .unwrap_or_default()
+}
+
+/// A new view of `kind` called `name`, after every view of `db`, with the type's defaults: no
+/// sort, filter or columns (a table shows every property), and a board grouped by `group_by`
+/// (see [`board_group`]). A table and a list start ungrouped.
+pub fn new_view(
+    db: &DatabaseFields,
+    id: impl Into<String>,
+    kind: crate::model::ViewType,
+    name: impl Into<String>,
+    group_by: Option<String>,
+) -> View {
+    let order = append_order(db.views.iter().map(|v| v.order.as_str()));
+    let board = kind == crate::model::ViewType::Board;
+    let mut view = View::new(id, name, kind, order);
+    if board {
+        view.group_by = group_by;
+    }
+    view
+}
+
+/// A copy of `view` with a new id, called "`name` copy" (cut to `max_chars`), placed straight
+/// after it among `db`'s views (after the last view, where its neighbours' keys can't be put
+/// between).
+pub fn duplicate_view(
+    db: &DatabaseFields,
+    view: &View,
+    id: impl Into<String>,
+    max_chars: usize,
+) -> View {
+    let mut copy = view.clone();
+    copy.id = id.into();
+    let name = format!("{} copy", view.name.trim());
+    copy.name = crate::model::truncate_chars(&name, max_chars).to_owned();
+    let views = db.views_in_order();
+    let at = views.iter().position(|v| v.id == view.id);
+    let next = at.and_then(|i| views.get(i + 1)).map(|v| v.order.as_str());
+    copy.order = order::between(Some(&view.order), next)
+        .or_else(|_| order::between(views.last().map(|v| v.order.as_str()), None))
+        .unwrap_or_else(|_| append_order(db.views.iter().map(|v| v.order.as_str())));
+    copy
+}
+
+/// The views that change when `view_id` moves to place `to` among `db`'s views (by `order`):
+/// that one with a key between its new neighbours', or, where they can't be put between (two
+/// the same, an older scheme's), every view renumbered with [`order::spread`]. Empty when it
+/// doesn't move.
+pub fn move_view(db: &DatabaseFields, view_id: &str, to: usize) -> Vec<View> {
+    let mut views: Vec<View> = db.views_in_order().into_iter().cloned().collect();
+    let Some(from) = views.iter().position(|v| v.id == view_id) else {
+        return Vec::new();
+    };
+    let to = to.min(views.len().saturating_sub(1));
+    if to == from {
+        return Vec::new();
+    }
+    let moving = views.remove(from);
+    views.insert(to, moving);
+    let before = to.checked_sub(1).map(|i| views[i].order.clone());
+    let after = views.get(to + 1).map(|v| v.order.clone());
+    let others_rise = views
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != to)
+        .map(|(_, v)| v.order.as_str())
+        .collect::<Vec<_>>();
+    let rising = others_rise.iter().all(|k| order::is_valid(k))
+        && others_rise.windows(2).all(|w| w[0] < w[1]);
+    if rising && let Ok(k) = order::between(before.as_deref(), after.as_deref()) {
+        views[to].order = k;
+        return vec![views.swap_remove(to)];
+    }
+    let keys = order::spread(views.len());
+    views
+        .into_iter()
+        .zip(keys)
+        .filter_map(|(mut v, k)| {
+            let changed = v.order != k;
+            v.order = k;
+            changed.then_some(v)
+        })
+        .collect()
+}
+
+/// The view of a new type: a board keeps a `groupBy` that can group, else takes `group_by`
+/// (see [`board_group`]); a table or a list keeps its grouping.
+pub fn retype_view(view: &View, kind: crate::model::ViewType, group_by: Option<String>) -> View {
+    let mut view = view.clone();
+    if kind == crate::model::ViewType::Board && group_by.is_some() {
+        if view.group_by != group_by {
+            view.collapsed_groups.clear();
+        }
+        view.group_by = group_by;
+    }
+    view.kind = kind;
+    view
+}
+
+/// The view grouped by `property_id`, or not grouped. Its folded groups were another
+/// property's and are let go; a date bucket stays only while it groups by a date.
+pub fn set_group_by(db: &DatabaseFields, view: &View, property_id: Option<&str>) -> View {
+    let mut view = view.clone();
+    if view.group_by.as_deref() == property_id {
+        return view;
+    }
+    view.group_by = property_id.map(str::to_owned);
+    view.collapsed_groups.clear();
+    let date = property_id
+        .and_then(|id| db.property(id))
+        .is_some_and(|p| p.kind.is_date());
+    if !date {
+        view.group_date = None;
+    }
+    view
+}
+
+/// The properties a view's cards (or lines) show, as it shows them: its `cardProperties` that
+/// name a property of `db` other than the title, each once, in order.
+pub fn card_properties(db: &DatabaseFields, view: &View) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in &view.card_properties {
+        if db
+            .property(id)
+            .is_some_and(|p| p.kind != PropertyType::Title)
+            && !out.contains(id)
+        {
+            out.push(id.clone());
+        }
+    }
+    out
+}
+
+/// The view with `property_id` shown on its cards (after the others) or not, up to the limit
+/// on a view's card properties (the properties limit).
+pub fn toggle_card_property(
+    db: &DatabaseFields,
+    view: &View,
+    property_id: &str,
+    limits: &Limits,
+) -> View {
+    let mut view = view.clone();
+    let mut shown = card_properties(db, &view);
+    match shown.iter().position(|p| p == property_id) {
+        Some(i) => {
+            shown.remove(i);
+        }
+        None if shown.len() < limits.properties => shown.push(property_id.to_owned()),
+        None => {}
+    }
+    view.card_properties = shown;
+    view
+}
+
+/// The view with its card property `property_id` moved `by` places (up is negative).
+pub fn move_card_property(db: &DatabaseFields, view: &View, property_id: &str, by: isize) -> View {
+    let mut view = view.clone();
+    let mut shown = card_properties(db, &view);
+    if let Some(i) = shown.iter().position(|p| p == property_id) {
+        let j = (i as isize + by).clamp(0, shown.len() as isize - 1) as usize;
+        let p = shown.remove(i);
+        shown.insert(j, p);
+    }
+    view.card_properties = shown;
+    view
+}

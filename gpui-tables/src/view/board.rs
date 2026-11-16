@@ -377,7 +377,7 @@ impl TableView {
 
     /// A spot as a lane and a place in it (a column's cards then its New button; the folded
     /// columns in the last lane).
-    fn spot_place(&self, spot: BoardSpot) -> Option<(usize, usize)> {
+    pub(crate) fn spot_place(&self, spot: BoardSpot) -> Option<(usize, usize)> {
         let lanes = self.lanes();
         match spot {
             BoardSpot::Card { column, index } => {

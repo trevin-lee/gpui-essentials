@@ -8,7 +8,9 @@
 //!
 //! The host here keeps the docs in memory and applies the edits itself (both sides of a two-way
 //! relation too, and a new two-way relation's other side in the other database), so the table
-//! changes as you use it, properties added and changed from the + and the columns' menus too. Typed values (titles, text, numbers,
+//! changes as you use it, properties added and changed from the + and the columns' menus too,
+//! and views added, renamed, duplicated, retyped, reordered and deleted from the crate's bar of
+//! views over each database (`TableView::with_view_bar`). Typed values (titles, text, numbers,
 //! emails...) are edited in place, in gpui-core's `Input`: the host doesn't implement
 //! `TableHost::edit_text`.
 //!
@@ -22,7 +24,8 @@
 //! `list` (Interactions, most recent first), `list-grouped` (People by stage) and `list-light`
 //! (the Companies directory, in the light theme); and properties: `columns` (the + menu, a new
 //! property named, its type to pick) and `options` (a select's options, to rename, recolour,
-//! reorder and delete).
+//! reorder and delete); and views: `add-view` (the bar's + menu, a new view named, its type to
+//! pick), `view-menu` (a view's menu) and `view-settings` (a board's settings).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -397,7 +400,7 @@ impl Crm {
                     (dbs[i].doc.clone(), dbs[i].rows.clone())
                 };
                 let h: Rc<dyn TableHost> = host.clone();
-                cx.new(|cx| TableView::new(h, doc, rows, cx))
+                cx.new(|cx| TableView::new(h, doc, rows, cx).with_view_bar(true))
             })
             .collect();
         Self {
@@ -436,22 +439,6 @@ impl Render for Crm {
             .iter()
             .map(|d| d.doc.title.clone())
             .collect();
-        let (views, active) = {
-            let t = table.read(cx);
-            let active = t.view().map(|v| v.id.clone());
-            let views: Vec<(String, String)> = t
-                .database()
-                .database
-                .as_ref()
-                .map(|f| {
-                    f.views_in_order()
-                        .into_iter()
-                        .map(|v| (v.id.clone(), v.name.clone()))
-                        .collect()
-                })
-                .unwrap_or_default();
-            (views, active)
-        };
         let tab = |id: ElementId, label: String, on: bool| {
             Press::new(id)
                 .selected(on)
@@ -508,15 +495,6 @@ impl Render for Crm {
                                         cx.notify();
                                     },
                                 ))
-                            }))
-                            .child(div().w_px().h_5().mx_2().bg(theme.border))
-                            .children(views.into_iter().enumerate().map(|(i, (id, name))| {
-                                let on = active.as_deref() == Some(id.as_str());
-                                let table = table.clone();
-                                tab(ElementId::NamedInteger("view".into(), i as u64), name, on)
-                                    .on_click(move |_: &ClickEvent, _, cx: &mut App| {
-                                        table.update(cx, |t, cx| t.set_view(id.clone(), cx));
-                                    })
                             })),
                     )
                     .child(div().flex_1().min_h_0().child(table)),
@@ -846,6 +824,33 @@ mod shots {
                             )
                         });
                     }
+                    "add-view" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| t.open_add_view_menu(window, cx));
+                    }
+                    "view-menu" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            t.open_view_menu(
+                                PIPELINE,
+                                gpui_tables::view::ViewMenu::Menu,
+                                window,
+                                cx,
+                            )
+                        });
+                    }
+                    "view-settings" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            t.set_view(PIPELINE, cx);
+                            t.open_view_menu(
+                                PIPELINE,
+                                gpui_tables::view::ViewMenu::Settings,
+                                window,
+                                cx,
+                            )
+                        });
+                    }
                     "scrolled" => {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| {
@@ -876,6 +881,16 @@ mod shots {
                     let t = crm.read(cx).table();
                     if let Some(state) = t.read(cx).menu_field_state() {
                         state.update(cx, |s, cx| s.set_value("Deal size", window, cx));
+                    }
+                });
+                settle(window, cx).await;
+            }
+            if scene == "add-view" {
+                // A name typed for the new view, and Board highlighted.
+                let _ = cx.update_window(window, |_, window, cx| {
+                    let t = crm.read(cx).table();
+                    if let Some(state) = t.read(cx).menu_field_state() {
+                        state.update(cx, |s, cx| s.set_value("Follow-ups by owner", window, cx));
                     }
                 });
                 settle(window, cx).await;

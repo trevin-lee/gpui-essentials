@@ -135,7 +135,11 @@ impl TableView {
                     .as_ref()
                     .map_or(self.database.title.clone(), |v| v.name.clone()),
             ))
-            .on_action(cx.listener(|this, _: &super::Up, _, cx| this.board_move(0, -1, cx)))
+            .on_action(cx.listener(|this, _: &super::Up, window, cx| {
+                if !this.up_to_bar(window, cx) {
+                    this.board_move(0, -1, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &super::Down, _, cx| this.board_move(0, 1, cx)))
             .on_action(cx.listener(|this, _: &super::Left, _, cx| this.board_move(-1, 0, cx)))
             .on_action(cx.listener(|this, _: &super::Right, _, cx| this.board_move(1, 0, cx)))

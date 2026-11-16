@@ -90,7 +90,11 @@ impl TableView {
                     .as_ref()
                     .map_or(self.database.title.clone(), |v| v.name.clone()),
             ))
-            .on_action(cx.listener(|this, _: &super::Up, _, cx| this.move_cell(-1, 0, cx)))
+            .on_action(cx.listener(|this, _: &super::Up, window, cx| {
+                if !this.up_to_bar(window, cx) {
+                    this.move_cell(-1, 0, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &super::Down, _, cx| this.move_cell(1, 0, cx)))
             .on_action(cx.listener(|this, _: &super::NextCell, _, cx| this.move_cell(1, 0, cx)))
             .on_action(cx.listener(|this, _: &super::PrevCell, _, cx| this.move_cell(-1, 0, cx)))
