@@ -49,6 +49,7 @@ struct Gallery {
     pressed: SharedString,
     view: usize,
     on: bool,
+    level: Entity<SliderState>,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -234,6 +235,19 @@ impl Render for Gallery {
                     .child(Switch::new("small").checked(true).small())
                     .child(Switch::new("disabled").checked(true).disabled(true)),
             )
+            .child(heading("A slider (arrows and drag)", &theme))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(rems(1.))
+                    .child(div().w(rems(16.)).child(Slider::new(&self.level).w_full()))
+                    .child(
+                        div()
+                            .text_size(theme.text.sm)
+                            .child(format!("{}", self.level.read(cx).value())),
+                    ),
+            )
             .child(heading("Press, with a host's own look", &theme))
             .child(
                 Press::new("press")
@@ -299,9 +313,16 @@ fn main() {
                 ..Default::default()
             };
             let (window, _) = gpui_core::open_window(options, cx, |_, cx| {
-                cx.new(|_| Gallery {
+                cx.new(|cx| Gallery {
                     pressed: "nothing yet".into(),
                     on: true,
+                    level: cx.new(|_| {
+                        SliderState::new()
+                            .min(0.)
+                            .max(100.)
+                            .step(5.)
+                            .default_value(40.)
+                    }),
                     view: 1,
                 })
             })
