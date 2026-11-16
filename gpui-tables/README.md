@@ -117,8 +117,9 @@ made up.
 ## Table view
 
 `gpui_tables::view::TableView` is a GPUI entity that draws a database's rows as a table, in the
-active view's sort, filter, grouping and columns. It's built on gpui-core (its `Press`, icons
-and theme), never on GPUI Kit. The host gives it the docs and a `TableHost`, and gets every
+active view's sort, filter, grouping and columns. It's built on gpui-core (its `Press`, icons,
+theme, `Input`, and its menus, pickers and month in `Popover`, `PopupMenu`, `Picker` and
+`MonthGrid`), never on GPUI Kit. The host gives it the docs and a `TableHost`, and gets every
 change back as a `TableEvent`:
 
 ```rust,ignore
@@ -150,7 +151,7 @@ rendered offscreen).
 | | |
 |---|---|
 | ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: sort, filter by an option, move, hide](docs/table-menu.png) |
-| ![A select's options open under its cell, the current one checked; the event log on the right](docs/table-picker.png) | ![The day grid under a date cell](docs/table-date.png) |
+| ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked, with Today and Clear](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
 | ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | |
 
@@ -182,7 +183,9 @@ rendered offscreen).
   hides any property.
 - **Editing.** A press focuses a cell and a second press edits it (Enter and F2 do too). A
   checkbox toggles at once. Selects, multi-selects, people and relations open a picker; a
-  relation's change comes with its `relationChanged`. A date opens a day grid. Delete and
+  relation's change comes with its `relationChanged`, and a new option made in a select's or
+  multi-select's picker with its `propertyChanged` ([Edits and events](#edits-and-events)). A
+  date opens its month. Delete and
   Backspace empty a cell. Created and edited times and people are read-only: their column's
   menu sorts, filters (by a person, for created-by and edited-by) and groups by them, but a
   press only focuses the cell.
@@ -215,22 +218,44 @@ rendered offscreen).
   next, Enter edits a cell, opens a row from its title, folds a group or makes a row; Escape
   closes a menu and then lets go of the cell; ⌥↓ opens the column's menu. While a value is
   typed in place the keys are the field's: the arrows move its caret, never the focused cell,
-  and Delete and Backspace delete text, not the cell's value. In menus the arrows
-  and Enter choose; in the day grid the arrows move by days and weeks, Page Up and Page Down by
-  months.
+  and Delete and Backspace delete text, not the cell's value. Menus take the keyboard while
+  open and open on their first entry: Up and Down move the highlight, Home and End go to the
+  ends, Enter picks, Shift-Enter picks adding a sort to the others (as a Shift-click does), and
+  Escape or a press elsewhere closes them and hands the keyboard back to the table, on the same
+  cell. A picker opens on the current value with its search field focused: typing searches,
+  Up and Down move through the matches, Enter picks the highlighted one (the first match after
+  typing). A date's month takes the arrows by days and weeks, Page Up and Page Down by months,
+  Enter picks, Escape closes.
+- **Menus.** The column's menu and the Columns menu are gpui-core's `PopupMenu` in a `Popover`:
+  entries with icons and checks under their sections' headings, the picked sort, filters and
+  shown columns checked. A select's, multi-select's, person's or relation's picker is
+  gpui-core's `Picker`: a search field over its choices, an option drawn as its coloured pill as
+  in a cell (its name is still the entry's label, which assistive tech reads and the search
+  matches), the value's checked. A multi-select's (and people's and relations') stays open as
+  choices are toggled, a select's closes on a pick. A select's or multi-select's offers
+  Create “text” while what's typed names no option, up to the options' limit. Rows are 28
+  points at the table's text size (44 on touch). They hang below what opened them, or above it
+  where there's more room, inside the window and scrolling past 520 points, at least a menu's
+  width and as wide as their cell or header, in the theme's popover, text, hover, line and
+  accent (checks) colours. A menu whose column is scrolled out of view stays open at the
+  window's edge.
+- **Dates.** A date's month is gpui-core's `MonthGrid` in a `Popover`, in the week the host
+  starts on, its days 28 points (44 on touch), the picked day in the theme's accent, a range's
+  days between its ends in the selection colour, Today and Clear under it. A pick keeps the
+  value's time of day and its range's length.
 - **New rows.** The New row at the end of the table, or of each group, emits a `rowCreated` with
   an order key after every row's (`order::between`) and the values that keep the row where it was
   made: the group's value, and what the filter's conditions ask for. When the host hands the row
   back, its title is focused.
 - **Touch.** With `TableTheme::with_touch(true)` (the default on iOS) rows, headers, the Open
-  button, group headers, New rows, menu entries and the day grid's days are at least 44 points
+  button, group headers, New rows, menu entries and the month's days are at least 44 points
   each way, column edges take a finger's drag across 44 points while their line stays thin, and
   a finger's swipe scrolls either way.
 - **Nothing redraws while nothing changes,** and the table keeps no timers.
 
 Not in this first table: dragging rows to reorder them, deleting rows, making and editing
-properties and views, ranges and times in the day grid (it keeps a value's time of day and the
-length of its range), long-press column drags on touch (the menu's Move left and Move right do
+properties and views (beyond a new option from a picker), picking ranges and times in the month
+(it shows a range, and keeps a value's time of day and the length of its range), long-press column drags on touch (the menu's Move left and Move right do
 it), and showing the engine's `Issue`s beside the view.
 
 ## Board view
@@ -557,6 +582,14 @@ How the host writes them to the server:
 - **One action, one batch.** Dropping a card in another board column is a `rowsMoved` and a
   `rowValueChanged`; changing a two-way relation is a `rowValueChanged` and a `relationChanged`.
   The host applies a batch together, and can undo it by applying the inverse.
+- **A new option** made in a select's or multi-select's picker (Create “text”) is a
+  `propertyChanged` with the whole property, the new option after the others (a new id, the
+  typed name cut to its limit, the `default` colour), then the row's `rowValueChanged` naming
+  it (for a multi-select, added to the options it had), in that order in one batch. The host
+  writes the property before the value, so the value never names an option the property
+  hasn't. It's last-write-wins like any property edit: two people making options at once can
+  lose one, and the row then names an option the property hasn't, which the views draw as no
+  option and `Limits::check_row` reports.
 
 For example, Theo dragged from Lead to Warm, between two cards, on the Pipeline board without
 its sort:
@@ -797,7 +830,12 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   grouping, currency and percent signs; text cut to its limits; a text value over several lines;
   a filter's value in the column's menu; the arrows, Delete and Backspace kept to the field; a
   tap editing a focused cell on touch), the host's own field winning when it has one, keyboard
-  navigation, opening rows, new rows in groups and filters, created-by and edited-by cells
+  navigation (in menus too, opening on their first entry, Shift-Enter adding a sort, and back
+  to the table when one closes), options drawn as pills, pickers opening on the current value
+  and searching as you type, a new option made from a picker (its `propertyChanged` and the
+  row's value in one batch), the month in the table's colours with Today and Clear under it and
+  a range shown and moved whole, opening rows, new rows in
+  groups and filters, created-by and edited-by cells
   (named by the host, never edited, filtered and grouped by), 44-point targets on touch, a finger
   resizing a column, swipes both ways with the title in place, and no frames while idle.
 - `tests/board.rs`: the board view driven by mouse, keyboard and finger: its columns and cards,

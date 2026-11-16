@@ -214,6 +214,12 @@ fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
                 }
             }
         }
+        Edit::PropertyChanged { property, .. } => {
+            let f = db.database.as_mut().unwrap();
+            if let Some(p) = f.properties.iter_mut().find(|p| p.id == property.id) {
+                *p = property.clone();
+            }
+        }
         Edit::ViewChanged { view, .. } => {
             let f = db.database.as_mut().unwrap();
             if let Some(v) = f.views.iter_mut().find(|v| v.id == view.id) {

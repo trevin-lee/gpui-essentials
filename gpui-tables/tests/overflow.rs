@@ -283,7 +283,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 for o in overflows(cx) {
                     found.push(format!("{case}: {o}"));
                 }
-                // A column's menu, a picker of options, related rows and people, the day grid.
+                // A column's menu, a picker of options, related rows and people, the month.
                 let menus = [
                     ("menu", STAGE),
                     ("tags", TAGS),
@@ -355,7 +355,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 }
                 cx.update(|_, cx| table.update(cx, |t, cx| t.open_column_menu(ROLE, cx)));
                 draw(cx);
-                click(cx, "entry:Contains…");
+                click(cx, "menu-item-Contains…");
                 type_text(cx, &worst());
                 let field = rect(cx, "editor");
                 for o in overflows_with(cx, Some(field)) {

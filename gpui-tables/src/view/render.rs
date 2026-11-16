@@ -1,21 +1,28 @@
 //! Drawing the table: the header, the rows (only those on screen, through `uniform_list`), the
-//! cells by type, and the menus, pickers and day grid over them.
+//! cells by type, and the menus, pickers and month over them (gpui-core's Popover, PopupMenu
+//! and MonthGrid).
 
+use std::collections::HashSet;
 use std::ops::Range;
+use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Anchor, AnyElement, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, FontWeight, Hsla,
+    AnyElement, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, FontWeight, Hsla,
     InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement, Pixels, Render, Role, ScrollEvent, SharedString, StatefulInteractiveElement,
     Styled, TextAlign, TouchDragEvent, TouchPhase, Window, anchored, canvas, deferred, div, point,
     px, uniform_list,
 };
-use gpui_core::{Icon, IconName, Input, Press, Selectable as _};
+use gpui_core::{
+    DatePickerColors, DismissReason, Icon, IconName, Input, MenuSelect, MonthGrid, Picker,
+    Popover as CorePopover, PopoverColors, PopupMenu, PopupMenuColors, PopupMenuItem, Press,
+    Selectable as _,
+};
 
 use super::format;
 use super::host::person_label;
-use super::table::{Drag, Entry, Item, Popover, TableView, type_icon};
+use super::table::{Action, Drag, Entry, Item, Popover, TableView, naive_day, type_icon};
 use crate::engine::{GroupKey, time};
 use crate::model::{Color, Doc, Person, Property, PropertyType, Value};
 
@@ -24,6 +31,10 @@ impl Render for TableView {
         self.theme = self.host.theme(cx);
         self.rem = window.rem_size();
         self.ensure();
+        // The month's state lives only while its popover is open.
+        if !matches!(self.popover, Some(Popover::Date { .. })) {
+            self.date = None;
+        }
         // A board view draws as a board, a list view as a list, any other as a table: one
         // entity and one host.
         if self.shown.board.is_some() {
@@ -132,20 +143,15 @@ impl Render for TableView {
             .on_action(
                 cx.listener(|this, _: &super::PrevCell, window, cx| this.on_tab(true, window, cx)),
             )
+            // The field takes Enter itself, and an open menu or month has the keyboard (gpui-core's
+            // PopupMenu and MonthGrid pick with Enter): nothing else does while they're open.
             .on_action(cx.listener(|this, _: &super::Confirm, window, cx| {
-                if this.is_editing() {
-                    // The field takes Enter itself; nothing else does while it's open.
-                } else if this.popover.is_some() {
-                    this.activate_highlight(false, window, cx)
-                } else {
+                if !this.is_editing() && this.popover.is_none() {
                     this.confirm(window, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &super::ConfirmAdd, window, cx| {
-                if this.is_editing() {
-                } else if this.popover.is_some() {
-                    this.activate_highlight(true, window, cx)
-                } else {
+                if !this.is_editing() && this.popover.is_none() {
                     this.confirm(window, cx)
                 }
             }))
@@ -195,7 +201,7 @@ impl Render for TableView {
             .child(self.render_header(cx))
             .child(list)
             .child(probe)
-            .children(popover)
+            .child(popover)
             .into_any_element()
     }
 }
@@ -212,44 +218,28 @@ pub(crate) fn icon(name: IconName, size: gpui::Rems, color: Hsla) -> Icon {
 impl TableView {
     // --- Keys -------------------------------------------------------------------------------
 
-    // While a value is typed in place, the arrows (and Page Up and Down) are the field's: they
+    // While a value is typed in place, the arrows (and Page Up and Down) are the field's, and
+    // while a menu or month is open they're its own (gpui-core's PopupMenu and MonthGrid): they
     // never move the focused cell.
 
     fn on_vertical(&mut self, d: isize, cx: &mut Context<Self>) {
-        if self.is_editing() {
-            return;
-        }
-        match &self.popover {
-            Some(Popover::Date { .. }) => self.move_day(7 * d as i64, cx),
-            Some(_) => self.move_highlight(d, cx),
-            None => self.move_cell(d, 0, cx),
+        if !self.is_editing() && self.popover.is_none() {
+            self.move_cell(d, 0, cx)
         }
     }
 
     fn on_horizontal(&mut self, d: isize, cx: &mut Context<Self>) {
-        if self.is_editing() {
-            return;
-        }
-        match &self.popover {
-            Some(Popover::Date { .. }) => self.move_day(d as i64, cx),
-            Some(_) => {}
-            None => self.move_cell(0, d, cx),
+        if !self.is_editing() && self.popover.is_none() {
+            self.move_cell(0, d, cx)
         }
     }
 
     fn on_page(&mut self, d: isize, cx: &mut Context<Self>) {
-        if self.is_editing() {
-            return;
-        }
-        match &self.popover {
-            Some(Popover::Date { .. }) => self.turn_month(d as i64, cx),
-            Some(_) => {}
-            None => {
-                let rows = (self.bounds.get().size.height / self.row_height())
-                    .floor()
-                    .max(1.);
-                self.move_cell(d * rows as isize, 0, cx)
-            }
+        if !self.is_editing() && self.popover.is_none() {
+            let rows = (self.bounds.get().size.height / self.row_height())
+                .floor()
+                .max(1.);
+            self.move_cell(d * rows as isize, 0, cx)
         }
     }
 
@@ -510,7 +500,7 @@ impl TableView {
             _ => None,
         };
         let menu_open =
-            matches!(&self.popover, Some(Popover::Header { column: c, .. }) if *c == column);
+            matches!(&self.popover, Some(Popover::Header { column: c }) if *c == column);
         let sel_name = name.clone();
         // A narrow column gives its name the room: no type icon, one mark at most.
         let roomy = self.column_px(column) >= t.pixels(90., self.rem);
@@ -1166,12 +1156,32 @@ impl TableView {
 
     // --- Menus ------------------------------------------------------------------------------
 
-    fn render_popover(&self, _: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The open menu, picker, month or filter field, in gpui-core's Popover. It's drawn closed
+    /// while none is open, so that on closing it hands the keyboard back to the table (its
+    /// named handle). While what it hangs from is scrolled out of the window (a column's header
+    /// off to the side), it stays open, held at the window's edge, as the table's own panel did.
+    fn render_popover(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = &self.theme;
-        let popover = self.popover.clone()?;
-        let target = match &popover {
-            Popover::Header { column, .. } => self.header_bounds(*column),
-            Popover::Columns { .. } => {
+        let popover = CorePopover::new("gpui-tables-popover")
+            .return_focus(&self.focus)
+            .close_when_scrolled_away(false)
+            .colors(PopoverColors {
+                background: t.colors.popover,
+                foreground: t.colors.text,
+                border: t.colors.popover_border,
+            })
+            .max_height(t.px(520.))
+            .on_dismiss(cx.listener(|this, reason: &DismissReason, window, cx| {
+                this.dismiss(*reason, window, cx)
+            }));
+        let Some(open) = self.popover.clone() else {
+            return popover.into_any_element();
+        };
+        let target = match &open {
+            Popover::Header { column } | Popover::FilterValue { column } => {
+                self.header_bounds(*column)
+            }
+            Popover::Columns => {
                 let b = self.bounds.get();
                 let w = t.pixels(t.sizes.menu_width, self.rem);
                 gpui::Bounds::new(
@@ -1179,60 +1189,270 @@ impl TableView {
                     gpui::size(w, self.header_height()),
                 )
             }
-            Popover::Picker { cell, .. } | Popover::Date { cell, .. } => self.cell_bounds(*cell),
-            Popover::FilterValue { column } => self.header_bounds(*column),
+            Popover::Picker { cell } | Popover::Date { cell } => self.cell_bounds(*cell),
         };
-        let filter_value = matches!(popover, Popover::FilterValue { .. });
-        let body = match &popover {
-            Popover::Date { month, day, cell } => self.render_day_grid(*month, *day, *cell, cx),
-            Popover::FilterValue { column } => self.render_filter_value(*column),
-            Popover::Header { highlight, .. }
-            | Popover::Columns { highlight }
-            | Popover::Picker { highlight, .. } => self.render_entries(*highlight, cx),
-        };
-        let shadow = BoxShadow {
-            color: t.colors.shadow,
-            offset: point(px(0.), px(6.)),
-            blur_radius: px(18.),
-            spread_radius: px(0.),
-            inset: false,
-        };
-        let menu = div()
-            .id("gpui-tables-menu")
+        // A menu's width, or its anchor's if that's wider, inside the window (its edges, the
+        // popover's border and padding).
+        let room = (window.viewport_size().width - px(26.)).max(px(0.));
+        let width = t
+            .pixels(t.sizes.menu_width, self.rem)
+            .max(target.size.width)
+            .min(room);
+        let body = div()
             .debug_selector(|| "menu".into())
-            .occlude()
-            .w(t.px(t.sizes.menu_width))
-            .max_h(t.px(520.))
-            .overflow_y_scroll()
-            .py(t.px(4.))
-            .rounded(t.px(t.sizes.radius))
-            .border_1()
-            .border_color(t.colors.popover_border)
-            .bg(t.colors.popover)
-            .shadow(vec![shadow])
-            .text_size(t.px(t.sizes.text))
-            .text_color(t.colors.text)
             .font_family(t.fonts.body.clone())
-            .on_mouse_down_out(cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                // A filter value typed is applied by pressing elsewhere, as a cell's is.
-                if filter_value {
-                    this.finish_editor(true, false, window, cx);
+            .text_size(t.px(t.sizes.text))
+            .text_color(t.colors.text);
+        let popover = popover.open(true).anchor(target);
+        let name = |column: usize| self.property_at(column).map_or("", |p| p.name.as_str());
+        match open {
+            Popover::Header { column } => popover
+                .accessibility_label(format!("{} column", name(column)))
+                .p(t.px(4.))
+                .child(body.w(width).child(self.popup_menu(cx)))
+                .into_any_element(),
+            Popover::Columns => popover
+                .accessibility_label("Properties")
+                .p(t.px(4.))
+                .child(body.w(width).child(self.popup_menu(cx)))
+                .into_any_element(),
+            Popover::Picker { cell } => popover
+                .accessibility_label(name(cell.column).to_owned())
+                .p(t.px(4.))
+                .child(body.w(width).child(self.picker(cell, cx)))
+                .into_any_element(),
+            // The field has the keyboard: the popover leaves it there.
+            Popover::FilterValue { column } => popover
+                .take_focus(false)
+                .py(t.px(4.))
+                .child(body.w(width).child(self.render_filter_value(column)))
+                .into_any_element(),
+            // The month took the keyboard when it opened; the popover leaves it there.
+            Popover::Date { cell } => {
+                let Some((state, _)) = &self.date else {
+                    return popover.open(false).into_any_element();
+                };
+                let mut grid = MonthGrid::new(state)
+                    .day_size(t.px(28.))
+                    .colors(self.month_colors())
+                    .footer(self.render_date_footer(cx));
+                if t.touch {
+                    grid = grid.touch();
                 }
-                this.popover = None;
-                cx.notify();
-            }))
-            .child(body);
-        Some(
-            deferred(
-                anchored()
-                    .anchor(Anchor::TopLeft)
-                    .attach(target, Anchor::BottomLeft)
-                    .snap_to_window_with_margin(px(8.))
-                    .child(menu),
+                // A range is drawn as one, its ends picked and the days between tinted; a pick
+                // moves its start and keeps its length.
+                let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
+                let range = self
+                    .cell_target(cell)
+                    .and_then(|(r, p)| self.rows[r].value(&p.id).and_then(Value::as_date))
+                    .filter(|d| d.end.is_some())
+                    .map(|d| time::days_of(d, offset));
+                if let Some((first, last)) = range {
+                    grid = grid.shown_range(naive_day(first), naive_day(last));
+                }
+                popover
+                    .take_focus(false)
+                    .match_trigger_width(false)
+                    .accessibility_label(name(cell.column).to_owned())
+                    .p(t.px(4.))
+                    .child(body.child(grid))
+                    .into_any_element()
+            }
+        }
+    }
+
+    /// The popover asks to close: a press elsewhere, or Escape. A filter value being typed is
+    /// applied by a press elsewhere, as a cell's is, and dropped by Escape.
+    fn dismiss(&mut self, reason: DismissReason, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.popover, Some(Popover::FilterValue { .. })) {
+            let escape = reason == DismissReason::Escape;
+            self.finish_editor(!escape, escape, window, cx);
+        }
+        self.date = None;
+        self.popover = None;
+        cx.notify();
+    }
+
+    /// The open menu's or picker's entries as gpui-core's, and what each one's id does. An
+    /// entry's id is its label (numbered when two are the same), so a test or a host finds it
+    /// as `menu-item-<label>`. An option is drawn as the table draws it in a cell, a coloured
+    /// pill (`label_element`), while its name stays the entry's label: what assistive tech
+    /// reads and what a picker's search matches.
+    fn menu_entries(&self) -> (Vec<MenuEntry>, PickActions) {
+        let mut used: HashSet<SharedString> = HashSet::new();
+        let mut actions = Vec::new();
+        let mut out = Vec::new();
+        for e in self.entries() {
+            let Entry {
+                label,
+                action,
+                icon,
+                checked,
+                chip,
+            } = e;
+            let Some(action) = action else {
+                out.push(MenuEntry::Heading(label.into()));
+                continue;
+            };
+            let mut id = SharedString::from(label.clone());
+            let mut n = 1;
+            while used.contains(&id) {
+                n += 1;
+                id = format!("{label} ({n})").into();
+            }
+            used.insert(id.clone());
+            let mut item = PopupMenuItem::new(id.clone(), label.clone());
+            if let Some(icon) = icon {
+                item = item.icon(icon);
+            }
+            if let Some(checked) = checked {
+                item = item.checked(checked);
+            }
+            if let Some(color) = &chip {
+                let pill = format!("pill:{label}");
+                item = item.label_element(self.chip(label, color).debug_selector(move || pill));
+            }
+            actions.push((id, action));
+            out.push(MenuEntry::Item(item));
+        }
+        (out, Rc::new(actions))
+    }
+
+    /// Runs a picked entry's action. Shift (Shift-Enter, or a Shift-click) adds a sort to the
+    /// others rather than replacing them.
+    fn on_pick(
+        &self,
+        actions: PickActions,
+        cx: &mut Context<Self>,
+    ) -> impl Fn(&MenuSelect, &mut Window, &mut gpui::App) + 'static {
+        cx.listener(move |this, pick: &MenuSelect, window, cx| {
+            if let Some((_, action)) = actions.iter().find(|(id, _)| *id == pick.id) {
+                this.activate(action.clone(), pick.modifiers.shift, window, cx);
+            }
+        })
+    }
+
+    /// A menu's and a picker's colours, from the table's theme: the hover fill for the
+    /// highlight, the accent for checks, muted headings.
+    #[allow(clippy::needless_update)]
+    fn menu_colors(&self) -> PopupMenuColors {
+        let t = &self.theme;
+        PopupMenuColors {
+            highlight: Some(t.colors.hover),
+            highlight_text: Some(t.colors.text),
+            muted: Some(t.colors.text_muted),
+            separator: Some(t.colors.line),
+            check: Some(t.colors.accent),
+            heading: Some(t.colors.text_muted),
+            ..Default::default()
+        }
+    }
+
+    /// The column's menu or the Columns menu as gpui-core's PopupMenu: its sections under their
+    /// headings, rows 28 points tall at the table's text size (44 on touch), opening with its
+    /// first entry highlighted.
+    fn popup_menu(&self, cx: &mut Context<Self>) -> PopupMenu {
+        let t = &self.theme;
+        let (entries, actions) = self.menu_entries();
+        let mut menu = PopupMenu::new(ElementId::NamedInteger(
+            "gpui-tables-menu".into(),
+            self.menu_serial,
+        ))
+        .touch(t.touch)
+        .row_height(t.px(28.))
+        .text_size(t.px(t.sizes.text))
+        .colors(self.menu_colors());
+        for e in entries {
+            menu = match e {
+                MenuEntry::Heading(title) => menu.heading(title),
+                MenuEntry::Item(item) => menu.item(item),
+            };
+        }
+        menu.on_select(self.on_pick(actions, cx))
+    }
+
+    /// A cell's picker as gpui-core's Picker: typing searches the options (people, rows), Enter
+    /// picks the first match, and it opens on the current value. A select's or multi-select's
+    /// offers to create an option from what's typed ([`TableView::create_option`]).
+    fn picker(&self, cell: super::CellRef, cx: &mut Context<Self>) -> Picker {
+        let t = &self.theme;
+        let (entries, actions) = self.menu_entries();
+        let kind = self.cell_target(cell).map(|(_, p)| p.kind.clone());
+        let placeholder = match kind {
+            Some(PropertyType::Select | PropertyType::MultiSelect) => "Search or create an option",
+            Some(PropertyType::Person) => "Search for a person",
+            _ => "Search",
+        };
+        let picker = Picker::new(ElementId::NamedInteger(
+            "gpui-tables-picker".into(),
+            self.menu_serial,
+        ))
+        .placeholder(placeholder)
+        .items(entries.into_iter().filter_map(|e| match e {
+            MenuEntry::Item(item) => Some(item),
+            MenuEntry::Heading(_) => None,
+        }))
+        .touch(t.touch)
+        .row_height(t.px(28.))
+        .text_size(t.px(t.sizes.text))
+        .colors(self.menu_colors())
+        .on_select(self.on_pick(actions, cx));
+        if self.can_create_option() {
+            picker.on_create(
+                cx.listener(|this, text: &str, window, cx| this.create_option(text, window, cx)),
             )
-            .with_priority(1)
-            .into_any_element(),
-        )
+        } else {
+            picker
+        }
+    }
+
+    /// The month's colours, from the table's theme: the accent for the picked day (or a
+    /// range's ends), the selection's tint between them, the hover fill.
+    fn month_colors(&self) -> DatePickerColors {
+        let t = &self.theme;
+        DatePickerColors {
+            selected: Some(t.colors.accent),
+            selected_text: Some(t.colors.on_accent),
+            range: Some(t.colors.selection),
+            hover: Some(t.colors.hover),
+            muted: Some(t.colors.text_muted),
+            cursor: Some(t.colors.line_strong),
+            focus_ring: Some(t.colors.focus.opacity(0.5)),
+            ..Default::default()
+        }
+    }
+
+    /// Under the month: Today, and Clear to empty the date.
+    fn render_date_footer(&self, cx: &mut Context<Self>) -> AnyElement {
+        let t = &self.theme;
+        let hit = t.hit(28., self.rem);
+        let today = self.shown.today;
+        let button =
+            |id: &'static str, label: &'static str, day: Option<i64>, cx: &mut Context<Self>| {
+                Press::new(id)
+                    .tab_stop(false)
+                    .focus_ring_color(t.colors.focus)
+                    .debug_selector(move || id.into())
+                    .h(hit)
+                    .px(t.px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(t.px(t.sizes.chip_radius))
+                    .text_size(t.px(t.sizes.text))
+                    .text_color(t.colors.text_muted)
+                    .hover(|s| s.bg(t.colors.hover))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.pick_day(day, window, cx);
+                    }))
+            };
+        div()
+            .debug_selector(|| "month-footer".into())
+            .flex()
+            .justify_between()
+            .child(button("day-today", "Today", Some(today), cx))
+            .child(button("day-clear", "Clear", None, cx))
+            .into_any_element()
     }
 
     /// A filter's value typed in place under the column's header: what it filters by, then the
@@ -1290,238 +1510,13 @@ impl TableView {
             )
             .into_any_element()
     }
-
-    fn render_entries(&self, highlight: usize, cx: &mut Context<Self>) -> AnyElement {
-        let t = &self.theme;
-        let entries = self.entries();
-        let hit = t.hit(28., self.rem);
-        let any_check = entries.iter().any(|e| e.checked.is_some());
-        div()
-            .flex()
-            .flex_col()
-            .children(entries.into_iter().enumerate().map(|(i, e)| {
-                let Entry {
-                    label,
-                    action,
-                    icon: ic,
-                    checked,
-                    chip,
-                } = e;
-                let Some(action) = action else {
-                    return div()
-                        .px(t.px(12.))
-                        .pt(t.px(8.))
-                        .pb(t.px(2.))
-                        .text_size(t.px(t.sizes.small))
-                        .text_color(t.colors.text_muted)
-                        .child(line(label))
-                        .into_any_element();
-                };
-                let sel = label.clone();
-                let mark = checked.unwrap_or(false);
-                Press::new(ElementId::NamedInteger("entry".into(), i as u64))
-                    .tab_stop(false)
-                    .focus_ring_color(t.colors.focus)
-                    .role(Role::MenuItem)
-                    .selected(mark)
-                    .debug_selector(move || format!("entry:{sel}"))
-                    .mx(t.px(4.))
-                    .h(hit)
-                    .px(t.px(8.))
-                    .flex()
-                    .items_center()
-                    .gap(t.px(8.))
-                    .rounded(t.px(t.sizes.chip_radius))
-                    .overflow_hidden()
-                    .when(i == highlight, |d| d.bg(t.colors.hover))
-                    .hover(|s| s.bg(t.colors.hover))
-                    .when(any_check, |d| {
-                        d.child(
-                            div()
-                                .flex_none()
-                                .w(t.px(t.sizes.icon))
-                                .flex()
-                                .items_center()
-                                .when(mark, |d| {
-                                    d.child(icon(
-                                        IconName::Check,
-                                        t.px(t.sizes.icon),
-                                        t.colors.accent,
-                                    ))
-                                }),
-                        )
-                    })
-                    .when_some(ic, |d, ic| {
-                        d.child(icon(ic, t.px(t.sizes.icon), t.colors.text_muted))
-                    })
-                    .map(|d| match &chip {
-                        Some(c) => {
-                            d.child(div().min_w_0().flex().child(self.chip(label.clone(), c)))
-                        }
-                        None => d.child(line(label.clone()).flex_1()),
-                    })
-                    .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
-                        this.activate(action.clone(), e.modifiers().shift, window, cx);
-                    }))
-                    .into_any_element()
-            }))
-            .into_any_element()
-    }
-
-    fn render_day_grid(
-        &self,
-        month: i64,
-        day: i64,
-        cell: super::CellRef,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let t = &self.theme;
-        let (y, m, _) = time::civil_from_days(month);
-        let monday = self.host.week_starts_monday();
-        let first_weekday = time::weekday(month) as i64; // 0 = Monday
-        let lead = if monday {
-            first_weekday
-        } else {
-            (first_weekday + 1) % 7
-        };
-        let start = month - lead;
-        let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
-        let current = self
-            .cell_target(cell)
-            .and_then(|(r, p)| self.rows[r].value(&p.id).and_then(Value::as_date).copied())
-            .map(|d| time::days_of(&d, offset).0);
-        let today = self.shown.today;
-        let hit = t.hit(28., self.rem);
-        let names: [&str; 7] = if monday {
-            ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
-        } else {
-            ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
-        };
-        let turn = |id: &'static str,
-                    label: &'static str,
-                    ic: IconName,
-                    d: i64,
-                    cx: &mut Context<Self>| {
-            Press::new(id)
-                .tab_stop(false)
-                .focus_ring_color(t.colors.focus)
-                .accessibility_label(label)
-                .debug_selector(move || id.into())
-                .size(hit)
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(t.px(t.sizes.chip_radius))
-                .hover(|s| s.bg(t.colors.hover))
-                .child(icon(ic, t.px(t.sizes.icon), t.colors.text_muted))
-                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    this.turn_month(d, cx);
-                    window.focus(&this.focus, cx);
-                }))
-        };
-        let weeks = (0..6)
-            .map(|w| {
-                div().flex().justify_between().children((0..7).map(|d| {
-                    let dd = start + w * 7 + d;
-                    let in_month = time::civil_from_days(dd).1 == m;
-                    let is_current = current == Some(dd);
-                    let label = time::civil_from_days(dd).2.to_string();
-                    let ymd = time::format_ymd(dd);
-                    Press::new(ElementId::NamedInteger("day".into(), (w * 7 + d) as u64))
-                        .tab_stop(false)
-                        .focus_ring_color(t.colors.focus)
-                        .role(Role::Button)
-                        .accessibility_label(format::day(dd))
-                        .selected(is_current)
-                        .debug_selector(move || format!("day:{ymd}"))
-                        .size(hit)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(t.px(t.sizes.chip_radius))
-                        .text_size(t.px(t.sizes.small))
-                        .when(!in_month, |s| s.text_color(t.colors.text_faint))
-                        .when(dd == today, |s| {
-                            s.border_1().border_color(t.colors.line_strong)
-                        })
-                        .when(dd == day, |s| s.bg(t.colors.hover))
-                        .when(is_current, |s| {
-                            s.bg(t.colors.accent).text_color(t.colors.on_accent)
-                        })
-                        .hover(|s| s.bg(t.colors.hover))
-                        .child(label)
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            this.pick_day(Some(dd), window, cx);
-                        }))
-                }))
-            })
-            .collect::<Vec<_>>();
-        let footer_button =
-            |id: &'static str, label: &'static str, cx: &mut Context<Self>, day: Option<i64>| {
-                Press::new(id)
-                    .tab_stop(false)
-                    .focus_ring_color(t.colors.focus)
-                    .debug_selector(move || id.into())
-                    .h(hit)
-                    .px(t.px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(t.px(t.sizes.chip_radius))
-                    .text_color(t.colors.text_muted)
-                    .hover(|s| s.bg(t.colors.hover))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        this.pick_day(day, window, cx);
-                    }))
-            };
-        div()
-            .px(t.px(8.))
-            .flex()
-            .flex_col()
-            .gap(t.px(2.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(turn(
-                        "month-previous",
-                        "Previous month",
-                        IconName::ChevronLeft,
-                        -1,
-                        cx,
-                    ))
-                    .child(line(format::month(y, m)).font_weight(FontWeight(t.sizes.medium)))
-                    .child(turn(
-                        "month-next",
-                        "Next month",
-                        IconName::ChevronRight,
-                        1,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .children(names.iter().map(|n| {
-                        div()
-                            .w(hit)
-                            .flex()
-                            .justify_center()
-                            .text_size(t.px(t.sizes.small))
-                            .text_color(t.colors.text_muted)
-                            .child(*n)
-                    })),
-            )
-            .children(weeks)
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .child(footer_button("day-today", "Today", cx, Some(today)))
-                    .child(footer_button("day-clear", "Clear", cx, None)),
-            )
-            .into_any_element()
-    }
 }
+
+/// A menu's entry, before it's handed to gpui-core: a section's heading, or an entry.
+enum MenuEntry {
+    Heading(SharedString),
+    Item(PopupMenuItem),
+}
+
+/// What each entry's id does.
+type PickActions = Rc<Vec<(SharedString, Action)>>;

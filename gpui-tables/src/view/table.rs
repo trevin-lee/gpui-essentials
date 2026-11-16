@@ -9,15 +9,15 @@ use gpui::{
     ScrollStrategy, Subscription, TextInputAction, TextInputConfiguration, UniformListScrollHandle,
     Window, point, px, size,
 };
-use gpui_core::{InputEvent, InputState};
+use gpui_core::{DatePickerEvent, DatePickerState, InputEvent, InputState};
 
 use super::host::{HostLookup, TableHost, TextEdit, TextReply, TextTarget, person_label};
 use super::ops::{self, ColumnLayout};
 use super::{TableTheme, format};
 use crate::engine::{self, Context as EngineContext, Group, GroupKey, Issue, relation, time};
 use crate::model::{
-    Condition, Direction, Doc, Edit, FilterOp, Person, Property, PropertyType, TableEvent, Value,
-    View, ViewType, new_id,
+    Color, Condition, Direction, Doc, Edit, FilterOp, Person, Property, PropertyType, SelectOption,
+    TableEvent, Value, View, ViewType, new_id,
 };
 
 /// One line of the table: a group's header, a row, or the New row at the end of a group (or
@@ -62,12 +62,13 @@ pub(crate) enum Action {
 #[derive(Clone, Debug)]
 pub(crate) struct Entry {
     pub label: String,
-    /// A section's heading when None: it does nothing and the keyboard skips it.
+    /// A section's heading when None: drawn as gpui-core's menu heading, which does nothing and
+    /// which the keyboard skips.
     pub action: Option<Action>,
     pub icon: Option<gpui_core::IconName>,
-    /// A check mark's place: shown checked, or an empty place.
+    /// Whether it's a toggle or one option of several, and checked.
     pub checked: Option<bool>,
-    /// Drawn as an option's chip in this colour.
+    /// An option's colour: the entry is drawn as the option's pill, as in a cell.
     pub chip: Option<crate::model::Color>,
 }
 
@@ -108,17 +109,17 @@ impl Entry {
     }
 }
 
-/// A menu or picker open over the table.
+/// A menu or picker open over the table, in gpui-core's `Popover`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Popover {
     /// A column's menu: sort, filter, hide, move.
-    Header { column: usize, highlight: usize },
+    Header { column: usize },
     /// The list of every property, to show and hide columns.
-    Columns { highlight: usize },
+    Columns,
     /// A cell's picker: options, people or related rows.
-    Picker { cell: CellRef, highlight: usize },
-    /// A cell's day grid, showing `month` (its first day) with `day` highlighted.
-    Date { cell: CellRef, month: i64, day: i64 },
+    Picker { cell: CellRef },
+    /// A cell's month, in gpui-core's `MonthGrid` ([`TableView::date`] holds its state).
+    Date { cell: CellRef },
     /// A column's filter value, typed in place: the field under its header.
     FilterValue { column: usize },
 }
@@ -226,6 +227,12 @@ pub struct TableView {
     pub(crate) theme: TableTheme,
     pub(crate) cell: Option<CellRef>,
     pub(crate) popover: Option<Popover>,
+    /// Counts the menus opened, so each draws as a new gpui-core `PopupMenu` (its highlight
+    /// cleared, taking the keyboard).
+    pub(crate) menu_serial: u64,
+    /// The open date cell's month: gpui-core's `DatePickerState`, which its `MonthGrid` draws,
+    /// and the table's subscription to its picks.
+    pub(crate) date: Option<(Entity<DatePickerState>, Subscription)>,
     pub(crate) drag: Option<Drag>,
     text_token: u64,
     /// A typed value asked of the host (or not yet handed back to be edited in place).
@@ -273,6 +280,8 @@ impl TableView {
             theme,
             cell: None,
             popover: None,
+            menu_serial: 0,
+            date: None,
             drag: None,
             text_token: 0,
             pending_text: None,
@@ -315,7 +324,7 @@ impl TableView {
     pub fn set_view(&mut self, view_id: impl Into<String>, cx: &mut Context<Self>) {
         self.view_id = Some(view_id.into());
         self.cell = None;
-        self.popover = None;
+        self.close_popover(cx);
         // A filter value being typed was for the view left; a cell's is kept until its field
         // loses the focus (it commits then).
         if self
@@ -454,7 +463,7 @@ impl TableView {
         }
     }
 
-    /// Edits a row's cell as Enter (or a second press) does: a picker, the day grid, a toggle,
+    /// Edits a row's cell as Enter (or a second press) does: a picker, the month, a toggle,
     /// or a typed value, in place (or in the host's field, if it has one).
     pub fn edit(
         &mut self,
@@ -471,6 +480,7 @@ impl TableView {
 
     /// Closes an open menu or picker.
     pub fn close_popover(&mut self, cx: &mut Context<Self>) {
+        self.date = None;
         if self.popover.take().is_some() {
             cx.notify();
         }
@@ -633,13 +643,13 @@ impl TableView {
             }
         }
         // A popover on a line that's gone closes.
-        if let Some(Popover::Picker { cell, .. } | Popover::Date { cell, .. }) = &self.popover
+        if let Some(Popover::Picker { cell } | Popover::Date { cell }) = &self.popover
             && self.cell != Some(*cell)
         {
             self.popover = None;
+            self.date = None;
         }
-        if let Some(Popover::Header { column, .. } | Popover::FilterValue { column }) =
-            &self.popover
+        if let Some(Popover::Header { column } | Popover::FilterValue { column }) = &self.popover
             && *column >= self.shown.columns.len()
         {
             self.popover = None;
@@ -891,8 +901,8 @@ impl TableView {
     }
 
     /// Edits a cell in the way its type edits: a checkbox toggles, an option, person or relation
-    /// opens a picker, a date the day grid, and a typed value opens a field in place (or the
-    /// host's own).
+    /// opens a picker (gpui-core's Picker), a date its month (gpui-core's MonthGrid), and a typed
+    /// value opens a field in place (or the host's own).
     pub(crate) fn edit_cell(&mut self, cell: CellRef, window: &mut Window, cx: &mut Context<Self>) {
         self.ensure();
         let Some((row, p)) = self.cell_target(cell) else {
@@ -917,28 +927,45 @@ impl TableView {
             | PropertyType::MultiSelect
             | PropertyType::Person
             | PropertyType::Relation => {
-                self.popover = Some(Popover::Picker { cell, highlight: 0 });
-                let entries = self.entries();
-                let first = entries
-                    .iter()
-                    .position(|e| e.checked == Some(true))
-                    .unwrap_or_else(|| self.first_action(0, 1));
-                if let Some(Popover::Picker { highlight, .. }) = &mut self.popover {
-                    *highlight = first;
-                }
+                self.menu_serial += 1;
+                self.popover = Some(Popover::Picker { cell });
             }
             PropertyType::Date => {
                 let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
-                let day = self.rows[row]
+                let current = self.rows[row]
                     .value(&p.id)
                     .and_then(Value::as_date)
-                    .map_or(self.shown.today, |d| time::days_of(d, offset).0);
-                let (y, m, _) = time::civil_from_days(day);
-                self.popover = Some(Popover::Date {
-                    cell,
-                    month: time::days_from_civil(y, m, 1),
-                    day,
+                    .map(|d| time::days_of(d, offset).0);
+                let today = self.shown.today;
+                let monday = self.host.week_starts_monday();
+                let state = cx.new(|cx| {
+                    let mut s = DatePickerState::new(window, cx)
+                        .week_start(if monday {
+                            chrono::Weekday::Mon
+                        } else {
+                            chrono::Weekday::Sun
+                        })
+                        .today(naive_day(today));
+                    if let Some(day) = current {
+                        s.set_value(Some(naive_day(day)), None, cx);
+                    }
+                    s
                 });
+                let picks = cx.subscribe_in(
+                    &state,
+                    window,
+                    |this: &mut Self, _, event: &DatePickerEvent, window, cx| {
+                        let DatePickerEvent::Change(value) = event;
+                        if let Some(day) = value.start() {
+                            this.pick_day(Some(day_of(day)), window, cx);
+                        }
+                    },
+                );
+                // The month takes the keyboard: its arrows move by days and weeks, Page Up and
+                // Page Down by months, Enter picks, and Escape closes its popover.
+                window.focus(&state.read(cx).focus_handle(cx), cx);
+                self.date = Some((state, picks));
+                self.popover = Some(Popover::Date { cell });
             }
             PropertyType::Title
             | PropertyType::Text
@@ -1284,6 +1311,7 @@ impl TableView {
             self.finish_editor(false, true, window, cx);
             return;
         }
+        self.date = None;
         if self.popover.take().is_none() && self.drag.take().is_none() {
             self.cell = None;
         }
@@ -1344,22 +1372,16 @@ impl TableView {
         if column >= self.shown.columns.len() {
             return;
         }
-        self.popover = Some(Popover::Header {
-            column,
-            highlight: 0,
-        });
-        let first = self.first_action(0, 1);
-        self.popover = Some(Popover::Header {
-            column,
-            highlight: first,
-        });
+        self.date = None;
+        self.menu_serial += 1;
+        self.popover = Some(Popover::Header { column });
         cx.notify();
     }
 
     pub(crate) fn open_columns_menu(&mut self, cx: &mut Context<Self>) {
-        self.popover = Some(Popover::Columns { highlight: 0 });
-        let first = self.first_action(0, 1);
-        self.popover = Some(Popover::Columns { highlight: first });
+        self.date = None;
+        self.menu_serial += 1;
+        self.popover = Some(Popover::Columns);
         cx.notify();
     }
 
@@ -1373,7 +1395,7 @@ impl TableView {
         };
         use gpui_core::IconName as I;
         match &self.popover {
-            Some(Popover::Header { column, .. }) => {
+            Some(Popover::Header { column }) => {
                 let Some(col) = self.shown.columns.get(*column) else {
                     return Vec::new();
                 };
@@ -1419,7 +1441,7 @@ impl TableView {
                 );
                 out
             }
-            Some(Popover::Columns { .. }) => {
+            Some(Popover::Columns) => {
                 let shown: Vec<&str> = self
                     .shown
                     .columns
@@ -1443,7 +1465,7 @@ impl TableView {
                 );
                 out
             }
-            Some(Popover::Picker { cell, .. }) => {
+            Some(Popover::Picker { cell }) => {
                 let Some((row, p)) = self.cell_target(*cell) else {
                     return Vec::new();
                 };
@@ -1671,71 +1693,6 @@ impl TableView {
         out
     }
 
-    /// The first entry from `from` (going `step` either way) that does something.
-    pub(crate) fn first_action(&self, from: usize, step: isize) -> usize {
-        let entries = self.entries();
-        let n = entries.len() as isize;
-        let mut i = from as isize;
-        while i >= 0 && i < n {
-            if entries[i as usize].action.is_some() {
-                return i as usize;
-            }
-            i += step;
-        }
-        from.min(entries.len().saturating_sub(1))
-    }
-
-    /// Moves the open menu's highlight.
-    pub(crate) fn move_highlight(&mut self, step: isize, cx: &mut Context<Self>) {
-        let n = self.entries().len();
-        let current = match &self.popover {
-            Some(Popover::Header { highlight, .. })
-            | Some(Popover::Columns { highlight })
-            | Some(Popover::Picker { highlight, .. }) => *highlight,
-            _ => return,
-        };
-        let mut next = current as isize + step;
-        let entries = self.entries();
-        while next >= 0 && (next as usize) < n && entries[next as usize].action.is_none() {
-            next += step;
-        }
-        if next < 0 || next as usize >= n {
-            return;
-        }
-        if let Some(
-            Popover::Header { highlight, .. }
-            | Popover::Columns { highlight }
-            | Popover::Picker { highlight, .. },
-        ) = &mut self.popover
-        {
-            *highlight = next as usize;
-        }
-        cx.notify();
-    }
-
-    /// Does the highlighted entry of the open menu.
-    pub(crate) fn activate_highlight(
-        &mut self,
-        add: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let highlight = match &self.popover {
-            Some(Popover::Header { highlight, .. })
-            | Some(Popover::Columns { highlight })
-            | Some(Popover::Picker { highlight, .. }) => *highlight,
-            Some(Popover::Date { day, .. }) => {
-                let day = *day;
-                self.pick_day(Some(day), window, cx);
-                return;
-            }
-            Some(Popover::FilterValue { .. }) | None => return,
-        };
-        if let Some(action) = self.entries().get(highlight).and_then(|e| e.action.clone()) {
-            self.activate(action, add, window, cx);
-        }
-    }
-
     /// Does what a menu entry says. `add` is a shift-click (a sort added to the others).
     pub(crate) fn activate(
         &mut self,
@@ -1753,7 +1710,7 @@ impl TableView {
         };
         let limits = self.host.limits();
         let header_property = match &self.popover {
-            Some(Popover::Header { column, .. }) => self
+            Some(Popover::Header { column }) => self
                 .shown
                 .columns
                 .get(*column)
@@ -1903,16 +1860,97 @@ impl TableView {
                 }
             }
         }
+        // A menu that stays open (a multi-select's, the columns') keeps the keyboard; one that
+        // closes gives it back to the table.
         if close {
             self.popover = None;
+            window.focus(&self.focus, cx);
         }
-        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    /// Whether the open picker can make an option from what's typed: a select's or a
+    /// multi-select's, with room for another option.
+    pub(crate) fn can_create_option(&self) -> bool {
+        self.picker_target().is_some_and(|(_, p)| {
+            matches!(p.kind, PropertyType::Select | PropertyType::MultiSelect)
+                && p.options().len() < self.host.limits().options
+        })
+    }
+
+    /// Makes an option named `name` in the open picker's property and gives it to the cell,
+    /// in one batch: a `propertyChanged` with the whole property, the new option (a new id, the
+    /// default colour) after the others, then the row's `rowValueChanged`, the option for a
+    /// select and added to the others for a multi-select. A select's picker closes; a
+    /// multi-select's stays open, its search emptied, with the new option checked once the host
+    /// hands the docs back.
+    pub(crate) fn create_option(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.can_create_option() {
+            return;
+        }
+        let Some((row, p)) = self.picker_target() else {
+            return;
+        };
+        let limits = self.host.limits();
+        let name = crate::model::truncate_chars(name.trim(), limits.option_name_chars);
+        if name.is_empty() {
+            return;
+        }
+        let option = SelectOption {
+            id: new_id(),
+            name: name.to_owned(),
+            color: Color::Default,
+        };
+        let mut property = p.clone();
+        property
+            .config
+            .options
+            .get_or_insert_with(Vec::new)
+            .push(option.clone());
+        let r = &self.rows[row];
+        let value = match p.kind {
+            PropertyType::Select => Value::text(option.id),
+            _ => {
+                let mut ids = r
+                    .value(&p.id)
+                    .and_then(Value::as_ids)
+                    .unwrap_or(&[])
+                    .to_vec();
+                ids.push(option.id);
+                limits.clamp_value(&property, Value::Ids(ids))
+            }
+        };
+        let edits = vec![
+            Edit::PropertyChanged {
+                database_id: self.database_id(),
+                property,
+            },
+            Edit::RowValueChanged {
+                row_id: r.id.clone(),
+                property_id: p.id.clone(),
+                value: Some(value),
+            },
+        ];
+        let select = p.kind == PropertyType::Select;
+        self.emit_edits(edits, window, cx);
+        if select {
+            self.popover = None;
+            window.focus(&self.focus, cx);
+        } else {
+            // A new picker: what was typed is gone, and it opens on the checked options.
+            self.menu_serial += 1;
+        }
         cx.notify();
     }
 
     fn picker_target(&self) -> Option<(usize, Property)> {
         let cell = match &self.popover {
-            Some(Popover::Picker { cell, .. } | Popover::Date { cell, .. }) => *cell,
+            Some(Popover::Picker { cell } | Popover::Date { cell }) => *cell,
             _ => return None,
         };
         self.cell_target(cell).map(|(r, p)| (r, p.clone()))
@@ -1935,7 +1973,8 @@ impl TableView {
         self.emit_edits(vec![edit], window, cx);
     }
 
-    /// The day grid's choice: a day (keeping a time of day the value had), or none to clear.
+    /// The month's choice: a day (keeping a time of day the value had, and a range's length),
+    /// or none to clear.
     pub(crate) fn pick_day(
         &mut self,
         day: Option<i64>,
@@ -1952,27 +1991,9 @@ impl TableView {
         });
         self.set_value(value, window, cx);
         self.popover = None;
+        self.date = None;
         window.focus(&self.focus, cx);
         cx.notify();
-    }
-
-    /// Moves the day grid's highlight by `days`, turning the month when it leaves it.
-    pub(crate) fn move_day(&mut self, days: i64, cx: &mut Context<Self>) {
-        if let Some(Popover::Date { month, day, .. }) = &mut self.popover {
-            *day += days;
-            let (y, m, _) = time::civil_from_days(*day);
-            *month = time::days_from_civil(y, m, 1);
-            cx.notify();
-        }
-    }
-
-    /// Turns the day grid's month.
-    pub(crate) fn turn_month(&mut self, months: i64, cx: &mut Context<Self>) {
-        if let Some(Popover::Date { month, day, .. }) = &mut self.popover {
-            *month = time::add_months(*month, months);
-            *day = time::add_months(*day, months);
-            cx.notify();
-        }
     }
 
     // --- Columns ----------------------------------------------------------------------------
@@ -2035,6 +2056,21 @@ impl TableView {
         }
         cx.notify();
     }
+}
+
+/// A day (days since 1970-01-01) as gpui-core's month takes it.
+pub(crate) fn naive_day(days: i64) -> chrono::NaiveDate {
+    let (y, m, d) = time::civil_from_days(days);
+    i32::try_from(y)
+        .ok()
+        .and_then(|y| chrono::NaiveDate::from_ymd_opt(y, m, d))
+        .unwrap_or_default()
+}
+
+/// A day picked in gpui-core's month, as days since 1970-01-01.
+fn day_of(date: chrono::NaiveDate) -> i64 {
+    use chrono::Datelike as _;
+    time::days_from_civil(i64::from(date.year()), date.month(), date.day())
 }
 
 /// What the on-screen keyboard offers for a type: capitals and suggestions for words, none of
