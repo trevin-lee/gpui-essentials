@@ -61,8 +61,15 @@ pub use tooltip::Tooltip;
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, WindowOptions};
 
 /// Sets the crate up: the default theme if the host has set none, and the key bindings.
-/// Call once, before opening windows.
+///
+/// It runs by itself the first time a [`Root`] or an [`InputState`] is made, so a host that
+/// embeds gpui-core's components without calling it still gets their keys; calling it again does
+/// nothing.
 pub fn init(cx: &mut App) {
+    if cx.has_global::<Initialized>() {
+        return;
+    }
+    cx.set_global(Initialized);
     if !cx.has_global::<Theme>() {
         Theme::set(Theme::dark(), cx);
     }
@@ -70,6 +77,11 @@ pub fn init(cx: &mut App) {
     input::init(cx);
     text::init(cx);
 }
+
+/// That [`init`] has run.
+struct Initialized;
+
+impl gpui::Global for Initialized {}
 
 /// Opens a window with `build`'s view inside a [`Root`], and returns the window and the view.
 pub fn open_window<V: Render>(

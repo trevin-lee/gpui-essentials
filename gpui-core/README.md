@@ -9,6 +9,15 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   with `Theme::set`, and components read it with `cx.theme()`.
 - **Root.** It makes the theme's `font_size` the window's rem, so every size in rems follows
   the host's zoom. It draws the window's surface in the theme and moves the focus with Tab.
+- **Setup.** `gpui_core::init(cx)` binds the components' keys and sets the default theme. It
+  also runs by itself the first time a `Root` or an `InputState` is made, so a crate that embeds
+  gpui-core's components in a host that never calls it still works; calling it twice does
+  nothing.
+- **A palette of your own.** The look comes from the global `Theme`. An element drawn on a
+  palette that differs from it (a light card in a dark app) takes its colours per element:
+  `Press::focus_ring_color`, `Input::caret_color` / `selection_color` / `placeholder_color`,
+  `Slider::track_color` / `fill_color` / `thumb_color`, `Tooltip::background` / `text_color` /
+  `border_color`.
 - **Rules.** Nothing redraws while nothing changes, text stays in its box at any width,
   everything works from the keyboard with a focus ring, nothing works by hover alone, and links
   and actions are events for the host.

@@ -40,6 +40,7 @@ impl Root {
     /// Wraps `view`. If nothing in the window has the focus yet, the Root takes it, so the
     /// first Tab has somewhere to start (with no focus at all, GPUI sends keys to no view).
     pub fn new(view: impl Into<AnyView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        crate::init(cx);
         cx.observe_global::<Theme>(|_, cx| cx.notify()).detach();
         let focus = cx.focus_handle();
         if window.focused(cx).is_none() {
