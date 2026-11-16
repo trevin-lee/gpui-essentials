@@ -63,7 +63,7 @@ jobs:
       - run: cargo clippy -p gpui-core --locked --all-targets --features shots -- -D warnings
       # Syntax highlighting, off by default: its grammars and their queries.
       - run: cargo clippy -p gpui-core --locked --all-targets --features highlight -- -D warnings
-      - run: cargo test -p gpui-core --locked --features highlight --lib
+      - run: cargo test -p gpui-core --locked --features highlight --lib --test text_view_highlight
       - run: cargo test -p gpui-core --locked --features highlight --doc
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-core --locked
