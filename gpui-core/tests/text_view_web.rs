@@ -50,6 +50,8 @@ struct Drawn {
     height: f32,
     glyphs: Vec<(f32, f32, Hsla)>,
     quads: Vec<(gpui::Bounds<f32>, Hsla, f32, f32)>,
+    /// Bordered quads: their border's colour and width.
+    borders: Vec<(Hsla, f32)>,
 }
 
 fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
@@ -65,7 +67,7 @@ fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
     });
     vcx.run_until_parked();
     let doc = vcx.debug_bounds("doc").unwrap();
-    let (glyphs, quads) = vcx.update(|window, cx| {
+    let (glyphs, quads, borders) = vcx.update(|window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
         let k = window.scale_factor();
@@ -93,13 +95,20 @@ fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
                 ))
             })
             .collect();
-        (glyphs, quads)
+        let borders = scene
+            .quads
+            .iter()
+            .filter(|q| q.border_widths.left.0 > 0.)
+            .map(|q| (q.border_color, q.border_widths.left.0 / k))
+            .collect();
+        (glyphs, quads, borders)
     });
     Drawn {
         left: f32::from(doc.origin.x),
         height: f32::from(doc.size.height),
         glyphs,
         quads,
+        borders,
     }
 }
 
@@ -264,4 +273,116 @@ fn a_tables_corners_and_header_fill_are_the_hosts() {
     // Without a header colour there's no fill.
     let plain = draw(TextViewStyle::default(), "| A | B |\n|---|---|\n| 1 | 2 |");
     assert!(!plain.quads.iter().any(|q| near(q.1, BLUE)));
+}
+
+#[test]
+fn the_host_sets_the_gap_between_two_kinds_of_block() {
+    use gpui_core::text::BlockKind;
+    let h = |after_heading: Option<f32>| {
+        draw(
+            TextViewStyle {
+                block_gap: Some(Arc::new(move |prev, next| match (prev, next) {
+                    (BlockKind::Heading(1), BlockKind::Paragraph) => after_heading.map(px),
+                    _ => None,
+                })),
+                ..Default::default()
+            },
+            "# One\n\nText\n\n- a\n- b",
+        )
+        .height
+    };
+    assert!((h(Some(30.)) - h(Some(10.)) - 20.).abs() < 0.6);
+    // None keeps the view's own rule.
+    let plain = draw(TextViewStyle::default(), "# One\n\nText\n\n- a\n- b").height;
+    assert!((h(None) - plain).abs() < 0.6);
+}
+
+#[test]
+fn inline_code_takes_a_border_and_room_for_it() {
+    let code = |border: Option<f32>| {
+        draw(
+            TextViewStyle {
+                inline_code: InlineCodeStyle {
+                    background: Some(BLUE),
+                    padding: Some(px(4.)),
+                    border_width: border.map(px),
+                    border_color: Some(RED),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "Some `code` here",
+        )
+    };
+    let with = code(Some(2.));
+    assert!(
+        with.borders
+            .iter()
+            .any(|(c, w)| near(*c, RED) && (*w - 2.).abs() < 0.1),
+        "a 2px red border"
+    );
+    let width = |d: &Drawn| {
+        d.quads
+            .iter()
+            .find(|q| near(q.1, BLUE))
+            .unwrap()
+            .0
+            .size
+            .width
+    };
+    assert!(
+        ((width(&with) - width(&code(None))) - 4.).abs() < 0.6,
+        "2px each side"
+    );
+}
+
+#[test]
+fn a_tables_header_text_cell_padding_and_stripes_are_the_hosts() {
+    let table = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |";
+    let d = draw(
+        TextViewStyle {
+            colors: TextViewColors {
+                table_header_text: Some(RED),
+                table_stripe: Some(BLUE),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        table,
+    );
+    assert!(d.glyphs.iter().any(|g| near(g.2, RED)), "the header's text");
+    // Body rows 1, 2, 3: the second is striped, and only it.
+    assert_eq!(d.quads.iter().filter(|q| near(q.1, BLUE)).count(), 1);
+    let h = |pad: f32| {
+        draw(
+            TextViewStyle {
+                table_cell_padding: Some(px(pad)),
+                ..Default::default()
+            },
+            table,
+        )
+        .height
+    };
+    // The header's weight: regular draws its labels narrower than the default semibold.
+    let header_ink = |weight: Option<gpui::FontWeight>| {
+        let d = draw(
+            TextViewStyle {
+                table_header_weight: weight,
+                colors: TextViewColors {
+                    table_header_text: Some(RED),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "| Wide header label | Another |\n|---|---|\n| 1 | 2 |",
+        );
+        d.glyphs
+            .iter()
+            .filter(|g| near(g.2, RED))
+            .map(|g| g.1 - g.0)
+            .sum::<f32>()
+    };
+    assert!(header_ink(Some(gpui::FontWeight::NORMAL)) < header_ink(None));
+    // Four rows, each 2 × 4px taller.
+    assert!(((h(12.) - h(8.)) - 32.).abs() < 0.6, "{} {}", h(8.), h(12.));
 }
