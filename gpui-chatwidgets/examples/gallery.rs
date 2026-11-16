@@ -94,7 +94,7 @@ fn load_fonts(cx: &mut App) {
 }
 
 /// The gallery's assets: gpui-core's Lucide icons, which `lucide_icon` names for the cards,
-/// then GPUI Kit's own for its fields, date picker and slider. Both serve `icons/<name>.svg`.
+/// then GPUI Kit's own for its date picker. Both serve `icons/<name>.svg`.
 struct Assets;
 
 impl AssetSource for Assets {
@@ -114,8 +114,16 @@ impl AssetSource for Assets {
     }
 }
 
-/// GPUI Kit's theme (its inputs, date picker and slider) in the same mode as the cards.
+/// GPUI Kit's theme (its date picker) and gpui-core's (the text fields' caret, selection and
+/// placeholder, the slider and tooltips) in the same mode as the cards.
 fn apply_theme(dark: bool, cx: &mut App) {
+    let mut core = if dark {
+        gpui_core::Theme::dark()
+    } else {
+        gpui_core::Theme::light()
+    };
+    core.font_family = "Inter".into();
+    gpui_core::Theme::set(core, cx);
     Theme::change(
         if dark {
             ThemeMode::Dark
@@ -435,6 +443,7 @@ fn main() {
     application().with_assets(Assets).run(move |cx| {
         load_fonts(cx);
         gpui_kit::init(cx);
+        gpui_core::init(cx);
         apply_theme(true, cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());

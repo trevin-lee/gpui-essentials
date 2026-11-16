@@ -1,14 +1,12 @@
-//! Forms and their controls, buttons and icon buttons. Text fields, the date picker and the
-//! slider are GPUI Kit's (their editing, popover and dragging); the others are drawn here, as
-//! GPUI Kit's unstyled buttons so the keyboard reaches them.
+//! Forms and their controls, buttons and icon buttons. Text fields and the slider are
+//! gpui-core's (their editing and dragging), text fields drawn in the card's colours; the date
+//! picker is still GPUI Kit's (its popover). The others are drawn here, as gpui-core's presses
+//! so the keyboard reaches them.
 
 use std::rc::Rc;
 
-use gpui_core::{Disableable as _, Selectable as _};
+use gpui_core::{Disableable as _, InputState, Selectable as _, Slider, Tooltip};
 use gpui_kit::component::date_picker::DatePicker;
-use gpui_kit::component::input::Input as KitInput;
-use gpui_kit::component::input::Textarea;
-use gpui_kit::component::slider::Slider;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde_json::{Value as Json, json};
@@ -19,7 +17,7 @@ use crate::openui::{
     Button, ButtonVariant, Buttons, Choice, Direction, Field, Form, IconButton, Input, Size,
     Surface, Toggle,
 };
-use crate::view::{Binding, CardView, TextState};
+use crate::view::{Binding, CardView};
 
 /// A form field's key: its form's path and its place.
 pub(crate) fn field_key(path: &str, i: usize) -> String {
@@ -159,48 +157,9 @@ impl Draw<'_, '_> {
                         .min_w_0(),
                     &format!("{key}.field"),
                 );
-                match &entry.state {
-                    TextState::Line(s) => wrap
-                        .child(
-                            KitInput::new(s)
-                                .w_full()
-                                .when(invalid, |i| i.border_color(t.colors.danger.emphasis)),
-                        )
-                        .into_any_element(),
-                    TextState::Area(s) => {
-                        let empty = s.read(self.cx).value().is_empty();
-                        let placeholder = match &b.field.input {
-                            Input::TextArea { placeholder, .. } => {
-                                placeholder.clone().filter(|_| empty)
-                            }
-                            _ => None,
-                        };
-                        // The kit draws a text area's placeholder on one line, out past its
-                        // edge; this one wraps, drawn over the area while it's empty.
-                        let over = placeholder.map(|p| {
-                            div()
-                                .absolute()
-                                .top(self.px(9.))
-                                .left(self.px(13.))
-                                .right(self.px(13.))
-                                .child(self.clamp(
-                                    p,
-                                    3,
-                                    t.text.sm,
-                                    t.colors.text_faint,
-                                    self.regular(),
-                                ))
-                        });
-                        wrap.relative()
-                            .child(
-                                Textarea::new(s)
-                                    .w_full()
-                                    .when(invalid, |i| i.border_color(t.colors.danger.emphasis)),
-                            )
-                            .children(over)
-                            .into_any_element()
-                    }
-                }
+                let area = matches!(b.field.input, Input::TextArea { .. });
+                let field = self.text_field(&entry.state, area, invalid);
+                wrap.child(field).into_any_element()
             }
             Input::Select {
                 options,
@@ -246,7 +205,7 @@ impl Draw<'_, '_> {
                 let Some(e) = self.v.sliders.get(key) else {
                     return div().into_any_element();
                 };
-                let now = e.state.read(self.cx).value().start();
+                let now = e.state.read(self.cx).value();
                 let shown = crate::openui::num_text(now as f64);
                 let (lo, hi) = crate::view::slider_range(*min, *max);
                 div()
@@ -277,7 +236,14 @@ impl Draw<'_, '_> {
                                     .flex_none(),
                             ),
                     )
-                    .child(Slider::new(&e.state).w_full())
+                    .child({
+                        let sel = self.selector(&format!("slider:{key}"));
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .debug_selector(move || sel)
+                            .child(Slider::new(&e.state).w_full().when(t.touch, |s| s.touch()))
+                    })
                     .child(
                         div()
                             .w_full()
@@ -706,6 +672,51 @@ impl Draw<'_, '_> {
     }
 
     /// A button showing the chosen option, with the options in a list under it while open.
+    /// A text field or text area: gpui-core's input with no look of its own, drawn in the
+    /// card's colours as the web's (`input.tsx`, `textarea.tsx`): a 1-pixel edge (red when its
+    /// value was refused), filled on a dark card, 12 pixels in from the sides, a one-line field
+    /// as tall as a select, and the edge and ring of the focus while it has it.
+    pub fn text_field(
+        &mut self,
+        state: &Entity<InputState>,
+        area: bool,
+        invalid: bool,
+    ) -> gpui_core::Input {
+        let t = self.t;
+        let focused = state.read(self.cx).is_focused(self.window);
+        let edge = if invalid {
+            t.colors.danger.emphasis
+        } else if focused {
+            t.colors.accent
+        } else {
+            t.colors.line_strong
+        };
+        gpui_core::Input::new(state)
+            .appearance(false)
+            .w_full()
+            .min_w_0()
+            .px(self.px(12.))
+            .py(self.px(if area { 8. } else { 4. }))
+            .when(!area, |i| i.min_h(self.px(36.)).items_center())
+            .rounded(self.px(t.radii.md))
+            .border_1()
+            .border_color(edge)
+            .when(t.dark, |i| i.bg(t.colors.sunk))
+            .when(focused, |i| {
+                i.shadow(vec![BoxShadow {
+                    color: t.colors.focus_ring,
+                    offset: point(px(0.), px(0.)),
+                    blur_radius: px(0.),
+                    spread_radius: px(3.),
+                    inset: false,
+                }])
+            })
+            .font_family(t.fonts.body.clone())
+            .text_size(self.px(t.text.sm))
+            .line_height(self.px(t.text.sm * t.text.body_leading))
+            .text_color(t.colors.text)
+    }
+
     pub fn dropdown(
         &mut self,
         key: &str,
@@ -997,9 +1008,7 @@ impl Draw<'_, '_> {
         div()
             .id(self.id(&format!("{path}.tip")))
             .flex_none()
-            .tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
-            })
+            .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
             .child(press)
             .into_any_element()
     }
