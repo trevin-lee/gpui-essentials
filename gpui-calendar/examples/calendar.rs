@@ -12,7 +12,7 @@
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
 //! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
 //! `compact-recurring`, `find`, `compact-find`, `panel`, `compact-panel`, `mini`,
-//! `compact-mini`, `crowd`. Pictures and the bench draw a window that's never shown and never takes the
+//! `compact-mini`, `crowd`, `all-day`, `all-day-month`, `all-day-drag`. Pictures and the bench draw a window that's never shown and never takes the
 //! keyboard.
 
 use std::path::PathBuf;
@@ -606,6 +606,31 @@ impl Root {
                 date = monday;
             }
             "month" | "month-drag" => view = CalendarView::Month,
+            // A crowded Wednesday in the all-day row, and a visit that goes on into next week.
+            "all-day" | "all-day-month" | "all-day-drag" => {
+                let day = |n: i64| monday + Duration::days(n);
+                for (i, (title, cal)) in [
+                    ("Office closed for the move", "work"),
+                    ("Library books due", "school"),
+                    ("Recycling day", "personal"),
+                    ("Quarter close", "finances"),
+                    ("Hackathon", "school"),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    events.push(
+                        Event::all_day(format!("wed-{i}"), title, day(2), day(3)).calendar(cal),
+                    );
+                }
+                events.push(
+                    Event::all_day("visit", "Parents visiting", day(5), day(10))
+                        .calendar("personal"),
+                );
+                if args.scene == "all-day-month" {
+                    view = CalendarView::Month;
+                }
+            }
             "overlap" => {
                 view = CalendarView::Days(3);
                 date = monday + Duration::days(1);
@@ -1232,6 +1257,18 @@ mod shots {
                             }
                         })
                     });
+                }
+                // Mom's birthday, all day, dragged into Friday's hours at 2 PM.
+                "all-day-drag" => {
+                    let from = calendar
+                        .read_with(cx, |c, _| c.event_bounds("birthday"))
+                        .expect("drawn");
+                    let grab = point(from.left() + px(30.), from.center().y);
+                    press(window, cx, grab);
+                    settle(window, cx).await;
+                    drag_to(window, cx, point(grab.x + px(8.), grab.y + px(8.)));
+                    let to = point_at(cx, 4, 14, 0);
+                    drag_to(window, cx, point(grab.x, to.y));
                 }
                 // Selected on a phone: the handle that changes its end.
                 "compact" => {

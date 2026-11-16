@@ -844,3 +844,80 @@ fn crowded_hours_keep_readable_columns_and_count_the_rest() {
     }
     assert!(found.is_empty(), "{}", found.join("\n"));
 }
+
+/// A day crowded with all-day events stacks them to the row's limit and then says "+N more":
+/// never past the calendar's edges and never taking the hours' place, expanded or not, from a
+/// phone to a wide window and from a short window to a tall one.
+#[test]
+fn a_crowded_all_day_row_fits_at_every_size() {
+    let mut events = worst_week();
+    for i in 0..14 {
+        events.push(Event::all_day(
+            format!("busy-{i}"),
+            format!("An all-day thing with a long name {i}"),
+            day(2),
+            day(3),
+        ));
+    }
+    events.push(Event::all_day("visit", "Parents visiting", day(5), day(10)));
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        let mut c = Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_events(events);
+        c.scroll_to_minute(8. * 60.);
+        c
+    });
+    let views = [
+        CalendarView::Day,
+        CalendarView::Days(3),
+        CalendarView::Week,
+        CalendarView::Month,
+    ];
+    let mut found = Vec::new();
+    for &h in &[360., 600., 900.] {
+        for &w in &[320., 390., 600., 1024., 1600.] {
+            vcx.simulate_resize(size(px(w), px(h)));
+            for &view in &views {
+                for expanded in [false, true] {
+                    calendar.update(vcx, |c, cx| {
+                        c.set_view(view, cx);
+                        c.all_day_expanded = expanded;
+                    });
+                    vcx.run_until_parked();
+                    drawn::record();
+                    vcx.update(|window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                    let texts = drawn::take();
+                    let geo = calendar
+                        .read_with(vcx, |c, _| c.shared.geo.get())
+                        .expect("drawn");
+                    let at = format!("{w}x{h}, {view:?}, expanded {expanded}");
+                    for p in problems(&texts, geo.bounds) {
+                        found.push(format!("{at}: {p}"));
+                    }
+                    if view == CalendarView::Month {
+                        continue;
+                    }
+                    // The hours keep most of the calendar under the day names.
+                    let under = geo.bounds.bottom() - geo.head_bottom;
+                    let row = geo.grid_top - geo.head_bottom;
+                    if row > under * 0.45 {
+                        found.push(format!("{at}: the all-day row takes {row:?} of {under:?}"));
+                    }
+                    // The crowded Wednesday says how many it couldn't show.
+                    let more = texts.iter().any(|t| t.text.starts_with('+'));
+                    if !more {
+                        found.push(format!("{at}: no \"+N\" for the crowded day"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}

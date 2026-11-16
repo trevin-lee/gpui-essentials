@@ -37,6 +37,10 @@ const LANE: f32 = 22.;
 /// and the narrowest the strip for "+N" beside them is.
 const MIN_COLUMN: f32 = 36.;
 const MIN_STRIP: f32 = 18.;
+/// How wide the chevron at a span's continuing end is, in CSS pixels.
+const CHEVRON: f32 = 8.;
+/// The most of the calendar under its day names the all-day row takes, expanded or not.
+const MAX_ALL_DAY_SHARE: f32 = 0.4;
 const MONTH_HEAD: f32 = 28.;
 const MONTH_LANE: f32 = 20.;
 const MONTH_DATE: f32 = 28.;
@@ -324,12 +328,17 @@ pub(crate) struct Scene {
 }
 
 impl Scene {
-    fn all_day_rows(&self) -> usize {
-        if self.all_day_expanded || self.days == 1 {
+    /// How many rows the all-day row stacks before "+N": `all_day_rows`, or all of them when
+    /// it's expanded or a single day; never more than leave the hours most of a calendar
+    /// `height` tall (CSS pixels at scale `s`), so a crowded day can't push them off.
+    fn all_day_rows(&self, height: Pixels, s: f32) -> usize {
+        let wanted = if self.all_day_expanded || self.days == 1 {
             usize::MAX
         } else {
             self.options.all_day_rows.max(1)
-        }
+        };
+        let room = (f32::from(height) / s - HEAD) * MAX_ALL_DAY_SHARE - 8.;
+        wanted.min(((room / LANE).floor() as usize).max(1))
     }
 
     fn all_day_lanes(&self) -> usize {
@@ -399,7 +408,10 @@ fn geometry(
             };
             let gutter = u(if narrow { GUTTER_NARROW } else { GUTTER }) + second;
             let head_bottom = bounds.top() + u(HEAD);
-            let lanes = scene.all_day_lanes().min(scene.all_day_rows()).max(1);
+            let lanes = scene
+                .all_day_lanes()
+                .min(scene.all_day_rows(bounds.size.height, s))
+                .max(1);
             let all_day_bottom = head_bottom + u(LANE * lanes as f32 + 8.);
             let hour_h = u(scene.options.hour_height.max(8.));
             let col_w = (bounds.size.width - gutter) / scene.days.max(1) as f32;
@@ -1493,9 +1505,42 @@ fn paint_span_chip(
             cc.accent.opacity(alpha),
         );
     }
-    let x = rect.left() + ink.u(if open_left { 6. } else { 9. });
-    let w = rect.right() - x - ink.u(4.);
     let y = rect.top() + ((rect.size.height - ink.u(TITLE_LEADING)) / 2.).max(px(0.));
+    // An end that goes on past the week (into the next row of the month, or the next
+    // period) says so: a chevron pointing on, where there's room for one beside the title.
+    let chevron = ink.u(CHEVRON);
+    let (on_left, on_right) = if rect.size.width >= ink.u(CHEVRON * 4.) {
+        (open_left, open_right)
+    } else {
+        (false, false)
+    };
+    let muted = cc.muted_text.opacity(alpha);
+    if on_left {
+        ink.text(
+            "‹",
+            TITLE,
+            TITLE_LEADING,
+            FontWeight::MEDIUM,
+            muted,
+            point(rect.left() + ink.u(3.), y),
+            Some(chevron),
+        );
+    }
+    if on_right {
+        ink.text_right(
+            "›",
+            TITLE,
+            TITLE_LEADING,
+            FontWeight::MEDIUM,
+            muted,
+            (rect.right() - chevron - ink.u(3.), rect.right() - ink.u(3.)),
+            y,
+        );
+    }
+    let x = rect.left()
+        + ink.u(if open_left { 6. } else { 9. })
+        + if on_left { chevron } else { px(0.) };
+    let w = rect.right() - x - ink.u(4.) - if on_right { chevron } else { px(0.) };
     let mid = rect.top() + rect.size.height / 2.;
     let badge = if links.is_empty() || w < ink.u(48.) {
         px(0.)
@@ -1889,7 +1934,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         }
     }
 
-    let max_rows = scene.all_day_rows();
+    let max_rows = scene.all_day_rows(geo.bounds.size.height, geo.s);
     let ranges: Vec<(i32, i32)> = scene.laid.spans.iter().map(|s| (s.first, s.last)).collect();
     let lanes: Vec<usize> = scene.laid.spans.iter().map(|s| s.lane).collect();
     let fits = layout::fit(&ranges, &lanes, scene.days as usize, max_rows);

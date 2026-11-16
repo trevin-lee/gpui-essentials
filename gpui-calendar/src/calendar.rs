@@ -215,7 +215,10 @@ pub(crate) enum Drag {
     Move {
         id: EventId,
         original: EventTime,
+        /// Where it was grabbed.
         area: Area,
+        /// Where it is now: on the week's grid, the all-day row or the hours, either way.
+        over: Area,
         grab: (NaiveDate, f32),
         now: (NaiveDate, f32),
     },
@@ -388,7 +391,7 @@ pub struct Calendar {
     pub options: CalendarOptions,
     colors: Option<CalendarColors>,
     header: bool,
-    all_day_expanded: bool,
+    pub(crate) all_day_expanded: bool,
 
     selection: Option<Selection>,
     pub(crate) drag: Option<Drag>,
@@ -1072,11 +1075,29 @@ impl Calendar {
                 id,
                 original,
                 area,
+                over,
                 grab,
                 now,
             } => Some((
                 Some(id.clone()),
-                time::moved(*original, *grab, *now, *area != Area::Grid, step, tz),
+                match (*over, original) {
+                    (over, _) if over == *area => {
+                        time::moved(*original, *grab, *now, *area != Area::Grid, step, tz)
+                    }
+                    // Into the all-day row: that whole day.
+                    (Area::AllDay, _) => EventTime::all_day(now.0, now.0 + Duration::days(1)),
+                    // Into the hours: starting where it's let go, an all-day event as long
+                    // as a new one, a timed one as long as it was.
+                    (Area::Grid, time) => {
+                        let start = time::at_minutes(now.0, time::snap(now.1, step), tz);
+                        let length = match time {
+                            EventTime::Timed { start, end } => *end - *start,
+                            EventTime::AllDay { .. } => self.options.default_duration,
+                        };
+                        EventTime::timed(start, start + length)
+                    }
+                    _ => time::moved(*original, *grab, *now, *area != Area::Grid, step, tz),
+                },
             )),
             Drag::Resize {
                 id,
@@ -1588,12 +1609,14 @@ impl Calendar {
                                 shift,
                             }
                         } else {
+                            let over = over_area(&geo, area, p);
                             Drag::Move {
                                 id,
                                 original,
                                 area,
+                                over,
                                 grab: geo.pos(at, area),
-                                now: geo.pos(p, area),
+                                now: geo.pos(p, over),
                             }
                         }
                     }
@@ -1621,13 +1644,17 @@ impl Calendar {
                 area,
                 grab,
                 ..
-            } => Drag::Move {
-                id,
-                original,
-                area,
-                grab,
-                now: geo.pos(p, area),
-            },
+            } => {
+                let over = over_area(&geo, area, p);
+                Drag::Move {
+                    id,
+                    original,
+                    area,
+                    over,
+                    grab,
+                    now: geo.pos(p, over),
+                }
+            }
             Drag::Resize {
                 id,
                 original,
@@ -1658,7 +1685,7 @@ impl Calendar {
                 next,
                 Drag::Create { .. }
                     | Drag::Move {
-                        area: Area::Grid,
+                        over: Area::Grid,
                         ..
                     }
                     | Drag::Resize {
@@ -2848,6 +2875,22 @@ pub(crate) fn after_calendar(content: impl IntoElement) -> Div {
     div()
         .tab_group()
         .child(div().tab_group().tab_index(3).child(content))
+}
+
+/// Which part of the calendar a move is over at `p`: on the week's grid, the all-day row
+/// above the hours or the hours below it, whichever it was grabbed in; elsewhere where it was
+/// grabbed.
+fn over_area(geo: &Geo, grabbed: Area, p: Point<Pixels>) -> Area {
+    match grabbed {
+        Area::Grid | Area::AllDay if geo.kind == paint::Kind::Grid => {
+            if p.y < geo.grid_top {
+                Area::AllDay
+            } else {
+                Area::Grid
+            }
+        }
+        other => other,
+    }
 }
 
 impl Render for Calendar {
