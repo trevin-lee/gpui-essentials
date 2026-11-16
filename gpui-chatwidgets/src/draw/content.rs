@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::text::{InlineCodeStyle, TextView, TextViewColors, TextViewStyle};
+use gpui_core::text::{BlockKind, InlineCodeStyle, TextView, TextViewColors, TextViewStyle};
 
 use super::{Draw, pressable};
 use crate::openui::{
@@ -213,9 +213,40 @@ impl Draw<'_, '_> {
         };
         // The web's margins are pixels, whatever the text's size (TextContent's small and
         // large change only the body's font).
+        let unit = css(1.);
+        // A rule is a line in the middle of a line's height here, and a 1px line on the web.
+        let half_line = size * t.text.body_leading / 2.;
         let style = TextViewStyle {
             // 18px between paragraphs (`p:has(+p)`).
             paragraph_gap: self.px(18.),
+            // The space between two blocks is the web's margin below the first or above the
+            // second, whichever is larger, as its margins collapse. Where the web has none (a
+            // paragraph before a heading, a table or a code block, and a code block before
+            // anything: Tailwind's reset and the code block's `margin: 0 !important`), the
+            // paragraph gap keeps the blocks apart.
+            block_gap: Some(Arc::new(move |prev: BlockKind, next: BlockKind| {
+                let below: f32 = match prev {
+                    // `h1:has(+p)` 8px, else the heading's 18px.
+                    BlockKind::Heading(_) if next == BlockKind::Paragraph => 8.,
+                    BlockKind::Heading(_) => 18.,
+                    // TextContent's `p:has(+ul)` and `p:has(+ol)`.
+                    BlockKind::Paragraph if matches!(next, BlockKind::List { .. }) => 8.,
+                    BlockKind::List { ordered: false } => 24.,
+                    // An `ol`, and the table's container.
+                    BlockKind::List { ordered: true } | BlockKind::Table => 20.,
+                    BlockKind::Quote => 25.,
+                    BlockKind::Rule => 48.,
+                    _ => 0.,
+                };
+                let above = match next {
+                    BlockKind::Quote => 25.,
+                    BlockKind::Rule => 48.,
+                    _ => 0.,
+                };
+                let rule = matches!(prev, BlockKind::Rule) || matches!(next, BlockKind::Rule);
+                let gap = below.max(above) - if rule { half_line } else { 0. };
+                (gap > 0.).then(|| unit * gap)
+            })),
             // Every level is the web's heading-xs: semibold at the body's medium size, 1.25 tall.
             heading_base_font_size: Some(css(t.text.md)),
             heading_font_size: Some(Arc::new(|_, base| base)),
@@ -230,19 +261,25 @@ impl Draw<'_, '_> {
             list_indent: Some(css(20.)),
             list_item_gap: Some(css(8.)),
             list_marker_gap: Some(css(size * 0.27)),
-            // A table's container has the web's radius-2xl corners and no header fill.
+            // A table's container has the web's radius-2xl corners, and its cells 12px round
+            // their text (`space-m`). The header has no fill, and its labels are muted and
+            // regular weight (`openui-table-head-label`).
             table_radius: Some(css(t.radii.xl)),
+            table_cell_padding: Some(css(12.)),
+            table_header_weight: Some(FontWeight::NORMAL),
             // `code`: the body's own font at its size (`font: var(--openui-text-body-default)`),
             // on sunk in a 4px-cornered box, 4px either side and 2px above and below the font's
-            // ascent and descent, with a 1px border the fill here takes in.
+            // ascent and descent, in a 1px `border-default` edge: 26px tall at 16px.
             inline_code: InlineCodeStyle {
                 family: Some(t.fonts.body.clone()),
                 size: Some(1.),
-                padding: Some(css(5.)),
-                padding_y: Some(css(3.)),
+                padding: Some(css(4.)),
+                padding_y: Some(css(2.)),
+                border_width: Some(css(1.)),
+                border_color: Some(t.colors.line),
                 radius: Some(css(4.)),
                 background: Some(t.colors.sunk),
-                color: None,
+                ..Default::default()
             },
             colors: TextViewColors {
                 link: Some(t.colors.text),
@@ -250,9 +287,13 @@ impl Draw<'_, '_> {
                 rule: Some(t.colors.line),
                 quote_bar: Some(t.colors.line),
                 table_line: Some(t.colors.line),
-                table_header: None,
+                table_header_text: Some(t.colors.text_muted),
+                // Every other body row from the second, as the web's
+                // `.openui-table-row:nth-child(even)` and the card's own Table.
+                table_stripe: Some(t.colors.highlight),
                 selection: Some(t.colors.accent.opacity(0.3)),
                 muted: Some(t.colors.text_muted),
+                ..Default::default()
             },
             ..Default::default()
         };

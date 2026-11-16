@@ -1039,7 +1039,12 @@ impl Draw<'_, '_> {
 /// the card's popover with a `line_strong` edge as the web's (`border-interactive`), a picked day
 /// on the accent (the web's `interactive-accent-default` and `text-accent-primary`), the days
 /// between a range's ends at the web's `--openui-highlight` strength (4%) and a day under the
-/// pointer at its `highlight-subtle`.
+/// pointer at its `highlight-subtle`. A focused field's edge is the accent, apart from its ring,
+/// as the text fields' are.
+///
+/// It lists every colour there is today, and the `..Default::default()` keeps the build whole
+/// when gpui-core adds one.
+#[allow(clippy::needless_update)]
 pub(crate) fn date_colors(t: &crate::theme::CardTheme) -> DatePickerColors {
     let c = &t.colors;
     DatePickerColors {
@@ -1052,6 +1057,7 @@ pub(crate) fn date_colors(t: &crate::theme::CardTheme) -> DatePickerColors {
         text: Some(c.text),
         placeholder: Some(c.text_muted),
         focus_ring: Some(c.focus_ring),
+        focus_border: Some(c.accent),
         popover: Some(PopoverColors {
             background: c.popover,
             foreground: c.text,
