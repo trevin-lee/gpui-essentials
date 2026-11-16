@@ -169,6 +169,20 @@ Run the example with `cargo run --release --example flow` from this folder.
     `FlowEvent::OpenUrl`.
   - **Dropped files.** Files dropped on the canvas send `FlowEvent::FilesDropped` with
     where they landed, for the host to make into nodes.
+- **Importing.** `import::from_subcanvas` reads a subcanvas whiteboard as its
+  `read_whiteboard` tool gives it (or with its document's own camelCase names).
+  - Plain nodes become shapes, groups frames, text nodes headings (the built-in `text`
+    kind), media pictures, link nodes link cards, and drawings drawings (the built-in
+    `drawing` kind).
+  - Colours, shapes, icons, emoji, documents (as links), dots and arrowheads keep their
+    meaning.
+  - `import::from_mermaid` reads a Mermaid flowchart in any direction. It keeps every node
+    shape Mermaid has (mapped to the nearest), arrows with their labels, dots, weight and
+    heads, chains and `&`, and makes subgraphs into frames. It lays the chart out in layers,
+    as Mermaid does.
+  - Both give a `FlowObject` for `Flow::restore`. They read within limits and never panic
+    on hostile input, and nothing they read makes the flow open anything: Mermaid's `click`
+    lines are left out.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in
