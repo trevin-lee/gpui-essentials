@@ -120,6 +120,7 @@ pub struct Popover {
     take_focus: bool,
     return_focus: Option<FocusHandle>,
     max_height: Rems,
+    match_trigger_width: bool,
     colors: Option<PopoverColors>,
     role: Role,
     label: Option<gpui::SharedString>,
@@ -138,6 +139,7 @@ impl Popover {
             take_focus: true,
             return_focus: None,
             max_height: rems(24.),
+            match_trigger_width: true,
             colors: None,
             role: Role::Dialog,
             label: None,
@@ -192,6 +194,13 @@ impl Popover {
     /// than the room the window has.
     pub fn max_height(mut self, height: Rems) -> Self {
         self.max_height = height;
+        self
+    }
+
+    /// Whether it's at least as wide as what it hangs from (on by default). Off, it's as wide as
+    /// its content: a month under a wide field.
+    pub fn match_trigger_width(mut self, matching: bool) -> Self {
+        self.match_trigger_width = matching;
         self
     }
 
@@ -297,6 +306,7 @@ impl RenderOnce for Popover {
             anchor,
             panel,
             max_height: self.max_height,
+            match_trigger_width: self.match_trigger_width,
             on_dismiss: self.on_dismiss,
         }
     }
@@ -393,6 +403,7 @@ struct PopoverElement {
     anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     panel: Option<Stateful<gpui::Div>>,
     max_height: Rems,
+    match_trigger_width: bool,
     on_dismiss: Option<DismissFn>,
 }
 
@@ -482,10 +493,15 @@ impl Element for PopoverElement {
         let room = below.max(above).max(px(0.));
         let height = self.max_height.to_pixels(rem).min(room);
         let widest = (view.size.width - edge * 2.).max(px(0.));
+        let narrowest = if self.match_trigger_width {
+            anchor.size.width.min(widest)
+        } else {
+            px(0.)
+        };
         let mut panel = panel
             .max_h(height)
             .max_w(widest)
-            .min_w(anchor.size.width.min(widest))
+            .min_w(narrowest)
             .into_any_element();
         // Laid out on its own, now that what it hangs from has been placed this frame.
         let size = panel.layout_as_root(

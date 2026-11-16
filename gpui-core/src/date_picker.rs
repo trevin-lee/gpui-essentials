@@ -7,11 +7,12 @@ use chrono::{Datelike as _, Duration, Local, NaiveDate, Weekday};
 use gpui::{
     App, Context, ElementId, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, KeyBinding, ParentElement as _, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, actions, anchored, deferred,
-    div, prelude::FluentBuilder as _, px, rems,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, actions, div,
+    prelude::FluentBuilder as _, rems,
 };
 
 use crate::icon::{Icon, IconName};
+use crate::popover::Popover;
 use crate::press::{Press, focus_ring};
 use crate::size::{Disableable, Selectable as _};
 use crate::theme::{ActiveTheme as _, Theme};
@@ -420,35 +421,28 @@ impl RenderOnce for DatePicker {
                     }
                 }),
             )
-            .child(trigger);
+            .child(
+                Popover::new(ElementId::NamedInteger("date-picker-month".into(), id))
+                    .open(open)
+                    // The keyboard stays on the field, whose keys move through the month.
+                    .take_focus(false)
+                    .match_trigger_width(false)
+                    .on_dismiss({
+                        let s = s.clone();
+                        move |_, _, cx| {
+                            s.update(cx, |st, cx| {
+                                st.open = false;
+                                cx.notify()
+                            })
+                        }
+                    })
+                    .trigger(trigger)
+                    .p(css(12.))
+                    .when(open, |p| {
+                        p.child(month_view(&s, &theme, &MonthOptions::default(), cx))
+                    }),
+            );
         gpui::Refineable::refine(root.style(), &self.style);
-        if !open {
-            return root;
-        }
-
-        let s_close = s.clone();
-        let popover = div()
-            .id(ElementId::NamedInteger("date-picker-month".into(), id))
-            .role(Role::Dialog)
-            .occlude()
-            .mt(css(4.))
-            .p(css(12.))
-            .rounded(theme.radius_lg())
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.popover)
-            .text_color(theme.popover_foreground)
-            .shadow_md()
-            .on_mouse_down_out(move |_, _, cx| {
-                s_close.update(cx, |st, cx| {
-                    st.open = false;
-                    cx.notify()
-                })
-            })
-            .child(month_view(&s, &theme, &MonthOptions::default(), cx));
-        root = root.child(
-            deferred(anchored().snap_to_window_with_margin(px(8.)).child(popover)).with_priority(1),
-        );
         root
     }
 }

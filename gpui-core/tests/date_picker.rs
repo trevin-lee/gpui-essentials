@@ -276,3 +276,78 @@ fn a_state_made_with_a_today_shows_its_month(cx: &mut TestAppContext) {
         vcx.update(|window, cx| cx.new(|cx| DatePickerState::new(window, cx).today(pinned)));
     assert_eq!(state.read_with(vcx, |s, _| s.shown()), pinned);
 }
+
+struct Placed {
+    state: Entity<DatePickerState>,
+    top: f32,
+    width: f32,
+}
+
+impl Render for Placed {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().pt(px(self.top)).pl(px(20.)).child(
+            div()
+                .w(px(self.width))
+                .debug_selector(|| "picker".into())
+                .child(DatePicker::new(&self.state)),
+        )
+    }
+}
+
+fn open_placed(
+    cx: &mut TestAppContext,
+    top: f32,
+    width: f32,
+) -> (Entity<DatePickerState>, Events, &mut VisualTestContext) {
+    cx.update(gpui_core::init);
+    let events: Events = Rc::default();
+    let e = events.clone();
+    let made = Rc::new(RefCell::new(None));
+    let m = made.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let state = cx.new(|cx| DatePickerState::new(window, cx));
+        cx.subscribe(&state, move |_, _, ev: &DatePickerEvent, _| {
+            e.borrow_mut().push(*ev)
+        })
+        .detach();
+        *m.borrow_mut() = Some(state.clone());
+        let v = cx.new(|_| Placed { state, top, width });
+        Root::new(v, window, cx)
+    });
+    vcx.simulate_resize(gpui::size(px(700.), px(600.)));
+    vcx.run_until_parked();
+    let state = made.borrow().clone().unwrap();
+    (state, events, vcx)
+}
+
+#[gpui::test]
+fn a_second_press_on_the_field_closes_it(cx: &mut TestAppContext) {
+    let (_, events, vcx) = open_placed(cx, 20., 240.);
+    let b = vcx.debug_bounds("picker").unwrap();
+    vcx.simulate_click(b.center(), Modifiers::none());
+    assert!(vcx.debug_bounds("gpui-core-popover").is_some());
+    vcx.simulate_click(b.center(), Modifiers::none());
+    assert!(vcx.debug_bounds("gpui-core-popover").is_none());
+    // Closed: right does nothing, Enter opens rather than picks.
+    keys(vcx, "right enter");
+    assert!(events.borrow().is_empty());
+}
+
+#[gpui::test]
+fn near_the_bottom_the_month_opens_above(cx: &mut TestAppContext) {
+    let (_, _, vcx) = open_placed(cx, 540., 240.);
+    let b = vcx.debug_bounds("picker").unwrap();
+    vcx.simulate_click(b.center(), Modifiers::none());
+    let m = vcx.debug_bounds("gpui-core-popover").expect("open");
+    assert!(m.bottom() <= b.top(), "{m:?} {b:?}");
+}
+
+#[gpui::test]
+fn a_wide_field_doesnt_stretch_the_month(cx: &mut TestAppContext) {
+    let (_, _, vcx) = open_placed(cx, 20., 600.);
+    let b = vcx.debug_bounds("picker").unwrap();
+    vcx.simulate_click(b.center(), Modifiers::none());
+    let m = vcx.debug_bounds("gpui-core-popover").expect("open");
+    assert!(m.size.width < px(400.), "{m:?}");
+    assert_eq!(m.left(), b.left());
+}
