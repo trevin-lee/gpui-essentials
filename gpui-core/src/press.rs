@@ -6,9 +6,9 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, Div, ElementId, FocusHandle, Hsla, InteractiveElement,
-    Interactivity, IntoElement, MouseButton, ParentElement, RenderOnce, Role, SharedString,
+    Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role, SharedString,
     Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Toggled, Window, div, point,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, relative,
 };
 
 use crate::size::{Disableable, Selectable};
@@ -45,6 +45,8 @@ pub struct Press {
     tab_stop: bool,
     ring: bool,
     ring_color: Option<Hsla>,
+    min_hit: Option<Pixels>,
+    focus_on_press: bool,
 }
 
 impl Press {
@@ -62,6 +64,8 @@ impl Press {
             tab_stop: true,
             ring: true,
             ring_color: None,
+            min_hit: None,
+            focus_on_press: true,
         }
     }
 
@@ -105,6 +109,21 @@ impl Press {
 
     /// Draws the focus ring in this colour instead of the theme's (for a host with a palette of
     /// its own). It's drawn as given: pass it at the strength it should show.
+    /// Takes presses in a square at least `side` each way, centred on it, without changing its
+    /// layout: a finger's 44 points around a small control. Where the square reaches past it,
+    /// it's laid over what's around it.
+    pub fn min_hit(mut self, side: Pixels) -> Self {
+        self.min_hit = Some(side);
+        self
+    }
+
+    /// Whether a pointer press gives it the focus (it does unless told not to). A grid or a
+    /// toolbar that keeps the focus itself says no; Tab and the keyboard still reach it.
+    pub fn focus_on_press(mut self, focus: bool) -> Self {
+        self.focus_on_press = focus;
+        self
+    }
+
     pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
         self.ring_color = Some(color.into());
         self
@@ -196,7 +215,35 @@ impl RenderOnce for Press {
                     cx.stop_propagation();
                 })
         } else {
+            // The hit square, if it's to be bigger than what's drawn: an invisible square
+            // centred on it that presses it too.
+            let hit = self.min_hit.map(|side| {
+                let f = self.on_click.clone();
+                div()
+                    .id(ElementId::NamedChild(
+                        std::sync::Arc::new(self.id.clone()),
+                        "hit".into(),
+                    ))
+                    .absolute()
+                    .left(relative(0.5))
+                    .top(relative(0.5))
+                    .ml(-side / 2.)
+                    .mt(-side / 2.)
+                    .size(side)
+                    .when(!host_cursor, |el| el.cursor_pointer())
+                    .when_some(f, |el, f| {
+                        el.on_click(move |event, window, cx| {
+                            cx.stop_propagation();
+                            f(event, window, cx)
+                        })
+                    })
+            });
             el.track_focus(&focus.tab_stop(self.tab_stop))
+                .when(!self.focus_on_press, |el| {
+                    // A press doesn't move the focus here (GPUI's own focus-on-press checks it).
+                    el.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+                })
+                .when_some(hit, |el, hit| el.relative().child(hit))
                 .when(!host_cursor, |el| el.cursor_pointer())
                 .when(self.ring, |el| {
                     el.focus_visible(move |s| s.shadow(vec![ring]))
