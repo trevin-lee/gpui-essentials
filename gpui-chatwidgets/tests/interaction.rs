@@ -67,6 +67,81 @@ fn only_web_links_reach_the_host(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn a_markdown_link_goes_to_the_host_and_markdown_copies(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    let program = r#"root = Stack([TextContent("[Docs](https://example.com/docs) and more"), TextContent("[Bad](javascript:alert(1)) and more"), MarkDownRenderer("Copy **these** words")])"#;
+    let (_, cx) = open(cx, program, &host, Some(400.));
+    // The first word of each is its link.
+    let first_word = |cx: &mut VisualTestContext, what: &str| {
+        let b = cx
+            .debug_bounds(Box::leak(format!("t:md:{what}").into_boxed_str()))
+            .unwrap_or_else(|| panic!("{what} isn't drawn"));
+        b.origin + point(px(4.), px(8.))
+    };
+    let docs = first_word(cx, "r.c0");
+    cx.simulate_click(docs, Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        host.opened.borrow().as_slice(),
+        ["https://example.com/docs"]
+    );
+    let bad = first_word(cx, "r.c1");
+    cx.simulate_click(bad, Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        host.opened.borrow().len(),
+        1,
+        "only web links reach the host"
+    );
+    // Dragged across, the text is selected, and Cmd-C copies it (as plain text).
+    let b = cx.debug_bounds("t:md:r.c2").expect("the Markdown");
+    let (from, to) = (
+        b.origin + point(px(1.), px(8.)),
+        point(b.right() - px(1.), b.origin.y + px(8.)),
+    );
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    key(cx, "cmd-c");
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+        Some("Copy these words")
+    );
+    assert!(host.opened.borrow().len() == 1 && host.sent.borrow().is_empty());
+}
+
+#[gpui_kit::test]
+fn markdown_shows_html_as_text_and_images_as_their_alt_text(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    // An HTML block would swallow the Markdown after it up to a blank line if it were parsed.
+    let program = r#"root = Stack([MarkDownRenderer("<div onclick=\"x()\">\n**after** ![cat](https://evil.test/x.png)")])"#;
+    let (_, cx) = open(cx, program, &host, Some(600.));
+    let b = cx.debug_bounds("t:md:r.c0").expect("the Markdown");
+    let (from, to) = (
+        b.origin + point(px(1.), px(4.)),
+        point(b.right() - px(1.), b.bottom() - px(1.)),
+    );
+    cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    key(cx, "cmd-c");
+    let copied = cx
+        .read_from_clipboard()
+        .and_then(|c| c.text())
+        .expect("copied text");
+    assert!(copied.starts_with("<div onclick=\"x()\">"), "{copied:?}");
+    // The Markdown after it is still Markdown, and the image only its words.
+    assert!(copied.ends_with("after cat"), "{copied:?}");
+    assert!(host.asked.borrow().is_empty() && host.opened.borrow().is_empty());
+}
+
+#[gpui_kit::test]
 fn a_press_sets_variables_and_the_card_draws_from_them(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("syntax-each-actions"), &host, Some(400.));

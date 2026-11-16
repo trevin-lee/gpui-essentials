@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::component::text::{TextView, TextViewStyle};
+use gpui_core::text::{InlineCodeStyle, TextView, TextViewColors, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -127,45 +127,6 @@ impl RenderOnce for GlyphElement {
     }
 }
 
-/// Text for the text view: HTML in it is shown as the characters it is (OpenUI's web renderer
-/// never renders it either), and images become their alt text.
-pub(crate) fn markdown_source(md: &str) -> String {
-    without_images(md).replace('<', "\\<")
-}
-
-/// Markdown images aren't loaded: each becomes its alt text before the text view sees it.
-pub(crate) fn without_images(md: &str) -> String {
-    let mut out = String::with_capacity(md.len());
-    let mut rest = md;
-    while let Some(at) = rest.find("![") {
-        out.push_str(&rest[..at]);
-        let after = &rest[at + 2..];
-        let Some(close) = after.find(']') else {
-            out.push_str(&rest[at..]);
-            return out;
-        };
-        let alt = &after[..close];
-        let tail = &after[close + 1..];
-        let end = match tail.chars().next() {
-            Some('(') => tail.find(')').map(|e| e + 1),
-            Some('[') => tail.find(']').map(|e| e + 1),
-            _ => Some(0),
-        };
-        match end {
-            Some(e) => {
-                out.push_str(alt);
-                rest = &tail[e..];
-            }
-            None => {
-                out.push_str(alt);
-                rest = tail;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
 impl Draw<'_, '_> {
     pub fn glyph(&self, glyph: Glyph, size: f32, color: Hsla) -> GlyphElement {
         GlyphElement {
@@ -228,12 +189,15 @@ impl Draw<'_, '_> {
             .into_any_element()
     }
 
-    /// Markdown as text, selectable, through GPUI Kit's text view: no HTML, no images, and a
-    /// link goes to the host as an event.
+    /// Markdown as text, selectable, through gpui-core's text view, laid out as the web lays
+    /// it out. It loads nothing: HTML reads as the text it is, an image as its alt text, and a
+    /// link goes to the host as an event. The text takes the card's colour from around it, and
+    /// everything else (links, markers, lines, code, the selection) the card's theme.
     pub fn markdown(&mut self, md: &str, size: f32, weight: f32, path: &str) -> Div {
         let t = self.t;
         let rem = self.window.rem_size();
-        let heading = t.px(t.text.md).to_pixels(rem);
+        let css = |v: f32| t.px(v).to_pixels(rem);
+        let heading = t.text.md;
         let mut code = StyleRefinement::default()
             .bg(t.colors.sunk)
             .border_1()
@@ -247,30 +211,51 @@ impl Draw<'_, '_> {
             line_height: Some(self.px(t.text.code * 1.6).into()),
             ..Default::default()
         };
+        // A heading's line is the body's leading at its size, where the web's is 1.35: the
+        // gaps around it give back the difference, so the text sits where the web's does.
+        let leading = heading * (t.text.body_leading - 1.35) / 2.;
         let style = TextViewStyle {
             paragraph_gap: self.px(size * 0.75),
-            heading_base_font_size: heading,
+            heading_base_font_size: Some(css(heading)),
             heading_font_size: Some(Arc::new(|_, base| base)),
             code_block: code,
-            ..Default::default()
+            // Bullets and numbers in a 1.4em column, items 0.25em apart.
+            list_indent: Some(css(size * 1.4)),
+            list_item_gap: Some(css(size * 0.25)),
+            // A heading starts a section (1.4 of its size above it) and leads into what
+            // follows it (0.35 below).
+            heading_margin_top: Some(css(heading * 1.4 - leading)),
+            heading_margin_bottom: Some(css(heading * 0.35 - leading)),
+            // `code`: the card's mono type at 0.875em, in a rounded box 4px either side.
+            inline_code: InlineCodeStyle {
+                family: Some(t.fonts.mono.clone()),
+                size: Some(0.875),
+                padding: Some(css(4.)),
+                radius: Some(css(4.)),
+                background: Some(t.colors.sunk),
+                color: None,
+            },
+            colors: TextViewColors {
+                link: Some(t.colors.text),
+                list_marker: Some(t.colors.text_muted),
+                rule: Some(t.colors.line),
+                quote_bar: Some(t.colors.line),
+                table_line: Some(t.colors.line),
+                selection: Some(t.colors.accent.opacity(0.3)),
+                muted: Some(t.colors.text_muted),
+            },
         };
         let view = self.cx.entity().downgrade();
-        let text = TextView::markdown(self.id(&format!("{path}.md")), markdown_source(md))
+        let text = TextView::markdown(self.id(&format!("{path}.md")), md.to_string())
             .style(style)
             .selectable(true)
-            .stream_fade(false)
-            .image_source(|_| {
-                ImageSource::Custom(Arc::new(|_, _| {
-                    Some(Err(ImageCacheError::Io(Arc::new(std::io::Error::other(
-                        "a card's Markdown images aren't loaded",
-                    )))))
-                }))
-            })
             .on_link_click(move |url, _, _, cx| {
                 let url = url.to_string();
                 let _ = view.update(cx, |v, cx| v.open_markdown_link(&url, cx));
             });
+        let sel = self.selector(&format!("md:{path}"));
         div()
+            .debug_selector(move || sel)
             .w_full()
             .min_w_0()
             .text_size(self.px(size))
@@ -977,28 +962,4 @@ impl Draw<'_, '_> {
 /// An image element from bytes the host gave (never from a URL).
 pub(crate) fn img_from(image: Arc<Image>) -> Img {
     img(ImageSource::Image(image))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{markdown_source, without_images};
-
-    #[test]
-    fn markdown_images_become_their_alt_text() {
-        assert_eq!(
-            without_images("a ![cat](https://evil.test/x.png) b"),
-            "a cat b"
-        );
-        assert_eq!(without_images("![ref][1] and ![](data:x)"), "ref and ");
-        assert_eq!(without_images("![open"), "![open");
-        assert_eq!(without_images("![alt](no close"), "alt(no close");
-        assert_eq!(
-            without_images("plain [link](https://example.com)"),
-            "plain [link](https://example.com)"
-        );
-        assert_eq!(
-            markdown_source("<script>x</script> ![a](b)"),
-            "\\<script>x\\</script> a"
-        );
-    }
 }
