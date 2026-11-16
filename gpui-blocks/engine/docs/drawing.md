@@ -17,7 +17,7 @@ the editor working after every step.
    - paragraphs and headings without pictures (done);
    - dividers, custom blocks (extensions) and source atoms (done);
    - quotes, callouts and toggles (with `surfaces.rs`' containers);
-   - lists, with their markers and task boxes;
+   - lists, with their markers and task boxes (done, when they hold only paragraphs and lists);
    - tables, with the grips;
    - pictures, inline and alone (through the host's image loader);
    - code blocks, once syntax highlighting has a home outside GPUI Kit.
@@ -44,3 +44,7 @@ Sizes are relative to the body font size (the editor's inherited text size).
 | Quote | muted text, a 2 px left border, padding 0.9 × body |
 | Rule | 1.6 × body above and below |
 | Code block | mono, line height 1.6, padding 16 px sides, 14 px top (28 with a language label) and bottom, the code background and a border |
+
+The engine's rows are its line height exactly. GPUI Kit's come out up to one device pixel taller
+(49 device pixels for a 24 px line at 2x), so a page the engine draws is a little shorter; the
+caret and hit testing follow what's drawn either way.
