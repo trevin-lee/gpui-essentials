@@ -16,6 +16,9 @@ use crate::menu::{
 };
 use crate::theme::ActiveTheme as _;
 
+/// Past this many matches a picker draws only the rows in view (relations, people).
+pub(crate) const VIRTUAL_AFTER: usize = 100;
+
 /// The Create entry's id: not one a host would use.
 const CREATE: &str = "\u{0}gpui-core-picker-create";
 
@@ -101,6 +104,7 @@ pub struct Picker {
     highlight: Option<SharedString>,
     row: RowStyle,
     on_create: Option<OnCreate>,
+    visible_rows: Option<usize>,
     colors: PopupMenuColors,
 }
 
@@ -116,6 +120,7 @@ impl Picker {
             highlight: None,
             row: RowStyle::default(),
             on_create: None,
+            visible_rows: None,
             colors: PopupMenuColors::default(),
         }
     }
@@ -183,6 +188,13 @@ impl Picker {
 
     /// Offers a "Create “text”" entry after the matches while what's typed isn't an entry's
     /// label already (case aside); picking it runs `f` with the text, trimmed.
+    /// How many rows a long list shows before it scrolls (10, or 8 for touch, unless given).
+    /// A list of more than a hundred matches draws only the rows in view.
+    pub fn visible_rows(mut self, rows: usize) -> Self {
+        self.visible_rows = Some(rows.max(1));
+        self
+    }
+
     pub fn on_create(mut self, f: impl Fn(&str, &mut Window, &mut App) + 'static) -> Self {
         self.on_create = Some(Rc::new(f));
         self
@@ -197,6 +209,10 @@ impl Picker {
 /// What a picker remembers between frames.
 struct PickerState {
     query: Entity<InputState>,
+    /// A long list's scroll, so the keys keep the highlight in view.
+    scroll: gpui::UniformListScrollHandle,
+    /// Whether it has scrolled to where it opens.
+    opened: bool,
     /// The query the highlight was set for.
     seen: Option<SharedString>,
     highlighted: Option<usize>,
@@ -224,6 +240,8 @@ impl RenderOnce for Picker {
             });
             PickerState {
                 query,
+                scroll: gpui::UniformListScrollHandle::new(),
+                opened: false,
                 seen: None,
                 highlighted: None,
             }
@@ -284,6 +302,12 @@ impl RenderOnce for Picker {
                 s.highlighted = step(&pickable, None, 1);
                 requeried = true;
             }
+            if (requeried || !s.opened)
+                && let Some(i) = s.highlighted
+            {
+                s.scroll.scroll_to_item(i, gpui::ScrollStrategy::Nearest);
+            }
+            s.opened = true;
             (s.highlighted.filter(|i| *i < pickable.len()), requeried)
         });
         // A new query moved it: tell the host after this frame (not in the middle of a draw).
@@ -301,6 +325,9 @@ impl RenderOnce for Picker {
                     let moved = to != s.highlighted;
                     if moved {
                         s.highlighted = to;
+                        if let Some(i) = to {
+                            s.scroll.scroll_to_item(i, gpui::ScrollStrategy::Nearest);
+                        }
                         cx.notify();
                     }
                     moved
@@ -345,16 +372,83 @@ impl RenderOnce for Picker {
         let theme = cx.theme().clone();
         let muted = self.colors.muted.unwrap_or(theme.muted_foreground);
         let empty = shown.is_empty();
-        let list = rows(
-            &self.id,
-            shown.into_iter().map(Entry::Item).collect(),
-            highlighted,
-            self.row,
-            self.colors,
-            Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
-            on_select,
-            cx,
-        );
+        let count = shown.len();
+        let set_highlight: crate::menu::SetHighlight =
+            Rc::new(move |i, cx: &mut App| set(Some(i), cx));
+        let list: gpui::AnyElement = if count > VIRTUAL_AFTER {
+            // Only the rows in view are made, from entries taken as they're shown.
+            let rem = window.rem_size();
+            let row_px = self
+                .row
+                .height
+                .map(|h| h.to_pixels(rem))
+                .unwrap_or(rem * (32. / 15.));
+            let row_px = if self.row.touch {
+                row_px.max(theme.touch_target)
+            } else {
+                row_px
+            };
+            let visible = self
+                .visible_rows
+                .unwrap_or(if self.row.touch { 8 } else { 10 });
+            let entries: Rc<std::cell::RefCell<Vec<Option<Entry>>>> = Rc::new(
+                std::cell::RefCell::new(shown.into_iter().map(|i| Some(Entry::Item(i))).collect()),
+            );
+            let (id, row, colors) = (self.id.clone(), self.row, self.colors);
+            let scroll = state.read(cx).scroll.clone();
+            gpui::uniform_list("picker-rows", count, move |range, _, cx| {
+                let taken: Vec<Entry> = {
+                    let mut e = entries.borrow_mut();
+                    if range == (0..1) {
+                        // The list measures its rows on the first, before drawing the ones in
+                        // view: a text-only copy, leaving the entry to be drawn.
+                        e.first()
+                            .and_then(|e| match e {
+                                Some(Entry::Item(i)) => Some(Entry::Item(i.text_copy())),
+                                _ => None,
+                            })
+                            .into_iter()
+                            .collect()
+                    } else {
+                        range
+                            .clone()
+                            .filter_map(|i| e.get_mut(i).and_then(Option::take))
+                            .collect()
+                    }
+                };
+                rows(
+                    &id,
+                    taken,
+                    range.start,
+                    highlighted,
+                    row,
+                    colors,
+                    set_highlight.clone(),
+                    on_select.clone(),
+                    cx,
+                )
+            })
+            .track_scroll(&scroll)
+            .h(row_px * visible.min(count) as f32)
+            .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .min_w_0()
+                .children(rows(
+                    &self.id,
+                    shown.into_iter().map(Entry::Item).collect(),
+                    0,
+                    highlighted,
+                    self.row,
+                    self.colors,
+                    set_highlight,
+                    on_select,
+                    cx,
+                ))
+                .into_any_element()
+        };
 
         div()
             .id(self.id)
@@ -401,7 +495,7 @@ impl RenderOnce for Picker {
                                 .child(self.empty),
                         )
                     })
-                    .children(list),
+                    .child(list),
             )
     }
 }
