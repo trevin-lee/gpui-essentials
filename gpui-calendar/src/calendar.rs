@@ -16,6 +16,7 @@ use gpui_core::{
     Button, ButtonGroup, ButtonVariants as _, IconName, Press, Selectable as _, Sizable as _, Theme,
 };
 
+use crate::find::Query;
 use crate::layout::{self, Column};
 use crate::model::*;
 use crate::overlay::{Popover, Sheet};
@@ -49,6 +50,8 @@ actions!(
         DeleteSelected,
         /// Drops the drag in progress, or else the selection.
         Cancel,
+        /// Asks the host to focus its search field ([`CalendarEvent::Find`]).
+        Find,
     ]
 );
 
@@ -76,6 +79,15 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("backspace", DeleteSelected, c),
         KeyBinding::new("delete", DeleteSelected, c),
         KeyBinding::new("escape", Cancel, c),
+        KeyBinding::new(
+            if cfg!(any(target_os = "macos", target_os = "ios")) {
+                "cmd-f"
+            } else {
+                "ctrl-f"
+            },
+            Find,
+            c,
+        ),
     ]);
 }
 
@@ -120,6 +132,12 @@ pub enum CalendarEvent {
     Delete { event: EventRef, scope: EditScope },
     /// One of an event's links was clicked: the host opens what it points at.
     OpenLink { event: EventRef, link: EventLink },
+    /// ⌘F (Ctrl-F off the Mac): focus the host's search field, and call
+    /// [`Calendar::set_query`] as it changes. The calendar takes no typing itself unless the
+    /// host asks it to with [`Calendar::type_query`].
+    Find,
+    /// The query changed while the calendar was taking typing ([`Calendar::type_query`]).
+    QueryChange(SharedString),
 }
 
 /// Which edit is waiting for the recurring-event question's answer.
@@ -194,6 +212,8 @@ pub(crate) struct Chip {
     /// time a day can't express.
     pub all_day: bool,
     pub end: DateTime<Utc>,
+    /// Whether the find query (if any) finds it.
+    pub found: bool,
 }
 
 /// A timed event's piece on one day of the grid.
@@ -233,6 +253,7 @@ struct LayoutKey {
     tz: chrono_tz::Tz,
     hour12: bool,
     min_minutes: u32,
+    query: Option<Rc<Query>>,
 }
 
 /// The events on screen, laid out. Rebuilt when the events, the period or the options change.
@@ -344,6 +365,10 @@ pub struct Calendar {
     asking: Option<Asking>,
     /// Where the pointer or finger last was in a drag.
     last_point: Point<Pixels>,
+    /// What the events are filtered by, if anything.
+    query: Option<Rc<Query>>,
+    /// Typing goes into the query: the host asked for it with `type_query`.
+    typing: bool,
 }
 
 impl EventEmitter<CalendarEvent> for Calendar {}
@@ -405,6 +430,8 @@ impl Calendar {
             neighbour: None,
             asking: None,
             last_point: Point::default(),
+            query: None,
+            typing: false,
         }
     }
 
@@ -553,6 +580,139 @@ impl Calendar {
     fn editable(&self, id: &str) -> Option<&Event> {
         self.event(id)
             .filter(|e| self.is_shown(e) && !self.is_read_only(e))
+    }
+
+    // Find.
+
+    /// Filters by text: the events whose title, place or link labels contain every word of
+    /// `query`, ignoring case and accents. The time grid dims the others and marks what it
+    /// found; the month and the agenda show only what it found. An empty query shows all.
+    pub fn set_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        let next = Query::new(query).map(Rc::new);
+        if next != self.query {
+            self.query = next;
+            self.laid = None;
+            self.neighbour = None;
+            cx.notify();
+        }
+    }
+
+    /// The query, as given; empty without one.
+    pub fn query(&self) -> &str {
+        self.query.as_ref().map_or("", |q| q.text.as_str())
+    }
+
+    /// Whether the query finds an event: always, without a query.
+    pub fn is_found(&self, event: &Event) -> bool {
+        self.query.as_ref().is_none_or(|q| q.matches(event))
+    }
+
+    /// The shown events in the period on screen that the query finds.
+    pub fn found(&self) -> Vec<&Event> {
+        let (start, end) = self.visible_range();
+        let mut out = self.events_in(start, end);
+        out.retain(|e| self.is_found(e));
+        out
+    }
+
+    /// Takes typing into the query until Enter or Escape (Escape clears it), sending
+    /// [`CalendarEvent::QueryChange`] as it changes. Only for a host with no search field of
+    /// its own: by default the calendar takes no typing.
+    pub fn type_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.typing = true;
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn is_typing_query(&self) -> bool {
+        self.typing
+    }
+
+    fn query_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if !self.typing {
+            return;
+        }
+        let k = &event.keystroke;
+        let mut text = self.query().to_string();
+        match k.key.as_str() {
+            "escape" => {
+                self.typing = false;
+                text.clear();
+            }
+            "enter" => self.typing = false,
+            "backspace" => {
+                text.pop();
+            }
+            _ if k.modifiers.control || k.modifiers.platform || k.modifiers.function => return,
+            _ => match &k.key_char {
+                Some(c) if !c.chars().any(char::is_control) => text.push_str(c),
+                _ => return,
+            },
+        }
+        cx.stop_propagation();
+        if text != self.query() {
+            self.set_query(&text, cx);
+            cx.emit(CalendarEvent::QueryChange(text.into()));
+        }
+        cx.notify();
+    }
+
+    /// While the calendar takes typing, a pill at the bottom of the body says what it's
+    /// finding.
+    fn render_query(&self, colors: CalendarColors, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.typing {
+            return None;
+        }
+        let theme = Theme::global(cx);
+        let found = self.found().len();
+        let count = match (self.query.is_some(), found) {
+            (false, _) => String::new(),
+            (true, 1) => "1 event".into(),
+            (true, n) => format!("{n} events"),
+        };
+        let pill = div()
+            .min_w_0()
+            .max_w(rems(320. / 15.))
+            .flex()
+            .items_center()
+            .gap(rems(8. / 15.))
+            .px(rems(10. / 15.))
+            .h(rems(30. / 15.))
+            .rounded_full()
+            .bg(theme.colors.popover)
+            .border_1()
+            .border_color(colors.find)
+            .shadow_md()
+            .text_size(rems(13. / 15.))
+            .debug_selector(|| "calendar-query".into())
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(colors.muted_text)
+                    .child("Find"),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(colors.text)
+                    .child(format!("{}▏", self.query())),
+            )
+            .when(!count.is_empty(), |d| {
+                d.child(div().flex_none().text_color(colors.muted_text).child(count))
+            });
+        // At the bottom right of the body, never wider than it.
+        Some(
+            div()
+                .absolute()
+                .bottom(rems(12. / 15.))
+                .left(rems(12. / 15.))
+                .right(rems(12. / 15.))
+                .flex()
+                .justify_end()
+                .child(pill)
+                .into_any_element(),
+        )
     }
 
     // The events.
@@ -908,6 +1068,7 @@ impl Calendar {
             color: self.color_of(e),
             read_only: self.is_read_only(e),
             all_day: e.time.is_all_day(),
+            found: self.is_found(e),
             end,
         }
     }
@@ -931,6 +1092,7 @@ impl Calendar {
             tz: self.options.time_zone,
             hour12: self.options.hour12,
             min_minutes: self.min_minutes(),
+            query: self.query.clone(),
         };
         let laid = match &self.neighbour {
             Some(laid) if laid.key == key => laid.clone(),
@@ -959,6 +1121,7 @@ impl Calendar {
             tz: self.options.time_zone,
             hour12: self.options.hour12,
             min_minutes: self.min_minutes(),
+            query: self.query.clone(),
         };
         if let Some(laid) = &self.laid
             && laid.key == key
@@ -980,7 +1143,11 @@ impl Calendar {
         );
         let month = key.view == CalendarView::Month;
         let agenda = matches!(key.view, CalendarView::Agenda(_));
-        let visible = self.events_in(start, end);
+        let mut visible = self.events_in(start, end);
+        // The month and the agenda show only what the query finds; the grid dims the rest.
+        if (month || agenda) && key.query.is_some() {
+            visible.retain(|e| self.is_found(e));
+        }
         // Each agenda day's rows, with a key to sort them by: all-day first, then by start.
         let mut agenda_rows: Vec<Vec<(AgendaRow, (u8, i64))>> = if agenda {
             vec![Vec::new(); days as usize]
@@ -1110,7 +1277,7 @@ impl Calendar {
             .enumerate()
             .filter_map(|(c, mut rows)| {
                 let date = first + Duration::days(c as i64);
-                if rows.is_empty() && date != today {
+                if rows.is_empty() && (date != today || key.query.is_some()) {
                     return None;
                 }
                 rows.sort_by_key(|r| r.1);
@@ -2443,10 +2610,12 @@ impl Render for Calendar {
             swipe: self.swipe,
             neighbour: self.swipe_neighbour(),
             lanes: None,
+            find: self.query.clone().map(|q| (q, colors.find.opacity(0.38))),
         };
         let this = cx.entity().downgrade();
         let body = paint::body(scene, self.shared.clone(), this);
         let question = self.render_question(cx);
+        let query = self.render_query(colors, cx);
         div()
             .id("calendar")
             .relative()
@@ -2456,7 +2625,12 @@ impl Render for Calendar {
             .bg(colors.background)
             .text_color(colors.text)
             .track_focus(&self.focus)
-            .key_context(CONTEXT)
+            .key_context(if self.typing {
+                "CalendarQuery"
+            } else {
+                CONTEXT
+            })
+            .capture_key_down(cx.listener(|c, e: &KeyDownEvent, _, cx| c.query_key(e, cx)))
             .on_action(cx.listener(|c, _: &SelectLeft, _, cx| c.move_selection(-1, 0, cx)))
             .on_action(cx.listener(|c, _: &SelectRight, _, cx| c.move_selection(1, 0, cx)))
             .on_action(cx.listener(|c, _: &SelectUp, _, cx| {
@@ -2488,6 +2662,7 @@ impl Render for Calendar {
             }))
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
             .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
+            .on_action(cx.listener(|_, _: &Find, _, cx| cx.emit(CalendarEvent::Find)))
             .when(self.header, |d| {
                 let narrow = self.is_narrow(window);
                 if narrow || self.options.touch {
@@ -2505,7 +2680,8 @@ impl Render for Calendar {
                     .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
                     .on_scroll(cx.listener(|c, e, _, cx| c.scroll(e, cx)))
-                    .child(body),
+                    .child(body)
+                    .children(query),
             )
             .children(question)
     }

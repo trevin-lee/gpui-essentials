@@ -25,6 +25,8 @@ pub struct CalendarColors {
     pub selection: Hsla,
     /// A day being dropped on in the month view, and the hour the clocks skip.
     pub highlight: Hsla,
+    /// What a find query found: the ring round a found event, and the mark behind found words.
+    pub find: Hsla,
 }
 
 impl CalendarColors {
@@ -42,6 +44,7 @@ impl CalendarColors {
             on_now: rgb(0xffffff).into(),
             selection: c.foreground.opacity(0.55),
             highlight: c.foreground.opacity(0.06),
+            find: rgb(0xf2c94c).into(),
         }
     }
 }
