@@ -6,11 +6,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use gpui_kit::base::text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin};
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::*;
 use markdown::mdast::Node;
 use markdown_editor::BlockId;
+use markdown_editor::{CustomNode, Extension};
 
 /// The block's Markdown.
 pub const MARKDOWN: &str = "[TOC]";
@@ -37,7 +37,7 @@ pub(crate) struct TocHooks {
 
 pub(crate) struct TocPlugin(pub(crate) TocHooks);
 
-impl MarkdownPlugin for TocPlugin {
+impl Extension for TocPlugin {
     fn is_block(&self) -> bool {
         true
     }
@@ -46,7 +46,7 @@ impl MarkdownPlugin for TocPlugin {
         NAME
     }
 
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node) -> Option<CustomNode> {
         let Node::Paragraph(paragraph) = node else {
             return None;
         };
@@ -61,14 +61,14 @@ impl MarkdownPlugin for TocPlugin {
             return None;
         }
         Some(
-            MarkdownNode::new(NAME, ())
+            CustomNode::new(NAME, ())
                 .text("Table of contents")
                 .accessibility_label("Table of contents")
                 .markdown(MARKDOWN),
         )
     }
 
-    fn render(&self, _: &MarkdownNode, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(&self, _: &CustomNode, _: &mut Window, cx: &mut App) -> AnyElement {
         let headings = self
             .0
             .headings
@@ -126,5 +126,6 @@ impl MarkdownPlugin for TocPlugin {
             );
         }
         list.debug_selector(|| "blocks-toc".into())
+            .into_any_element()
     }
 }
