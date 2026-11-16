@@ -7,7 +7,7 @@ use std::rc::Rc;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use gpui::{
     Entity, Focusable as _, Modifiers, MouseButton, MouseDownEvent, Pixels, Point, TestAppContext,
-    VisualTestContext, point, px,
+    VisualTestContext, point, px, size,
 };
 use gpui_calendar::*;
 
@@ -1197,4 +1197,65 @@ fn the_now_line_redraws_once_a_minute_and_no_more(cx: &mut TestAppContext) {
     }
     let n = redraws.get();
     assert!((9..=11).contains(&n), "{n} redraws in ten minutes");
+}
+
+fn mini_on(c: Calendar) -> Calendar {
+    c.with_options(|o| o.mini_month = true)
+}
+
+fn day_cell(d: NaiveDate) -> &'static str {
+    Box::leak(format!("day-{d}").into_boxed_str())
+}
+
+#[gpui::test]
+fn the_mini_month_beside_a_wide_calendar_goes_to_a_date(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, mini_on);
+    cx.simulate_resize(size(px(1280.), px(800.)));
+    draw(cx);
+    assert!(cx.debug_bounds("calendar-mini").is_some());
+    // A day in the mini month: the calendar goes there, and tells the host what to supply.
+    let friday = NaiveDate::from_ymd_opt(2026, 11, 27).unwrap();
+    let cell = cx.debug_bounds(day_cell(friday)).expect("the 27th");
+    cx.simulate_click(cell.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(c.read_with(cx, |c, _| c.date()), friday);
+    assert!(
+        seen.borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::RangeChange { .. }))
+    );
+    // It keeps in step: the calendar a month on, the mini month shows December.
+    cx.simulate_keystrokes("m j");
+    draw(cx);
+    draw(cx);
+    let december = NaiveDate::from_ymd_opt(2026, 12, 15).unwrap();
+    assert!(cx.debug_bounds(day_cell(december)).is_some());
+}
+
+#[gpui::test]
+fn the_mini_month_is_behind_the_title_when_narrow(cx: &mut TestAppContext) {
+    let (c, _, cx) = open_with(cx, |c| mini_on(c).with_header(true));
+    cx.simulate_resize(size(px(390.), px(800.)));
+    draw(cx);
+    draw(cx);
+    assert!(cx.debug_bounds("calendar-mini").is_none());
+    // The title opens it; Escape closes it; g opens it too.
+    let title = cx.debug_bounds("calendar-title").expect("a title");
+    cx.simulate_click(title.center(), Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.is_mini_month_open()));
+    assert!(cx.debug_bounds("calendar-mini").is_some());
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
+    cx.simulate_keystrokes("g");
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.is_mini_month_open()));
+    // A pick goes there and closes it.
+    let d = NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
+    let cell = cx.debug_bounds(day_cell(d)).expect("the 26th");
+    cx.simulate_click(cell.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(c.read_with(cx, |c, _| c.date()), d);
+    assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
 }

@@ -49,8 +49,8 @@ their look.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event; ← and → cross into the next or previous day (and period) in the day,
   week and month views. With nothing selected, ← and → change the period. `j` goes to the next
-  period and `k` or `p` to the previous one. `t` goes to today, and `d`, `w`, `m` and `a` switch
-  views. In the agenda the arrows go from event to event down the list. `n` proposes a new event
+  period and `k` or `p` to the previous one. `t` goes to today, `g` opens the mini month, and
+  `d`, `w`, `m` and `a` switch views. In the agenda the arrows go from event to event down the list. `n` proposes a new event
   at the selected slot, or at the next round half hour today. Enter opens the selected event or
   makes one in the selected slot, Delete or Backspace asks to delete the selected event, and
   Escape drops a drag or the selection.
@@ -95,6 +95,13 @@ their look.
   following or all?" first for a repeating event. A read-only event's panel has no Edit,
   Delete or Change. `open_panel(id)`, `close_panel()` and `panel_event()` drive it from your
   app; Escape or a click outside closes it.
+- **The mini month** (`mini_month`, off by default): gpui-core's `MonthGrid` to jump to a date.
+  Where the calendar is wide (its days still at least 600 pixels with the month beside them),
+  it's a column at the calendar's left; narrower, or on touch, it's behind the title: a click
+  (or `g`) opens it in a popover, or a sheet of 44-point days on touch. It shows the calendar's
+  period and keeps in step as that changes, starts weeks on `week_start`, dots the days your
+  app's shown events fall on (it never fetches anything), and a pick goes to that date (sending
+  `RangeChange`). Escape closes it.
 - **Find:** `set_query(text)` filters the events by text: those whose title, place, notes or
   link labels contain every word, ignoring case and accents ("cafe zurich" finds "Café Zürich").
   The time grid dims the rest, rings what it found and marks the found words; the month and
@@ -270,11 +277,14 @@ never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `dra
 selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger
 halfway through a swipe to the next day), `compact-hold` (a long press on empty time, drawn
 down), `compact-zones` (the day with a second zone), `compact-recurring` (the recurring
-question as a sheet), `compact-find` (the list found by "CS 162") and `compact-panel` (the
-design review's panel as a sheet); at the Mac's size, `zones` is the week with India's hours
-beside Los Angeles', `recurring` asks the recurring question in a popover, `find` finds "lunch"
-while the calendar takes typing, and `panel` opens the design review's panel beside it. `tests/touch.rs` drives the
-calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
+question as a sheet), `compact-find` (the list found by "CS 162"), `compact-panel` (the
+design review's panel as a sheet) and `compact-mini` (the mini month open behind the title); at
+the Mac's size, `zones` is the week with India's hours beside Los Angeles', `recurring` asks
+the recurring question in a popover, `find` finds "lunch" while the calendar takes typing,
+`panel` opens the design review's panel beside it, and `mini` has the mini month beside the
+week. Only `mini` and `compact-mini` are drawn with the mini month, so the other pictures stay
+comparable. `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
+presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from
@@ -301,6 +311,8 @@ gpui-core's theme.
 | ![The week with the lunches ringed and marked, the rest dimmed, and a Find pill](docs/find.png) | ![The list showing only CS 162's events](docs/compact-find.png) |
 | **An event's panel, beside it** | **The panel as a sheet on a phone** |
 | ![The design review's time, calendar, place, notes, link, guests, Going? and Edit and Delete](docs/panel.png) | ![The same details in a sheet at 390 pixels wide](docs/compact-panel.png) |
+| **The mini month beside the week** | **Behind the title on a phone** |
+| ![The week with November's mini month at its left, days with events dotted](docs/mini.png) | ![November's month in a sheet at 390 pixels wide](docs/compact-mini.png) |
 
 ## Performance
 

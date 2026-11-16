@@ -11,8 +11,9 @@
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
 //! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
-//! `compact-recurring`, `find`, `compact-find`, `panel`, `compact-panel`. Pictures and the
-//! bench draw a window that's never shown and never takes the keyboard.
+//! `compact-recurring`, `find`, `compact-find`, `panel`, `compact-panel`, `mini`,
+//! `compact-mini`. Pictures and the bench draw a window that's never shown and never takes the
+//! keyboard.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -683,6 +684,9 @@ impl Root {
             }
             // Opening an event shows its panel.
             c.options.event_panel = true;
+            // The mini month: in the window you use, and in its own pictures (the others are
+            // drawn without it, so they stay comparable).
+            c.options.mini_month = !pictures || scene.ends_with("mini");
             // A colleague in Bangalore: a second column of hours, half an hour off ours.
             if scene.ends_with("zones") {
                 c.options.secondary_zone = Some(chrono_tz::Asia::Kolkata);
@@ -1285,6 +1289,12 @@ mod shots {
                     settle(window, cx).await;
                     let _ = cx.update_window(window, |_, _, cx| {
                         calendar.update(cx, |c, cx| c.open_panel("design".into(), cx))
+                    });
+                }
+                // The mini month behind a phone's title, open.
+                "compact-mini" => {
+                    let _ = cx.update_window(window, |_, window, cx| {
+                        calendar.update(cx, |c, cx| c.toggle_mini_month(window, cx))
                     });
                 }
                 "agenda" | "compact-agenda" => {

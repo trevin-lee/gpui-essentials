@@ -413,6 +413,9 @@ pub struct CalendarOptions {
     /// its details in a panel: a popover on the Mac, a sheet on touch. `CalendarEvent::Open` is
     /// sent either way. Off by default, for hosts with a panel of their own.
     pub event_panel: bool,
+    /// A month to jump to a date from: beside the calendar when it's wide, behind the title
+    /// when it's narrow (or taken by touch). Off by default, for hosts with one of their own.
+    pub mini_month: bool,
     /// The most rows of all-day events the time grid shows before it says "+N".
     pub all_day_rows: usize,
     /// Taken by touch, as on a phone or a tablet. A long press picks an event up or makes one,
@@ -437,6 +440,7 @@ impl Default for CalendarOptions {
             default_calendar: None,
             dim_past: true,
             event_panel: false,
+            mini_month: false,
             all_day_rows: 3,
             touch: cfg!(any(target_os = "ios", target_os = "android")),
         }
