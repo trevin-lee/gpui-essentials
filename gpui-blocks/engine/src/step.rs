@@ -136,15 +136,7 @@ impl StepMap {
 impl Step {
     /// Apply the step and return its inverse and position map.
     pub(crate) fn apply(&self, doc: &mut EditorDocument) -> Result<(Step, StepMap), StepError> {
-        let result = self.apply_inner(doc)?;
-        let touched = match self {
-            Self::ReplaceText { block, .. }
-            | Self::SetKind { block, .. }
-            | Self::ReplacePlain { block, .. } => *block,
-            Self::InsertBlocks { parent, .. } | Self::RemoveBlocks { parent, .. } => *parent,
-        };
-        doc.touch(touched);
-        Ok(result)
+        self.apply_inner(doc)
     }
 
     fn apply_inner(&self, doc: &mut EditorDocument) -> Result<(Step, StepMap), StepError> {

@@ -20,7 +20,7 @@ use super::{
     kind::BlockKind,
     marks::MarkKind,
     position::BlockPosition,
-    projection::{ProjectionCache, Snapshot},
+    projection::{Snapshot, SnapshotCache},
     selection::BlockSelection,
     style::BlockEditorStyle,
     transaction::EditOrigin,
@@ -426,7 +426,7 @@ pub struct BlockEditorState {
     pub(crate) focus_handle: FocusHandle,
     pub(crate) blink_cursor: Entity<BlinkCursor>,
     pub(crate) style: BlockEditorStyle,
-    pub(crate) projection: ProjectionCache,
+    pub(crate) snapshots: SnapshotCache,
     /// Last complete frame, written by the element after prepaint.
     pub(crate) frame: Rc<RefCell<FrameLayout>>,
     pub(crate) cull: Rc<RefCell<super::cull::CullState>>,
@@ -508,7 +508,7 @@ impl BlockEditorState {
             focus_handle,
             blink_cursor,
             style: BlockEditorStyle::default(),
-            projection: ProjectionCache::default(),
+            snapshots: SnapshotCache::default(),
             frame: Rc::default(),
             cull: Rc::default(),
             a11y_value: RefCell::default(),
@@ -644,7 +644,7 @@ impl BlockEditorState {
         let source = self.model.source();
         if let Ok(model) = BlockEditorModel::from_markdown(&source, extensions) {
             self.model = model;
-            self.projection.invalidate();
+            self.snapshots.invalidate();
         }
         self
     }
@@ -652,7 +652,7 @@ impl BlockEditorState {
     /// Builder: initial Markdown.
     pub fn with_source(mut self, source: &str) -> Self {
         let _ = self.model.set_source(source);
-        self.projection.invalidate();
+        self.snapshots.invalidate();
         self
     }
 
@@ -662,7 +662,7 @@ impl BlockEditorState {
         self.marked = None;
         self.composition_open = false;
         self.pending_paste = None;
-        self.projection.invalidate();
+        self.snapshots.invalidate();
         cx.notify();
         Ok(())
     }
@@ -702,7 +702,7 @@ impl BlockEditorState {
     }
     pub fn set_image_policy(&mut self, policy: super::ImagePolicy, cx: &mut Context<Self>) {
         self.image_policy = policy;
-        self.projection.invalidate();
+        self.snapshots.invalidate();
         cx.notify();
     }
     pub fn image_policy(&self) -> super::ImagePolicy {
@@ -719,11 +719,16 @@ impl BlockEditorState {
     /// pictures again.
     pub fn set_image_source(&mut self, source: Option<ImageSourceFn>, cx: &mut Context<Self>) {
         self.image_source = source;
-        self.projection.invalidate();
+        self.snapshots.invalidate();
         cx.notify();
     }
+    /// The loader pictures are drawn through: none under [`super::ImagePolicy::Placeholder`],
+    /// which shows their descriptions instead.
     pub(crate) fn image_source(&self) -> Option<ImageSourceFn> {
-        self.image_source.clone()
+        match self.image_policy {
+            super::ImagePolicy::Placeholder => None,
+            _ => self.image_source.clone(),
+        }
     }
 
     /// Highlights code blocks with the host's highlighter (see [`CodeHighlightFn`]).
@@ -740,7 +745,7 @@ impl BlockEditorState {
     ) {
         self.code_highlighter = highlighter;
         self.highlights.borrow_mut().clear();
-        self.projection.invalidate();
+        self.snapshots.invalidate();
         cx.notify();
     }
     pub(crate) fn code_highlighter(&self) -> Option<CodeHighlightFn> {
@@ -946,9 +951,7 @@ impl BlockEditorState {
     }
 
     pub(crate) fn snapshot(&mut self) -> Rc<Snapshot> {
-        self.projection
-            .set_placeholders(self.image_policy == super::ImagePolicy::Placeholder);
-        self.projection.snapshot(&self.model.doc)
+        self.snapshots.snapshot(&self.model.doc)
     }
 
     /// Blocks that are always laid out: the selection ends, the IME

@@ -1,14 +1,12 @@
 // Changed in Trevin Lee's fork (2026): block motion, the dragged copy, toggle chevron clicks,
-// touch input; paragraphs and headings drawn on gpui-core's paragraph layer.
+// touch input; every block drawn on gpui-core's paragraph layer.
 //! `BlockEditor` view (design §7).
 //!
-//! `render` takes the cached projection and renders it with gpui-kit's own
-//! `BlockNode` renderer, so the editor looks exactly like `TextView`. The
-//! [`EditorRoot`] element installs a frame-local [`FrameSink`] while its
-//! children prepaint: keyed text leaves report their layouts into it and take
-//! their selection backgrounds from it (`text::editor_seam`, D3). The root
-//! then paints the caret and the composition underline from that geometry.
-//! Paint never updates the editor entity.
+//! `render` draws the visible top-level blocks itself (`draw.rs`), on gpui-core's paragraph
+//! layer, from the snapshot of the document's structure (`projection.rs`). Each text leaf reports
+//! where it laid out while the [`EditorRoot`] element prepaints its children; the root then builds
+//! the frame from those leaves (`frame.rs`) and paints the caret and the composition underline
+//! from it. Paint never updates the editor entity.
 
 use std::{cell::Cell, collections::HashMap, ops::Range, rc::Rc};
 
@@ -25,7 +23,6 @@ use gpui::{
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
 use crate::support::secondary_modifier;
 use gpui_kit::base::StyledExt as _;
-use gpui_kit::base::text::editor_host::{BlockNode, collect_leaf_geometry};
 
 /// Items per cull unit of a long top-level list.
 const LIST_CHUNK: usize = 32;
@@ -59,21 +56,18 @@ impl Styled for BlockEditor {
 /// The accessible role (and heading level) of a top-level block (Phase 5,
 /// per-block accessibility). `None` for blocks that are not exposed on
 /// their own (definitions, breaks).
-pub(crate) fn block_role(node: &BlockNode) -> Option<(Role, Option<usize>)> {
-    Some(match node {
-        BlockNode::Paragraph(_) => (Role::Paragraph, None),
-        BlockNode::Heading { level, .. } => (Role::Heading, Some(*level as usize)),
-        BlockNode::Blockquote { .. } => (Role::Blockquote, None),
-        BlockNode::List { .. } => (Role::List, None),
-        BlockNode::CodeBlock(_) => (Role::Code, None),
-        BlockNode::Table(_) => (Role::Table, None),
-        BlockNode::HorizontalRule { .. } => (Role::Splitter, None),
-        BlockNode::Custom { .. } => (Role::Group, None),
-        BlockNode::ListItem { .. } => (Role::ListItem, None),
-        BlockNode::Root { .. }
-        | BlockNode::Break { .. }
-        | BlockNode::Definition { .. }
-        | BlockNode::Unknown => return None,
+pub(crate) fn block_role(kind: &super::kind::BlockKindData) -> Option<(Role, Option<usize>)> {
+    use super::kind::BlockKindData as K;
+    Some(match kind {
+        K::Paragraph => (Role::Paragraph, None),
+        K::Heading { level } => (Role::Heading, Some(*level as usize)),
+        K::Blockquote => (Role::Blockquote, None),
+        K::List { .. } => (Role::List, None),
+        K::CodeBlock { .. } => (Role::Code, None),
+        K::Table { .. } => (Role::Table, None),
+        K::HorizontalRule => (Role::Splitter, None),
+        K::Custom => (Role::Group, None),
+        K::ListItem { .. } => (Role::ListItem, None),
         _ => return None,
     })
 }
@@ -226,34 +220,38 @@ impl RenderOnce for BlockEditor {
                 // top-level list is split into chunks of `LIST_CHUNK` items,
                 // each rendered as a list of its own (continuing the
                 // numbering, no gap between chunks). Rebuilt per revision.
-                let nodes: Vec<&BlockNode> = snapshot
-                    .blocks
-                    .iter()
-                    .flat_map(|b| b.nodes.iter())
-                    .collect();
-                let mut units = Vec::with_capacity(nodes.len());
-                let mut node_ix = 0;
+                let doc = &self.state.read(cx).model.doc;
+                let mut units = Vec::with_capacity(snapshot.blocks.len());
                 for (block_ix, block) in snapshot.blocks.iter().enumerate() {
-                    for (node_in_block, node) in block.nodes.iter().enumerate() {
-                        let unit = |id, items| super::cull::UnitDesc {
-                            id,
-                            block: block_ix,
-                            node: node_in_block,
-                            node_ix,
-                            items,
-                        };
-                        match (node, list_items.get(&block.id)) {
-                            (BlockNode::List { children, .. }, Some(ids))
-                                if ids.len() == children.len() =>
-                            {
-                                for start in (0..ids.len()).step_by(LIST_CHUNK) {
-                                    let range = start..(start + LIST_CHUNK).min(ids.len());
-                                    units.push(unit(ids[start], Some((range, ids.clone()))));
-                                }
+                    let kind = doc.kind(*block);
+                    let (look, role) = (
+                        match kind {
+                            Some(super::kind::BlockKindData::Heading { level }) => {
+                                super::draw::Prev::Heading(*level)
                             }
-                            _ => units.push(unit(block.id, None)),
+                            Some(super::kind::BlockKindData::HorizontalRule) => {
+                                super::draw::Prev::Rule
+                            }
+                            _ => super::draw::Prev::Other,
+                        },
+                        kind.and_then(block_role),
+                    );
+                    let unit = |id, items| super::cull::UnitDesc {
+                        id,
+                        block: block_ix,
+                        items,
+                        kind: look,
+                        role,
+                    };
+                    // A long list's items, in chunks (`list_items` has only long lists).
+                    match list_items.get(block) {
+                        Some(ids) => {
+                            for start in (0..ids.len()).step_by(LIST_CHUNK) {
+                                let range = start..(start + LIST_CHUNK).min(ids.len());
+                                units.push(unit(ids[start], Some((range, ids.clone()))));
+                            }
                         }
-                        node_ix += 1;
+                        None => units.push(unit(*block, None)),
                     }
                 }
                 cull_state.index.rebuild(
@@ -268,7 +266,7 @@ impl RenderOnce for BlockEditor {
                     &cull_state.heights,
                 );
                 cull_state.units = units;
-                cull_state.node_count = nodes.len();
+                cull_state.node_count = snapshot.blocks.len();
             }
             let units = &cull_state.units;
             let count = cull_state.node_count;
@@ -278,7 +276,7 @@ impl RenderOnce for BlockEditor {
             // the blocks changing places move from there (`reorder`).
             let mut slots: Vec<(BlockId, super::reorder::Slot)> = Vec::with_capacity(n);
             for (ix, unit) in units.iter().enumerate() {
-                let id = snapshot.blocks[unit.block].id;
+                let id = snapshot.blocks[unit.block];
                 let (top, height) = (f32::from(index.prefix(ix)), f32::from(index.height(ix)));
                 match slots.last_mut() {
                     Some((last, slot)) if *last == id => slot.pitch += height,
@@ -322,7 +320,7 @@ impl RenderOnce for BlockEditor {
             let mut rendered = 0;
             for unit_ix in wanted {
                 let unit = &units[unit_ix];
-                let node_ix = unit.node_ix;
+                let node_ix = unit.block;
                 let top = index.prefix(unit_ix);
                 if top > cursor {
                     children.push(div().h(top - cursor).into_any_element());
@@ -330,11 +328,10 @@ impl RenderOnce for BlockEditor {
                 cursor = top + index.height(unit_ix);
                 rendered += 1;
                 let is_last_node = node_ix + 1 == count;
-                let node = &snapshot.blocks[unit.block].nodes[unit.node];
-                let element = match (&unit.items, node) {
-                    (Some((range, ids)), BlockNode::List { .. }) => {
+                let element = match &unit.items {
+                    Some((range, ids)) => {
                         let last_chunk = range.end == ids.len();
-                        let block_id = snapshot.blocks[unit.block].id;
+                        let block_id = snapshot.blocks[unit.block];
                         let tree = super::draw::list_tree(
                             &self.state.read(cx).model.doc,
                             block_id,
@@ -359,18 +356,9 @@ impl RenderOnce for BlockEditor {
                             None => div().into_any_element(),
                         }
                     }
-                    _ => {
-                        let block_id = snapshot.blocks[unit.block].id;
-                        let prev = unit_ix.checked_sub(1).map(|ix| {
-                            let u = &units[ix];
-                            match &snapshot.blocks[u.block].nodes[u.node] {
-                                BlockNode::Heading { level, .. } => {
-                                    super::draw::Prev::Heading(*level)
-                                }
-                                BlockNode::HorizontalRule { .. } => super::draw::Prev::Rule,
-                                _ => super::draw::Prev::Other,
-                            }
-                        });
+                    None => {
+                        let block_id = snapshot.blocks[unit.block];
+                        let prev = unit_ix.checked_sub(1).map(|ix| units[ix].kind);
                         let own = super::draw::tree(
                             &self.state.read(cx).model.doc,
                             block_id,
@@ -395,7 +383,7 @@ impl RenderOnce for BlockEditor {
                     }
                 };
                 // Per-block accessibility node around the rendered block.
-                let element = match block_role(node) {
+                let element = match unit.role {
                     Some((role, level)) => div()
                         .id(("block", unit.id.as_u64() as usize))
                         .role(role)
@@ -404,7 +392,7 @@ impl RenderOnce for BlockEditor {
                         .into_any_element(),
                     None => element,
                 };
-                let block_id = snapshot.blocks[unit.block].id;
+                let block_id = snapshot.blocks[unit.block];
                 let offset = offsets.get(&block_id).copied().unwrap_or(0.);
                 let element = if dragged_block == Some(block_id) {
                     // Under the pointer: a copy drawn over every other block, while the block
@@ -597,7 +585,7 @@ impl RenderOnce for BlockEditor {
                 padding: root_style.padding,
                 typography,
                 caret_was_visible,
-                backgrounds: Some(backgrounds),
+                fresh: true,
                 own_leaves,
                 snapshot,
                 style,
@@ -605,12 +593,11 @@ impl RenderOnce for BlockEditor {
     }
 }
 
-type LeafBackgrounds = HashMap<u64, Vec<(Range<usize>, Hsla)>>;
-
 struct EditorRoot {
     state: Entity<BlockEditorState>,
     child: Option<AnyElement>,
-    backgrounds: Option<LeafBackgrounds>,
+    /// Whether this element's prepaint hasn't built the frame yet.
+    fresh: bool,
     snapshot: Rc<Snapshot>,
     style: BlockEditorStyle,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -710,16 +697,12 @@ impl Element for EditorRoot {
         window: &mut Window,
         cx: &mut App,
     ) -> Prepaint {
-        if let Some(backgrounds) = self.backgrounds.take() {
-            let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
+        if std::mem::take(&mut self.fresh) {
+            child.prepaint(window, cx);
             // Swap in the complete frame; handlers read it until the next one.
             let own = std::mem::take(&mut *self.own_leaves.borrow_mut());
-            let mut frame = super::frame::into_frame(
-                geometries,
-                own,
-                self.snapshot.leaves.clone(),
-                &self.snapshot.tables,
-            );
+            let mut frame =
+                super::frame::into_frame(own, self.snapshot.leaves.clone(), &self.snapshot.tables);
             frame.content = Some(self.content_bounds.get());
             frame.rem_size = window.rem_size();
             frame.units = std::mem::take(&mut self.state.read(cx).cull.borrow_mut().drawn);
