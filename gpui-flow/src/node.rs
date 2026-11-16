@@ -1275,6 +1275,92 @@ pub fn link_node(node: &Node, ctx: &NodeContext, window: &mut Window, cx: &mut A
         .into_any_element()
 }
 
+/// The built-in `text` kind: words on the canvas with no box round them, as a heading, in the
+/// node's palette color. Selected, a faint outline shows where it is.
+pub fn text_node(node: &Node, ctx: &NodeContext) -> AnyElement {
+    let pencil = ctx.colors.pencil(node.color.as_deref());
+    let color = if node.color.is_some() {
+        pencil.text
+    } else {
+        ctx.colors.node_text
+    };
+    let align = node.text_align.unwrap_or(LabelAlign::Left);
+    div()
+        .relative()
+        .w(units(node.width.unwrap_or(240.)))
+        .when_some(node.height, |d, h| d.h(units(h)))
+        .p(units(4.))
+        .rounded(units(4.))
+        .border_1()
+        .border_color(if ctx.selected {
+            ctx.colors.selected
+        } else {
+            gpui::transparent_black()
+        })
+        .text_size(ctx.font_size(16.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(color)
+        .flex()
+        .items_center()
+        .gap(units(6.))
+        .children(badges(node, ctx, color))
+        .child(label(node, align))
+        .into_any_element()
+}
+
+/// The built-in `drawing` kind: a line drawn with a pen, as points across the node's box (its
+/// `data.points`, "x,y x,y …" each from 0 to 1, as subcanvas keeps them), so it scales with the
+/// node.
+pub fn drawing_node(node: &Node, ctx: &NodeContext) -> AnyElement {
+    let points: Vec<XY> = node
+        .data
+        .get("points")
+        .and_then(|p| p.as_str())
+        .map(parse_points)
+        .unwrap_or_default();
+    let (w, h) = (node.width.unwrap_or(40.), node.height.unwrap_or(40.));
+    let color = if ctx.selected {
+        ctx.colors.selected
+    } else if node.color.is_some() {
+        ctx.colors.pencil(node.color.as_deref()).stroke
+    } else {
+        ctx.colors.node_text
+    };
+    let zoom = ctx.zoom;
+    div()
+        .relative()
+        .w(units(w))
+        .h(units(h))
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    let (bw, bh) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+                    let line: Vec<XY> = points.iter().map(|p| xy(p.x * bw, p.y * bh)).collect();
+                    crate::paint::stroke(bounds.origin, &line, (3. * zoom).max(1.), color, window);
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
+        .into_any_element()
+}
+
+/// Points as subcanvas keeps a drawing's: "x,y x,y …", each kept from 0 to 1. What isn't a pair
+/// of numbers is skipped, and a line is cut short at 4000 points.
+pub fn parse_points(text: &str) -> Vec<XY> {
+    text.split_whitespace()
+        .filter_map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            let (x, y) = (x.parse::<f32>().ok()?, y.parse::<f32>().ok()?);
+            (x.is_finite() && y.is_finite()).then(|| xy(x.clamp(0., 1.), y.clamp(0., 1.)))
+        })
+        .take(4000)
+        .collect()
+}
+
 /// The renderers every flow starts with.
 pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     let mut kinds: HashMap<SharedString, NodeRenderer> = HashMap::new();
@@ -1294,6 +1380,11 @@ pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     kinds.insert("topic".into(), Rc::new(|n, c, _, _, _| topic_node(n, c)));
     kinds.insert("shape".into(), Rc::new(|n, c, _, _, _| shape_node(n, c)));
     kinds.insert("frame".into(), Rc::new(|n, c, _, _, _| frame_node(n, c)));
+    kinds.insert("text".into(), Rc::new(|n, c, _, _, _| text_node(n, c)));
+    kinds.insert(
+        "drawing".into(),
+        Rc::new(|n, c, _, _, _| drawing_node(n, c)),
+    );
     kinds.insert(
         "image".into(),
         Rc::new(|n, c, _, w, cx| image_node(n, c, w, cx)),

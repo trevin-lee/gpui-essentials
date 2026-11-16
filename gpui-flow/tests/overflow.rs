@@ -202,6 +202,18 @@ fn worst_nodes() -> Vec<Node> {
             n
         }),
     )
+    // Headings with no box, and a drawing.
+    .chain([
+        Node::new("heading", xy(1200., 1400.))
+            .kind("text")
+            .label(text.clone()),
+        Node::new("small heading", xy(1600., 1400.))
+            .kind("text")
+            .label(WORD)
+            .color("teal")
+            .icon("type")
+            .size(120., 40.),
+    ])
     // Frames, titled with the worst text, colored and not.
     .chain([
         Node::new("frame", xy(0., 1100.))
