@@ -91,8 +91,8 @@ pub enum CalendarEvent {
     /// Double-click or Enter on an event.
     Open(EventId),
     /// Someone dragged out empty time, double-clicked a slot, or pressed Enter on one. The
-    /// calendar is [`CalendarOptions::default_calendar`] or the first that can be edited; none
-    /// when the host gave no calendars.
+    /// calendar is [`CalendarOptions::default_calendar`] or the first that's shown and can be
+    /// edited; none when the host gave no calendars.
     Create {
         calendar: Option<CalendarId>,
         time: EventTime,
@@ -413,13 +413,15 @@ impl Calendar {
         if self.calendars.is_empty() {
             return Some(None);
         }
-        let writable = |c: &&CalendarSource| !c.read_only;
+        // Shown as well as editable: an event made in a hidden calendar would vanish as soon
+        // as the host added it.
+        let usable = |c: &&CalendarSource| c.visible && !c.read_only;
         self.options
             .default_calendar
             .as_ref()
             .and_then(|id| self.calendar(id))
-            .filter(writable)
-            .or_else(|| self.calendars.iter().filter(|c| c.visible).find(writable))
+            .filter(usable)
+            .or_else(|| self.calendars.iter().find(usable))
             .map(|c| Some(c.id.clone()))
     }
 

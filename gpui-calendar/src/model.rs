@@ -288,8 +288,8 @@ pub struct CalendarOptions {
     /// Where the time grid opens when today isn't on screen. With today on screen it opens
     /// with the current time about a third of the way down.
     pub scroll_time: NaiveTime,
-    /// The calendar new events are proposed in. Without one, or if it can't be edited, it's the
-    /// first visible calendar that can.
+    /// The calendar new events are proposed in. Without one, or if it's hidden or can't be
+    /// edited, it's the first visible calendar that can be.
     pub default_calendar: Option<CalendarId>,
     /// Draws events that have ended a little quieter.
     pub dim_past: bool,
