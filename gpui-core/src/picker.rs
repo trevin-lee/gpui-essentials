@@ -105,6 +105,7 @@ pub struct Picker {
     row: RowStyle,
     on_create: Option<OnCreate>,
     visible_rows: Option<usize>,
+    filter: bool,
     colors: PopupMenuColors,
     /// The search field's caret, selection and placeholder colours.
     field: (Option<gpui::Hsla>, Option<gpui::Hsla>, Option<gpui::Hsla>),
@@ -123,6 +124,7 @@ impl Picker {
             row: RowStyle::default(),
             on_create: None,
             visible_rows: None,
+            filter: true,
             colors: PopupMenuColors::default(),
             field: (None, None, None),
         }
@@ -215,6 +217,14 @@ impl Picker {
 
     /// Offers a "Create “text”" entry after the matches while what's typed isn't an entry's
     /// label already (case aside); picking it runs `f` with the text, trimmed.
+    /// Whether typing filters the entries (on by default). Off, the field names something while
+    /// the list stays whole and its highlight where the keys put it: a new property's name over
+    /// its types, Enter picking the type with the name in [`MenuSelect::query`].
+    pub fn filter(mut self, filter: bool) -> Self {
+        self.filter = filter;
+        self
+    }
+
     /// How many rows a long list shows before it scrolls (10, or 8 for touch, unless given).
     /// A list of more than a hundred matches draws only the rows in view.
     pub fn visible_rows(mut self, rows: usize) -> Self {
@@ -281,16 +291,18 @@ impl RenderOnce for Picker {
             .items
             .iter()
             .any(|i| i.label.to_lowercase() == typed.to_lowercase());
+        let filter = self.filter;
         let mut shown: Vec<PopupMenuItem> = self
             .items
             .into_iter()
-            .filter(|i| matches(&i.label, &text))
+            .filter(|i| !filter || matches(&i.label, &text))
             .collect();
         if self.on_create.is_some() && !typed.is_empty() && !exact {
             shown
                 .push(PopupMenuItem::new(CREATE, format!("Create “{typed}”")).icon(IconName::Plus));
         }
         // A pick, or the Create entry's.
+        let typed_text = text.clone();
         let on_select: Option<OnSelect> = match (self.on_select.clone(), self.on_create.clone()) {
             (None, None) => None,
             (select, create) => Some(Rc::new(move |pick: &MenuSelect, window, cx| {
@@ -299,7 +311,12 @@ impl RenderOnce for Picker {
                         f(&typed, window, cx);
                     }
                 } else if let Some(f) = &select {
-                    f(pick, window, cx);
+                    // Every pick carries what's typed, from the keys or a press.
+                    let pick = MenuSelect {
+                        query: Some(typed_text.clone()),
+                        ..pick.clone()
+                    };
+                    f(&pick, window, cx);
                 }
             })),
         };
@@ -326,8 +343,12 @@ impl RenderOnce for Picker {
                 s.highlighted = current.or_else(|| step(&pickable, None, 1));
             } else if s.seen.as_ref() != Some(&text) {
                 s.seen = Some(text.clone());
-                s.highlighted = step(&pickable, None, 1);
-                requeried = true;
+                // A filtering field's new matches start from the first; a naming field's list
+                // doesn't change, nor does its highlight.
+                if filter {
+                    s.highlighted = step(&pickable, None, 1);
+                    requeried = true;
+                }
             }
             if (requeried || !s.opened)
                 && let Some(i) = s.highlighted
@@ -389,6 +410,7 @@ impl RenderOnce for Picker {
                     let pick = MenuSelect {
                         id: id.clone(),
                         modifiers,
+                        query: None,
                     };
                     f(&pick, window, cx);
                 }
