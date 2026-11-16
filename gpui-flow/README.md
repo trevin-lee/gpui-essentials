@@ -54,6 +54,10 @@ Run the example with `cargo run --release --example flow` from this folder.
   fields that changed (a JSON merge patch). A drag of many nodes is one batch, at its end.
   `Flow::apply()` takes batches from elsewhere without sending them back or losing the
   selection, so a server can merge an agent's edits with the owner's.
+- **Undo and redo** (⌘Z, ⇧⌘Z, `Flow::undo`, `Flow::redo`) step over those batches: a drag
+  of many nodes, a deletion with its edges, or whatever one update changed, is one step.
+  Taking an edit back puts back only the fields it changed and is sent as an edit too; edits
+  from elsewhere aren't in the history, and a step whose nodes have since gone is passed over.
 - **With the mouse and keys.** Drag the pane to pan; scroll or pinch to zoom about the pointer;
   drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
   rectangle; drag from a handle to another (either direction) to connect; click an edge to
