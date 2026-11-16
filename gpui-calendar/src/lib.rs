@@ -17,6 +17,7 @@
 //! Recurring events are the host's to expand: it supplies each occurrence in the range asked
 //! for as an event of its own.
 
+mod a11y;
 mod calendar;
 mod find;
 pub mod layout;
@@ -27,6 +28,7 @@ mod paint;
 mod theme;
 pub mod time;
 
+pub use a11y::{A11yItem, A11yTarget};
 pub use calendar::{
     Calendar, CalendarEvent, Cancel, DayView, DeleteSelected, MonthView, NextPeriod, OpenSelected,
     PreviousPeriod, SelectDown, SelectLeft, SelectRight, SelectUp, Today, WeekView, bind_keys,

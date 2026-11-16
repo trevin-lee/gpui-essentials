@@ -110,6 +110,29 @@ their look.
   The calendar takes no typing for find unless your app asks with `type_query`: then typing goes
   into the query (Enter keeps it, Escape clears it), a pill at the bottom says what it's finding
   and how many it found, and each change is sent as `CalendarEvent::QueryChange`.
+- **Accessibility:** VoiceOver reads the calendar.
+  - **The canvas.** It is a group named for the period ("Calendar, November 2026"). It holds a
+    node for each day name, event, "+N more" and hour (on the grid) or day (in the month) on
+    screen, each with a role, a label and its bounds.
+  - **Event labels.** An event says what, when and where: "Team sync, Tuesday 3 to 4 PM, Work
+    calendar". Where they apply, ", repeating", ", read-only" and ", 2 links" follow.
+  - **Day labels.** Days say "Wednesday, November 18, today", and hours "Wednesday, November 18,
+    9 AM".
+  - **Activating a node** does what a click does: it opens an event, selects an hour, or shows a
+    day. Selected and read-only are marked.
+  - **When it runs.** The nodes are built only while a screen reader is on. The frame is laid
+    out without paint first, so they're this frame's, never the last one's.
+  - **For your app.** `describe_event(id)`, `accessibility_items()` and `activate(target)` give
+    the same to your app and its tests.
+  - **The header.** Its controls are labelled buttons ("Previous", "Next", the views, and on a
+    phone the title, "November 2026, go to a date").
+  - **Tab** goes through the header, the mini month, the days (the arrow keys move in them), and
+    an open panel or question, in that order. Where Tab brought the keyboard to the days, a ring
+    in the theme's focus colour shows it.
+  - **Reduce Motion:** a swipe lands at once instead of easing. This reads `App::reduce_motion()`,
+    which GPUI 0.3.12 doesn't set from the system, so set it from your app (see "Putting it in an
+    app"). Nothing else in the calendar moves on its own: popovers and sheets appear at once, and
+    drags follow the pointer.
 - **Theming:** each calendar's colour, the week's first day, 12- or 24-hour time, and colours
   from gpui-core's theme. It scales with the window's rem, so it follows an app's zoom.
 
@@ -236,6 +259,19 @@ fn main() {
   `Calendar` key context. Bind them to other keys after `gpui_calendar::init`.
 - **Placing your own popovers:** `event_bounds(id)` gives where an event was drawn, and
   `point_at(date, minute)` gives where a time is on the grid.
+- **Reduce Motion:** call `cx.set_reduce_motion(on)` with the system's setting at launch, and
+  again when it changes:
+  - **macOS:** `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion`, and
+    `NSWorkspace.accessibilityDisplayOptionsDidChangeNotification` on its notification center.
+  - **iOS:** `UIAccessibility.isReduceMotionEnabled` and
+    `UIAccessibility.reduceMotionStatusDidChangeNotification`.
+
+  It's one switch for the whole app: GPUI's own animations honour it too.
+- **What VoiceOver can't do yet:**
+  - It reaches only what's on screen. It can't scroll the grid by itself, so a person scrolls
+    with three fingers, or uses the keys or the header, to bring more hours or days in.
+  - An event's links are part of its label, not nodes of their own; the panel lists them as
+    buttons.
 
 ## Time zones and DST
 

@@ -1259,3 +1259,165 @@ fn the_mini_month_is_behind_the_title_when_narrow(cx: &mut TestAppContext) {
     assert_eq!(c.read_with(cx, |c, _| c.date()), d);
     assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
 }
+
+#[gpui::test]
+fn every_event_is_described_for_a_screen_reader(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    c.read_with(cx, |c, _| {
+        let said = |id: &str| c.describe_event(id).unwrap();
+        assert_eq!(
+            said("a"),
+            "Planning, Wednesday 11 AM to 12 PM, Work calendar, 1 link"
+        );
+        assert_eq!(
+            said("many"),
+            "Sync, Saturday 1 to 1:45 PM, Work calendar, 3 links"
+        );
+        assert_eq!(
+            said("ro"),
+            "All-hands, Thursday 9 to 10 AM, Work calendar, read-only"
+        );
+        assert_eq!(
+            said("hol"),
+            "Holiday, Tuesday 1 to 2 PM, Holidays calendar, read-only"
+        );
+        assert_eq!(
+            said("gym@1"),
+            "Gym, Tuesday 6 to 7 PM, Home calendar, repeating"
+        );
+        assert_eq!(
+            said("trip"),
+            "Trip, Monday to Tuesday, all day, Home calendar"
+        );
+        assert_eq!(c.describe_event("nope"), None);
+    });
+    // One day, a span longer than a week, and overnight.
+    c.update(cx, |c, cx| {
+        c.set_events(
+            vec![
+                Event::all_day("one", "Rent", day(2), day(3)),
+                Event::all_day("long", "Leave", day(0), day(10)),
+                Event::timed("late", "Deploy", at(day(3), 22, 0), at(day(4), 1, 30)),
+            ],
+            cx,
+        )
+    });
+    c.read_with(cx, |c, _| {
+        assert_eq!(c.describe_event("one").unwrap(), "Rent, Wednesday, all day");
+        assert_eq!(
+            c.describe_event("long").unwrap(),
+            "Leave, November 16 to November 25, all day"
+        );
+        assert_eq!(
+            c.describe_event("late").unwrap(),
+            "Deploy, Thursday 10 PM to Friday 1:30 AM"
+        );
+    });
+}
+
+#[gpui::test]
+fn what_a_screen_reader_is_told_is_what_was_drawn(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let items = c.read_with(cx, |c, _| c.accessibility_items());
+    let find = |t: &A11yTarget| items.iter().find(|i| i.target == *t);
+    // The week's days by name, today said as today.
+    let days: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i.target, A11yTarget::Day(_)))
+        .collect();
+    assert_eq!(days.len(), 7);
+    let wednesday = find(&A11yTarget::Day(day(2))).unwrap();
+    assert_eq!(wednesday.label, "Wednesday, November 18, today");
+    assert_eq!(wednesday.role, gpui::Role::Button);
+    // Each shown event once, where it was drawn; a hidden calendar's not at all.
+    let a = find(&A11yTarget::Event("a".into())).unwrap();
+    assert_eq!(a.role, gpui::Role::Button);
+    assert_eq!(Some(a.bounds), c.read_with(cx, |c, _| c.event_bounds("a")));
+    assert!(a.label.starts_with("Planning, Wednesday"));
+    assert!(find(&A11yTarget::Event("hidden".into())).is_none());
+    let ro = find(&A11yTarget::Event("ro".into())).unwrap();
+    assert!(ro.read_only);
+    let trip: Vec<_> = items
+        .iter()
+        .filter(|i| i.target == A11yTarget::Event("trip".into()))
+        .collect();
+    assert_eq!(trip.len(), 1);
+    // Read in order: the days, then the events by when they start (the trip first), then the
+    // hours.
+    let first_event = items
+        .iter()
+        .position(|i| matches!(i.target, A11yTarget::Event(_)))
+        .unwrap();
+    assert!(
+        items[..first_event]
+            .iter()
+            .all(|i| matches!(i.target, A11yTarget::Day(_)))
+    );
+    assert_eq!(items[first_event].target, A11yTarget::Event("trip".into()));
+    // The hours on screen, each a cell: scrolled to 8 AM, midnight isn't there.
+    let nine = find(&A11yTarget::Slot {
+        date: day(2),
+        minute: 9 * 60,
+    })
+    .unwrap();
+    assert_eq!(nine.label, "Wednesday, November 18, 9 AM");
+    assert_eq!(nine.role, gpui::Role::Cell);
+    assert!(
+        find(&A11yTarget::Slot {
+            date: day(2),
+            minute: 0
+        })
+        .is_none()
+    );
+
+    // Activating them does what a click does.
+    c.update(cx, |c, cx| c.activate(&A11yTarget::Event("a".into()), cx));
+    assert_eq!(
+        c.read_with(cx, |c, _| c.selected_event().cloned()),
+        Some("a".into())
+    );
+    assert!(
+        seen.borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Open(id) if id.as_ref() == "a"))
+    );
+    draw(cx);
+    let selected = c.read_with(cx, |c, _| c.accessibility_items());
+    assert!(
+        selected
+            .iter()
+            .any(|i| i.target == A11yTarget::Event("a".into()) && i.selected)
+    );
+    c.update(cx, |c, cx| {
+        c.activate(
+            &A11yTarget::Slot {
+                date: day(3),
+                minute: 14 * 60,
+            },
+            cx,
+        )
+    });
+    assert_eq!(
+        c.read_with(cx, |c, _| c.selection().cloned()),
+        Some(Selection::Slot {
+            date: day(3),
+            minute: 14 * 60
+        })
+    );
+    c.update(cx, |c, cx| c.activate(&A11yTarget::Day(day(4)), cx));
+    assert_eq!(
+        c.read_with(cx, |c, _| (c.view(), c.date())),
+        (CalendarView::Day, day(4))
+    );
+
+    // The month: its days, each a cell, and the canvas named for the period.
+    c.update(cx, |c, cx| c.set_view(CalendarView::Month, cx));
+    draw(cx);
+    let month = c.read_with(cx, |c, _| c.accessibility_items());
+    let cells = month.iter().filter(|i| i.role == gpui::Role::Cell).count();
+    assert!(cells == 35 || cells == 42, "{cells}");
+    assert_eq!(
+        c.read_with(cx, |c, _| c.accessibility_label()),
+        "Calendar, November 2026"
+    );
+}

@@ -423,3 +423,30 @@ fn on_touch_the_mini_month_is_a_sheet_of_44_point_days(cx: &mut TestAppContext) 
     assert_eq!(c.read_with(cx, |c, _| c.date()), d);
     assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
 }
+
+#[gpui::test]
+fn with_reduce_motion_a_swipe_lands_at_once(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    let mid = spot(&c, cx, day(2), 13, 0);
+    let date = |c: &Entity<Calendar>, cx: &VisualTestContext| c.read_with(cx, |c, _| c.date());
+    // Without it, the week eases out over a few frames: lifted, it's still this week.
+    touch(cx, TouchPhase::Started, mid);
+    slide(cx, mid, point(mid.x - px(400.), mid.y));
+    assert_eq!(date(&c, cx), day(2));
+    settle(cx);
+    assert_eq!(date(&c, cx), day(9));
+
+    // With it (the host sets it from the system's setting), the next week is there on the
+    // frame the finger lifts, in place.
+    cx.update(|_, cx| cx.set_reduce_motion(true));
+    touch(cx, TouchPhase::Started, mid);
+    slide(cx, mid, point(mid.x - px(400.), mid.y));
+    assert_eq!(date(&c, cx), day(16));
+    let landed = spot(&c, cx, day(16), 13, 0);
+    assert!((landed.x - mid.x).abs() < px(1.), "{landed:?} vs {mid:?}");
+    // And it stays put: there's nothing left to ease.
+    settle(cx);
+    assert_eq!(date(&c, cx), day(16));
+    let still = spot(&c, cx, day(16), 13, 0);
+    assert_eq!(still, landed);
+}
