@@ -160,6 +160,21 @@ impl PopupMenuItem {
         self
     }
 
+    /// The entry without what the host draws (its chip, its drawn label): a stand-in a long
+    /// list measures its rows with, leaving the entry itself to be drawn.
+    pub(crate) fn text_copy(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            icon: self.icon,
+            checked: self.checked,
+            disabled: self.disabled,
+            shortcut: self.shortcut.clone(),
+            chip: None,
+            label_element: None,
+        }
+    }
+
     /// Something the host draws in the label's place: a select option's coloured pill, say.
     /// The label still names the entry to assistive tech and to a picker's filter.
     pub fn label_element(mut self, element: impl IntoElement) -> Self {
@@ -459,6 +474,7 @@ impl RenderOnce for PopupMenu {
         let rows = rows(
             &self.id,
             self.entries,
+            0,
             highlighted,
             self.row,
             self.colors,
@@ -492,6 +508,8 @@ impl RenderOnce for PopupMenu {
 pub(crate) fn rows(
     menu_id: &ElementId,
     entries: Vec<Entry>,
+    // The first entry's index in the whole menu (a virtual list draws a slice).
+    first: usize,
     highlighted: Option<usize>,
     row_style: RowStyle,
     colors: PopupMenuColors,
@@ -511,6 +529,7 @@ pub(crate) fn rows(
     entries
         .into_iter()
         .enumerate()
+        .map(|(i, e)| (first + i, e))
         .map(|(i, e)| {
             let item = match e {
                 Entry::Separator => {
