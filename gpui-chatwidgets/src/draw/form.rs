@@ -7,7 +7,10 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::{DatePicker, Disableable as _, InputState, Selectable as _, Slider, Tooltip};
+use gpui_core::{
+    DatePicker, DatePickerColors, Disableable as _, InputState, PopoverColors, Selectable as _,
+    Slider, Tooltip,
+};
 use serde_json::{Value as Json, json};
 
 use super::content::Glyph;
@@ -192,6 +195,7 @@ impl Draw<'_, '_> {
                     )
                     .child(
                         DatePicker::new(&e.state)
+                            .colors(date_colors(t))
                             .placeholder("Pick a date")
                             .w_full(),
                     )
@@ -239,6 +243,7 @@ impl Draw<'_, '_> {
                         let sel = self.selector(&format!("slider:{key}"));
                         div().w_full().min_w_0().debug_selector(move || sel).child(
                             Slider::new(&e.state)
+                                .focus_ring_color(t.colors.focus_ring)
                                 .track_color(t.colors.line_strong)
                                 .fill_color(t.colors.accent)
                                 .thumb_color(t.colors.background)
@@ -720,6 +725,7 @@ impl Draw<'_, '_> {
             .caret_color(t.colors.text)
             .selection_color(selection(t))
             .placeholder_color(t.colors.text_muted)
+            .focus_ring_color(t.colors.focus_ring)
     }
 
     pub fn dropdown(
@@ -1011,6 +1017,7 @@ impl Draw<'_, '_> {
         // long press on touch (GPUI shows an element's tooltip for one).
         let name = b.name.clone();
         let (bg, text, border) = (t.colors.popover, t.colors.text, t.colors.line_strong);
+        let font = t.fonts.body.clone();
         div()
             .id(self.id(&format!("{path}.tip")))
             .flex_none()
@@ -1019,10 +1026,44 @@ impl Draw<'_, '_> {
                     .background(bg)
                     .text_color(text)
                     .border_color(border)
+                    .font_family(font.clone())
                     .build(window, cx)
             })
             .child(press)
             .into_any_element()
+    }
+}
+
+/// The date picker's colours, from the card rather than gpui-core's global theme: its field as
+/// the card's text fields (the same edge, fill, text, placeholder and focus ring), its month on
+/// the card's popover with a `line_strong` edge as the web's (`border-interactive`), a picked day
+/// on the accent (the web's `interactive-accent-default` and `text-accent-primary`), the days
+/// between a range's ends at the web's `--openui-highlight` strength (4%) and a day under the
+/// pointer at its `highlight-subtle`.
+pub(crate) fn date_colors(t: &crate::theme::CardTheme) -> DatePickerColors {
+    let c = &t.colors;
+    DatePickerColors {
+        field: Some(if t.dark {
+            c.sunk
+        } else {
+            gpui::transparent_black()
+        }),
+        border: Some(c.line_strong),
+        text: Some(c.text),
+        placeholder: Some(c.text_muted),
+        focus_ring: Some(c.focus_ring),
+        popover: Some(PopoverColors {
+            background: c.popover,
+            foreground: c.text,
+            border: c.line_strong,
+        }),
+        selected: Some(c.accent),
+        selected_text: Some(c.on_accent),
+        range: Some(c.accent.opacity(0.04)),
+        hover: Some(c.highlight),
+        today: Some(c.accent),
+        muted: Some(c.text_muted),
+        cursor: Some(c.focus_ring),
     }
 }
 
