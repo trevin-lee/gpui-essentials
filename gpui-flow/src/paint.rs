@@ -570,3 +570,44 @@ pub(crate) fn paint_icon(icon: Icon, bounds: Bounds<Pixels>, color: Hsla, window
     }
     ink.paint(window);
 }
+
+/// A whiteboard shape's outline, filled and stroked, and its detail line, in `bounds`: the
+/// node's box, `w` flow units wide. `line` is the stroke's width in points, at any zoom.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_shape(
+    outline: &[crate::shapes::PathOp],
+    detail: &[crate::shapes::PathOp],
+    bounds: Bounds<Pixels>,
+    w: f32,
+    fill: Hsla,
+    stroke: Hsla,
+    line: f32,
+    window: &mut Window,
+) {
+    use crate::shapes::PathOp;
+    let scale = f32::from(bounds.size.width) / w.max(1.);
+    let o = bounds.origin;
+    let at = |p: XY| point(o.x + px(p.x * scale), o.y + px(p.y * scale));
+    let build = |ops: &[PathOp], mut b: PathBuilder| {
+        for op in ops {
+            match *op {
+                PathOp::Move(p) => b.move_to(at(p)),
+                PathOp::Line(p) => b.line_to(at(p)),
+                PathOp::Cubic { c1, c2, to } => b.cubic_bezier_to(at(to), at(c1), at(c2)),
+                PathOp::Close => b.close(),
+            }
+        }
+        b.build().ok()
+    };
+    if let Some(path) = build(outline, PathBuilder::fill()) {
+        window.paint_path(path, fill);
+    }
+    if let Some(path) = build(outline, PathBuilder::stroke(px(line))) {
+        window.paint_path(path, stroke);
+    }
+    if !detail.is_empty()
+        && let Some(path) = build(detail, PathBuilder::stroke(px(line)))
+    {
+        window.paint_path(path, stroke);
+    }
+}

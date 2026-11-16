@@ -108,6 +108,23 @@ Run the example with `cargo run --release --example flow` from this folder.
   your own. Pressing it, or ⌘↩ with the node selected, sends `FlowEvent::OpenLink`. The
   host decides what the id means and opens it; the flow never opens or follows anything
   itself, so a hostile file can't make it.
+- **Whiteboard nodes.** The built-in `shape` kind (`Node::shape`) draws a node as one of nine
+  outlines: rectangle, pill (`rounded`), ellipse, diamond, hexagon, cylinder,
+  parallelogram, document and cloud. The geometry lives in `shapes`: each outline, the area
+  its text may use, where edges meet it, and where its badge goes, so anything that draws a
+  flow draws the same shape.
+  - **Colours.** Any built-in node can take a colour from the flow's palette by name
+    (`Node::color`: red, orange, yellow, green, teal, blue, purple or pink, as in subcanvas).
+    Its stroke is the pencil, its fill the pencil mixed into the pane, and its text a shade
+    that reads on that fill. Hosts give their theme's palette through `FlowColors::palette`.
+  - **Badges.** Nodes take a Lucide icon (`Node::icon`, drawn with gpui-core's bundled icons,
+    so serve `gpui_core::Icons` as assets) and an emoji, shown as badges.
+  - **Alignment** comes from `Node::text_align` (`LabelAlign`, as GPUI has its own
+    `TextAlign`).
+  - **Handles.** A shape has a handle of each kind on every side, named `top`, `right`,
+    `bottom` and `left`, on its visible edge. They're drawn only while it's selected, and a
+    finger takes them only then. The mouse can drag a connection from them at any time.
+  - The example draws a whiteboard with `--whiteboard`.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in
