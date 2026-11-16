@@ -27,6 +27,7 @@ README is the design for all of it.
 - [Board view](#board-view)
 - [List view](#list-view)
 - [Changing properties](#changing-properties)
+- [Changing views](#changing-views)
 - [Databases and rows are docs](#databases-and-rows-are-docs)
 - [Properties and values](#properties-and-values)
 - [Views](#views)
@@ -146,8 +147,8 @@ let table = cx.new(|cx| TableView::new(Rc::new(Host), database, rows, cx).with_v
 ```
 
 `cargo run --release -p gpui-tables --example crm` opens the CRM in the fixtures with a log of
-every event, and its views (tables, boards and lists) as tabs (the pictures here are its `--shot`s,
-rendered offscreen).
+every event, and its views (tables, boards and lists) as tabs in the crate's bar of views
+([Changing views](#changing-views)); the pictures here are its `--shot`s, rendered offscreen.
 
 | | |
 |---|---|
@@ -260,8 +261,7 @@ rendered offscreen).
   a finger's swipe scrolls either way.
 - **Nothing redraws while nothing changes,** and the table keeps no timers.
 
-Not in this first table: dragging rows to reorder them, deleting rows, making and editing
-views, picking ranges and times in the month
+Not in this first table: dragging rows to reorder them, deleting rows, picking ranges and times in the month
 (it shows a range, and keeps a value's time of day and the length of its range), long-press column drags on touch (the menu's Move left and Move right do
 it), and showing the engine's `Issue`s beside the view.
 
@@ -455,6 +455,87 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
   `TableView::open_property_menu(property_id, PropertyMenu::Options, ..)` open the same menus.
 - **Boards and lists** have no column headers, so they have no property menus yet; their
   properties change from a table view of the same database.
+
+## Changing views
+
+A database's views are made, changed and deleted from a bar of views the table draws over
+itself, as Notion's tabs over a database. Every change is a batch of edits for the host
+([Edits and events](#edits-and-events)), shown at once and kept until the host hands the table
+new docs, as a header's change is.
+
+| | |
+|---|---|
+| ![The bar's + menu: a new view's name typed over its three types, under the +](docs/view-add.png) | ![The Pipeline board's settings under its tab: its type, what it groups by, its card properties, and its sort to remove](docs/view-settings.png) |
+
+```rust,ignore
+let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(true));
+```
+
+- **The bar is an option on `TableView`** (`with_view_bar(true)`, or `set_view_bar`), not an
+  element of its own. The bar, the table under it and their menus share one entity: the view
+  shown, the one popover open at a time, the keyboard going back where it came from, and the
+  edits shown at once all stay the table's, with one host and no second object for the host to
+  place or keep in step. A host that draws its own tabs leaves it off and calls `set_view`, and
+  can still open the same menus (`open_add_view_menu`, `open_view_menu(view_id, ViewMenu::..)`),
+  which then hang from the view's top left.
+- **Tabs.** The views in their `order`, each with its type's icon, the shown one marked (a line
+  under it, a chevron) and scrolled into view; past the bar's width they scroll sideways while +
+  and the settings stay put. Pressing a tab shows its view (`set_view`); the table keeps which
+  view is shown, so the host needn't store it, and `TableHost::view_shown` tells a host that wants
+  to remember it. Pressing the shown view's tab, or right-clicking any tab, opens its menu.
+- **Adding.** + opens a field for the name over the types: Table, Board and List (galleries
+  aren't drawn in v1). Typing names it, Up and Down move through the types while the field keeps
+  the keyboard, Enter or a press makes it; nothing typed names it for its type ("Board", then
+  "Board 2"). It's a `viewCreated` with a new id, an `order` after every view's
+  (`order::between`) and the type's defaults (no sort, filter or columns; a table shows every
+  property), and the new view is shown. A **board** groups by the first select property; with no
+  select it asks which property to group by (any multi-select, checkbox, person or date), and
+  with nothing that can group it says so (add one from a table first).
+- **A view's menu:**
+  - **Rename** opens a field with the name selected: Enter (or Save) is a `viewChanged`.
+  - **Change type** lists Table, Board and List: a `viewChanged` with the new type. A table or
+    list keeps its grouping; a board keeps one that can group, else takes the first select,
+    else asks, as + does.
+  - **View settings** (below).
+  - **Duplicate** is a `viewCreated`: a copy with a new id, named "Name copy", its `order`
+    between the view's and the next one's. The copy is shown.
+  - **Move left** and **Move right**, or dragging a tab onto another, is a `viewChanged` with the
+    view's new `order` between its new neighbours'; where they can't be put between (two the
+    same, an older scheme's), every view is renumbered (`order::spread`), a `viewChanged` each in
+    one batch.
+  - **Delete view** asks first, opening on Cancel: Delete view is a `viewDeleted`. The last view
+    can't be deleted. Deleting the view shown shows its neighbour (the next, else the one
+    before).
+- **View settings**, from a view's menu or the bar's settings button:
+  - **Group by** lists the properties that can group, the current one checked, and None for a
+    table or list (a board always groups). A pick is a `viewChanged` with `groupBy`, its folded
+    groups let go and its `groupDate` kept only for a date.
+  - **Date grouping**, while it groups by a date: Relative, Day, Week, Month or Year
+    (`groupDate`, absent for relative). Grouping by a date goes on to it.
+  - **Card properties** (a board) and **Properties** (a list) list the properties shown on cards
+    or lines, in order, then the hidden ones. A hidden one pressed is shown after the others; a
+    shown one opens its page, to hide it or move it up or down. Each is a `viewChanged` with
+    `cardProperties`.
+  - **Properties** (a table) opens the Properties menu the column headers have (Show and hide
+    properties).
+  - **Remove sorts** and **Clear filter**, while it sorts or filters, each a `viewChanged`.
+    Sorts and filters are made from the headers; the bar sums up the shown view's (its sort's
+    first property and how many more, its filter's property or how many rules), and pressing
+    either opens the settings.
+- **Limits** are kept in the menus, each refused with a note: no view past `views` (+ shows its
+  types but can't make one, and Duplicate is refused), names typed up to `name_chars` with a note
+  at the limit and an empty name refused, and in a column's menu no sort added past `sorts`
+  (Shift-click, Shift-Enter).
+- **Keys.** Up from a table's or list's top line, or a board's top card, goes to the shown
+  view's tab (`TableView::focus_view_bar` does too). In the bar Left and Right move along the
+  tabs, Enter shows the focused one (or opens the shown one's menu), ⌥↓ opens its menu, Tab
+  reaches +, the sort and filter summary and the settings, and Down or Escape goes back to the
+  view. The menus are driven as the property menus are (Up, Down, Home, End, Enter, Escape, Back
+  on every page), and a menu opened from the bar gives the keyboard back to it when it closes.
+- **Touch.** With `TableTheme::with_touch(true)` tabs, +, the summaries and the settings button
+  are 44 points tall (+ and the settings 44 wide), as is every menu entry and field.
+- **Pages, not submenus**, as for properties: gpui-core has no submenu yet, so a view's menu is
+  one popover whose content changes page by page.
 
 ## Databases and rows are docs
 
@@ -683,6 +764,13 @@ How the host writes them to the server:
     deleting it): its `propertyChanged` (or `propertyDeleted`) and the other side's
     `propertyDeleted`.
   - Deleting one: `propertyDeleted`.
+- **Views changed from the bar** ([Changing views](#changing-views)):
+  - Adding one, or duplicating one: `viewCreated` with the whole view.
+  - Renaming, changing type, grouping, `groupDate`, card properties, removing sorts, clearing
+    the filter: one `viewChanged` with the whole view.
+  - Moving one (Move left or right, a dragged tab): `viewChanged` with its new `order`, or a
+    `viewChanged` for every view renumbered, in one batch.
+  - Deleting one: `viewDeleted`.
 - **A new option** made in a select's or multi-select's picker (Create “text”) is a
   `propertyChanged` with the whole property, the new option after the others (a new id, the
   typed name cut to its limit, the `default` colour), then the row's `rowValueChanged` naming
@@ -811,6 +899,8 @@ The host is the app around the views. It:
   sizes and row heights, scaled by the window's rem, as gpui-chatwidgets' `CardTheme` does.
 - **Writes both sides of relations** in one batch, with `relation::back_edits`, and both
   databases' properties for a two-way relation made or unmade from a table.
+- **May remember the view each person had open**, from `TableHost::view_shown`, and show it
+  next time with `with_view`.
 - **Lists the databases a relation can point at**, with their properties
   (`TableHost::databases`), for the relation menu and a two-way relation's other side.
 - **Checks agents' writes** against `Limits`.
@@ -875,7 +965,8 @@ nothing draws while nothing changes.
 - **No text overflows its cell** at any width: cells, headers, group headers, menus and cards
   end in an ellipsis, and a list's values drop off. A headless Core Text test, as
   gpui-chatwidgets has, checks every cell type (and a board's cards and a list's lines, with
-  every property on them) with the worst text at 360, 700 and 1400 wide.
+  every property on them, and the bar of views' tabs and menus) with the worst text at 360, 700
+  and 1400 wide.
 
 ## iOS and touch
 
@@ -883,7 +974,8 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
 0.3.12). The crate builds for `aarch64-apple-ios-sim`, and CI checks it.
 
 - Every control is at least 44 points on touch (in the table view, `TableTheme::with_touch`): cell targets, header menus, the Open button,
-  group headers and column resize handles (whose visible line stays thin).
+  group headers, column resize handles (whose visible line stays thin), and the bar of views'
+  tabs, + and settings.
 - Nothing is hover-only. What a pointer finds by hovering (the Open button, a column's menu, a
   card's handle) is a tap away on touch.
 - A tap selects a cell and a second tap edits it: a typed value's field takes the focus, so the
@@ -962,13 +1054,24 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   kinds; a two-way relation made in both databases at once and one turned two-way with its rows
   written back; deleting after a confirm (a two-way relation's other side too); the title
   refused; every limit refused with a note; 44-point targets on touch.
+- `tests/views.rs`: views changed from the bar: switching tabs (`view_shown` told), + making a
+  table, a board (grouped by the first select) and a list, each shown, named for its type when
+  nothing's typed; a board asking what to group by with no select, and saying why with nothing to
+  group by; renaming (an empty name refused), duplicating (after it, shown), changing type,
+  deleting after a confirm (its neighbour shown) and never the last; moving by the menu and by
+  dragging tabs, and renumbering keys that can't be put between; grouping, date buckets, card
+  and line properties shown, hidden and ordered, a table's Properties menu; the sort and filter
+  summary; every limit refused with a note; the keyboard (Up to the bar, Left, Right, Enter, ⌥↓,
+  Down back, the + menu's field); 44-point targets on touch.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu (the property
   menus too: the + menu, options, an option's page, number format, relation, delete, rename)
   at 360, 700 and 1400 wide (and in each typed value's field open in place, which stays in its cell, a text
   value's in the window), columns at their widths and their narrowest, on a board's cards, columns and
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
-  (grouped or not, focused, with a finger's sizes, and the worst valid icons), laid out with
-  Core Text; no glyph leaves its place.
+  (grouped or not, focused, with a finger's sizes, and the worst valid icons), and in the bar of
+  views and its menus (the + menu, a view's menu, its settings, grouping, type, delete, card
+  properties and rename, by a table, a board and a list, with a finger's sizes too), laid out
+  with Core Text; no glyph leaves its place.
 - `tests/fields.rs`: the fields values are typed in, in place, laid out with Core Text: typing
   stops at a value's limit (counted in characters, a title's, an email's, a filter value's), a
   paste is cut to fit, a value already over its limit opens whole and commits cut, a host's

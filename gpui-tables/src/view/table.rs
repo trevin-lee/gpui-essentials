@@ -58,6 +58,8 @@ pub(crate) enum Action {
     ClearValue,
     /// Something done to a property: its pages, and the edits they make.
     Prop(super::properties::PropAction),
+    /// Something done to a view: its pages, and the edits they make.
+    View(super::views::ViewAction),
 }
 
 /// One entry of a menu or picker.
@@ -155,6 +157,23 @@ pub(crate) enum Popover {
         property_id: String,
         page: super::properties::Page,
     },
+    /// The bar's +: a new view's name and type.
+    AddView,
+    /// A new board's group, asked for when the database has no select.
+    NewBoard,
+    /// A page of a view's menu: rename, type, settings, delete, ...
+    View {
+        view_id: String,
+        page: super::views::ViewPage,
+        anchor: super::views::ViewAnchor,
+    },
+}
+
+impl Popover {
+    /// Whether it's one of the bar's menus, drawn over the bar rather than in the table.
+    pub(crate) fn is_view_menu(&self) -> bool {
+        matches!(self, Self::AddView | Self::NewBoard | Self::View { .. })
+    }
 }
 
 /// A typed value asked for: of the host's field, or (when the host hands it back) of the
@@ -291,6 +310,13 @@ pub struct TableView {
     pub(crate) new_relation: Option<super::properties::NewRelation>,
     /// A property just added, whose column is scrolled into view once the host hands it back.
     pub(crate) pending_column: Option<String>,
+    /// The bar of views, when it's drawn.
+    pub(crate) bar: super::views::Bar,
+    /// The type highlighted in the add-view menu (a place in `views::VIEW_TYPES`), and a count
+    /// of its moves, so its list draws anew with the highlight there.
+    pub(crate) view_kind: (usize, u64),
+    /// A board being added that waits for what it groups by.
+    pub(crate) new_view: Option<super::views::NewView>,
 }
 
 impl Focusable for TableView {
@@ -338,6 +364,9 @@ impl TableView {
             add_kind: (0, 0),
             new_relation: None,
             pending_column: None,
+            bar: super::views::Bar::default(),
+            view_kind: (0, 0),
+            new_view: None,
         }
     }
 
@@ -706,9 +735,13 @@ impl TableView {
         }
         // A property's page whose property is gone closes; a property just added has its
         // column scrolled into view.
-        if let Some(Popover::Property { property_id, .. }) = &self.popover
-            && fields.property(property_id).is_none()
-        {
+        // A view's menu whose view is gone closes too.
+        let gone = match &self.popover {
+            Some(Popover::Property { property_id, .. }) => fields.property(property_id).is_none(),
+            Some(Popover::View { view_id, .. }) => fields.view(view_id).is_none(),
+            _ => false,
+        };
+        if gone {
             self.popover = None;
             self.close_property_menu();
         }
@@ -1512,6 +1545,7 @@ impl TableView {
                 out
             }
             Some(Popover::Property { .. } | Popover::AddRelation) => self.property_entries(),
+            Some(Popover::View { .. } | Popover::NewBoard) => self.view_entries(),
             Some(Popover::Columns) => {
                 let shown: Vec<&str> = self
                     .shown
@@ -1777,6 +1811,10 @@ impl TableView {
             self.activate_property(a, window, cx);
             return;
         }
+        if let Action::View(a) = action {
+            self.activate_view(a, window, cx);
+            return;
+        }
         let Some(fields) = self.database.database.clone() else {
             return;
         };
@@ -1802,6 +1840,17 @@ impl TableView {
         match action {
             Action::Sort(direction) => {
                 if let Some((_, pid)) = &header_property {
+                    // A sort added past the limit is refused, the menu staying open to say so.
+                    if add
+                        && view.sort.len() >= limits.sorts
+                        && !view.sort.iter().any(|s| s.property_id == *pid)
+                    {
+                        self.refuse(
+                            format!("A view sorts by at most {} properties", limits.sorts),
+                            cx,
+                        );
+                        return;
+                    }
                     let v = ops::sort(&view, pid, direction, add, &limits);
                     self.change_view(v, window, cx);
                 }
@@ -1918,7 +1967,7 @@ impl TableView {
                     self.emit_edits(edits, window, cx);
                 }
             }
-            Action::Prop(_) => {}
+            Action::Prop(_) | Action::View(_) => {}
             Action::ClearValue => {
                 if let Some((row, p)) = self.picker_target() {
                     if p.kind == PropertyType::Relation {

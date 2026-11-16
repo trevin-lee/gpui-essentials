@@ -4,10 +4,11 @@
 //! are laid out with Core Text (as on screen) in windows 360, 700 and 1400 wide, with the
 //! columns at their widths and at their narrowest, grouped and not, with a menu and a picker
 //! open, and with each typed value's field open in place; and on a board's cards and a list's
-//! lines, with every property on them. Any glyph or icon drawn past what clips it, past the table
+//! lines, with every property on them; and in the bar of views and its menus, with the views'
+//! names at their worst, by a table, a board and a list, with a finger's sizes too. Any glyph or icon drawn past what clips it, past the table
 //! or past the window fails the test with where it is. The places a glyph may cross its clip are
-//! the edges of the strip the columns after the title scroll in, where they're cut off until
-//! scrolled to, and the edges of a field being typed in, whose text scrolls in it.
+//! the edges of the strip the columns after the title scroll in (and the strip the bar's tabs
+//! scroll in), where they're cut off until scrolled to, and the edges of a field being typed in, whose text scrolls in it.
 
 #![cfg(all(target_os = "macos", feature = "gpui"))]
 
@@ -156,6 +157,8 @@ fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> 
     // The columns after the title scroll sideways in a strip that cuts them off at its edges
     // (a board's columns scroll in the board itself).
     let strip = cx.debug_bounds("strip").unwrap_or(table);
+    // The bar of views' tabs scroll sideways too, cut off at the edges of their strip.
+    let tabs = cx.debug_bounds("view-tabs");
     cx.update(|window, _| {
         let scale = window.scale_factor();
         let width = f32::from(window.viewport_size().width) * scale;
@@ -205,10 +208,16 @@ fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> 
                 m.origin.x.as_f32() + m.size.width.as_f32(),
             );
             let in_field = field.is_some_and(|(l, r)| clip_left >= l && clip_right <= r);
+            let at_tabs = |x: f32, edge: fn(&Bounds<Pixels>) -> Pixels| {
+                tabs.is_some_and(|t| (x - f32::from(edge(&t)) * scale).abs() <= scale)
+            };
             let cut_at_edge = (clip_right - right_edge).abs() <= scale
                 || (clip_right - strip_right).abs() <= scale
+                || at_tabs(clip_right, Bounds::right)
                 || in_field;
-            let cut_at_left = (clip_left - strip_left).abs() <= scale || in_field;
+            let cut_at_left = (clip_left - strip_left).abs() <= scale
+                || at_tabs(clip_left, Bounds::left)
+                || in_field;
             let past_clip = (left < clip_left - slack && !cut_at_left)
                 || (right > clip_right + slack && !cut_at_edge);
             // What a clip cuts off isn't drawn: past the table or the window is what shows.
@@ -590,6 +599,128 @@ fn no_line_or_group_header_of_a_list_lets_its_text_out() {
 
 /// A text that can't wrap, running out of a box too narrow for it, is found; the same text
 /// truncated isn't.
+/// The People database at its worst, with its views' names at their worst too.
+fn hostile_views() -> (Doc, Vec<Doc>) {
+    let (mut db, rows) = hostile();
+    for v in &mut db.database.as_mut().unwrap().views {
+        v.name = format!("{} {}", v.name, worst());
+    }
+    (db, rows)
+}
+
+#[test]
+fn no_view_tab_or_view_menu_lets_its_text_out() {
+    let mut found = Vec::new();
+    for width in [360., 700., 1400.] {
+        for touch in [false, true] {
+            // A table, a board and a list.
+            for name in ["All people", "Pipeline", "Follow up"] {
+                let mut app = app_with_text();
+                let host = host();
+                if touch {
+                    let t = host.theme.borrow().clone().with_touch(true);
+                    *host.theme.borrow_mut() = t;
+                }
+                let (db, rows) = hostile_views();
+                let view = view_id(&db, &format!("{name} {}", worst()));
+                let (table, cx) = open_with(
+                    &mut app,
+                    &host,
+                    db,
+                    rows,
+                    Some(&view),
+                    size(px(width), px(900.)),
+                );
+                table.update(cx, |t, cx| t.set_view_bar(true, cx));
+                draw(cx);
+                let case = format!(
+                    "{width} wide{}, {}",
+                    if touch { ", touch" } else { "" },
+                    table.read_with(cx, |t, _| t.view().unwrap().kind.to_string())
+                );
+                assert!(drawn(cx, "view-bar"), "{case}: the bar");
+                let bar = rect(cx, "view-bar");
+                let window = cx.update(|window, _| window.viewport_size());
+                if bar.right() > window.width + px(1.) {
+                    found.push(format!("{case}: the bar is {bar:?}"));
+                }
+                for c in ["add-view", "view-settings"] {
+                    let b = rect(cx, c);
+                    if b.right() > bar.right() + px(1.) || b.left() < bar.left() {
+                        found.push(format!("{case}: {c} at {b:?} leaves the bar {bar:?}"));
+                    }
+                }
+                for o in overflows(cx) {
+                    found.push(format!("{case}: {o}"));
+                }
+                // The + menu with the worst name typed.
+                cx.update(|window, cx| table.update(cx, |t, cx| t.open_add_view_menu(window, cx)));
+                draw(cx);
+                type_text(cx, &worst());
+                let field = rect(cx, "menu-field");
+                for o in overflows_with(cx, Some(field)) {
+                    found.push(format!("{case}, the + menu open: {o}"));
+                }
+                keys(cx, "escape");
+                // The view's menu and its pages.
+                let pages: [&[&str]; 6] = [
+                    &[],
+                    &["menu-item-View settings"],
+                    &["menu-item-View settings", "menu-item-Group by"],
+                    &["menu-item-Change type"],
+                    &["menu-item-Delete view"],
+                    &["menu-item-View settings", "menu-item-Card properties"],
+                ];
+                for steps in pages {
+                    cx.update(|window, cx| {
+                        table.update(cx, |t, cx| {
+                            t.open_view_menu(&view, gpui_tables::view::ViewMenu::Menu, window, cx)
+                        })
+                    });
+                    draw(cx);
+                    let mut ok = true;
+                    for s in steps {
+                        if !drawn(cx, *s) {
+                            ok = false;
+                            break;
+                        }
+                        click(cx, *s);
+                    }
+                    if ok {
+                        for o in overflows(cx) {
+                            found.push(format!("{case}, {steps:?} open: {o}"));
+                        }
+                    }
+                    keys(cx, "escape");
+                }
+                cx.update(|window, cx| {
+                    table.update(cx, |t, cx| {
+                        t.open_view_menu(&view, gpui_tables::view::ViewMenu::Rename, window, cx)
+                    })
+                });
+                draw(cx);
+                let field = rect(cx, "menu-field");
+                for o in overflows_with(cx, Some(field)) {
+                    found.push(format!("{case}, the rename field open: {o}"));
+                }
+                keys(cx, "escape");
+            }
+        }
+    }
+    found.dedup();
+    assert!(
+        found.is_empty(),
+        "{} glyphs past their place:\n{}",
+        found.len(),
+        found
+            .iter()
+            .take(60)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
 #[test]
 fn the_check_finds_text_past_its_box() {
     struct Boxed(bool, Entity<TableView>);
