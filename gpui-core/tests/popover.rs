@@ -28,6 +28,8 @@ struct Panel {
     /// One long row instead of the short ones.
     long: bool,
     take_focus: bool,
+    /// Stay open when the trigger scrolls away.
+    stay: bool,
     return_to: Option<FocusHandle>,
     /// Hang from this point instead of a trigger.
     point: Option<Point<Pixels>>,
@@ -45,6 +47,7 @@ impl Render for Panel {
         let mut popover = Popover::new("pop")
             .open(self.open)
             .take_focus(self.take_focus)
+            .close_when_scrolled_away(!self.stay)
             .on_dismiss(cx.listener(move |this, _, _, cx| {
                 dismissed.set(dismissed.get() + 1);
                 this.open = false;
@@ -136,6 +139,7 @@ fn open_with(
                 width: Some(px(200.)),
                 long: false,
                 take_focus: true,
+                stay: false,
                 return_to: None,
                 point: None,
                 trigger: cx.focus_handle(),
@@ -421,4 +425,33 @@ fn in_a_narrow_window_it_stays_inside(cx: &mut TestAppContext) {
     let p = popover(o.vcx).expect("open");
     assert!(p.left() >= px(0.) && p.right() <= px(160.), "{p:?}");
     assert!(p.bottom() <= px(300.), "{p:?}");
+}
+
+#[gpui::test]
+fn told_to_stay_it_stays_at_the_edge_when_its_trigger_scrolls_away(cx: &mut TestAppContext) {
+    let o = open_with(cx, Place::TopLeft, |p| {
+        p.stay = true;
+        p.rows = 40;
+    });
+    let t = bounds(o.vcx, "trigger");
+    click(o.vcx, t.center());
+    o.panel.update(o.vcx, |p, cx| {
+        p.scroll.set_offset(point(px(0.), px(-500.)));
+        cx.notify();
+    });
+    o.vcx.run_until_parked();
+    assert_eq!(o.dismissed.get(), 0);
+    let p = popover(o.vcx).expect("still open");
+    assert!(p.top() >= px(0.) && p.bottom() <= px(300.), "{p:?}");
+    // Back in view, it hangs from the trigger again.
+    o.panel.update(o.vcx, |p, cx| {
+        p.scroll.set_offset(point(px(0.), px(0.)));
+        cx.notify();
+    });
+    o.vcx.run_until_parked();
+    let p = popover(o.vcx).unwrap();
+    assert!(
+        p.top() >= t.bottom() && p.top() <= t.bottom() + px(8.),
+        "{p:?} {t:?}"
+    );
 }
