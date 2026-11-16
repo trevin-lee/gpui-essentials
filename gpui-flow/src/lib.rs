@@ -44,8 +44,8 @@ mod types;
 pub use flow::{
     AddChild, AddSibling, Cancel, CanvasTransform, ContextTarget, DeleteSelected, EdgeDefaults,
     FitView, Flow, FlowEvent, FlowOptions, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar,
-    MoveRight, MoveRightFar, MoveUp, MoveUpFar, PanelPosition, PointerMode, SelectAll, ZoomIn,
-    ZoomOut, ZoomReset, bind_keys,
+    MoveRight, MoveRightFar, MoveUp, MoveUpFar, OpenLink, PanelPosition, PointerMode, SelectAll,
+    ZoomIn, ZoomOut, ZoomReset, bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, group_node, labeled_node,

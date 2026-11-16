@@ -297,6 +297,10 @@ pub struct Node {
     /// In a tree layout (a mind map), whether what's under the node is folded away.
     #[serde(default, skip_serializing_if = "is_false")]
     pub collapsed: bool,
+    /// What the node links to, as the host names it (a document's id, say). The flow shows a
+    /// link button and tells the host when it's pressed; it never opens anything itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<SharedString>,
     /// Fields of React Flow's (`style`, `className`, `measured`, …) and any of the host's that
     /// this crate doesn't read. They're kept so a saved flow loads and saves without loss.
     #[serde(flatten)]
@@ -361,6 +365,7 @@ impl Node {
             extent: None,
             z_index: 0,
             collapsed: false,
+            link: None,
             extra: Map::new(),
         }
     }
@@ -445,6 +450,12 @@ impl Node {
     /// Folds away what's under the node in a tree layout.
     pub fn collapsed(mut self, on: bool) -> Self {
         self.collapsed = on;
+        self
+    }
+
+    /// Links the node to something of the host's, by its id.
+    pub fn link(mut self, link: impl Into<SharedString>) -> Self {
+        self.link = Some(link.into());
         self
     }
 

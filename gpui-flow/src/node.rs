@@ -281,6 +281,8 @@ pub struct NodeContext {
     /// In a tree layout, how many children the node has, and whether they're folded away.
     pub children: usize,
     pub collapsed: bool,
+    /// What the node links to, if anything.
+    pub link: Option<SharedString>,
 }
 
 impl NodeContext {
@@ -289,6 +291,34 @@ impl NodeContext {
     /// renderer is given instead.
     pub fn flow(&self) -> &WeakEntity<Flow> {
         &self.flow
+    }
+
+    /// A small button that asks the host to open the node's link (a `FlowEvent::OpenLink`),
+    /// or nothing when the node has none. The built-in kinds show it after their label; add
+    /// it to a kind of your own wherever it fits.
+    pub fn link_button(&self) -> Option<AnyElement> {
+        self.link.as_ref()?;
+        let (flow, id) = (self.flow.clone(), self.id.clone());
+        Some(
+            div()
+                .id(SharedString::from(format!("link-{}", self.id)))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(units(18.))
+                .rounded(units(4.))
+                .text_size(self.font_size(11.))
+                .text_color(self.colors.selected)
+                .cursor(CursorStyle::PointingHand)
+                .hover(|s| s.bg(self.colors.panel_hover))
+                .nodrag()
+                .child("↗")
+                .on_click(move |_, _, cx| {
+                    flow.update(cx, |flow, cx| flow.open_link(&id, cx)).ok();
+                })
+                .into_any_element(),
+        )
     }
 
     /// The size for text of `n` flow units in this node: use it rather than [`units`] for
@@ -660,7 +690,9 @@ pub fn labeled_node(node: &Node, ctx: &NodeContext, target: bool, source: bool) 
             None => d.w(units(150.)),
         })
         .when(node.height.is_some(), |d| d.h_full())
+        .gap(units(6.))
         .child(node.label_text())
+        .children(ctx.link_button())
         .when(target, |d| {
             d.child(ctx.handle(HandleKind::Target, node.target_position))
         })
@@ -709,7 +741,11 @@ pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .bg(ctx.colors.node)
         .text_size(ctx.font_size(if root { 16. } else { 13. }))
         .when(root, |d| d.font_weight(FontWeight::SEMIBOLD))
+        .flex()
+        .items_center()
+        .gap(units(6.))
         .child(node.label_text())
+        .children(ctx.link_button())
         .into_any_element()
 }
 
