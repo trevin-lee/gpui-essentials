@@ -11,7 +11,7 @@ use gpui::*;
 
 use crate::geometry::{EdgePath, distance_to_polyline, edge_path, longest_middle, rounded_path};
 use crate::graph;
-use crate::json::{self, DocLayout, Document};
+use crate::json::{self, DocLayout, Document, Op};
 use crate::node::{
     EdgeLine, FRAME_BORDER, FRAME_TITLE, Measured, NodeContext, NodeInput as _, NodeRenderer,
     Reach, Shared, TouchTarget, Zoomed, built_in, measure_node, touch_target, units,
@@ -371,6 +371,13 @@ pub enum FlowEvent {
     },
     /// The viewport moved or zoomed.
     ViewportChange(Viewport),
+    /// The nodes, edges or frames changed: what changed, by id, for the host to store (see
+    /// [`json::Op`]). One batch for each edit, sent when it's settled: a drag of many nodes is
+    /// one batch, at its end. Edits made through the flow's methods (`update_node`,
+    /// `set_nodes`, `connect`, …) are sent as well; loading (`restore`, `set_document`) and
+    /// applying edits from elsewhere ([`Flow::apply`]) send nothing. What's selected and where
+    /// the flow is in view aren't edits.
+    Edits(Vec<Op>),
     /// Someone pressed a node's link button, or ⌘↩ with it selected: the host opens what
     /// `link` names, if it will. The flow never opens anything itself.
     OpenLink {
@@ -598,6 +605,14 @@ pub struct Flow {
     /// and a newer writer's fields. They're written back with the flow's document.
     doc_layout: Option<serde_json::Value>,
     doc_extra: serde_json::Map<String, serde_json::Value>,
+    /// The nodes and edges as last stored (sent as edits, applied, or loaded), unselected:
+    /// what an edit is told against.
+    stored_nodes: HashMap<NodeId, Node>,
+    stored_edges: HashMap<EdgeId, Edge>,
+    /// Whether the nodes or edges may have changed since the last look for edits; what only
+    /// pans, zooms, hovers or selects leaves it alone, so those cost no look.
+    edited: bool,
+    _settle: Subscription,
 }
 
 impl EventEmitter<FlowEvent> for Flow {}
@@ -646,6 +661,60 @@ fn sanitize_edge(e: &mut Edge) {
         if !(marker.size.is_finite() && marker.size > 0.) {
             marker.size = Marker::arrow().size;
         }
+    }
+}
+
+/// Items by id as stored: unselected.
+fn stored<T: Clone + Stored>(items: &[T]) -> HashMap<SharedString, T> {
+    items
+        .iter()
+        .map(|i| {
+            let mut i = i.clone();
+            i.deselect();
+            (i.key().clone(), i)
+        })
+        .collect()
+}
+
+/// A node or an edge, as the stored copy sees it.
+trait Stored {
+    fn key(&self) -> &SharedString;
+    fn deselect(&mut self);
+    fn is_selected(&self) -> bool;
+}
+
+impl Stored for Node {
+    fn key(&self) -> &SharedString {
+        &self.id
+    }
+    fn deselect(&mut self) {
+        self.selected = false;
+    }
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+impl Stored for Edge {
+    fn key(&self) -> &SharedString {
+        &self.id
+    }
+    fn deselect(&mut self) {
+        self.selected = false;
+    }
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+/// Whether `now` is `was` (stored, so unselected) apart from its selection.
+fn same_stored<T: Clone + PartialEq + Stored>(was: &T, now: &T) -> bool {
+    if now.is_selected() {
+        let mut now = now.clone();
+        now.deselect();
+        was == &now
+    } else {
+        was == now
     }
 }
 
@@ -705,6 +774,10 @@ impl Flow {
             new_node: None,
             doc_layout: None,
             doc_extra: serde_json::Map::new(),
+            stored_nodes: HashMap::new(),
+            stored_edges: HashMap::new(),
+            edited: false,
+            _settle: cx.observe_self(Self::settle),
         }
     }
 
@@ -715,6 +788,7 @@ impl Flow {
         self.nodes = nodes;
         self.reindex();
         self.last_selection = (self.selected_nodes(), self.selected_edges());
+        self.stored_nodes = stored(&self.nodes);
         self
     }
 
@@ -722,6 +796,7 @@ impl Flow {
         edges.iter_mut().for_each(sanitize_edge);
         self.edges = edges;
         self.last_selection = (self.selected_nodes(), self.selected_edges());
+        self.stored_edges = stored(&self.edges);
         self
     }
 
@@ -1160,6 +1235,7 @@ impl Flow {
 
     /// Folds away what's under a node in a tree layout, or shows it again.
     pub fn set_collapsed(&mut self, id: &str, collapsed: bool, cx: &mut Context<Self>) {
+        self.edited = true;
         let Some(i) = self.index_of(id) else {
             return;
         };
@@ -1326,6 +1402,7 @@ impl Flow {
         after: Option<NodeId>,
         cx: &mut Context<Self>,
     ) {
+        self.edited = true;
         let parent_node = parent.as_ref().and_then(|p| self.node(p)).cloned();
         let mut node = match &self.new_node {
             Some(make) => make(parent_node.as_ref(), self),
@@ -1472,6 +1549,7 @@ impl Flow {
 
     /// Makes `node` a child of `parent` in the tree: the edge into it now comes from there.
     fn reparent(&mut self, node: &NodeId, parent: &NodeId, cx: &mut Context<Self>) {
+        self.edited = true;
         if node == parent || self.tree.parent.get(node) == Some(parent) {
             return;
         }
@@ -1569,6 +1647,7 @@ impl Flow {
     // Changing a flow.
 
     pub fn set_nodes(&mut self, mut nodes: Vec<Node>, cx: &mut Context<Self>) {
+        self.edited = true;
         nodes.iter_mut().for_each(sanitize_node);
         let old = std::mem::replace(&mut self.nodes, nodes);
         self.reindex();
@@ -1579,6 +1658,7 @@ impl Flow {
     }
 
     pub fn set_edges(&mut self, mut edges: Vec<Edge>, cx: &mut Context<Self>) {
+        self.edited = true;
         edges.iter_mut().for_each(sanitize_edge);
         self.edges = edges;
         self.selection_changed(cx);
@@ -1586,6 +1666,7 @@ impl Flow {
     }
 
     pub fn add_node(&mut self, mut node: Node, cx: &mut Context<Self>) {
+        self.edited = true;
         sanitize_node(&mut node);
         self.nodes.push(node);
         self.reindex();
@@ -1595,6 +1676,7 @@ impl Flow {
 
     /// Adds the edge unless one already joins the same two handles; says whether it did.
     pub fn add_edge(&mut self, mut edge: Edge, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         sanitize_edge(&mut edge);
         let added = graph::add_edge(edge, &mut self.edges);
         self.selection_changed(cx);
@@ -1609,6 +1691,7 @@ impl Flow {
         change: impl FnOnce(&mut Node),
         cx: &mut Context<Self>,
     ) -> bool {
+        self.edited = true;
         let Some(i) = self.index_of(id) else {
             return false;
         };
@@ -1633,6 +1716,7 @@ impl Flow {
         change: impl FnOnce(&mut Edge),
         cx: &mut Context<Self>,
     ) -> bool {
+        self.edited = true;
         let Some(edge) = self.edges.iter_mut().find(|e| e.id.as_ref() == id) else {
             return false;
         };
@@ -1649,6 +1733,7 @@ impl Flow {
         ids: &[NodeId],
         cx: &mut Context<Self>,
     ) -> (Vec<Node>, Vec<Edge>) {
+        self.edited = true;
         let mut gone: HashSet<NodeId> = ids.iter().cloned().collect();
         // Children go with their parents, however deep.
         loop {
@@ -1678,6 +1763,7 @@ impl Flow {
     }
 
     pub fn remove_edges(&mut self, ids: &[EdgeId], cx: &mut Context<Self>) -> Vec<Edge> {
+        self.edited = true;
         let (removed, kept): (Vec<Edge>, Vec<Edge>) = std::mem::take(&mut self.edges)
             .into_iter()
             .partition(|e| ids.contains(&e.id));
@@ -1699,6 +1785,8 @@ impl Flow {
         let old = std::mem::replace(&mut self.nodes, nodes);
         self.reindex();
         self.edges = edges;
+        self.stored_nodes = stored(&self.nodes);
+        self.stored_edges = stored(&self.edges);
         self.transition = None;
         self.drag = None;
         self.forget_changed(&old);
@@ -1706,6 +1794,269 @@ impl Flow {
         self.selection_changed(cx);
         let viewport = self.sane_viewport(viewport);
         self.move_viewport(viewport, cx);
+        cx.notify();
+    }
+
+    /// Once an edit has settled (it isn't in the middle of a drag or a resize), tells the host
+    /// what it changed.
+    fn settle(&mut self, cx: &mut Context<Self>) {
+        // Debug builds always look, to catch a change that didn't mark the flow edited.
+        if !self.edited && !cfg!(debug_assertions) {
+            return;
+        }
+        if matches!(self.drag, Some(Drag::Nodes { .. } | Drag::Resize { .. })) {
+            return;
+        }
+        let ops = self.unsent();
+        debug_assert!(
+            self.edited || ops.is_empty(),
+            "a change didn't mark the flow edited: {ops:?}"
+        );
+        self.edited = false;
+        if ops.is_empty() {
+            return;
+        }
+        for op in &ops {
+            match op {
+                Op::AddNode { node } => {
+                    self.stored_nodes.insert(node.id.clone(), (**node).clone());
+                }
+                Op::PatchNode { id, patch } => {
+                    if let Some(was) = self.stored_nodes.get_mut(id)
+                        && let Some(now) = json::patched(was, patch)
+                    {
+                        *was = now;
+                    }
+                }
+                Op::RemoveNode { id } => {
+                    self.stored_nodes.remove(id);
+                }
+                Op::AddEdge { edge } => {
+                    self.stored_edges.insert(edge.id.clone(), (**edge).clone());
+                }
+                Op::PatchEdge { id, patch } => {
+                    if let Some(was) = self.stored_edges.get_mut(id)
+                        && let Some(now) = json::patched(was, patch)
+                    {
+                        *was = now;
+                    }
+                }
+                Op::RemoveEdge { id } => {
+                    self.stored_edges.remove(id);
+                }
+            }
+        }
+        cx.emit(FlowEvent::Edits(ops));
+    }
+
+    /// What changed since the nodes and edges were last stored: adds, then patches, then
+    /// removals, nodes before edges. In a tree layout, where a node under a root is is the
+    /// layout's, not an edit.
+    fn unsent(&self) -> Vec<Op> {
+        let tree = self.tree_layout().is_some();
+        let placed = |n: &Node| tree && self.tree.parent.contains_key(&n.id);
+        let mut adds = Vec::new();
+        let mut patches = Vec::new();
+        let mut removes = Vec::new();
+        for node in &self.nodes {
+            let Some(was) = self.stored_nodes.get(&node.id) else {
+                let mut node = node.clone();
+                node.selected = false;
+                adds.push(Op::AddNode {
+                    node: Box::new(node),
+                });
+                continue;
+            };
+            let same = if placed(node) {
+                let mut now = node.clone();
+                now.position = was.position;
+                same_stored(was, &now)
+            } else {
+                same_stored(was, node)
+            };
+            if !same {
+                let mut patch = json::diff_stored(was, node);
+                if placed(node) {
+                    patch.remove("position");
+                }
+                if !patch.is_empty() {
+                    patches.push(Op::PatchNode {
+                        id: node.id.clone(),
+                        patch,
+                    });
+                }
+            }
+        }
+        if self.stored_nodes.len() + adds.len() != self.nodes.len() {
+            let mut gone: Vec<&NodeId> = self
+                .stored_nodes
+                .keys()
+                .filter(|id| self.index_of(id).is_none())
+                .collect();
+            gone.sort();
+            removes.extend(gone.into_iter().map(|id| Op::RemoveNode { id: id.clone() }));
+        }
+        let mut edge_adds = 0;
+        for edge in &self.edges {
+            let Some(was) = self.stored_edges.get(&edge.id) else {
+                let mut edge = edge.clone();
+                edge.selected = false;
+                adds.push(Op::AddEdge {
+                    edge: Box::new(edge),
+                });
+                edge_adds += 1;
+                continue;
+            };
+            if !same_stored(was, edge) {
+                let patch = json::diff_stored(was, edge);
+                if !patch.is_empty() {
+                    patches.push(Op::PatchEdge {
+                        id: edge.id.clone(),
+                        patch,
+                    });
+                }
+            }
+        }
+        if self.stored_edges.len() + edge_adds != self.edges.len() {
+            let here: HashSet<&EdgeId> = self.edges.iter().map(|e| &e.id).collect();
+            let mut gone: Vec<&EdgeId> = self
+                .stored_edges
+                .keys()
+                .filter(|id| !here.contains(id))
+                .collect();
+            gone.sort();
+            // Edges go before the nodes they joined.
+            let edges_gone: Vec<Op> = gone
+                .into_iter()
+                .map(|id| Op::RemoveEdge { id: id.clone() })
+                .collect();
+            removes.splice(0..0, edges_gone);
+        }
+        adds.sort_by_key(|op| matches!(op, Op::AddEdge { .. }));
+        adds.extend(patches);
+        adds.extend(removes);
+        adds
+    }
+
+    /// Applies edits from elsewhere: another person's, an agent's, or the server's (see
+    /// [`json::Op`]). Nothing is sent back for them, and what's selected stays selected where
+    /// it's still there. An add of an id that's here replaces it, and a patch or removal of one
+    /// that isn't is skipped. A removal takes only what it names: the edges and children that
+    /// go with a node come as removals of their own.
+    pub fn apply(&mut self, ops: &[Op], cx: &mut Context<Self>) {
+        // Unsent edits of this flow's own stay unsent: the stored copies take the same ops.
+        let mut at: HashMap<NodeId, usize> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id.clone(), i))
+            .collect();
+        let mut edge_at: HashMap<EdgeId, usize> = self
+            .edges
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.id.clone(), i))
+            .collect();
+        let mut gone: HashSet<NodeId> = HashSet::new();
+        let mut edges_gone: HashSet<EdgeId> = HashSet::new();
+        let mut measured = self.shared.measured.borrow_mut();
+        for op in ops {
+            match op {
+                Op::AddNode { node } => {
+                    if !json::valid_id(&node.id) {
+                        continue;
+                    }
+                    let mut node = (**node).clone();
+                    sanitize_node(&mut node);
+                    node.selected = false;
+                    self.stored_nodes.insert(node.id.clone(), node.clone());
+                    measured.remove(&node.id);
+                    match at.get(&node.id) {
+                        Some(&i) => {
+                            node.selected = self.nodes[i].selected && !gone.contains(&node.id);
+                            gone.remove(&node.id);
+                            self.nodes[i] = node;
+                        }
+                        None => {
+                            at.insert(node.id.clone(), self.nodes.len());
+                            self.nodes.push(node);
+                        }
+                    }
+                }
+                Op::PatchNode { id, patch } => {
+                    if let Some(was) = self.stored_nodes.get_mut(id)
+                        && let Some(now) = json::patched(was, patch)
+                    {
+                        *was = now;
+                    }
+                    if let Some(&i) = at.get(id)
+                        && !gone.contains(id)
+                        && let Some(mut now) = json::patched(&self.nodes[i], patch)
+                    {
+                        sanitize_node(&mut now);
+                        self.nodes[i] = now;
+                        measured.remove(id);
+                    }
+                }
+                Op::RemoveNode { id } => {
+                    self.stored_nodes.remove(id);
+                    if at.contains_key(id) {
+                        gone.insert(id.clone());
+                        measured.remove(id);
+                    }
+                }
+                Op::AddEdge { edge } => {
+                    if !json::valid_id(&edge.id) {
+                        continue;
+                    }
+                    let mut edge = (**edge).clone();
+                    sanitize_edge(&mut edge);
+                    edge.selected = false;
+                    self.stored_edges.insert(edge.id.clone(), edge.clone());
+                    match edge_at.get(&edge.id) {
+                        Some(&i) => {
+                            edge.selected =
+                                self.edges[i].selected && !edges_gone.contains(&edge.id);
+                            edges_gone.remove(&edge.id);
+                            self.edges[i] = edge;
+                        }
+                        None => {
+                            edge_at.insert(edge.id.clone(), self.edges.len());
+                            self.edges.push(edge);
+                        }
+                    }
+                }
+                Op::PatchEdge { id, patch } => {
+                    if let Some(was) = self.stored_edges.get_mut(id)
+                        && let Some(now) = json::patched(was, patch)
+                    {
+                        *was = now;
+                    }
+                    if let Some(&i) = edge_at.get(id)
+                        && !edges_gone.contains(id)
+                        && let Some(mut now) = json::patched(&self.edges[i], patch)
+                    {
+                        sanitize_edge(&mut now);
+                        self.edges[i] = now;
+                    }
+                }
+                Op::RemoveEdge { id } => {
+                    self.stored_edges.remove(id);
+                    if edge_at.contains_key(id) {
+                        edges_gone.insert(id.clone());
+                    }
+                }
+            }
+        }
+        drop(measured);
+        if !gone.is_empty() {
+            self.nodes.retain(|n| !gone.contains(&n.id));
+        }
+        if !edges_gone.is_empty() {
+            self.edges.retain(|e| !edges_gone.contains(&e.id));
+        }
+        self.reindex();
+        self.selection_changed(cx);
         cx.notify();
     }
 
@@ -1735,6 +2086,7 @@ impl Flow {
     /// deleted stays where it is in the flow, no longer anyone's child. The flow's delete
     /// check can refuse. Says whether there was anything to delete.
     pub fn delete_selected(&mut self, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         let deletable = |n: &Node| n.deletable.unwrap_or(true);
         let mut gone: HashSet<NodeId> = self
             .nodes
@@ -1874,6 +2226,7 @@ impl Flow {
     /// subscribers. None when a node is missing, the flow's connection check refuses it, or the
     /// edge already exists.
     pub fn connect(&mut self, connection: Connection, cx: &mut Context<Self>) -> Option<Edge> {
+        self.edited = true;
         if self.node(&connection.source).is_none()
             || self.node(&connection.target).is_none()
             || !self.connection_allowed(&connection)
@@ -2641,6 +2994,7 @@ impl Flow {
     /// Moves a node into `parent` (out of any, for none), where it is in the flow, and tells
     /// the host.
     fn set_parent(&mut self, id: &NodeId, parent: Option<NodeId>, cx: &mut Context<Self>) {
+        self.edited = true;
         let (Some(at), Some(i)) = (self.absolute_position(id), self.index_of(id)) else {
             return;
         };
@@ -2667,6 +3021,7 @@ impl Flow {
     /// dragged wholly out of its frame leaves it, and a frame dropped over loose nodes takes in
     /// those wholly inside it.
     fn adopt(&mut self, dragged: &[NodeId], cx: &mut Context<Self>) {
+        self.edited = true;
         for id in dragged {
             let Some(node) = self.node(id) else {
                 continue;
@@ -2727,6 +3082,7 @@ impl Flow {
         title: impl Into<String>,
         cx: &mut Context<Self>,
     ) -> Option<NodeId> {
+        self.edited = true;
         let tops: Vec<NodeId> = self
             .nodes
             .iter()
@@ -2783,6 +3139,7 @@ impl Flow {
     /// Takes a frame away, leaving what was in it where it is, in the frame's own parent. Says
     /// whether `id` was a frame.
     pub fn unframe(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         let Some(frame) = self.node(id).filter(|n| is_frame(n)).cloned() else {
             return false;
         };
@@ -3174,6 +3531,7 @@ impl Flow {
     /// Puts every node with an extent inside it, as drawing would show it: a child saved
     /// outside its parent, or left outside when the parent shrank.
     fn enforce_extents(&mut self) {
+        self.edited = true;
         for i in 0..self.nodes.len() {
             if self.nodes[i].extent.is_none() {
                 continue;
@@ -3282,6 +3640,7 @@ impl Flow {
     }
 
     fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        self.edited = true;
         let Some(mut drag) = self.drag.take() else {
             return;
         };
@@ -3603,6 +3962,7 @@ impl Flow {
     /// Moves the selected nodes a step (four with `far`), as the arrow keys do: five points, or
     /// a grid square when snapping. Says whether anything moved.
     fn nudge(&mut self, dx: f32, dy: f32, far: bool, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         let snap = self.options.snap_to_grid;
         let (sx, sy) = if snap {
             self.options.snap_grid
@@ -3656,6 +4016,7 @@ impl Flow {
 
     /// Drops what's being dragged, putting back what it changed. Says whether anything was.
     fn cancel_drag(&mut self, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         self.guides.clear();
         match self.drag.take() {
             Some(Drag::Nodes { origins, moved, .. }) => {
