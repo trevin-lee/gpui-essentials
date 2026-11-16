@@ -8,6 +8,7 @@ together so they link one GPUI.
 | [gpui-blocks](gpui-blocks) | A Notion-like block editor: Markdown documents with a slash menu, drag handles, callouts, toggles and widget blocks |
 | [gpui-calendar](gpui-calendar) | Day, week and month calendar views with a time grid, drag to create, move and resize, and time zones |
 | [gpui-chatwidgets](gpui-chatwidgets) | Draws AI agents' [OpenUI](https://openui.com) cards (cards, tables, charts, forms, buttons) natively, with a parser that builds without GPUI |
+| [gpui-core](gpui-core) | The components the others build on (theme, root, buttons, inputs, markdown text), drawn in the host's theme; replacing GPUI Kit, in progress |
 | [gpui-flow](gpui-flow) | A node-and-edge editor in the manner of React Flow |
 
 Each folder has its own README with what the crate does, how to use it, its example window and
