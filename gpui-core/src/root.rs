@@ -2,8 +2,8 @@
 //! window's surface in the theme, and moves the focus with Tab and shift-Tab.
 
 use gpui::{
-    AnyView, App, Context, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _,
-    Render, Styled as _, Window, actions, div,
+    AnyView, App, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
+    ParentElement as _, Render, Styled as _, Window, actions, div,
 };
 
 use crate::theme::{ActiveTheme as _, Theme};
@@ -33,12 +33,22 @@ pub(crate) fn init(cx: &mut App) {
 /// and Tab and shift-Tab move the focus. It redraws when the theme changes, and only then.
 pub struct Root {
     view: AnyView,
+    focus: FocusHandle,
 }
 
 impl Root {
-    pub fn new(view: impl Into<AnyView>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Wraps `view`. If nothing in the window has the focus yet, the Root takes it, so the
+    /// first Tab has somewhere to start (with no focus at all, GPUI sends keys to no view).
+    pub fn new(view: impl Into<AnyView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe_global::<Theme>(|_, cx| cx.notify()).detach();
-        Self { view: view.into() }
+        let focus = cx.focus_handle();
+        if window.focused(cx).is_none() {
+            window.focus(&focus, cx);
+        }
+        Self {
+            view: view.into(),
+            focus,
+        }
     }
 
     /// The content.
@@ -54,6 +64,7 @@ impl Render for Root {
         div()
             .id("gpui-core-root")
             .key_context(CONTEXT)
+            .track_focus(&self.focus)
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
             .size_full()
