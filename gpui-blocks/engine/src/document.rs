@@ -12,7 +12,7 @@ use super::{
     step::DetachedBlock,
 };
 use crate::kind::ColumnAlign;
-use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode};
+use gpui_kit::base::text::MarkdownNode;
 
 /// Payload of an atomic block.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,8 +49,6 @@ pub(crate) struct EditorDocument {
     pub(crate) structure_dirty: bool,
     /// What the document was read with, for reading more (a paste, an insert).
     pub(crate) ext: Arc<super::extension::Extensions>,
-    /// The same, as GPUI Kit's renderer draws with.
-    pub(crate) extensions: Arc<MarkdownExtensions>,
     /// Per-block content revision, bumped for a block and all its ancestors
     /// by every step that touches it; absent means never edited. The view
     /// re-projects a top-level block only when its revision changes.
@@ -61,7 +59,6 @@ pub(crate) struct EditorDocument {
 impl EditorDocument {
     /// An empty document: a root holding one empty paragraph.
     pub(crate) fn empty(ext: Arc<super::extension::Extensions>) -> Self {
-        let extensions: Arc<MarkdownExtensions> = Arc::new((&*ext).into());
         let root = BlockId::next();
         let paragraph = BlockId::next();
         let mut blocks = HashMap::new();
@@ -88,7 +85,6 @@ impl EditorDocument {
             order: OrderIndex::default(),
             structure_dirty: true,
             ext,
-            extensions,
             block_revisions: HashMap::new(),
             edit_counter: 0,
         };
