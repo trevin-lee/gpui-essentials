@@ -12,11 +12,12 @@ use gpui::*;
 use crate::geometry::{distance_to_polyline, edge_path};
 use crate::graph;
 use crate::node::{
-    EdgeLine, Measured, NodeContext, NodeRenderer, Reach, Shared, TouchTarget, Zoomed, built_in,
-    measure_node, touch_target, units,
+    EdgeLine, Measured, NodeContext, NodeInput as _, NodeRenderer, Reach, Shared, TouchTarget,
+    Zoomed, built_in, measure_node, touch_target, units,
 };
 use crate::paint::{self, FlowBackground, Icon};
 use crate::theme::FlowColors;
+use crate::tree::{self, Layout, Tree};
 use crate::types::*;
 
 actions!(
@@ -39,6 +40,10 @@ actions!(
         MoveRight,
         MoveUp,
         MoveDown,
+        /// In a tree layout, adds a child to the selected node.
+        AddChild,
+        /// In a tree layout, adds a sibling after the selected node.
+        AddSibling,
         /// Moves the selected nodes four steps.
         MoveLeftFar,
         MoveRightFar,
@@ -70,6 +75,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", MoveRight, c),
         KeyBinding::new("up", MoveUp, c),
         KeyBinding::new("down", MoveDown, c),
+        KeyBinding::new("tab", AddChild, c),
+        KeyBinding::new("enter", AddSibling, c),
         KeyBinding::new("shift-left", MoveLeftFar, c),
         KeyBinding::new("shift-right", MoveRightFar, c),
         KeyBinding::new("shift-up", MoveUpFar, c),
@@ -138,6 +145,11 @@ pub struct FlowOptions {
     /// How large (in points) the area is that a finger can take a handle or a resizer's grip
     /// by, at least: Apple's 44 by default. A finger takes an edge from up to half that away.
     pub touch_target_size: f32,
+    /// Where nodes go: where they're put, or laid out as a tree read from the edges (a mind
+    /// map). In a tree, tab adds a child to the selected node and enter a sibling, the arrows
+    /// move the selection, a node dropped on another becomes its child, and delete takes a
+    /// node's subtree with it.
+    pub layout: Layout,
     /// How far (in points on screen) a pressed node must move before it counts as a drag.
     pub node_drag_threshold: f32,
     /// How long the viewport takes to get where the controls, a fit or a double click send it.
@@ -175,6 +187,7 @@ impl Default for FlowOptions {
             simplify_below_zoom: 0.3,
             pointer_mode: PointerMode::Edit,
             touch_target_size: 44.,
+            layout: Layout::Free,
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
             fit_padding: 0.1,
@@ -310,6 +323,22 @@ pub enum FlowEvent {
     },
     /// The viewport moved or zoomed.
     ViewportChange(Viewport),
+    /// A node was added with tab or enter in a tree layout, and selected: where the host starts
+    /// editing its text.
+    NodeAdd {
+        node: NodeId,
+        parent: Option<NodeId>,
+    },
+    /// In a tree layout, a node was dropped on another and is now its child.
+    NodeReparent {
+        node: NodeId,
+        parent: NodeId,
+    },
+    /// In a tree layout, what's under a node was folded away or shown again.
+    NodeCollapse {
+        node: NodeId,
+        collapsed: bool,
+    },
     /// A right click, or a long press of a finger, on a node, an edge or the pane, at
     /// `position` in the flow and `window_position` in the window: where the host shows its
     /// menu. The flow shows none itself.
@@ -334,6 +363,7 @@ pub enum PanelPosition {
 type PanelRenderer = Rc<dyn Fn(&Flow, &mut Window, &mut App) -> AnyElement>;
 type ConnectionCheck = Rc<dyn Fn(&Connection, &Flow) -> bool>;
 type DeleteCheck = Rc<dyn Fn(&[Node], &[Edge], &Flow) -> bool>;
+type NewNode = Rc<dyn Fn(Option<&Node>, &Flow) -> Node>;
 pub(crate) type TransformListener = Rc<dyn Fn(CanvasTransform, &mut Window, &mut App)>;
 
 /// The handle a connection drag is over.
@@ -369,6 +399,8 @@ enum Drag {
         moved: bool,
         pressed: NodeId,
         clicks: usize,
+        /// Where the pointer last was, in the flow.
+        pointer: XY,
     },
     Select {
         start: XY,
@@ -465,6 +497,14 @@ pub struct Flow {
     started: Instant,
     last_selection: (Vec<NodeId>, Vec<EdgeId>),
     touch: Option<TouchPress>,
+    /// In a tree layout: the tree as of the last frame, the nodes folded under a collapsed
+    /// one, where each node is headed, and when the last step toward there was taken.
+    tree: Tree,
+    folded: HashSet<NodeId>,
+    placed: HashMap<NodeId, tree::Placed>,
+    laid_out: Option<Instant>,
+    /// Makes a new node for tab or enter in a tree layout.
+    new_node: Option<NewNode>,
     /// The last tap: when, where, and on which node (none for the pane), for a double tap.
     last_tap: Option<(Instant, Point<Pixels>, Option<NodeId>)>,
 }
@@ -529,6 +569,7 @@ fn same_look(a: &Node, b: &Node) -> bool {
         && a.target_position == b.target_position
         && a.selected == b.selected
         && a.hidden == b.hidden
+        && a.collapsed == b.collapsed
         && a.connectable == b.connectable
         && a.extra == b.extra
 }
@@ -562,6 +603,11 @@ impl Flow {
             last_selection: Default::default(),
             touch: None,
             last_tap: None,
+            tree: Tree::default(),
+            folded: HashSet::new(),
+            placed: HashMap::new(),
+            laid_out: None,
+            new_node: None,
         }
     }
 
@@ -678,6 +724,14 @@ impl Flow {
         listener: impl Fn(CanvasTransform, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.transform_listener = Some(Rc::new(listener));
+        self
+    }
+
+    /// Makes the nodes tab and enter add in a tree layout, given the parent (none for a new
+    /// root). Its id must be new; the flow places it. Without one, a node labelled "New idea"
+    /// is made, of the parent's kind.
+    pub fn with_new_node(mut self, make: impl Fn(Option<&Node>, &Flow) -> Node + 'static) -> Self {
+        self.new_node = Some(Rc::new(make));
         self
     }
 
@@ -827,7 +881,7 @@ impl Flow {
     /// The box around every node that isn't hidden. None while any of them is unmeasured.
     pub fn nodes_bounds(&self) -> Option<Rect> {
         let mut all: Option<Rect> = None;
-        for node in self.nodes.iter().filter(|n| !n.hidden) {
+        for node in self.nodes.iter().filter(|n| self.shown(n)) {
             let rect = self.node_rect(&node.id)?;
             all = Some(all.map_or(rect, |a| a.union(&rect)));
         }
@@ -866,6 +920,369 @@ impl Flow {
     fn pane_size(&self) -> (f32, f32) {
         let s = self.shared.pane.get().size;
         (f32::from(s.width), f32::from(s.height))
+    }
+
+    /// Whether a node is drawn: not hidden, and not folded under a collapsed node in a tree.
+    fn shown(&self, node: &Node) -> bool {
+        !node.hidden && !self.folded.contains(&node.id)
+    }
+
+    fn tree_layout(&self) -> Option<tree::TreeLayout> {
+        match self.options.layout {
+            Layout::Tree(t) => Some(t),
+            Layout::Free => None,
+        }
+    }
+
+    /// The tree the edges make, as of the last frame (empty unless the layout is a tree).
+    pub fn tree(&self) -> &Tree {
+        &self.tree
+    }
+
+    /// Folds away what's under a node in a tree layout, or shows it again.
+    pub fn set_collapsed(&mut self, id: &str, collapsed: bool, cx: &mut Context<Self>) {
+        let Some(i) = self.index_of(id) else {
+            return;
+        };
+        if self.nodes[i].collapsed == collapsed {
+            return;
+        }
+        self.nodes[i].collapsed = collapsed;
+        let node = self.nodes[i].id.clone();
+        // What's folded away can't stay selected.
+        if collapsed {
+            let under: HashSet<NodeId> = self.tree.descendants(&node).into_iter().collect();
+            for n in &mut self.nodes {
+                if under.contains(&n.id) {
+                    n.selected = false;
+                }
+            }
+            self.selection_changed(cx);
+        }
+        cx.emit(FlowEvent::NodeCollapse { node, collapsed });
+        cx.notify();
+    }
+
+    /// Lays the tree out for this frame: reads it from the edges, folds what's collapsed, and
+    /// moves each node toward its place (at once until every node has a size, and for what's
+    /// carried along by a drag). Nodes being dragged are roots of their own until they're
+    /// dropped.
+    fn lay_out_tree(&mut self, window: &mut Window) {
+        let Some(options) = self.tree_layout() else {
+            if !self.folded.is_empty() || !self.tree.parent.is_empty() || !self.placed.is_empty() {
+                self.folded.clear();
+                self.tree = Tree::default();
+                self.placed.clear();
+                self.laid_out = None;
+            }
+            return;
+        };
+        let full = Tree::new(&self.nodes, &self.edges);
+        let mut tree = full.clone();
+        let dragged: Vec<NodeId> = match &self.drag {
+            Some(Drag::Nodes {
+                moved: true,
+                origins,
+                ..
+            }) => origins.iter().map(|(id, _)| id.clone()).collect(),
+            _ => Vec::new(),
+        };
+        for id in &dragged {
+            if let Some(parent) = tree.parent.remove(id)
+                && let Some(kids) = tree.children.get_mut(&parent)
+            {
+                kids.retain(|k| k != id);
+            }
+        }
+        let collapsed: HashSet<NodeId> = self
+            .nodes
+            .iter()
+            .filter(|n| n.collapsed)
+            .map(|n| n.id.clone())
+            .collect();
+        let mut folded = HashSet::new();
+        for id in &collapsed {
+            folded.extend(full.descendants(id));
+        }
+        let mut root_ids: Vec<NodeId> = tree.roots.clone();
+        root_ids.extend(dragged.iter().cloned());
+        let roots: Vec<(NodeId, XY)> = root_ids
+            .into_iter()
+            .filter(|id| !folded.contains(id))
+            .filter_map(|id| Some((id.clone(), self.node(&id)?.position)))
+            .collect();
+        let placed = {
+            let measured = self.shared.measured.borrow();
+            let size = |id: &NodeId| {
+                let node = self.node(id);
+                let m = measured.get(id).and_then(|m| m.size);
+                match (node.and_then(|n| n.width), node.and_then(|n| n.height), m) {
+                    (Some(w), Some(h), _) => (w, h),
+                    (w, h, Some(m)) => (w.unwrap_or(m.0), h.unwrap_or(m.1)),
+                    (w, h, None) => (w.unwrap_or(150.), h.unwrap_or(40.)),
+                }
+            };
+            tree::layout(&tree, &roots, &size, &|id| collapsed.contains(id), &options)
+        };
+        // Carried along by what's dragged: they follow it exactly.
+        let mut carried: HashSet<NodeId> = HashSet::new();
+        for id in &dragged {
+            carried.extend(full.descendants(id));
+        }
+        let now = Instant::now();
+        let step = match self.laid_out {
+            Some(last) if !options.motion.is_zero() => {
+                let dt = now.duration_since(last).as_secs_f32();
+                // An exponential approach: about 95% of the way in the motion's duration.
+                Some(1. - (-3. * dt / options.motion.as_secs_f32()).exp())
+            }
+            _ => None,
+        };
+        let mut moving = false;
+        for node in &mut self.nodes {
+            let Some(place) = placed.get(&node.id) else {
+                continue;
+            };
+            // What's dragged goes where the pointer takes it; a node inside a group, where
+            // the group has it.
+            if dragged.contains(&node.id) || node.parent.is_some() {
+                continue;
+            }
+            let to = place.position;
+            node.position = match step {
+                Some(k) if !carried.contains(&node.id) => {
+                    let next = node.position + (to - node.position) * k;
+                    if next.distance(to) < 0.25 {
+                        to
+                    } else {
+                        moving = true;
+                        next
+                    }
+                }
+                _ => to,
+            };
+        }
+        self.tree = full;
+        self.folded = folded;
+        self.placed = placed;
+        // Only once every node has a size is the layout final; until then, nodes jump.
+        let sized = {
+            let measured = self.shared.measured.borrow();
+            self.nodes
+                .iter()
+                .filter(|n| self.shown(n))
+                .all(|n| measured.get(&n.id).is_some_and(|m| m.size.is_some()))
+        };
+        self.laid_out = sized.then_some(now);
+        if moving {
+            window.request_animation_frame();
+        }
+    }
+
+    /// Where a tree edge meets its two nodes: the middle of the parent's side the child is on,
+    /// and of the child's side facing back. None for an edge that isn't the tree's.
+    fn tree_anchors(&self, edge: &Edge) -> Option<((XY, Side), (XY, Side))> {
+        self.tree_layout()?;
+        if self.tree.parent.get(&edge.target) != Some(&edge.source) {
+            return None;
+        }
+        let side = self.placed.get(&edge.target)?.out;
+        let (s, t) = (self.node_rect(&edge.source)?, self.node_rect(&edge.target)?);
+        let mid = |r: Rect, side: Side| match side {
+            Side::Left => xy(r.x, r.y + r.h / 2.),
+            Side::Right => xy(r.right(), r.y + r.h / 2.),
+            Side::Top => xy(r.x + r.w / 2., r.y),
+            Side::Bottom => xy(r.x + r.w / 2., r.bottom()),
+        };
+        Some((
+            (mid(s, side), side),
+            (mid(t, side.opposite()), side.opposite()),
+        ))
+    }
+
+    /// Adds a node under `parent` (a new root for none), after `after` among its siblings when
+    /// given, selects it, and tells the host so it can start editing it.
+    fn add_tree_node(
+        &mut self,
+        parent: Option<NodeId>,
+        after: Option<NodeId>,
+        cx: &mut Context<Self>,
+    ) {
+        let parent_node = parent.as_ref().and_then(|p| self.node(p)).cloned();
+        let mut node = match &self.new_node {
+            Some(make) => make(parent_node.as_ref(), self),
+            None => {
+                let mut n = 1;
+                while self.node(&format!("node-{n}")).is_some() {
+                    n += 1;
+                }
+                let kind = parent_node
+                    .as_ref()
+                    .map_or(SharedString::from("default"), |p| p.kind.clone());
+                Node::new(format!("node-{n}"), XY::default())
+                    .kind(kind)
+                    .label("New idea")
+            }
+        };
+        if self.node(&node.id).is_some() {
+            return;
+        }
+        // It grows out of its parent.
+        if let Some(p) = &parent_node {
+            node.position = p.position;
+        }
+        node.selected = true;
+        sanitize_node(&mut node);
+        let id = node.id.clone();
+        self.nodes.iter_mut().for_each(|n| n.selected = false);
+        self.edges.iter_mut().for_each(|e| e.selected = false);
+        self.nodes.push(node);
+        self.reindex();
+        if let Some(parent) = &parent {
+            let connection = Connection {
+                source: parent.clone(),
+                source_handle: None,
+                target: id.clone(),
+                target_handle: None,
+            };
+            let d = &self.options.edge_defaults;
+            let edge = Edge {
+                id: graph::unique_edge_id(&connection, &self.edges),
+                kind: d.kind.clone(),
+                animated: d.animated,
+                marker_start: d.marker_start,
+                marker_end: d.marker_end,
+                color: d.color,
+                stroke_width: d.stroke_width,
+                ..Edge::new("", parent.clone(), id.clone())
+            };
+            // Siblings are in the order of their edges.
+            let at = after
+                .and_then(|a| {
+                    self.edges
+                        .iter()
+                        .position(|e| e.target == a && &e.source == parent)
+                })
+                .map_or(self.edges.len(), |i| i + 1);
+            self.edges.insert(at, edge);
+        }
+        cx.emit(FlowEvent::NodeAdd { node: id, parent });
+        self.selection_changed(cx);
+        cx.notify();
+    }
+
+    /// The one selected node, if exactly one is.
+    fn only_selected(&self) -> Option<NodeId> {
+        let mut selected = self.nodes.iter().filter(|n| n.selected);
+        let first = selected.next()?;
+        selected.next().is_none().then(|| first.id.clone())
+    }
+
+    /// Tab in a tree: a child of the selected node. Says whether it was the flow's to do.
+    fn add_child(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.tree_layout().is_none() {
+            return false;
+        }
+        let Some(parent) = self.only_selected() else {
+            return false;
+        };
+        // A collapsed parent opens to show its new child.
+        self.set_collapsed(&parent, false, cx);
+        self.add_tree_node(Some(parent), None, cx);
+        true
+    }
+
+    /// Enter in a tree: a sibling after the selected node (a child, under a root).
+    fn add_sibling(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.tree_layout().is_none() {
+            return false;
+        }
+        let Some(selected) = self.only_selected() else {
+            return false;
+        };
+        match self.tree.parent.get(&selected).cloned() {
+            Some(parent) => self.add_tree_node(Some(parent), Some(selected), cx),
+            None => self.add_tree_node(Some(selected), None, cx),
+        }
+        true
+    }
+
+    /// An arrow in a tree: the selection moves to the nearest node that way.
+    fn select_toward(&mut self, dir: XY, cx: &mut Context<Self>) -> bool {
+        if self.tree_layout().is_none() {
+            return false;
+        }
+        let rects: Vec<(NodeId, Rect)> = self
+            .nodes
+            .iter()
+            .filter(|n| self.shown(n) && self.selectable(n))
+            .filter_map(|n| Some((n.id.clone(), self.node_rect(&n.id)?)))
+            .collect();
+        let next = match self.only_selected().and_then(|id| self.node_rect(&id)) {
+            Some(from) => tree::nearest_in_direction(&from, dir, &rects),
+            None => self.tree.roots.first().cloned(),
+        };
+        let Some(next) = next else {
+            return true;
+        };
+        self.nodes
+            .iter_mut()
+            .for_each(|n| n.selected = n.id == next);
+        self.edges.iter_mut().for_each(|e| e.selected = false);
+        self.selection_changed(cx);
+        cx.notify();
+        true
+    }
+
+    /// The node a drag of `dragged` would be dropped on at `at`, in a tree: the topmost one
+    /// there that isn't being dragged or under what is.
+    fn drop_target(&self, dragged: &[NodeId], at: XY) -> Option<NodeId> {
+        self.tree_layout()?;
+        self.draw_order()
+            .into_iter()
+            .rev()
+            .map(|(_, i)| &self.nodes[i])
+            .filter(|n| !dragged.iter().any(|d| self.tree.is_ancestor(d, &n.id)))
+            .find(|n| self.node_rect(&n.id).is_some_and(|r| r.contains(at)))
+            .map(|n| n.id.clone())
+    }
+
+    /// Makes `node` a child of `parent` in the tree: the edge into it now comes from there.
+    fn reparent(&mut self, node: &NodeId, parent: &NodeId, cx: &mut Context<Self>) {
+        if node == parent || self.tree.parent.get(node) == Some(parent) {
+            return;
+        }
+        let old = self.tree.parent.get(node).cloned();
+        let found = old.as_ref().and_then(|old| {
+            self.edges
+                .iter()
+                .position(|e| &e.target == node && &e.source == old)
+        });
+        match found {
+            Some(i) => {
+                let edge = &mut self.edges[i];
+                edge.source = parent.clone();
+                edge.source_handle = None;
+            }
+            None => {
+                let connection = Connection {
+                    source: parent.clone(),
+                    source_handle: None,
+                    target: node.clone(),
+                    target_handle: None,
+                };
+                let edge = Edge::new(
+                    graph::unique_edge_id(&connection, &self.edges),
+                    parent.clone(),
+                    node.clone(),
+                );
+                self.edges.push(edge);
+            }
+        }
+        cx.emit(FlowEvent::NodeReparent {
+            node: node.clone(),
+            parent: parent.clone(),
+        });
     }
 
     fn draggable(&self, node: &Node) -> bool {
@@ -1120,6 +1537,26 @@ impl Flow {
         if gone.is_empty() && picked.is_empty() {
             return false;
         }
+        // In a tree, a node takes what's under it, and its parent is selected after.
+        let mut select_after = None;
+        if self.tree_layout().is_some() {
+            let tops: Vec<NodeId> = gone.iter().cloned().collect();
+            select_after = tops
+                .iter()
+                .filter_map(|id| self.tree.parent.get(id))
+                .find(|p| !gone.contains(*p))
+                .cloned();
+            for id in &tops {
+                for d in self.tree.descendants(id) {
+                    if self.node(&d).is_some_and(deletable) {
+                        gone.insert(d);
+                    }
+                }
+            }
+            if select_after.as_ref().is_some_and(|p| gone.contains(p)) {
+                select_after = None;
+            }
+        }
         loop {
             let before = gone.len();
             for node in &self.nodes {
@@ -1177,6 +1614,11 @@ impl Flow {
         self.edges.retain(|e| !cut.contains(&e.id));
         self.forget_removed();
         cx.emit(FlowEvent::Delete { nodes, edges });
+        if let Some(parent) = select_after
+            && let Some(i) = self.index_of(&parent)
+        {
+            self.nodes[i].selected = true;
+        }
         self.selection_changed(cx);
         cx.notify();
         true
@@ -1185,7 +1627,8 @@ impl Flow {
     pub fn select_all(&mut self, cx: &mut Context<Self>) {
         let all = self.options.elements_selectable;
         for node in &mut self.nodes {
-            node.selected = !node.hidden && node.selectable.unwrap_or(all);
+            node.selected =
+                !node.hidden && !self.folded.contains(&node.id) && node.selectable.unwrap_or(all);
         }
         for edge in &mut self.edges {
             edge.selected = !edge.hidden && edge.selectable.unwrap_or(all);
@@ -1399,7 +1842,7 @@ impl Flow {
         if w <= 0. || h <= 0. {
             return;
         }
-        if self.nodes.iter().all(|n| n.hidden) {
+        if self.nodes.iter().all(|n| !self.shown(n)) {
             self.pending_fit = None;
             self.ready = true;
             return;
@@ -1544,6 +1987,7 @@ impl Flow {
             moved: false,
             pressed: id.clone(),
             clicks: event.click_count,
+            pointer: self.viewport.to_flow(pane),
         });
         cx.notify();
         true
@@ -2133,7 +2577,7 @@ impl Flow {
         let margin = reach + 16.;
         let mut best: Option<((f32, bool), Snap)> = None;
         let measured = self.shared.measured.borrow();
-        for node in self.nodes.iter().filter(|n| !n.hidden) {
+        for node in self.nodes.iter().filter(|n| self.shown(n)) {
             let Some(m) = measured.get(&node.id) else {
                 continue;
             };
@@ -2250,8 +2694,10 @@ impl Flow {
                 origins,
                 moved,
                 pressed,
+                pointer: at,
                 ..
             } => {
+                *at = pointer;
                 if !*moved
                     && (pane - *start).distance(xy(0., 0.)) < self.options.node_drag_threshold
                 {
@@ -2288,7 +2734,7 @@ impl Flow {
                 let picked: HashSet<NodeId> = self
                     .nodes
                     .iter()
-                    .filter(|n| !n.hidden && self.selectable(n))
+                    .filter(|n| self.shown(n) && self.selectable(n))
                     .filter(|n| {
                         keep.contains(&n.id)
                             || self.node_rect(&n.id).is_some_and(|r| {
@@ -2412,13 +2858,20 @@ impl Flow {
                 moved,
                 pressed,
                 clicks,
+                pointer,
                 ..
             } => {
                 if moved {
                     if !origins.is_empty() {
-                        cx.emit(FlowEvent::NodeDragStop(
-                            origins.into_iter().map(|(id, _)| id).collect(),
-                        ));
+                        let ids: Vec<NodeId> = origins.into_iter().map(|(id, _)| id).collect();
+                        // In a tree, dropped on another node, they become its children; else
+                        // the layout takes them back where they were.
+                        if let Some(parent) = self.drop_target(&ids, pointer) {
+                            for id in &ids {
+                                self.reparent(id, &parent, cx);
+                            }
+                        }
+                        cx.emit(FlowEvent::NodeDragStop(ids));
                     }
                 } else {
                     cx.emit(if clicks >= 2 {
@@ -2698,7 +3151,7 @@ impl Flow {
             .nodes
             .iter()
             .enumerate()
-            .filter(|(i, n)| !n.hidden && self.index_of(&n.id) == Some(*i))
+            .filter(|(i, n)| self.shown(n) && self.index_of(&n.id) == Some(*i))
             .filter(|(_, n)| {
                 !cull
                     || !measured.get(&n.id).is_some_and(|m| m.size.is_some())
@@ -2731,6 +3184,9 @@ impl Flow {
             zoom,
             colors,
             touch_size: px(self.options.touch_target_size.max(0.)),
+            depth: self.tree_layout().map(|_| self.tree.depth(&node.id)),
+            children: self.tree.children_of(&node.id).len(),
+            collapsed: node.collapsed,
         };
         let renderer = self
             .node_kinds
@@ -2783,6 +3239,9 @@ impl Flow {
                 px(0.),
                 Reach::Around,
             ))
+            .when_some(self.collapse_chip(node, &ctx, this), |d, chip| {
+                d.child(chip)
+            })
             .child(measure_node(
                 self.shared.clone(),
                 this.entity_id(),
@@ -2792,6 +3251,55 @@ impl Flow {
         Zoomed::new(zoom, wrapper)
     }
 
+    /// In a tree, the round chip on the side a node's children leave from that folds them away
+    /// or shows them again: a minus, or how many are folded.
+    fn collapse_chip(
+        &self,
+        node: &Node,
+        ctx: &NodeContext,
+        this: &WeakEntity<Flow>,
+    ) -> Option<Stateful<Div>> {
+        if ctx.children == 0 || self.tree_layout().is_none() {
+            return None;
+        }
+        let side = self.placed.get(&node.id).map_or(Side::Right, |p| p.out);
+        let size = units(16.);
+        // Centred 10 units past the side.
+        let out = units(-18.);
+        let label: SharedString = if node.collapsed {
+            self.tree.descendants(&node.id).len().to_string().into()
+        } else {
+            "−".into()
+        };
+        let base = div()
+            .id(SharedString::from(format!("collapse-{}", node.id)))
+            .absolute()
+            .size(size)
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .border_1()
+            .border_color(ctx.colors.node_border)
+            .bg(ctx.colors.panel)
+            .text_size(ctx.font_size(9.))
+            .text_color(ctx.colors.muted_text)
+            .cursor(CursorStyle::PointingHand)
+            .nodrag()
+            .child(label);
+        let placed = match side {
+            Side::Right => base.right(out).top(relative(0.5)).mt(units(-8.)),
+            Side::Left => base.left(out).top(relative(0.5)).mt(units(-8.)),
+            Side::Bottom => base.bottom(out).left(relative(0.5)).ml(units(-8.)),
+            Side::Top => base.top(out).left(relative(0.5)).ml(units(-8.)),
+        };
+        let (flow, id, collapsed) = (this.clone(), node.id.clone(), node.collapsed);
+        Some(placed.on_click(move |_, _, cx| {
+            flow.update(cx, |flow, cx| flow.set_collapsed(&id, !collapsed, cx))
+                .ok();
+        }))
+    }
+
     /// What the edge canvases need of each edge, so they don't hold the flow while they paint.
     fn edge_draws(&self, colors: &FlowColors) -> Vec<EdgeDraw> {
         self.edges
@@ -2799,7 +3307,7 @@ impl Flow {
             .filter(|e| !e.hidden)
             .filter_map(|e| {
                 let (source, target) = (self.node(&e.source)?, self.node(&e.target)?);
-                if source.hidden || target.hidden {
+                if !self.shown(source) || !self.shown(target) {
                     return None;
                 }
                 Some(EdgeDraw {
@@ -2827,6 +3335,7 @@ impl Flow {
                     },
                     width: e.stroke_width.unwrap_or(1.) + if e.selected { 0.5 } else { 0. },
                     reach: e.interaction_width.unwrap_or(INTERACTION_WIDTH) / 2.,
+                    anchors: self.tree_anchors(e),
                 })
             })
             .collect()
@@ -2867,22 +3376,24 @@ impl Flow {
                 let mut animated = false;
                 for edge in &draws {
                     let (s, t) = (&edge.source, &edge.target);
-                    let ends = endpoint(
-                        &measured,
-                        &s.node,
-                        s.at,
-                        &s.handle,
-                        HandleKind::Source,
-                        loose,
-                    )
-                    .zip(endpoint(
-                        &measured,
-                        &t.node,
-                        t.at,
-                        &t.handle,
-                        HandleKind::Target,
-                        loose,
-                    ));
+                    let ends = edge.anchors.or_else(|| {
+                        endpoint(
+                            &measured,
+                            &s.node,
+                            s.at,
+                            &s.handle,
+                            HandleKind::Source,
+                            loose,
+                        )
+                        .zip(endpoint(
+                            &measured,
+                            &t.node,
+                            t.at,
+                            &t.handle,
+                            HandleKind::Target,
+                            loose,
+                        ))
+                    });
                     let Some(((from, from_side), (to, to_side))) = ends else {
                         continue;
                     };
@@ -3010,7 +3521,7 @@ impl Flow {
         let nodes: Vec<(Rect, bool)> = self
             .nodes
             .iter()
-            .filter(|n| !n.hidden)
+            .filter(|n| self.shown(n))
             .filter_map(|n| Some((self.node_rect(&n.id)?, n.selected)))
             .collect();
         let (w, h) = self.pane_size();
@@ -3080,6 +3591,8 @@ struct EdgeDraw {
     width: f32,
     /// Half the interaction width, in flow units.
     reach: f32,
+    /// Where a tree edge meets its nodes, set by the layout rather than by handles.
+    anchors: Option<((XY, Side), (XY, Side))>,
 }
 
 /// A node drawn as a plain box, in pane coordinates.
@@ -3152,6 +3665,7 @@ impl Render for Flow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self.colors.unwrap_or_else(|| FlowColors::from_theme(cx));
         self.enforce_extents();
+        self.lay_out_tree(window);
         self.try_pending_fit(cx);
         self.step_transition(window, cx);
         self.keep_ticking(cx);
@@ -3335,7 +3849,21 @@ impl Render for Flow {
             layers.push(self.edge_layer(level, list, colors, flow_id));
         }
 
-        // Over the nodes: the connection being dragged and the selection rectangle.
+        // Over the nodes: the connection being dragged, the selection rectangle, and in a tree
+        // the node a drag would be dropped on.
+        let drop_onto = match &self.drag {
+            Some(Drag::Nodes {
+                moved: true,
+                origins,
+                pointer,
+                ..
+            }) => {
+                let ids: Vec<NodeId> = origins.iter().map(|(id, _)| id.clone()).collect();
+                self.drop_target(&ids, *pointer)
+                    .and_then(|id| self.node_rect(&id))
+            }
+            _ => None,
+        };
         let overlay = {
             let drag = self.drag.clone();
             let line_kind = self.options.connection_line.clone();
@@ -3343,6 +3871,22 @@ impl Render for Flow {
                 |_, _, _| {},
                 move |bounds, _, window, _| {
                     let origin = bounds.origin;
+                    if let Some(r) = drop_onto {
+                        let a = viewport.to_pane(xy(r.x, r.y));
+                        let pad = 4.;
+                        let area = Bounds::new(
+                            point(origin.x + px(a.x - pad), origin.y + px(a.y - pad)),
+                            size(px(r.w * zoom + pad * 2.), px(r.h * zoom + pad * 2.)),
+                        );
+                        window.paint_quad(quad(
+                            area,
+                            px(8. * zoom),
+                            colors.selection_fill,
+                            px(2.),
+                            colors.selected,
+                            BorderStyle::default(),
+                        ));
+                    }
                     match &drag {
                         Some(Drag::Connect {
                             at,
@@ -3451,6 +3995,16 @@ impl Render for Flow {
             .on_action(cx.listener(|flow, _: &ZoomOut, _, cx| flow.zoom_out(cx)))
             .on_action(cx.listener(|flow, _: &ZoomReset, _, cx| flow.zoom_to(1., cx)))
             .on_action(cx.listener(|flow, _: &FitView, _, cx| flow.fit_view(cx)))
+            .on_action(cx.listener(|flow, _: &AddChild, _, cx| {
+                if !flow.add_child(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &AddSibling, _, cx| {
+                if !flow.add_sibling(cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|f, _: &MoveLeft, _, cx| f.nudge_or_pass(-1., 0., false, cx)))
             .on_action(cx.listener(|f, _: &MoveRight, _, cx| f.nudge_or_pass(1., 0., false, cx)))
             .on_action(cx.listener(|f, _: &MoveUp, _, cx| f.nudge_or_pass(0., -1., false, cx)))
@@ -3494,7 +4048,13 @@ impl Render for Flow {
 impl Flow {
     /// An arrow key: moves the selected nodes, or with none to move lets the key go on.
     fn nudge_or_pass(&mut self, dx: f32, dy: f32, far: bool, cx: &mut Context<Self>) {
-        if !self.nudge(dx, dy, far, cx) {
+        // In a tree the layout places nodes: the arrows move the selection instead.
+        let done = if self.tree_layout().is_some() {
+            self.select_toward(xy(dx, dy), cx)
+        } else {
+            self.nudge(dx, dy, far, cx)
+        };
+        if !done {
             cx.propagate();
         }
     }
