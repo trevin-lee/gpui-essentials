@@ -11,6 +11,7 @@ use gpui::*;
 
 use crate::geometry::{EdgePath, distance_to_polyline, edge_path, longest_middle, rounded_path};
 use crate::graph;
+use crate::json::{self, DocLayout, Document};
 use crate::node::{
     EdgeLine, FRAME_BORDER, FRAME_TITLE, Measured, NodeContext, NodeInput as _, NodeRenderer,
     Reach, Shared, TouchTarget, Zoomed, built_in, measure_node, touch_target, units,
@@ -593,6 +594,10 @@ pub struct Flow {
     new_node: Option<NewNode>,
     /// The last tap: when, where, and on which node (none for the pane), for a double tap.
     last_tap: Option<(Instant, Point<Pixels>, Option<NodeId>)>,
+    /// What the last document given had that the flow doesn't use: a layout it doesn't know,
+    /// and a newer writer's fields. They're written back with the flow's document.
+    doc_layout: Option<serde_json::Value>,
+    doc_extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl EventEmitter<FlowEvent> for Flow {}
@@ -698,6 +703,8 @@ impl Flow {
             placed: HashMap::new(),
             laid_out: None,
             new_node: None,
+            doc_layout: None,
+            doc_extra: serde_json::Map::new(),
         }
     }
 
@@ -954,6 +961,68 @@ impl Flow {
             edges: self.edges.clone(),
             viewport: self.viewport,
         }
+    }
+
+    /// The flow as a stored document (see [`json`]): its nodes, edges and layout, and where
+    /// it's in view. Nothing in it is selected: that's the person's own.
+    pub fn document(&self) -> Document {
+        let mut doc = Document::new(self.nodes.clone(), self.edges.clone());
+        doc.nodes.iter_mut().for_each(|n| n.selected = false);
+        doc.edges.iter_mut().for_each(|e| e.selected = false);
+        doc.layout = match self.options.layout {
+            Layout::Tree(t) => Some(DocLayout::Tree {
+                direction: t.direction,
+            }),
+            Layout::Free => self.doc_layout.clone().map(DocLayout::Other),
+        };
+        doc.viewport = Some(self.viewport);
+        doc.extra = self.doc_extra.clone();
+        doc
+    }
+
+    /// Gives the flow a stored document, in place of what it holds. What's selected stays
+    /// selected where it's still there. A tree layout takes the document's direction and keeps
+    /// the flow's own gaps; with none, or one this crate doesn't know, nodes stay where
+    /// they're put. The viewport moves to the document's when it has one.
+    pub fn set_document(&mut self, doc: Document, cx: &mut Context<Self>) {
+        let nodes_on: HashSet<NodeId> = self.selected_nodes().into_iter().collect();
+        let edges_on: HashSet<EdgeId> = self.selected_edges().into_iter().collect();
+        let Document {
+            layout,
+            mut nodes,
+            mut edges,
+            viewport,
+            extra,
+            ..
+        } = doc;
+        for n in &mut nodes {
+            n.selected = nodes_on.contains(&n.id);
+        }
+        for e in &mut edges {
+            e.selected = edges_on.contains(&e.id);
+        }
+        self.doc_layout = None;
+        self.options.layout = match layout {
+            Some(DocLayout::Tree { direction }) => {
+                let mut t = self.tree_layout().unwrap_or_default();
+                t.direction = direction;
+                Layout::Tree(t)
+            }
+            Some(DocLayout::Other(v)) => {
+                self.doc_layout = Some(v);
+                Layout::Free
+            }
+            None => Layout::Free,
+        };
+        self.doc_extra = extra;
+        self.restore(
+            FlowObject {
+                nodes,
+                edges,
+                viewport: viewport.unwrap_or(self.viewport),
+            },
+            cx,
+        );
     }
 
     /// The node's parent, its parent's parent, and so on, nearest first. A chain that loops
@@ -1261,14 +1330,10 @@ impl Flow {
         let mut node = match &self.new_node {
             Some(make) => make(parent_node.as_ref(), self),
             None => {
-                let mut n = 1;
-                while self.node(&format!("node-{n}")).is_some() {
-                    n += 1;
-                }
                 let kind = parent_node
                     .as_ref()
                     .map_or(SharedString::from("default"), |p| p.kind.clone());
-                Node::new(format!("node-{n}"), XY::default())
+                Node::new(json::new_id(), XY::default())
                     .kind(kind)
                     .label("New idea")
             }
@@ -1288,15 +1353,9 @@ impl Flow {
         self.nodes.push(node);
         self.reindex();
         if let Some(parent) = &parent {
-            let connection = Connection {
-                source: parent.clone(),
-                source_handle: None,
-                target: id.clone(),
-                target_handle: None,
-            };
             let d = &self.options.edge_defaults;
             let edge = Edge {
-                id: graph::unique_edge_id(&connection, &self.edges),
+                id: json::new_id().into(),
                 kind: d.kind.clone(),
                 animated: d.animated,
                 marker_start: d.marker_start,
@@ -1429,17 +1488,7 @@ impl Flow {
                 edge.source_handle = None;
             }
             None => {
-                let connection = Connection {
-                    source: parent.clone(),
-                    source_handle: None,
-                    target: node.clone(),
-                    target_handle: None,
-                };
-                let edge = Edge::new(
-                    graph::unique_edge_id(&connection, &self.edges),
-                    parent.clone(),
-                    node.clone(),
-                );
+                let edge = Edge::new(json::new_id(), parent.clone(), node.clone());
                 self.edges.push(edge);
             }
         }
@@ -1833,7 +1882,7 @@ impl Flow {
         }
         let d = &self.options.edge_defaults;
         let edge = Edge {
-            id: graph::unique_edge_id(&connection, &self.edges),
+            id: json::new_id().into(),
             source_handle: connection.source_handle.clone(),
             target_handle: connection.target_handle.clone(),
             kind: d.kind.clone(),
@@ -2707,11 +2756,7 @@ impl Flow {
             .as_ref()
             .and_then(|p| self.absolute_position(p))
             .unwrap_or_default();
-        let mut n = 1;
-        while self.node(&format!("frame-{n}")).is_some() {
-            n += 1;
-        }
-        let id: NodeId = format!("frame-{n}").into();
+        let id: NodeId = json::new_id().into();
         let mut frame = Node::new(id.clone(), xy(area.x, area.y) - base)
             .kind("frame")
             .label(title)

@@ -43,6 +43,12 @@ Run the example with `cargo run --release --example flow` from this folder.
   camelCase fields, `parentId`, `extent` (`"parent"` or a box), `zIndex`, handles, markers,
   `style.stroke` and `strokeWidth`, custom edge types by name (drawn as bezier), and any field
   it doesn't read kept as it was, so a file comes back without loss.
+- **A stored form.** For an app or a server to store, `Flow::document()` gives a versioned
+  `json::Document` (`"format": "gpui-flow"`, version 1): the nodes, edges and frames with ids
+  that never change, the layout (a mind map's direction), and every field it doesn't know
+  kept. Nothing selected is stored, and `Flow::set_document()` keeps the selection. New ids are
+  random, so two editors adding at once don't clash. [docs/json.md](docs/json.md) has every
+  field.
 - **With the mouse and keys.** Drag the pane to pan; scroll or pinch to zoom about the pointer;
   drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
   rectangle; drag from a handle to another (either direction) to connect; click an edge to

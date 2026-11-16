@@ -535,6 +535,7 @@ impl Node {
             width: Some(width),
             height: Some(height),
             alt: alt.into(),
+            extra: Map::new(),
         });
         self
     }
@@ -580,6 +581,9 @@ pub struct Media {
     /// What it shows, for someone who can't see it, and shown in its place until it loads.
     #[serde(default, skip_serializing_if = "is_blank")]
     pub alt: SharedString,
+    /// Fields this crate doesn't read, kept for saving.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 /// What a `link` node shows of an address: the address, and what the host found there (the
@@ -598,6 +602,9 @@ pub struct LinkCard {
     /// A preview picture, for the host's image loader.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<SharedString>,
+    /// Fields this crate doesn't read, kept for saving.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 /// How a node's text lines up across it. (Not `TextAlign`, which GPUI exports too.)

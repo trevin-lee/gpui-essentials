@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use crate::types::{Edge, Node, NodeId, Rect, Side, XY, xy};
 
-/// Which way a tree grows from its root.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Which way a tree grows from its root. Stored as `right`, `down` or `both`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TreeDirection {
     /// Children to the right of their parent, as an outline reads.
     #[default]
