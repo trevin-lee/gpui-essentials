@@ -2386,6 +2386,7 @@ dependencies = [
  "gpui-pre-macos",
  "gpui-pre-platform",
  "image",
+ "markdown",
  "unicode-segmentation",
 ]
 
