@@ -37,6 +37,7 @@ pub mod geometry;
 pub mod graph;
 pub mod node;
 mod paint;
+pub mod routing;
 pub mod shapes;
 mod theme;
 pub mod tree;

@@ -316,9 +316,17 @@ fn whiteboard() -> (Vec<Node>, Vec<Edge>) {
         edge("e1", "user", "right", "form", "left"),
         edge("e2", "form", "right", "valid", "left"),
         edge("e3", "valid", "right", "db", "left").label("yes"),
-        edge("e4", "valid", "top", "error", "bottom").label("no"),
+        edge("e4", "valid", "top", "error", "bottom")
+            .label("no")
+            .pencil("red")
+            .dash(EdgeDash::Dashed),
         edge("e5", "db", "bottom", "mail", "top"),
         edge("e6", "valid", "bottom", "api", "top"),
+        // Past the note and the cloud, which the route goes round.
+        edge("e7", "user", "bottom", "api", "left")
+            .label("checks the limit")
+            .pencil("pink")
+            .dash(EdgeDash::Dotted),
     ];
     (nodes, edges)
 }
@@ -445,6 +453,7 @@ impl Root {
                     o.max_zoom = 4.;
                     o.transition = std::time::Duration::from_millis(180);
                     o.edge_defaults.marker_end = Some(Marker::arrow_closed());
+                    o.avoid_nodes = true;
                     if mindmap {
                         o.layout =
                             Layout::Tree(TreeLayout::default().direction(TreeDirection::Both));
