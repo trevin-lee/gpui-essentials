@@ -37,6 +37,7 @@ pub mod geometry;
 pub mod graph;
 pub mod node;
 mod paint;
+pub mod shapes;
 mod theme;
 pub mod tree;
 mod types;
@@ -49,10 +50,10 @@ pub use flow::{
 };
 pub use node::{
     HANDLE_SIZE, Handle, NodeContext, NodeInput, NodeRenderer, font_size, group_node, labeled_node,
-    topic_node, units,
+    shape_node, topic_node, units,
 };
 pub use paint::{BackgroundVariant, FlowBackground};
-pub use theme::FlowColors;
+pub use theme::{FlowColors, Palette, Pencil};
 pub use tree::{Layout, Tree, TreeDirection, TreeLayout};
 pub use types::*;
 

@@ -15,8 +15,11 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 
 use crate::flow::Flow;
+use crate::shapes::geometry;
 use crate::theme::FlowColors;
-use crate::types::{HandleKind, Node, NodeId, Rect, ResizeCorner, Side, Viewport, XY, xy};
+use crate::types::{
+    HandleKind, LabelAlign, Node, NodeId, Rect, ResizeCorner, Side, Viewport, XY, xy,
+};
 
 /// A length in flow units: one point at zoom 1, and scaled with the zoom inside a node.
 pub fn units(n: f32) -> Rems {
@@ -172,12 +175,19 @@ pub(crate) struct HandleBounds {
     pub position: Side,
     pub rect: Rect,
     pub connectable: bool,
+    /// A handle that isn't drawn: edges meet its middle, which is on the node's outline, rather
+    /// than the outer side of a dot nobody sees.
+    pub hidden: bool,
 }
 
 impl HandleBounds {
-    /// Where an edge meets the handle: the middle of its outer side.
+    /// Where an edge meets the handle: the middle of its outer side, or its middle when it
+    /// isn't drawn.
     pub fn anchor(&self) -> XY {
         let c = self.rect.center();
+        if self.hidden {
+            return c;
+        }
         match self.position {
             Side::Left => xy(self.rect.x, c.y),
             Side::Right => xy(self.rect.right(), c.y),
@@ -339,6 +349,8 @@ impl NodeContext {
             connectable: self.connectable,
             color: None,
             border: px(1.),
+            inset: 0.,
+            hidden: false,
         }
     }
 
@@ -427,9 +439,25 @@ pub struct Handle {
     connectable: bool,
     color: Option<Hsla>,
     border: Pixels,
+    inset: f32,
+    hidden: bool,
 }
 
 impl Handle {
+    /// How far (in flow units) in from the box's side the handle sits: onto a shape's visible
+    /// edge, such as a parallelogram's slanted side.
+    pub fn inset(mut self, inset: f32) -> Self {
+        self.inset = inset;
+        self
+    }
+
+    /// Takes connections and has edges meet it as ever, but isn't drawn: a whiteboard shape's
+    /// handles show only while it's selected.
+    pub fn hidden(mut self, hidden: bool) -> Self {
+        self.hidden = hidden;
+        self
+    }
+
     /// Names the handle, so edges can say which of several they use.
     pub fn id(mut self, id: impl Into<SharedString>) -> Self {
         self.id = Some(id.into());
@@ -472,23 +500,31 @@ impl RenderOnce for Handle {
             connectable,
             color,
             border,
+            inset,
+            hidden,
         } = self;
-        let out = units(-HANDLE_SIZE / 2.);
+        let out = units(-HANDLE_SIZE / 2. + inset);
+        let along = units(-HANDLE_SIZE / 2.);
+        let (fill, rim) = if hidden {
+            (gpui::transparent_black(), gpui::transparent_black())
+        } else {
+            (color.unwrap_or(ctx.colors.handle), ctx.colors.handle_border)
+        };
         let base = div()
             .absolute()
             .size(units(HANDLE_SIZE))
             .rounded_full()
-            .bg(color.unwrap_or(ctx.colors.handle))
+            .bg(fill)
             .border_1()
-            .border_color(ctx.colors.handle_border);
+            .border_color(rim);
         // Offsets count from inside the box's border, so the dot goes out by that much more
         // to sit centered on the box's outer edge.
         let b = -border;
         let placed = match position {
-            Side::Top => base.top(out).mt(b).left(relative(at)).ml(out),
-            Side::Bottom => base.bottom(out).mb(b).left(relative(at)).ml(out),
-            Side::Left => base.left(out).ml(b).top(relative(at)).mt(out),
-            Side::Right => base.right(out).mr(b).top(relative(at)).mt(out),
+            Side::Top => base.top(out).mt(b).left(relative(at)).ml(along),
+            Side::Bottom => base.bottom(out).mb(b).left(relative(at)).ml(along),
+            Side::Left => base.left(out).ml(b).top(relative(at)).mt(along),
+            Side::Right => base.right(out).mr(b).top(relative(at)).mt(along),
         };
 
         // Tells the flow where the handle ended up, for the edges and for connecting.
@@ -516,6 +552,7 @@ impl RenderOnce for Handle {
                             position,
                             rect,
                             connectable,
+                            hidden,
                         });
                 },
                 |_, _, _, _| {},
@@ -537,7 +574,9 @@ impl RenderOnce for Handle {
             Reach::Out(position),
         );
         placed
-            .when(connectable, |d| d.child(touch))
+            // A finger takes a handle only while it's drawn: one nobody can see mustn't turn
+            // a touch at a shape's edge into a connection.
+            .when(connectable && !hidden, |d| d.child(touch))
             .when(connectable, |d| {
                 let flow = ctx.flow.clone();
                 let node = ctx.id.clone();
@@ -670,28 +709,35 @@ impl Element for Zoomed {
 /// The box the built-in `default`, `input` and `output` kinds share: the label, centered, with
 /// a target handle, a source handle, or both.
 pub fn labeled_node(node: &Node, ctx: &NodeContext, target: bool, source: bool) -> AnyElement {
+    let pencil = ctx.colors.pencil(node.color.as_deref());
+    let align = node.text_align.unwrap_or_default();
     div()
         .relative()
         .flex()
         .items_center()
-        .justify_center()
-        .text_center()
+        .map(|d| match align {
+            LabelAlign::Left => d.justify_start(),
+            LabelAlign::Center => d.justify_center(),
+            LabelAlign::Right => d.justify_end(),
+        })
         .p(units(10.))
         .rounded(units(3.))
         .border_1()
         .border_color(if ctx.selected {
             ctx.colors.selected
         } else {
-            ctx.colors.node_border
+            pencil.stroke
         })
-        .bg(ctx.colors.node)
+        .bg(pencil.fill)
+        .text_color(pencil.text)
+        .children(badges(node, ctx, pencil.text))
         .map(|d| match node.width {
             Some(_) => d.w_full(),
             None => d.w(units(150.)),
         })
         .when(node.height.is_some(), |d| d.h_full())
         .gap(units(6.))
-        .child(label(node))
+        .child(label(node, align))
         .children(ctx.link_button())
         .when(target, |d| {
             d.child(ctx.handle(HandleKind::Target, node.target_position))
@@ -704,12 +750,143 @@ pub fn labeled_node(node: &Node, ctx: &NodeContext, target: bool, source: bool) 
 
 /// A node's label as the built-in kinds show it: wrapped to the box (a word too long for it
 /// breaks), and cut off where a box of a fixed height ends.
-fn label(node: &Node) -> Div {
+fn label(node: &Node, align: LabelAlign) -> Div {
     div()
         .min_w_0()
         .max_h_full()
         .overflow_hidden()
+        .map(|d| match align {
+            LabelAlign::Left => d.text_left(),
+            LabelAlign::Center => d.text_center(),
+            LabelAlign::Right => d.text_right(),
+        })
         .child(node.label_text())
+}
+
+/// A node's icon (one gpui-core bundles) and emoji, side by side, or nothing when it has
+/// neither.
+pub(crate) fn badges(node: &Node, ctx: &NodeContext, color: Hsla) -> Option<Div> {
+    let icon = node
+        .icon
+        .as_deref()
+        .and_then(gpui_core::IconName::named)
+        .map(|name| gpui_core::Icon::new(name).size(units(14.)).color(color));
+    // One emoji: a short run of characters, as a single one may be several code points.
+    let emoji = node
+        .emoji
+        .as_ref()
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty() && e.chars().count() <= 12)
+        .map(|e| SharedString::from(e.to_string()));
+    if icon.is_none() && emoji.is_none() {
+        return None;
+    }
+    Some(
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(units(3.))
+            .text_size(ctx.font_size(13.))
+            .children(icon)
+            .children(emoji),
+    )
+}
+
+/// The built-in `shape` kind, for whiteboards: the node's outline ([`NodeShape`](crate::shapes::NodeShape)) in its
+/// palette color, its label inside the shape's text area, its badges near its top right, and a
+/// handle each way on every side, drawn while it's selected.
+pub fn shape_node(node: &Node, ctx: &NodeContext) -> AnyElement {
+    let shape = node.shape.unwrap_or_default();
+    let (dw, dh) = shape.default_size();
+    let (w, h) = (node.width.unwrap_or(dw), node.height.unwrap_or(dh));
+    let g = geometry(shape, w, h);
+    let pencil = ctx.colors.pencil(node.color.as_deref());
+    let stroke = if ctx.selected {
+        ctx.colors.selected
+    } else {
+        pencil.stroke
+    };
+    let line = if ctx.selected { 2. } else { 1. };
+    let (outline, detail) = (g.outline.clone(), g.detail.clone());
+    let fill = pencil.fill;
+    let painted = canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            crate::paint::paint_shape(&outline, &detail, bounds, w, fill, stroke, line, window)
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full();
+    let t = g.text;
+    let align = node.text_align.unwrap_or_default();
+    let text = div()
+        .absolute()
+        .left(units(t.x))
+        .top(units(t.y))
+        .w(units(t.w))
+        .h(units(t.h))
+        .flex()
+        .items_center()
+        .map(|d| match align {
+            LabelAlign::Left => d.justify_start(),
+            LabelAlign::Center => d.justify_center(),
+            LabelAlign::Right => d.justify_end(),
+        })
+        .gap(units(6.))
+        .text_color(pencil.text)
+        .child(label(node, align))
+        .children(ctx.link_button());
+    // Ending at the shape's badge point and growing back from it, so an icon and an emoji
+    // both stay inside the box, and a diamond's or a cloud's sit near its outline.
+    let badge = badges(node, ctx, pencil.text).map(|b| {
+        div()
+            .absolute()
+            .right(units((w - g.badge.x - 9.).max(2.)))
+            .top(units((g.badge.y - 9.).max(2.)))
+            .child(b)
+    });
+    let hidden = !ctx.selected;
+    let handles = [Side::Top, Side::Right, Side::Bottom, Side::Left]
+        .into_iter()
+        .flat_map(|side| {
+            let a = g.anchors.on(side);
+            let (at, inset) = match side {
+                Side::Top => (a.x / w, a.y),
+                Side::Bottom => (a.x / w, h - a.y),
+                Side::Left => (a.y / h, a.x),
+                Side::Right => (a.y / h, w - a.x),
+            };
+            let name: SharedString = match side {
+                Side::Top => "top",
+                Side::Right => "right",
+                Side::Bottom => "bottom",
+                Side::Left => "left",
+            }
+            .into();
+            // Both kinds, so edges meet any side whichever way they run; the source on top,
+            // so a drag starts a connection out.
+            [HandleKind::Target, HandleKind::Source].map(|kind| {
+                ctx.handle(kind, side)
+                    .id(name.clone())
+                    .at(at)
+                    .inset(inset)
+                    .border_width(px(0.))
+                    .hidden(hidden)
+            })
+        });
+    div()
+        .relative()
+        .w(units(w))
+        .h(units(h))
+        .text_size(ctx.font_size(13.))
+        .child(painted)
+        .child(text)
+        .children(badge)
+        .children(handles)
+        .into_any_element()
 }
 
 /// The built-in `group` kind: a plain area other nodes can be children of.
@@ -737,6 +914,8 @@ pub fn group_node(node: &Node, ctx: &NodeContext) -> AnyElement {
 /// layout joins topics by their sides), larger and bolder for a root.
 pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
     let root = ctx.depth == Some(0);
+    let pencil = ctx.colors.pencil(node.color.as_deref());
+    let align = node.text_align.unwrap_or(LabelAlign::Left);
     div()
         .relative()
         .max_w(units(260.))
@@ -747,15 +926,17 @@ pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .border_color(if ctx.selected {
             ctx.colors.selected
         } else {
-            ctx.colors.node_border
+            pencil.stroke
         })
-        .bg(ctx.colors.node)
+        .bg(pencil.fill)
+        .text_color(pencil.text)
         .text_size(ctx.font_size(if root { 16. } else { 13. }))
         .when(root, |d| d.font_weight(FontWeight::SEMIBOLD))
         .flex()
         .items_center()
         .gap(units(6.))
-        .child(label(node))
+        .children(badges(node, ctx, pencil.text))
+        .child(label(node, align))
         .children(ctx.link_button())
         .into_any_element()
 }
@@ -777,5 +958,6 @@ pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     );
     kinds.insert("group".into(), Rc::new(|n, c, _, _, _| group_node(n, c)));
     kinds.insert("topic".into(), Rc::new(|n, c, _, _, _| topic_node(n, c)));
+    kinds.insert("shape".into(), Rc::new(|n, c, _, _, _| shape_node(n, c)));
     kinds
 }

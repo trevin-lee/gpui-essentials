@@ -9,6 +9,8 @@ use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+pub use crate::shapes::NodeShape;
+
 /// A node's id. Unique among the flow's nodes.
 pub type NodeId = SharedString;
 /// An edge's id. Unique among the flow's edges.
@@ -297,6 +299,23 @@ pub struct Node {
     /// In a tree layout (a mind map), whether what's under the node is folded away.
     #[serde(default, skip_serializing_if = "is_false")]
     pub collapsed: bool,
+    /// A whiteboard node's outline (the `shape` kind).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<NodeShape>,
+    /// A color from the flow's palette by name (`red`, `blue`, …); the node's own colors when
+    /// unset or `default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<SharedString>,
+    /// A Lucide icon by name (`database`), shown as a badge. One gpui-core doesn't bundle is
+    /// left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<SharedString>,
+    /// One emoji, shown as a badge beside the icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<SharedString>,
+    /// How the node's text lines up; the kind's own way when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<LabelAlign>,
     /// What the node links to, as the host names it (a document's id, say). The flow shows a
     /// link button and tells the host when it's pressed; it never opens anything itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -365,6 +384,11 @@ impl Node {
             extent: None,
             z_index: 0,
             collapsed: false,
+            shape: None,
+            color: None,
+            icon: None,
+            emoji: None,
+            text_align: None,
             link: None,
             extra: Map::new(),
         }
@@ -453,6 +477,36 @@ impl Node {
         self
     }
 
+    /// A whiteboard node of this outline (of the `shape` kind).
+    pub fn shape(mut self, shape: NodeShape) -> Self {
+        self.kind = "shape".into();
+        self.shape = Some(shape);
+        self
+    }
+
+    /// Colors the node with the palette's color of this name.
+    pub fn color(mut self, key: impl Into<SharedString>) -> Self {
+        self.color = Some(key.into());
+        self
+    }
+
+    /// Shows this Lucide icon on the node.
+    pub fn icon(mut self, name: impl Into<SharedString>) -> Self {
+        self.icon = Some(name.into());
+        self
+    }
+
+    /// Shows this emoji on the node.
+    pub fn emoji(mut self, emoji: impl Into<SharedString>) -> Self {
+        self.emoji = Some(emoji.into());
+        self
+    }
+
+    pub fn text_align(mut self, align: LabelAlign) -> Self {
+        self.text_align = Some(align);
+        self
+    }
+
     /// Links the node to something of the host's, by its id.
     pub fn link(mut self, link: impl Into<SharedString>) -> Self {
         self.link = Some(link.into());
@@ -467,6 +521,16 @@ impl Node {
             .map(|s| SharedString::from(s.to_string()))
             .unwrap_or_default()
     }
+}
+
+/// How a node's text lines up across it. (Not `TextAlign`, which GPUI exports too.)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LabelAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
 }
 
 /// How an edge's line runs between its two handles.
