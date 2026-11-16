@@ -11,11 +11,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use common::*;
+use gpui::*;
 use gpui_chatwidgets::CardTheme;
-use gpui_kit::*;
 use serde_json::json;
 // The built-in #[test] (which GPUI's test attribute expands to), not GPUI's, which
-// gpui_kit::* brings in.
+// gpui::* brings in.
 use std::prelude::v1::test;
 
 /// A test host whose theme is for touch, or for a mouse.
@@ -88,7 +88,7 @@ fn beside(b: Bounds<Pixels>) -> Point<Pixels> {
     }
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_small_control_takes_a_tap_beside_it_when_the_theme_is_for_touch(cx: &mut TestAppContext) {
     let host = host(true);
     let (_, cx) = open(cx, &sample("steps-carousel-separator"), &host, Some(400.));
@@ -114,7 +114,7 @@ fn a_small_control_takes_a_tap_beside_it_when_the_theme_is_for_touch(cx: &mut Te
     assert_eq!(host.sent.borrow().len(), 2, "{:?}", host.sent.borrow());
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn with_a_mouse_a_control_takes_presses_only_where_it_is_drawn(cx: &mut TestAppContext) {
     let host = host(false);
     let (_, cx) = open(cx, &sample("steps-carousel-separator"), &host, Some(400.));
@@ -149,7 +149,7 @@ fn key(cx: &mut VisualTestContext, key: &'static str) {
     draw(cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_tap_on_a_tab_an_arrow_a_chip_or_copy_leaves_the_focus_in_a_text_field(
     cx: &mut TestAppContext,
 ) {
@@ -195,7 +195,7 @@ carousel = Carousel([[TextContent("Slide one")], [TextContent("Slide two")]])"#;
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_tap_at_the_edge_of_a_select_option_picks_that_option(cx: &mut TestAppContext) {
     let host = host(true);
     let (card, cx) = open(cx, &sample("form-contact"), &host, Some(400.));
@@ -210,7 +210,7 @@ fn a_tap_at_the_edge_of_a_select_option_picks_that_option(cx: &mut TestAppContex
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn touch_targets_change_nothing_drawn(cx: &mut TestAppContext) {
     let marks = [
         "r.c2:next",
@@ -240,7 +240,7 @@ fn touch_targets_change_nothing_drawn(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_swipe_turns_a_carousel_and_a_short_or_upward_one_does_not(cx: &mut TestAppContext) {
     let host = host(true);
     let (_, cx) = open(cx, &sample("steps-carousel-separator"), &host, Some(400.));
@@ -261,7 +261,7 @@ fn a_swipe_turns_a_carousel_and_a_short_or_upward_one_does_not(cx: &mut TestAppC
     assert!(drawn(cx, "r.c2:slide2"));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_wide_table_scrolls_sideways_only_with_a_sideways_pan(cx: &mut TestAppContext) {
     let host = host(true);
     let (_, cx) = open(cx, &sample("editable-table"), &host, Some(280.));
@@ -279,7 +279,7 @@ fn a_wide_table_scrolls_sideways_only_with_a_sideways_pan(cx: &mut TestAppContex
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn long_code_scrolls_sideways_with_a_pan(cx: &mut TestAppContext) {
     let host = host(true);
     let line = "x".repeat(120);

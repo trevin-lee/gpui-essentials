@@ -1,14 +1,13 @@
 //! Forms and their controls, buttons and icon buttons. Text fields, the slider and an icon
-//! button's tooltip are gpui-core's (their editing and dragging), drawn in the card's colours;
-//! the date picker is still GPUI Kit's (its popover). The others are drawn here, as gpui-core's
-//! presses so the keyboard reaches them.
+//! button's tooltip are gpui-core's (their editing and dragging), drawn in the card's colours,
+//! and so is the date picker (its month), drawn in gpui-core's theme. The others are drawn here,
+//! as gpui-core's presses so the keyboard reaches them.
 
 use std::rc::Rc;
 
-use gpui_core::{Disableable as _, InputState, Selectable as _, Slider, Tooltip};
-use gpui_kit::component::date_picker::DatePicker;
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
+use gpui_core::{DatePicker, Disableable as _, InputState, Selectable as _, Slider, Tooltip};
 use serde_json::{Value as Json, json};
 
 use super::content::Glyph;
@@ -1061,8 +1060,7 @@ fn chosen_of(value: Option<&Json>) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::theme::CardTheme;
-    // The built-in #[test] (gpui_kit::test expands to it), not GPUI's, which gpui_kit::*
-    // brings in.
+    // The built-in #[test] (gpui::test expands to it), not GPUI's, which gpui::* brings in.
     use std::prelude::v1::test;
 
     /// The accessibility node a choice row's press writes, as GPUI builds it for a screen
@@ -1084,7 +1082,7 @@ mod tests {
         })
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn choice_rows_report_their_role_and_whether_they_are_checked(cx: &mut TestAppContext) {
         for role in [Role::CheckBox, Role::RadioButton, Role::Switch] {
             let on = node(role, true, cx);

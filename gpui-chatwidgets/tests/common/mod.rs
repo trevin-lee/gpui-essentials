@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_chatwidgets::openui::{ImageSrc, Link, Store};
 use gpui_chatwidgets::*;
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
 
 /// How the test host answers a card's images.
 #[derive(Clone, Copy, PartialEq)]
@@ -152,12 +152,12 @@ impl Render for Frame {
     }
 }
 
-/// Opens a card from `source` in a test window, `width` wide (or the window's width).
-/// GPUI Kit set up and the fonts the cards draw with loaded. gpui-core sets itself up (its
-/// text fields' keys) when the first field is made, as in a host that never calls its init.
+/// The fonts the cards draw with loaded, and gpui-core's theme at the cards' 16 pixel rem.
+/// gpui-core sets itself up (its keys) when the window's Root or the first field is made, as in
+/// a host that never calls its init.
 pub fn setup(cx: &mut TestAppContext) {
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        gpui_core::Theme::global_mut(cx).font_size = px(16.);
         let _ = cx.text_system().add_fonts(vec![
             std::borrow::Cow::Borrowed(
                 include_bytes!("../../examples/fonts/Inter-Regular.ttf").as_slice(),
@@ -172,6 +172,7 @@ pub fn setup(cx: &mut TestAppContext) {
     });
 }
 
+/// Opens a card from `source` in a test window, `width` wide (or the window's width).
 pub fn open<'a>(
     cx: &'a mut TestAppContext,
     source: &str,
@@ -183,7 +184,7 @@ pub fn open<'a>(
     let source = source.to_string();
     let made: Rc<RefCell<Option<Entity<CardView>>>> = Rc::default();
     let m = made.clone();
-    // In GPUI Kit's Root, as a host's window is: it moves the focus with Tab.
+    // In gpui-core's Root, as a host's window is: it moves the focus with Tab.
     let (_, cx) = cx.add_window_view(move |window, cx| {
         let card = cx.new(|cx| CardView::new(&source, "t", h, window, cx));
         *m.borrow_mut() = Some(card.clone());
@@ -191,7 +192,7 @@ pub fn open<'a>(
             card,
             width: width.map(px),
         });
-        gpui_kit::base::Root::new(frame, window, cx)
+        gpui_core::Root::new(frame, window, cx)
     });
     let card = made.borrow().clone().expect("the card");
     // Tall enough for every card to be drawn whole.

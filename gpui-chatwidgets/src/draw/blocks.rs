@@ -1,8 +1,8 @@
 //! Card blocks: grids (or a carousel) of small cards — snippet, overview, context, composite
 //! and visual — each pressable when its block has an action.
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 
 use super::content::{Glyph, img_from};
 use super::{Draw, pressable};

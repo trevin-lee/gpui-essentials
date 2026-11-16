@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_core::text::{InlineCodeStyle, TextView, TextViewColors, TextViewStyle};
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
 
 use super::{Draw, pressable};
 use crate::openui::{

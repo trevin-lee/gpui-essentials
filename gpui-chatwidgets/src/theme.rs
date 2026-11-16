@@ -6,7 +6,12 @@
 //! `rem_base` is how many CSS pixels the window's rem stands for, so a host that zooms by
 //! changing its rem size zooms the cards with it.
 
-use gpui_kit::{Hsla, Rems, rems, rgb, rgba};
+use gpui::{Hsla, Rems, rems, rgb, rgba};
+
+/// Built for iOS or Android, where people use a card with a finger: the theme's touch defaults.
+const fn is_mobile() -> bool {
+    cfg!(any(target_os = "ios", target_os = "android"))
+}
 
 /// Every colour a card draws with.
 #[derive(Clone, Debug, PartialEq)]
@@ -86,8 +91,8 @@ pub struct CodeColors {
 /// Font families by name; the host loads the fonts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CardFonts {
-    pub body: gpui_kit::SharedString,
-    pub mono: gpui_kit::SharedString,
+    pub body: gpui::SharedString,
+    pub mono: gpui::SharedString,
 }
 
 /// Text sizes in CSS pixels, with their line heights as a multiple of the size.
@@ -157,7 +162,7 @@ pub struct CardTheme {
     pub radii: Radii,
     pub space: Spacing,
     /// CSS pixels per rem of the window: every size here is drawn as `rems(size / rem_base)`.
-    /// GPUI's own rem is 16 pixels; GPUI Kit's Root sets it to its theme's font size.
+    /// GPUI's own rem is 16 pixels; gpui-core's Root sets it to its theme's font size.
     pub rem_base: f32,
     /// Draws the card in its own rounded, bordered frame, as a chat bubble (the web's
     /// UIMessage). Off, the card is drawn on whatever the host puts behind it.
@@ -376,12 +381,12 @@ impl CardTheme {
             rem_base: 16.,
             frame: true,
             dark: true,
-            min_hit: if gpui_kit::is_mobile() {
+            min_hit: if is_mobile() {
                 CardTheme::TOUCH_HIT
             } else {
                 0.
             },
-            touch: gpui_kit::is_mobile(),
+            touch: is_mobile(),
         }
     }
 

@@ -3,8 +3,8 @@
 //! series colours with a legend. Axis labels are painted inside the chart's own box, cut short
 //! to fit, so they never leave it.
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 
 use super::Draw;
 use crate::openui::{Bars, Chart, ChartKind, Curve, Scatter, Slices, SlicesKind};
@@ -1120,7 +1120,7 @@ fn arc(c: Point<Pixels>, r: Pixels, turn: f32) -> Point<Pixels> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+    // The built-in #[test], not GPUI's, which gpui::* brings in.
     use std::prelude::v1::test;
 
     #[test]
