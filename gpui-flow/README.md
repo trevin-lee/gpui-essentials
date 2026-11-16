@@ -83,6 +83,25 @@ Run the example with `cargo run --release --example flow` from this folder.
   - A `nodrag` child, such as a button, gets an ordinary tap.
   - GPUI doesn't recognise a two-finger pinch on iOS yet, so the host recognises it natively
     and calls `zoom_by` (or dispatches `PinchEvent`s).
+- **Mind maps.** With `layout: Layout::Tree(TreeLayout { .. })` a flow is a mind map. Its
+  tree is read from the edges: a node's parent is the source of the first edge into it, so
+  a mind map saves and loads as any flow does.
+  - **Layout.** Roots stay where they're put. Everything under them is laid out from the
+    nodes' sizes: to the right, downward, or to both sides of the root (`TreeDirection`),
+    with siblings in edge order.
+  - **Motion.** Nodes ease to their new places, and nothing redraws once they're there.
+  - **Edges** join the sides of the boxes.
+  - **Chips.** A chip on each parent folds its subtree away, showing a count, or shows it
+    again (`Node::collapsed`, `FlowEvent::NodeCollapse`).
+  - **Tab** adds a child to the selected node and **enter** a sibling after it. The new
+    node is selected, and `FlowEvent::NodeAdd` tells the host to start editing it
+    (`with_new_node` makes nodes your way).
+  - **Arrows** move the selection to the nearest node that way.
+  - **Moving.** A node dropped on another becomes its child, with the target outlined
+    while you aim (`FlowEvent::NodeReparent`). Dropped on nothing, it goes back.
+  - **Delete** takes a node's subtree and selects its parent.
+  - **Topics.** The built-in `topic` kind is a label without handles, larger for a root.
+  - The example has one: `--mindmap`.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

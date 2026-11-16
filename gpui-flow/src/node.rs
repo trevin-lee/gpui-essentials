@@ -276,6 +276,11 @@ pub struct NodeContext {
     pub colors: FlowColors,
     /// How large (in points) the area a finger can take a handle or a grip by is, at least.
     pub(crate) touch_size: Pixels,
+    /// In a tree layout, how deep the node is (0 for a root); none otherwise.
+    pub depth: Option<usize>,
+    /// In a tree layout, how many children the node has, and whether they're folded away.
+    pub children: usize,
+    pub collapsed: bool,
 }
 
 impl NodeContext {
@@ -685,6 +690,29 @@ pub fn group_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .into_any_element()
 }
 
+/// The built-in `topic` kind, for mind maps: the label in a rounded box with no handles (a tree
+/// layout joins topics by their sides), larger and bolder for a root.
+pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
+    let root = ctx.depth == Some(0);
+    div()
+        .relative()
+        .max_w(units(260.))
+        .px(units(if root { 16. } else { 12. }))
+        .py(units(if root { 10. } else { 7. }))
+        .rounded(units(if root { 10. } else { 7. }))
+        .border_1()
+        .border_color(if ctx.selected {
+            ctx.colors.selected
+        } else {
+            ctx.colors.node_border
+        })
+        .bg(ctx.colors.node)
+        .text_size(ctx.font_size(if root { 16. } else { 13. }))
+        .when(root, |d| d.font_weight(FontWeight::SEMIBOLD))
+        .child(node.label_text())
+        .into_any_element()
+}
+
 /// The renderers every flow starts with.
 pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
     let mut kinds: HashMap<SharedString, NodeRenderer> = HashMap::new();
@@ -701,5 +729,6 @@ pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
         Rc::new(|n, c, _, _, _| labeled_node(n, c, true, false)),
     );
     kinds.insert("group".into(), Rc::new(|n, c, _, _, _| group_node(n, c)));
+    kinds.insert("topic".into(), Rc::new(|n, c, _, _, _| topic_node(n, c)));
     kinds
 }
