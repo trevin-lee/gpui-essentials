@@ -2,7 +2,8 @@
 //! screen, the selection and any drag in progress. It lays events out once per change (not per
 //! frame), paints them (`paint.rs`), and turns the mouse and keyboard into proposals it hands
 //! the host as [`CalendarEvent`]s. It never changes an event itself: the host applies a move
-//! and sets the events again.
+//! and sets the events again. The host's calendars decide each event's colour, whether it's
+//! shown and whether it can be edited.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -74,7 +75,8 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 /// What the calendar tells its host. Every change to an event is a proposal: the host decides,
-/// and updates the events it gave the calendar if it agrees.
+/// and updates the events it gave the calendar if it agrees. Nothing is proposed for an event
+/// that's read-only or in a read-only calendar.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CalendarEvent {
     /// The view or the period on screen changed: supply events for this range (recurring
@@ -88,14 +90,19 @@ pub enum CalendarEvent {
     Select(Option<EventId>),
     /// Double-click or Enter on an event.
     Open(EventId),
-    /// Someone dragged out empty time, double-clicked a slot, or pressed Enter on one.
-    Create(EventTime),
-    /// An event was dragged somewhere else.
-    Move { id: EventId, time: EventTime },
+    /// Someone dragged out empty time, double-clicked a slot, or pressed Enter on one. The
+    /// calendar is [`CalendarOptions::default_calendar`] or the first that can be edited; none
+    /// when the host gave no calendars.
+    Create {
+        calendar: Option<CalendarId>,
+        time: EventTime,
+    },
+    /// An event (one occurrence, for a recurring one) was dragged somewhere else.
+    Move { event: EventRef, time: EventTime },
     /// An event's end was dragged.
-    Resize { id: EventId, time: EventTime },
-    /// Delete was pressed with this event selected.
-    Delete(EventId),
+    Resize { event: EventRef, time: EventTime },
+    /// Delete or Backspace was pressed with this event selected.
+    Delete(EventRef),
 }
 
 /// A drag in progress, or a press that might become one.
@@ -183,7 +190,6 @@ struct LayoutKey {
     tz: chrono_tz::Tz,
     hour12: bool,
     min_minutes: u32,
-    colors: u64,
 }
 
 /// The events on screen, laid out. Rebuilt when the events, the period or the options change.
@@ -198,6 +204,8 @@ pub(crate) struct Laid {
 
 /// A calendar: day, week, N-day and month views of the host's events.
 pub struct Calendar {
+    calendars: Vec<CalendarSource>,
+    calendar_index: HashMap<CalendarId, usize>,
     events: Vec<Event>,
     /// Timed events by start, all-day ones by start date: what the culling searches.
     timed_order: Vec<usize>,
@@ -252,6 +260,8 @@ impl Calendar {
             }
         });
         Self {
+            calendars: Vec::new(),
+            calendar_index: HashMap::new(),
             events: Vec::new(),
             timed_order: Vec::new(),
             all_day_order: Vec::new(),
@@ -302,9 +312,9 @@ impl Calendar {
         self
     }
 
-    /// A colour for a calendar id, as 0xRRGGBB.
-    pub fn with_calendar_color(mut self, calendar: impl Into<SharedString>, rgb: u32) -> Self {
-        self.options.calendar_colors.insert(calendar.into(), rgb);
+    /// The host's calendars: their colours, which are shown and which can be edited.
+    pub fn with_calendars(mut self, calendars: Vec<CalendarSource>) -> Self {
+        self.load_calendars(calendars);
         self
     }
 
@@ -346,6 +356,82 @@ impl Calendar {
             .date_naive()
     }
 
+    // The calendars.
+
+    fn load_calendars(&mut self, calendars: Vec<CalendarSource>) {
+        self.calendar_index = calendars
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.id.clone(), i))
+            .collect();
+        self.calendars = calendars;
+        // Which events show, and their colours, follow the calendars.
+        let events = std::mem::take(&mut self.events);
+        self.load(events);
+    }
+
+    /// Replaces the calendars: say a calendar was hidden, recoloured or made read-only.
+    pub fn set_calendars(&mut self, calendars: Vec<CalendarSource>, cx: &mut Context<Self>) {
+        self.load_calendars(calendars);
+        cx.notify();
+    }
+
+    pub fn calendars(&self) -> &[CalendarSource] {
+        &self.calendars
+    }
+
+    pub fn calendar(&self, id: &str) -> Option<&CalendarSource> {
+        self.calendar_index.get(id).map(|&i| &self.calendars[i])
+    }
+
+    /// Whether an event's calendar is shown. An event whose calendar isn't in the list is.
+    pub fn is_shown(&self, event: &Event) -> bool {
+        self.calendar(&event.calendar).is_none_or(|c| c.visible)
+    }
+
+    /// Whether an event can't be changed: it's read-only, or its calendar is.
+    pub fn is_read_only(&self, event: &Event) -> bool {
+        event.read_only || self.calendar(&event.calendar).is_some_and(|c| c.read_only)
+    }
+
+    /// The colour an event is drawn in, as 0xRRGGBB: its own, its calendar's, or a palette
+    /// colour picked by its calendar id when the host gave that calendar none.
+    pub fn color_of(&self, event: &Event) -> u32 {
+        event.color.unwrap_or_else(|| {
+            self.calendar(&event.calendar)
+                .map(|c| c.color)
+                .unwrap_or_else(|| palette_color(&event.calendar))
+        })
+    }
+
+    /// The calendar a new event goes in: `Some(None)` with no calendars given, `None` when
+    /// every calendar is read-only (and so nothing can be made).
+    fn new_event_calendar(&self) -> Option<Option<CalendarId>> {
+        if self.calendars.is_empty() {
+            return Some(None);
+        }
+        let writable = |c: &&CalendarSource| !c.read_only;
+        self.options
+            .default_calendar
+            .as_ref()
+            .and_then(|id| self.calendar(id))
+            .filter(writable)
+            .or_else(|| self.calendars.iter().filter(|c| c.visible).find(writable))
+            .map(|c| Some(c.id.clone()))
+    }
+
+    fn propose_create(&self, time: EventTime, cx: &mut Context<Self>) {
+        if let Some(calendar) = self.new_event_calendar() {
+            cx.emit(CalendarEvent::Create { calendar, time });
+        }
+    }
+
+    /// An event the host could change: shown, and neither it nor its calendar read-only.
+    fn editable(&self, id: &str) -> Option<&Event> {
+        self.event(id)
+            .filter(|e| self.is_shown(e) && !self.is_read_only(e))
+    }
+
     // The events.
 
     fn load(&mut self, events: Vec<Event>) {
@@ -361,6 +447,9 @@ impl Calendar {
         self.longest_timed = Duration::zero();
         self.longest_all_day = Duration::zero();
         for (i, e) in self.events.iter().enumerate() {
+            if !self.is_shown(e) {
+                continue;
+            }
             match e.time {
                 EventTime::Timed { start, end } => {
                     self.longest_timed = self.longest_timed.max(end - start);
@@ -382,7 +471,7 @@ impl Calendar {
         self.all_day_order = all_day;
         self.laid = None;
         if let Some(Selection::Event(id)) = &self.selection
-            && !self.by_id.contains_key(id)
+            && !self.event(id).is_some_and(|e| self.is_shown(e))
         {
             self.selection = None;
         }
@@ -411,6 +500,7 @@ impl Calendar {
         self.set_events(events, cx);
     }
 
+    /// Every event the host gave, its hidden calendars' included.
     pub fn events(&self) -> &[Event] {
         &self.events
     }
@@ -419,7 +509,7 @@ impl Calendar {
         self.by_id.get(id).map(|&i| &self.events[i])
     }
 
-    /// The events that touch an instant range, culled with a binary search.
+    /// The shown events that touch an instant range, culled with a binary search.
     pub fn events_in(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<&Event> {
         let tz = self.options.time_zone;
         let mut out = Vec::new();
@@ -636,28 +726,6 @@ impl Calendar {
 
     // Laying out.
 
-    fn color_of(&self, e: &Event) -> u32 {
-        e.color.unwrap_or_else(|| {
-            self.options
-                .calendar_colors
-                .get(&e.calendar)
-                .copied()
-                .unwrap_or_else(|| palette_color(&e.calendar))
-        })
-    }
-
-    fn colors_hash(&self) -> u64 {
-        let mut pairs: Vec<(&SharedString, &u32)> = self.options.calendar_colors.iter().collect();
-        pairs.sort();
-        let mut h: u64 = 0xcbf29ce484222325;
-        for (k, v) in pairs {
-            for b in k.bytes().chain(v.to_le_bytes()) {
-                h = (h ^ b as u64).wrapping_mul(0x100000001b3);
-            }
-        }
-        h
-    }
-
     /// The shortest an event is drawn on the grid, in minutes: tall enough for a line of text.
     fn min_minutes(&self) -> u32 {
         (paint::MIN_CHIP_HEIGHT / self.options.hour_height.max(8.) * 60.).ceil() as u32
@@ -688,7 +756,7 @@ impl Calendar {
             time: time.into(),
             location: e.location.clone(),
             color: self.color_of(e),
-            read_only: e.read_only,
+            read_only: self.is_read_only(e),
             all_day: e.time.is_all_day(),
             end,
         }
@@ -704,7 +772,6 @@ impl Calendar {
             tz: self.options.time_zone,
             hour12: self.options.hour12,
             min_minutes: self.min_minutes(),
-            colors: self.colors_hash(),
         };
         if let Some(laid) = &self.laid
             && laid.key == key
@@ -885,14 +952,15 @@ impl Calendar {
                 let start = time::snap_floor(*minute, self.options.slot_minutes as f32);
                 let length = self.options.default_duration.num_minutes() as f32;
                 let tz = self.options.time_zone;
-                cx.emit(CalendarEvent::Create(EventTime::timed(
+                let time = EventTime::timed(
                     time::at_minutes(*date, start, tz),
                     time::at_minutes(*date, start + length, tz),
-                )));
+                );
+                self.propose_create(time, cx);
                 return;
             }
             Target::Day { date, .. } if double => {
-                cx.emit(CalendarEvent::Create(time::created_days(*date, *date)));
+                self.propose_create(time::created_days(*date, *date), cx);
                 return;
             }
             Target::Nothing => return,
@@ -941,7 +1009,7 @@ impl Calendar {
                         if read_only {
                             return;
                         }
-                        let Some(original) = self.event(&id).map(|e| e.time) else {
+                        let Some(original) = self.editable(&id).map(|e| e.time) else {
                             return;
                         };
                         if resize {
@@ -960,6 +1028,11 @@ impl Calendar {
                                 now: geo.pos(p, area),
                             }
                         }
+                    }
+                    Target::Grid { .. } | Target::Day { .. }
+                        if self.new_event_calendar().is_none() =>
+                    {
+                        return;
                     }
                     Target::Grid { date, minute } => Drag::Create {
                         date,
@@ -1055,20 +1128,22 @@ impl Calendar {
                 _ => {}
             },
             Drag::Move { original, .. } | Drag::Resize { original, .. } => {
+                // The host may have made it read-only while it was dragged.
                 if let Some((Some(id), time)) = proposal
                     && time != original
+                    && let Some(event) = self.editable(&id).map(Event::to_ref)
                 {
                     let moved = matches!(drag, Drag::Move { .. });
                     cx.emit(if moved {
-                        CalendarEvent::Move { id, time }
+                        CalendarEvent::Move { event, time }
                     } else {
-                        CalendarEvent::Resize { id, time }
+                        CalendarEvent::Resize { event, time }
                     });
                 }
             }
             Drag::Create { .. } | Drag::CreateDays { .. } => {
                 if let Some((None, time)) = proposal {
-                    cx.emit(CalendarEvent::Create(time));
+                    self.propose_create(time, cx);
                 }
             }
         }
@@ -1258,17 +1333,19 @@ impl Calendar {
                     let start = time::at_minutes(date, minute as f32, tz);
                     EventTime::timed(start, start + self.options.default_duration)
                 };
-                cx.emit(CalendarEvent::Create(time));
+                self.propose_create(time, cx);
             }
             None => {}
         }
     }
 
     fn delete_selected(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self.selected_event().cloned()
-            && self.event(&id).is_some_and(|e| !e.read_only)
+        if let Some(event) = self
+            .selected_event()
+            .and_then(|id| self.editable(id))
+            .map(Event::to_ref)
         {
-            cx.emit(CalendarEvent::Delete(id));
+            cx.emit(CalendarEvent::Delete(event));
         }
     }
 
@@ -1280,7 +1357,14 @@ impl Calendar {
         let tz = self.options.time_zone;
         let (title, color) = match id.as_ref().and_then(|id| self.event(id)) {
             Some(e) => (e.title.clone(), self.color_of(e)),
-            None => ("New event".into(), crate::theme::PALETTE[0]),
+            None => {
+                let calendar = self.new_event_calendar().flatten();
+                let color = calendar
+                    .as_ref()
+                    .and_then(|id| self.calendar(id))
+                    .map_or(crate::theme::PALETTE[0], |c| c.color);
+                ("New event".into(), color)
+            }
         };
         let label = match time {
             EventTime::Timed { start, end } => time::format_range(
