@@ -51,7 +51,9 @@ pub mod theme;
 mod tooltip;
 
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
-pub use date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateValue, MonthGrid};
+pub use date_picker::{
+    DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
+};
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
 pub use menu::{PopupMenu, PopupMenuColors, PopupMenuItem};
