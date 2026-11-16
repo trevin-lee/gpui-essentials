@@ -12,6 +12,8 @@
 //!   so any Markdown tool can still read the document.
 //! - **Links to other documents** ([`docs`]): mentions inside text and sub-page blocks, drawn
 //!   with the title and icon the app gives them.
+//! - **JSON** ([`json`]): the document as a tree of blocks with ids that last, for storing
+//!   and indexing.
 //! - Markdown shortcuts as you type (`# `, `- `, `1. `, `[ ] `, `> `, three backticks, `---`,
 //!   `**bold**`), undo and redo, selection across blocks, and copy and paste as Markdown.
 //!
@@ -37,6 +39,7 @@
 
 pub mod docs;
 mod editor;
+pub mod json;
 pub mod slash;
 pub mod widget;
 

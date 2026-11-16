@@ -47,7 +47,7 @@ pub fn fenced(name: &str, body: &str) -> String {
 }
 
 /// `fenced` with a whole info string: the name and anything written after it.
-fn fenced_with_info(info: &str, body: &str) -> String {
+pub(crate) fn fenced_with_info(info: &str, body: &str) -> String {
     let longest = body.split(|c| c != '`').map(str::len).max().unwrap_or(0);
     let fence = "`".repeat(longest.max(2) + 1);
     let body = body.strip_suffix('\n').unwrap_or(body);
