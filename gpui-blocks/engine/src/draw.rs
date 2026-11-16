@@ -404,6 +404,7 @@ pub(crate) struct Colors {
     pub(crate) link: Hsla,
     pub(crate) code_background: Hsla,
     pub(crate) mono: gpui::SharedString,
+    pub(crate) border: Hsla,
 }
 
 /// A line height snapped to whole device pixels, as GPUI Kit lays its text out.
@@ -415,9 +416,29 @@ pub(crate) fn device_line(line: Pixels, window: &Window) -> Pixels {
 /// What came before a top-level block, for the gap above a heading.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Prev {
-    Heading,
+    Heading(u8),
     Rule,
     Other,
+}
+
+/// A top-level block the engine draws itself.
+pub(crate) enum Own {
+    /// A paragraph (no level) or a heading.
+    Text(Option<u8>, InlineText),
+    Rule,
+    Custom(gpui_kit::base::text::MarkdownNode),
+    /// A break, a link definition or an unknown block: nothing to see.
+    Nothing,
+}
+
+/// Where a top-level block stands among the others, for the gaps around it.
+#[derive(Clone, Copy)]
+pub(crate) struct Place {
+    pub(crate) first: bool,
+    pub(crate) last: bool,
+    pub(crate) prev: Option<Prev>,
+    pub(crate) body_size: Pixels,
+    pub(crate) paragraph_gap: Pixels,
 }
 
 /// A top-level paragraph or heading.
@@ -426,14 +447,10 @@ pub(crate) struct TopLevel<'a> {
     /// A heading's level; `None` for a paragraph.
     pub(crate) level: Option<u8>,
     pub(crate) inline: &'a InlineText,
-    pub(crate) first: bool,
-    pub(crate) last: bool,
-    pub(crate) prev: Option<Prev>,
+    pub(crate) place: Place,
     pub(crate) bands: Vec<(Range<usize>, Hsla)>,
     pub(crate) base: &'a gpui::TextStyle,
-    pub(crate) body_size: Pixels,
     pub(crate) body_line: Pixels,
-    pub(crate) paragraph_gap: Pixels,
     pub(crate) colors: &'a Colors,
 }
 
@@ -462,18 +479,23 @@ pub(crate) fn top_level_text(
 ) -> AnyElement {
     match block.level {
         None => {
-            let style = paragraph_style(block.base, block.body_size, block.body_line, block.colors);
+            let style = paragraph_style(
+                block.base,
+                block.place.body_size,
+                block.body_line,
+                block.colors,
+            );
             let leaf = TextLeaf::new(block.key, block.inline, style, block.bands, cx, window, app);
-            let gap = if block.last {
+            let gap = if block.place.last {
                 px(0.)
             } else {
-                block.paragraph_gap
+                block.place.paragraph_gap
             };
             div().pb(gap).child(leaf).into_any_element()
         }
         Some(level) => {
             let (scale, line, section) = heading_metrics(level);
-            let size = block.body_size * scale;
+            let size = block.place.body_size * scale;
             let mut style = paragraph_style(
                 block.base,
                 size,
@@ -486,13 +508,17 @@ pub(crate) fn top_level_text(
             }
             // The previous block already leaves a gap below itself, so only the rest of the
             // section gap goes above; a heading right after another stays close.
-            let top = match (block.first, block.prev) {
+            let top = match (block.place.first, block.place.prev) {
                 (true, _) | (_, None) => px(0.),
-                (false, Some(Prev::Heading)) => size * 0.25,
-                (false, Some(Prev::Rule)) => (size * section - block.body_size * 1.6).max(px(0.)),
-                (false, Some(Prev::Other)) => (size * section - block.paragraph_gap).max(px(0.)),
+                (false, Some(Prev::Heading(_))) => size * 0.25,
+                (false, Some(Prev::Rule)) => {
+                    (size * section - block.place.body_size * 1.6).max(px(0.))
+                }
+                (false, Some(Prev::Other)) => {
+                    (size * section - block.place.paragraph_gap).max(px(0.))
+                }
             };
-            let bottom = if block.last {
+            let bottom = if block.place.last {
                 px(0.)
             } else {
                 size * HEADING_BOTTOM_GAP
@@ -501,4 +527,58 @@ pub(crate) fn top_level_text(
             div().pt(top).pb(bottom).child(leaf).into_any_element()
         }
     }
+}
+
+/// The room above and below a rule.
+fn rule_space(body_size: Pixels) -> Pixels {
+    body_size * 1.6
+}
+
+/// A top-level rule: a hairline with more room around it than a paragraph gap. The previous
+/// block's own gap counts toward the space above.
+pub(crate) fn rule(place: Place, colors: &Colors) -> AnyElement {
+    let space = rule_space(place.body_size);
+    let top = if place.first {
+        px(0.)
+    } else {
+        let above = match place.prev {
+            None => px(0.),
+            Some(Prev::Rule) => space,
+            Some(Prev::Heading(level)) => {
+                place.body_size * heading_metrics(level).0 * HEADING_BOTTOM_GAP
+            }
+            Some(Prev::Other) => place.paragraph_gap,
+        };
+        (space - above).max(px(0.))
+    };
+    let bottom = if place.last { px(0.) } else { space };
+    div()
+        .pt(top)
+        .pb(bottom)
+        .child(div().bg(colors.border).h(px(1.)))
+        .into_any_element()
+}
+
+/// A top-level custom block: what its extension draws, or its text.
+pub(crate) fn custom_block(
+    node: &gpui_kit::base::text::MarkdownNode,
+    place: Place,
+    extensions: &Extensions,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let drawn = node.data::<CustomNode>().and_then(|custom| {
+        extensions
+            .iter()
+            .find(|e| e.name() == custom.name())
+            .map(|e| e.render(custom, window, cx))
+    });
+    let content =
+        drawn.unwrap_or_else(|| div().child(node.as_text().to_string()).into_any_element());
+    let gap = if place.last {
+        px(0.)
+    } else {
+        place.paragraph_gap
+    };
+    div().pb(gap).child(content).into_any_element()
 }

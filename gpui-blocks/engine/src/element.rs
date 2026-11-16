@@ -172,6 +172,7 @@ impl RenderOnce for BlockEditor {
             link: text_style.link(),
             code_background: text_style.code_background(),
             mono: theme.tokens.typography.mono.clone(),
+            border: text_style.border(),
         };
         let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
         let own_extensions = self.state.read(cx).model.doc.ext.clone();
@@ -340,46 +341,62 @@ impl RenderOnce for BlockEditor {
                         let prev = unit_ix.checked_sub(1).map(|ix| {
                             let u = &units[ix];
                             match &snapshot.blocks[u.block].nodes[u.node] {
-                                BlockNode::Heading { .. } => super::draw::Prev::Heading,
+                                BlockNode::Heading { level, .. } => {
+                                    super::draw::Prev::Heading(*level)
+                                }
                                 BlockNode::HorizontalRule { .. } => super::draw::Prev::Rule,
                                 _ => super::draw::Prev::Other,
                             }
                         });
+                        use super::draw::Own;
                         let own = {
                             let state = self.state.read(cx);
                             let doc = &state.model.doc;
-                            match (doc.kind(block_id), doc.inline(block_id)) {
-                                (Some(super::kind::BlockKindData::Paragraph), Some(inline))
+                            use super::document::{AtomData, BlockContent};
+                            use super::kind::BlockKindData as K;
+                            match (doc.kind(block_id), doc.get(block_id).map(|e| &e.content)) {
+                                (Some(K::Paragraph), Some(BlockContent::Inline(inline)))
                                     if super::draw::draws(inline) =>
                                 {
-                                    Some((None, inline.clone()))
+                                    Some(Own::Text(None, inline.clone()))
                                 }
                                 (
-                                    Some(super::kind::BlockKindData::Heading { level }),
-                                    Some(inline),
+                                    Some(K::Heading { level }),
+                                    Some(BlockContent::Inline(inline)),
                                 ) if super::draw::draws(inline) => {
-                                    Some((Some(*level), inline.clone()))
+                                    Some(Own::Text(Some(*level), inline.clone()))
+                                }
+                                (Some(K::HorizontalRule), _) => Some(Own::Rule),
+                                (
+                                    Some(K::Custom),
+                                    Some(BlockContent::Atom(AtomData::Custom(node))),
+                                ) => Some(Own::Custom(node.clone())),
+                                (Some(K::Break { .. } | K::Definition { .. } | K::Unknown), _) => {
+                                    Some(Own::Nothing)
                                 }
                                 _ => None,
                             }
                         };
+                        let place = super::draw::Place {
+                            first: node_ix == 0,
+                            last: is_last_node,
+                            prev,
+                            body_size,
+                            paragraph_gap,
+                        };
                         match own {
-                            Some((level, inline)) => super::draw::top_level_text(
+                            Some(Own::Text(level, inline)) => super::draw::top_level_text(
                                 super::draw::TopLevel {
                                     key: block_id.as_u64(),
                                     level,
                                     inline: &inline,
-                                    first: node_ix == 0,
-                                    last: is_last_node,
-                                    prev,
+                                    place,
                                     bands: backgrounds
                                         .get(&block_id.as_u64())
                                         .cloned()
                                         .unwrap_or_default(),
                                     base: &typography,
-                                    body_size,
                                     body_line,
-                                    paragraph_gap,
                                     colors: &text_colors,
                                 },
                                 &super::draw::LeafContext {
@@ -389,6 +406,11 @@ impl RenderOnce for BlockEditor {
                                 window,
                                 cx,
                             ),
+                            Some(Own::Rule) => super::draw::rule(place, &text_colors),
+                            Some(Own::Custom(node)) => {
+                                super::draw::custom_block(&node, place, &own_extensions, window, cx)
+                            }
+                            Some(Own::Nothing) => div().into_any_element(),
                             None => {
                                 node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx)
                             }
