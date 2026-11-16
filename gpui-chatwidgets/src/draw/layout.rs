@@ -209,7 +209,7 @@ impl Draw<'_, '_> {
                 this.ui.tabs.insert(key.clone(), i);
                 cx.notify();
             });
-            let trigger = pressable(self.id(&format!("{path}.tab{i}")))
+            let trigger = pressable(self.id(&format!("{path}.tab{i}")), self.t)
                 .role(Role::Tab)
                 .accessibility_label(s.title.clone())
                 .flex_1()
@@ -288,7 +288,7 @@ impl Draw<'_, '_> {
                     )
                     .into_any_element()
             };
-            let trigger = pressable(self.id(&format!("{item_key}.trigger")))
+            let trigger = pressable(self.id(&format!("{item_key}.trigger")), self.t)
                 .accessibility_label(s.title.clone())
                 .w_full()
                 .min_w_0()
@@ -530,7 +530,7 @@ impl Draw<'_, '_> {
                 s.moves += 1;
                 cx.notify();
             });
-            let press = pressable(d.id(&format!("{path}.{name}")))
+            let press = pressable(d.id(&format!("{path}.{name}")), d.t)
                 .accessibility_label(name.to_string())
                 .disabled(!enabled)
                 .flex_none()
@@ -631,7 +631,7 @@ impl Draw<'_, '_> {
         let close_outside = self
             .cx
             .listener(move |this, _: &ClickEvent, _, cx| this.close_modal(&key, &open, cx));
-        let close_button = pressable(self.id(&format!("{path}.close")))
+        let close_button = pressable(self.id(&format!("{path}.close")), self.t)
             .accessibility_label("Close")
             .flex_none()
             .size(self.px(28.))

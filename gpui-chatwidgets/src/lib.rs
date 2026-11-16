@@ -37,25 +37,13 @@ pub use view::CardView;
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
-/// The asset path of a Lucide icon in GPUI Kit's bundled catalog ("icons/calendar.svg"), or
-/// None when the catalog hasn't one by that name. For a host that registers GPUI Kit's
-/// `AllAssets`, as its [`CardHost::icon`]. The name is only ever looked up in the catalog, never
-/// used as a path itself.
+/// The asset path of a Lucide icon in gpui-core's bundled set ("icons/calendar.svg"), or None
+/// when the set hasn't one by that name. For a host that serves gpui-core's `Icons` asset
+/// source, as its [`CardHost::icon`]. The name is only ever looked up in the set, never used as
+/// a path itself.
 #[cfg(feature = "gpui")]
 pub fn lucide_icon(name: &str) -> Option<gpui_kit::SharedString> {
-    if name.is_empty()
-        || name.len() > 64
-        || !name
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-    {
-        return None;
-    }
-    let want = format!("icons/{name}.svg");
-    gpui_kit::assets::IconName::ALL
-        .iter()
-        .map(|i| i.path())
-        .find(|p| p.as_ref() == want)
+    gpui_core::IconName::named(name).map(|i| i.path())
 }
 
 #[cfg(feature = "gpui")]

@@ -26,6 +26,23 @@ pub(crate) fn field_key(path: &str, i: usize) -> String {
     format!("{path}/f{i}")
 }
 
+/// A choice row's press: what it is to assistive technology (a check box, a radio button or a
+/// switch), its label, and whether it's checked, which it reports as toggled.
+fn choice_press(
+    id: ElementId,
+    t: &crate::theme::CardTheme,
+    role: Role,
+    label: &str,
+    checked: bool,
+    disabled: bool,
+) -> gpui_core::Press {
+    pressable(id, t)
+        .role(role)
+        .accessibility_label(label.to_string())
+        .selected(checked)
+        .disabled(disabled)
+}
+
 /// What a press in a form carries along: the form's name and its fields, to check first.
 #[derive(Clone)]
 pub(crate) struct FormRef {
@@ -316,6 +333,7 @@ impl Draw<'_, '_> {
                         o.description.as_deref(),
                         o.disabled,
                         Role::RadioButton,
+                        on,
                         move |this, _, cx| this.edit(&k, &binding, Json::String(v.clone()), cx),
                     ));
                 }
@@ -355,7 +373,7 @@ impl Draw<'_, '_> {
                         };
                         this.edit(&k, &binding, value, cx);
                     });
-                    let chip = pressable(self.id(&format!("{key}.chip{i}")))
+                    let chip = pressable(self.id(&format!("{key}.chip{i}")), self.t)
                         .role(Role::CheckBox)
                         .accessibility_label(o.label.clone())
                         .disabled(o.disabled)
@@ -402,6 +420,7 @@ impl Draw<'_, '_> {
     }
 
     /// A row a person presses to choose: the mark (a box, a dot), a label and a description.
+    /// `role` is a check box, a radio button or a switch, and `checked` its state.
     #[allow(clippy::too_many_arguments)]
     fn choice_row(
         &mut self,
@@ -411,16 +430,14 @@ impl Draw<'_, '_> {
         description: Option<&str>,
         disabled: bool,
         role: Role,
+        checked: bool,
         on: impl Fn(&mut CardView, &mut Window, &mut Context<CardView>) + 'static,
     ) -> AnyElement {
         let t = self.t;
         let choose = self
             .cx
             .listener(move |this, _, window, cx| on(this, window, cx));
-        let press = pressable(self.id(id))
-            .role(role)
-            .accessibility_label(label.to_string())
-            .disabled(disabled)
+        let press = choice_press(self.id(id), t, role, label, checked, disabled)
             .w_full()
             .min_w_0()
             .justify_start()
@@ -492,6 +509,7 @@ impl Draw<'_, '_> {
                 it.description.as_deref(),
                 false,
                 Role::CheckBox,
+                on,
                 move |this, _, cx| {
                     let now = this.read(&binding);
                     let mut agg = serde_json::Map::new();
@@ -553,6 +571,7 @@ impl Draw<'_, '_> {
                 it.description.as_deref(),
                 false,
                 Role::Switch,
+                on,
                 move |this, _, cx| {
                     let now = this.read(&binding);
                     let mut agg = serde_json::Map::new();
@@ -624,7 +643,7 @@ impl Draw<'_, '_> {
                 (None, Some(icon)) => Some(self.icon_element(&icon.name, 20., t.colors.text)),
                 _ => None,
             };
-            let card = pressable(self.id(&format!("{key}.card{i}")))
+            let card = pressable(self.id(&format!("{key}.card{i}")), self.t)
                 .role(if multiple {
                     Role::CheckBox
                 } else {
@@ -706,7 +725,7 @@ impl Draw<'_, '_> {
             };
             cx.notify();
         });
-        let trigger = pressable(self.id(&format!("{key}.select")))
+        let trigger = pressable(self.id(&format!("{key}.select")), self.t)
             .role(Role::ComboBox)
             .accessibility_label(shown.clone())
             .w_full()
@@ -770,7 +789,7 @@ impl Draw<'_, '_> {
                 let choose = self
                     .cx
                     .listener(move |this, _, window, cx| pick(this, v.clone(), window, cx));
-                let option = pressable(self.id(&format!("{key}.opt{i}")))
+                let option = pressable(self.id(&format!("{key}.opt{i}")), self.t)
                     .role(Role::ListBoxOption)
                     .accessibility_label(label.clone())
                     .selected(on)
@@ -880,7 +899,7 @@ impl Draw<'_, '_> {
                 cx,
             )
         });
-        let press = pressable(self.id(path))
+        let press = pressable(self.id(path), self.t)
             .accessibility_label(b.label.clone())
             .flex_none()
             .max_w_full()
@@ -950,7 +969,7 @@ impl Draw<'_, '_> {
         let go = self.cx.listener(move |this, _, window, cx| {
             this.press(&action, &words, None, None, window, cx)
         });
-        let press = pressable(self.id(path))
+        let press = pressable(self.id(path), self.t)
             .accessibility_label(b.name.clone())
             .flex_none()
             .size(self.px(side))
@@ -1001,5 +1020,53 @@ fn chosen_of(value: Option<&Json>) -> Vec<String> {
             .collect(),
         Some(Json::String(s)) if !s.is_empty() => vec![s.clone()],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use crate::theme::CardTheme;
+    // The built-in #[test] (gpui_kit::test expands to it), not GPUI's, which gpui_kit::*
+    // brings in.
+    use std::prelude::v1::test;
+
+    /// The accessibility node a choice row's press writes, as GPUI builds it for a screen
+    /// reader. (GPUI's test window never turns its accessibility tree on, so the press is
+    /// rendered and asked directly.)
+    fn node(role: Role, checked: bool, cx: &mut TestAppContext) -> accesskit::Node {
+        let vcx = cx.add_empty_window();
+        vcx.update(|window, cx| {
+            let t = CardTheme::dark();
+            // A focus handle of its own: outside a frame the press can't keep one in the window.
+            let focus = cx.focus_handle();
+            let press = choice_press("row".into(), &t, role, "Email me", checked, false)
+                .track_focus(&focus);
+            let el = RenderOnce::render(press, window, cx).into_element();
+            let role = Element::a11y_role(&el).expect("a choice row has a role");
+            let mut node = accesskit::Node::new(role);
+            Element::write_a11y_info(&el, &mut node);
+            node
+        })
+    }
+
+    #[gpui_kit::test]
+    fn choice_rows_report_their_role_and_whether_they_are_checked(cx: &mut TestAppContext) {
+        for role in [Role::CheckBox, Role::RadioButton, Role::Switch] {
+            let on = node(role, true, cx);
+            assert_eq!(on.role(), role);
+            assert_eq!(on.label(), Some("Email me"));
+            assert_eq!(
+                on.toggled(),
+                Some(accesskit::Toggled::True),
+                "{role:?} checked"
+            );
+            let off = node(role, false, cx);
+            assert_eq!(
+                off.toggled(),
+                Some(accesskit::Toggled::False),
+                "{role:?} unchecked"
+            );
+        }
     }
 }

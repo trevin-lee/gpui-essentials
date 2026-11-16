@@ -296,7 +296,7 @@ impl Draw<'_, '_> {
                         let edit = self.cx.listener(move |this, _, window, cx| {
                             this.edit_cell(&key, r, c, window, cx)
                         });
-                        let press = pressable(self.id(&format!("{path}.c{r}.{c}")))
+                        let press = pressable(self.id(&format!("{path}.c{r}.{c}")), self.t)
                             .accessibility_label(format!("{}: {text}", col.header))
                             .w_full()
                             .min_w_0()
@@ -341,7 +341,7 @@ impl Draw<'_, '_> {
         let save_it = self
             .cx
             .listener(move |this, _, window, cx| this.save_table(&key, &tbl, window, cx));
-        let save = pressable(self.id(&format!("{path}.save")))
+        let save = pressable(self.id(&format!("{path}.save")), self.t)
             .accessibility_label("Save Changes")
             .disabled(!dirty)
             .flex_none()
