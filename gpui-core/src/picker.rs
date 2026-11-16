@@ -106,6 +106,8 @@ pub struct Picker {
     on_create: Option<OnCreate>,
     visible_rows: Option<usize>,
     colors: PopupMenuColors,
+    /// The search field's caret, selection and placeholder colours.
+    field: (Option<gpui::Hsla>, Option<gpui::Hsla>, Option<gpui::Hsla>),
 }
 
 impl Picker {
@@ -122,6 +124,7 @@ impl Picker {
             on_create: None,
             visible_rows: None,
             colors: PopupMenuColors::default(),
+            field: (None, None, None),
         }
     }
 
@@ -183,6 +186,30 @@ impl Picker {
     /// The entries' text size (the theme's small size unless given).
     pub fn text_size(mut self, size: impl Into<gpui::AbsoluteLength>) -> Self {
         self.row.text_size = Some(size.into());
+        self
+    }
+
+    /// Puts the check in a column before each label, as [`PopupMenu::check_leading`](crate::PopupMenu::check_leading).
+    pub fn check_leading(mut self, leading: bool) -> Self {
+        self.row.check_leading = leading;
+        self
+    }
+
+    /// The search field's caret colour (the theme's foreground unless given).
+    pub fn caret_color(mut self, color: impl Into<gpui::Hsla>) -> Self {
+        self.field.0 = Some(color.into());
+        self
+    }
+
+    /// The search field's selection colour (the theme's ring at 30% unless given).
+    pub fn selection_color(mut self, color: impl Into<gpui::Hsla>) -> Self {
+        self.field.1 = Some(color.into());
+        self
+    }
+
+    /// The search field's placeholder colour (the theme's muted foreground unless given).
+    pub fn placeholder_color(mut self, color: impl Into<gpui::Hsla>) -> Self {
+        self.field.2 = Some(color.into());
         self
     }
 
@@ -471,12 +498,14 @@ impl RenderOnce for Picker {
                     .border_b_1()
                     .border_color(self.colors.separator.unwrap_or(theme.border))
                     .child(Icon::new(IconName::Search).color(muted))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(&query).appearance(false)),
-                    ),
+                    .child(div().flex_1().min_w_0().child({
+                        let (caret, selection, placeholder) = self.field;
+                        Input::new(&query)
+                            .appearance(false)
+                            .when_some(caret, |i, c| i.caret_color(c))
+                            .when_some(selection, |i, c| i.selection_color(c))
+                            .when_some(placeholder, |i, c| i.placeholder_color(c))
+                    })),
             )
             .child(
                 div()
