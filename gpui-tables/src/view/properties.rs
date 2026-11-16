@@ -9,10 +9,14 @@
 //! batch. The table shows each change at once (as it does a view's) and keeps it until the host
 //! hands it new docs. Rows are never rewritten: values read as the new type reads them.
 //!
-//! The menus are gpui-core's `PopupMenu` in the table's `Popover`, a page at a time (gpui-core
-//! has no submenus): the column's menu leads to the type, options, format, relation, people and
-//! delete pages, each with Back. Names are typed in gpui-core's `Input` on a page of their own,
-//! Enter saving and Escape closing.
+//! The menus are gpui-core's `PopupMenu` in the table's `Popover`. The column's menu opens the
+//! types, the options (and each option's colour, place and delete), a number's format (and its
+//! currency), a relation's database and who a person property allows as submenus beside their
+//! entries. What needs a name typed or a delete confirmed takes a step of its own in the
+//! popover, as Notion's field over its menu does: the name in gpui-core's `Input`, Enter saving
+//! and Escape closing, Save and Back for a pointer or a finger, and back on the column's menu
+//! where the step came from. The + menu is gpui-core's `Picker` naming rather than filtering:
+//! the new property's name typed over its types.
 
 use gpui::{App, AppContext as _, Context, Entity, Subscription, Window};
 use gpui_core::{InputEvent, InputState};
@@ -26,7 +30,8 @@ use crate::model::{
     Value, new_id, truncate_chars,
 };
 
-/// A page of a property's menu, past the column's own.
+/// A property's menu other than its column's: a step of the column's menu (a name typed, a
+/// delete confirmed), or one of its submenus opened on its own ([`PropertyMenu`]).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Page {
     /// Its name, typed.
@@ -35,16 +40,12 @@ pub(crate) enum Page {
     Type,
     /// A select's or multi-select's options.
     Options,
-    /// An option's page: rename, colour, move, delete.
-    Option(String),
     /// An option's name, typed.
     RenameOption(String),
     /// A new option's name, typed.
     NewOption,
     /// A number's format and decimal places.
     Number,
-    /// A currency number's currency.
-    Currency,
     /// A relation's database, and whether it's two-way.
     Relation,
     /// The kinds of people a person property allows.
@@ -60,8 +61,8 @@ impl Page {
     }
 }
 
-/// A page of a property's menu, which [`TableView::open_property_menu`] opens as the column's
-/// menu leads to it.
+/// A part of a property's menu, which [`TableView::open_property_menu`] opens on its own,
+/// hanging from the column's header: a step of the column's menu, or one of its submenus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PropertyMenu {
     /// Its name, in a field.
@@ -98,10 +99,10 @@ impl From<PropertyMenu> for Page {
 fn fits(p: &Property, page: &Page) -> bool {
     match page {
         Page::Type | Page::Delete => p.kind != PropertyType::Title,
-        Page::Options | Page::Option(_) | Page::RenameOption(_) | Page::NewOption => {
+        Page::Options | Page::RenameOption(_) | Page::NewOption => {
             matches!(p.kind, PropertyType::Select | PropertyType::MultiSelect)
         }
-        Page::Number | Page::Currency => p.kind == PropertyType::Number,
+        Page::Number => p.kind == PropertyType::Number,
         Page::Relation => p.kind == PropertyType::Relation,
         Page::People => p.kind == PropertyType::Person,
         Page::Rename => true,
@@ -112,12 +113,10 @@ fn fits(p: &Property, page: &Page) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PropAction {
     Page(Page),
-    /// To the page before: the column's menu, or the options from an option's page.
+    /// From a step back to the column's menu (or to the + menu from a new relation).
     Back,
     /// The add-property menu.
     AddProperty,
-    /// A new property of this type, named as typed (in the add-property menu).
-    Add(PropertyType),
     SetType(PropertyType),
     IncludeTime,
     Format(NumberFormat),
@@ -126,9 +125,11 @@ pub(crate) enum PropAction {
     Kind(PersonKind),
     Database(String),
     TwoWay,
-    Color(Color),
-    MoveOption(isize),
-    DeleteOption,
+    /// An option (by id) recoloured.
+    Color(String, Color),
+    /// An option moved this many places.
+    MoveOption(String, isize),
+    DeleteOption(String),
     /// The property deleted (confirmed).
     Delete,
     /// The relation being added made.
@@ -138,12 +139,9 @@ pub(crate) enum PropAction {
 /// What a menu's field names.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum FieldFor {
-    NewProperty,
     Rename(String),
     NewOption(String),
     RenameOption(String, String),
-    /// A new view's name, in the bar's + menu.
-    NewView,
     /// A view's name.
     RenameView(String),
 }
@@ -239,16 +237,17 @@ fn full_note(title: &str, limit: usize) -> String {
 
 impl TableView {
     /// Opens the + menu, as pressing the + after the last column does: a field for the new
-    /// property's name over the types it can have. Typing names it; Up and Down move through
-    /// the types; Enter, or a press on a type, makes it.
-    pub fn open_add_property_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_add_property(String::new(), window, cx);
+    /// property's name over the types it can have (gpui-core's `Picker`, naming rather than
+    /// filtering). Typing names it; Up and Down move through the types; Enter, or a press on a
+    /// type, makes it.
+    pub fn open_add_property_menu(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.open_add_property(None, cx);
     }
 
-    /// Opens a page of a property's menu, hanging from its column's header (or the + when it
-    /// has no column shown), as its column's menu leads to it: to rename it, change its type,
-    /// edit its options, and so on. A page that doesn't apply to the property's type (a
-    /// number's options, the title's type) doesn't open.
+    /// Opens a part of a property's menu on its own, hanging from its column's header (or the +
+    /// when it has no column shown): its name to type, its types, options, format, and so on,
+    /// which the column's menu opens as submenus. A part that doesn't apply to the property's
+    /// type (a number's options, the title's type) doesn't open.
     pub fn open_property_menu(
         &mut self,
         property_id: &str,
@@ -274,36 +273,32 @@ impl TableView {
         self.open_page(property_id.to_owned(), page, window, cx);
     }
 
-    /// The field of an open property menu (a new property's name, a rename), while one is.
+    /// The field of an open name step (a property's, an option's or a view's rename, a new
+    /// option), while one is. (A + menu's name is typed in gpui-core's `Picker`, which keeps its
+    /// own field.)
     pub fn menu_field_state(&self) -> Option<Entity<InputState>> {
         self.field.as_ref().map(|f| f.state.clone())
     }
 
-    fn open_add_property(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens the + menu, on the type `on` when given (a relation, back from its database).
+    fn open_add_property(&mut self, on: Option<String>, cx: &mut Context<Self>) {
         self.ensure();
         self.date = None;
         self.close_property_menu();
         self.menu_serial += 1;
-        self.add_kind = (0, self.add_kind.1 + 1);
         self.popover = Some(Popover::AddProperty);
-        let max = self.host.limits().name_chars;
-        self.open_field(
-            FieldFor::NewProperty,
-            name,
-            max,
-            "Property name",
-            window,
-            cx,
-        );
+        self.reopen_on = on;
         cx.notify();
     }
 
-    /// Forgets a property menu's field, note and new relation, as it closes.
+    /// Forgets a menu's field, note, new relation or view and where it reopens, as it closes.
     pub(crate) fn close_property_menu(&mut self) {
         self.field = None;
         self.note = None;
         self.new_relation = None;
         self.new_view = None;
+        self.reopen_on = None;
+        self.menu_focus = None;
     }
 
     /// The property the open menu is about: the column's, or a property page's.
@@ -457,34 +452,11 @@ impl TableView {
         };
         let name = self.typed(cx);
         match names {
-            FieldFor::NewProperty => {
-                let kind = PropertyType::ADDABLE
-                    .get(self.add_kind.0)
-                    .cloned()
-                    .unwrap_or(PropertyType::Text);
-                self.add_property(kind, window, cx);
-            }
             FieldFor::Rename(pid) => self.rename_property(&pid, &name, window, cx),
             FieldFor::NewOption(pid) => self.add_option(&pid, &name, window, cx),
             FieldFor::RenameOption(pid, oid) => self.rename_option(&pid, &oid, &name, window, cx),
-            FieldFor::NewView => self.commit_new_view(window, cx),
             FieldFor::RenameView(id) => self.rename_view(&id, window, cx),
         }
-    }
-
-    /// Up or Down in the add-property menu's field: the type above or below.
-    pub(crate) fn move_add_kind(&mut self, by: isize, cx: &mut Context<Self>) {
-        if matches!(self.popover, Some(Popover::AddView)) {
-            self.move_view_kind(by, cx);
-            return;
-        }
-        if !matches!(self.popover, Some(Popover::AddProperty)) {
-            return;
-        }
-        let n = PropertyType::ADDABLE.len() as isize;
-        let at = (self.add_kind.0 as isize + by).rem_euclid(n) as usize;
-        self.add_kind = (at, self.add_kind.1 + 1);
-        cx.notify();
     }
 
     /// Why the open menu can't do something now: a note it refused with, or a limit reached.
@@ -508,21 +480,12 @@ impl TableView {
             Some(Popover::AddProperty) if fields.properties.len() >= limits.properties => {
                 Some(full_note(&self.database.title, limits.properties))
             }
+            // The limits its submenus are at, over the column's menu.
+            Some(Popover::Header { .. }) => self.limit_note(self.menu_property()?),
             Some(Popover::Property { page, property_id }) => {
                 let p = fields.property(property_id)?;
                 match page {
-                    Page::Options | Page::NewOption if p.options().len() >= limits.options => Some(
-                        format!("A property holds at most {} options", limits.options),
-                    ),
-                    Page::Relation => {
-                        let t = p.relation()?;
-                        if t.two_way {
-                            return None;
-                        }
-                        let other = self.database_info(t.database_id)?;
-                        (other.properties.len() >= limits.properties)
-                            .then(|| full_note(&other.title, limits.properties))
-                    }
+                    Page::Options | Page::Relation => self.limit_note(p),
                     _ if at_max => Some(format!(
                         "Names are at most {} characters",
                         self.field.as_ref().map_or(0, |f| f.max_chars)
@@ -544,6 +507,32 @@ impl TableView {
         }
     }
 
+    /// The limit a property's options or relation is at: its options all taken, or (one-way) the
+    /// related database too full for its other side.
+    fn limit_note(&self, p: &Property) -> Option<String> {
+        let limits = self.host.limits();
+        match p.kind {
+            PropertyType::Select | PropertyType::MultiSelect
+                if p.options().len() >= limits.options =>
+            {
+                Some(format!(
+                    "A property holds at most {} options",
+                    limits.options
+                ))
+            }
+            PropertyType::Relation => {
+                let t = p.relation()?;
+                if t.two_way {
+                    return None;
+                }
+                let other = self.database_info(t.database_id)?;
+                (other.properties.len() >= limits.properties)
+                    .then(|| full_note(&other.title, limits.properties))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn refuse(&mut self, note: String, cx: &mut Context<Self>) {
         self.note = Some(note);
         cx.notify();
@@ -551,26 +540,26 @@ impl TableView {
 
     // --- Entries -----------------------------------------------------------------------------
 
-    /// The top of the column's menu, its Property section: rename, type, the type's settings.
+    /// The top of the column's menu, its Property section: rename, and the type and the type's
+    /// settings as submenus.
     pub(crate) fn property_head(&self, p: &Property) -> Vec<Entry> {
         use PropAction as A;
         use gpui_core::IconName as I;
-        let page = |page: Page| Action::Prop(A::Page(page));
         let mut out = vec![Entry::heading("Property")];
-        out.push(Entry::act("Rename", page(Page::Rename)).icon(I::Pencil));
+        out.push(Entry::act("Rename", Action::Prop(A::Page(Page::Rename))).icon(I::Pencil));
         if p.kind != PropertyType::Title {
             out.push(
-                Entry::act("Change type", page(Page::Type))
+                Entry::sub("Change type", self.type_entries(p))
                     .icon(type_icon(&p.kind))
                     .hint(p.kind.label()),
             );
         }
         match p.kind {
             PropertyType::Select | PropertyType::MultiSelect => {
-                out.push(Entry::act("Edit options", page(Page::Options)).icon(I::ListChecks))
+                out.push(Entry::sub("Edit options", self.options_entries(p)).icon(I::ListChecks))
             }
             PropertyType::Number => out.push(
-                Entry::act("Number format", page(Page::Number))
+                Entry::sub("Number format", self.number_entries(p))
                     .icon(I::Percent)
                     .hint(format_label(p)),
             ),
@@ -580,10 +569,15 @@ impl TableView {
                     .checked(p.config.include_time == Some(true)),
             ),
             PropertyType::Relation => {
-                out.push(Entry::act("Relation", page(Page::Relation)).icon(I::ArrowLeftRight))
+                let t = p.relation();
+                let entries = self.relation_entries(
+                    t.map_or("", |t| t.database_id),
+                    t.is_some_and(|t| t.two_way),
+                );
+                out.push(Entry::sub("Relation", entries).icon(I::ArrowLeftRight))
             }
             PropertyType::Person => {
-                out.push(Entry::act("People", page(Page::People)).icon(I::Users))
+                out.push(Entry::sub("People", self.people_entries(p)).icon(I::Users))
             }
             _ => {}
         }
@@ -607,20 +601,19 @@ impl TableView {
         out
     }
 
-    /// The entries of a property's page, or of the new relation's.
+    /// The entries of a property's menu opened on its own (or of a step of the column's), or
+    /// of the new relation's.
     pub(crate) fn property_entries(&self) -> Vec<Entry> {
         use PropAction as A;
         use gpui_core::IconName as I;
         let act = |label: &str, a: A| Entry::act(label, Action::Prop(a));
-        let back = || act("Back", A::Back).icon(I::ArrowLeft);
-        let limits = self.host.limits();
         if let Some(Popover::AddRelation) = &self.popover {
             let Some(nr) = &self.new_relation else {
                 return Vec::new();
             };
             let mut out = self.relation_entries(&nr.database_id, nr.two_way);
             out.push(act("Add relation", A::CreateRelation).icon(I::Plus));
-            out.push(back());
+            out.push(act("Back", A::Back).icon(I::ArrowLeft));
             return out;
         }
         let Some(Popover::Property { page, .. }) = &self.popover else {
@@ -629,111 +622,20 @@ impl TableView {
         let Some(p) = self.menu_property() else {
             return Vec::new();
         };
-        let mut out = Vec::new();
         match page {
-            Page::Type => {
-                out.push(Entry::heading("Type"));
-                for k in PropertyType::ADDABLE {
-                    let on = *k == p.kind;
-                    out.push(
-                        act(k.label(), A::SetType(k.clone()))
-                            .icon(type_icon(k))
-                            .checked(on)
-                            .highlighted(on),
-                    );
-                }
-            }
-            Page::Options => {
-                out.push(Entry::heading("Options"));
-                for o in p.options() {
-                    out.push(
-                        act(&o.name, A::Page(Page::Option(o.id.clone()))).chip(o.color.clone()),
-                    );
-                }
-                out.push(
-                    act("Add an option", A::Page(Page::NewOption))
-                        .icon(I::Plus)
-                        .disabled(p.options().len() >= limits.options),
-                );
-            }
-            Page::Option(oid) => {
-                let Some(i) = p.options().iter().position(|o| o.id == *oid) else {
-                    out.push(back());
-                    return out;
-                };
-                let o = &p.options()[i];
-                out.push(Entry::heading(o.name.clone()));
-                out.push(act("Rename", A::Page(Page::RenameOption(oid.clone()))).icon(I::Pencil));
-                out.push(Entry::heading("Colour"));
-                for c in Color::ALL {
-                    out.push(
-                        act(&color_label(c), A::Color(c.clone()))
-                            .chip(c.clone())
-                            .checked(o.color == *c),
-                    );
-                }
-                out.push(Entry::heading("Option"));
-                if i > 0 {
-                    out.push(act("Move up", A::MoveOption(-1)).icon(I::ArrowUp));
-                }
-                if i + 1 < p.options().len() {
-                    out.push(act("Move down", A::MoveOption(1)).icon(I::ArrowDown));
-                }
-                out.push(act("Delete option", A::DeleteOption).icon(I::Trash));
-            }
-            Page::Number => {
-                let format = p.config.format.clone().unwrap_or(NumberFormat::Plain);
-                out.push(Entry::heading("Format"));
-                for (label, f) in [
-                    ("Number", NumberFormat::Plain),
-                    ("Percent", NumberFormat::Percent),
-                    ("Currency", NumberFormat::Currency),
-                ] {
-                    out.push(act(label, A::Format(f.clone())).checked(format == f));
-                }
-                if format == NumberFormat::Currency {
-                    out.push(
-                        act("Currency code", A::Page(Page::Currency))
-                            .icon(I::DollarSign)
-                            .hint(p.config.currency.as_deref().unwrap_or("USD")),
-                    );
-                }
-                out.push(Entry::heading("Decimal places"));
-                for (label, n) in PRECISIONS {
-                    out.push(act(label, A::Precision(*n)).checked(p.config.precision == *n));
-                }
-            }
-            Page::Currency => {
-                out.push(Entry::heading("Currency"));
-                let current = p.config.currency.as_deref().unwrap_or("USD");
-                for c in CURRENCIES {
-                    let on = current == *c;
-                    out.push(act(c, A::Currency(c)).checked(on).highlighted(on));
-                }
-            }
+            Page::Type => self.type_entries(p),
+            Page::Options => self.options_entries(p),
+            Page::Number => self.number_entries(p),
             Page::Relation => {
                 let t = p.relation();
-                out.extend(self.relation_entries(
+                self.relation_entries(
                     t.map_or("", |t| t.database_id),
                     t.is_some_and(|t| t.two_way),
-                ));
+                )
             }
-            Page::People => {
-                let kinds = p.person_kinds();
-                out.push(Entry::heading("Allows"));
-                out.push(
-                    act("Owner", A::Kind(PersonKind::Owner))
-                        .icon(I::User)
-                        .checked(kinds.contains(&PersonKind::Owner)),
-                );
-                out.push(
-                    act("Agents", A::Kind(PersonKind::Agent))
-                        .icon(I::Users)
-                        .checked(kinds.contains(&PersonKind::Agent)),
-                );
-            }
+            Page::People => self.people_entries(p),
             Page::Delete => {
-                out.push(Entry::heading(format!("Delete {}?", p.name)));
+                let mut out = vec![Entry::heading(format!("Delete {}?", p.name))];
                 if let Some(t) = p.relation()
                     && t.two_way
                     && t.back_property_id.is_some()
@@ -747,12 +649,129 @@ impl TableView {
                 }
                 out.push(act("Delete property", A::Delete).icon(I::Trash));
                 out.push(act("Cancel", A::Back).icon(I::X).highlighted(true));
-                return out;
+                out
             }
-            Page::Rename | Page::RenameOption(_) | Page::NewOption => {}
+            Page::Rename | Page::RenameOption(_) | Page::NewOption => Vec::new(),
         }
-        out.push(back());
+    }
+
+    /// The types a property can change to, its own checked.
+    fn type_entries(&self, p: &Property) -> Vec<Entry> {
+        let mut out = vec![Entry::heading("Type")];
+        for k in PropertyType::ADDABLE {
+            let on = *k == p.kind;
+            out.push(
+                Entry::act(k.label(), Action::Prop(PropAction::SetType(k.clone())))
+                    .icon(type_icon(k))
+                    .checked(on)
+                    .highlighted(on),
+            );
+        }
         out
+    }
+
+    /// A select's options as their pills, each opening its own submenu, and Add an option.
+    fn options_entries(&self, p: &Property) -> Vec<Entry> {
+        use gpui_core::IconName as I;
+        let mut out = vec![Entry::heading("Options")];
+        for o in p.options() {
+            out.push(
+                Entry::sub(o.name.clone(), self.option_entries(p, &o.id))
+                    .chip(o.color.clone())
+                    .highlighted(self.menu_focus.as_deref() == Some(o.id.as_str())),
+            );
+        }
+        out.push(
+            Entry::act(
+                "Add an option",
+                Action::Prop(PropAction::Page(Page::NewOption)),
+            )
+            .icon(I::Plus)
+            .disabled(p.options().len() >= self.host.limits().options),
+        );
+        out
+    }
+
+    /// An option's submenu: rename it, recolour it, move it, delete it.
+    fn option_entries(&self, p: &Property, oid: &str) -> Vec<Entry> {
+        use PropAction as A;
+        use gpui_core::IconName as I;
+        let act = |label: &str, a: A| Entry::act(label, Action::Prop(a));
+        let Some(i) = p.options().iter().position(|o| o.id == oid) else {
+            return Vec::new();
+        };
+        let o = &p.options()[i];
+        let mut out = vec![
+            act("Rename option", A::Page(Page::RenameOption(oid.to_owned()))).icon(I::Pencil),
+            Entry::heading("Colour"),
+        ];
+        for c in Color::ALL {
+            out.push(
+                act(&color_label(c), A::Color(oid.to_owned(), c.clone()))
+                    .chip(c.clone())
+                    .checked(o.color == *c),
+            );
+        }
+        out.push(Entry::heading("Option"));
+        if i > 0 {
+            out.push(act("Move up", A::MoveOption(oid.to_owned(), -1)).icon(I::ArrowUp));
+        }
+        if i + 1 < p.options().len() {
+            out.push(act("Move down", A::MoveOption(oid.to_owned(), 1)).icon(I::ArrowDown));
+        }
+        out.push(act("Delete option", A::DeleteOption(oid.to_owned())).icon(I::Trash));
+        out
+    }
+
+    /// A number's format, its currency (a submenu of its own), and its decimal places.
+    fn number_entries(&self, p: &Property) -> Vec<Entry> {
+        use PropAction as A;
+        use gpui_core::IconName as I;
+        let act = |label: &str, a: A| Entry::act(label, Action::Prop(a));
+        let format = p.config.format.clone().unwrap_or(NumberFormat::Plain);
+        let mut out = vec![Entry::heading("Format")];
+        for (label, f) in [
+            ("Number", NumberFormat::Plain),
+            ("Percent", NumberFormat::Percent),
+            ("Currency", NumberFormat::Currency),
+        ] {
+            let on = format == f;
+            out.push(act(label, A::Format(f)).checked(on).highlighted(on));
+        }
+        let current = p.config.currency.as_deref().unwrap_or("USD");
+        if format == NumberFormat::Currency {
+            let mut codes = vec![Entry::heading("Currency")];
+            for c in CURRENCIES {
+                let on = current == *c;
+                codes.push(act(c, A::Currency(c)).checked(on).highlighted(on));
+            }
+            out.push(
+                Entry::sub("Currency code", codes)
+                    .icon(I::DollarSign)
+                    .hint(current),
+            );
+        }
+        out.push(Entry::heading("Decimal places"));
+        for (label, n) in PRECISIONS {
+            out.push(act(label, A::Precision(*n)).checked(p.config.precision == *n));
+        }
+        out
+    }
+
+    /// The kinds of people a person property allows.
+    fn people_entries(&self, p: &Property) -> Vec<Entry> {
+        use PropAction as A;
+        use gpui_core::IconName as I;
+        let kinds = p.person_kinds();
+        vec![
+            Entry::heading("Allows"),
+            Entry::act("Owner", Action::Prop(A::Kind(PersonKind::Owner)))
+                .icon(I::User)
+                .checked(kinds.contains(&PersonKind::Owner)),
+            Entry::act("Agents", Action::Prop(A::Kind(PersonKind::Agent)))
+                .icon(I::Users)
+                .checked(kinds.contains(&PersonKind::Agent)),
+        ]
     }
 
     /// A relation's database choices and its two-way toggle.
@@ -814,7 +833,6 @@ impl TableView {
             }
             PropAction::Back => self.back(window, cx),
             PropAction::AddProperty => self.open_add_property_menu(window, cx),
-            PropAction::Add(kind) => self.add_property(kind, window, cx),
             PropAction::SetType(kind) => {
                 if let Some(p) = p {
                     self.set_type(&p, kind, window, cx)
@@ -847,9 +865,7 @@ impl TableView {
             PropAction::Currency(c) => {
                 if let Some(mut p) = p.filter(|p| p.kind == PropertyType::Number) {
                     p.config.currency = Some(c.into());
-                    let id = p.id.clone();
                     self.change(vec![self.changed(p)], window, cx);
-                    self.open_page(id, Page::Number, window, cx);
                 }
             }
             PropAction::Kind(k) => {
@@ -893,31 +909,32 @@ impl TableView {
                     self.toggle_two_way(p, window, cx);
                 }
             }
-            PropAction::Color(c) => {
-                self.edit_option(pid, |options, i| options[i].color = c, window, cx)
+            PropAction::Color(oid, c) => {
+                self.edit_option(pid, &oid, |options, i| options[i].color = c, window, cx)
             }
-            PropAction::MoveOption(by) => self.edit_option(
+            // The options draw anew in their new order, on the one moved.
+            PropAction::MoveOption(oid, by) => {
+                self.menu_focus = Some(oid.clone());
+                self.edit_option(
+                    pid,
+                    &oid,
+                    |options, i| {
+                        let j = (i as isize + by).clamp(0, options.len() as isize - 1) as usize;
+                        options.swap(i, j);
+                    },
+                    window,
+                    cx,
+                )
+            }
+            PropAction::DeleteOption(oid) => self.edit_option(
                 pid,
+                &oid,
                 |options, i| {
-                    let j = (i as isize + by).clamp(0, options.len() as isize - 1) as usize;
-                    options.swap(i, j);
+                    options.remove(i);
                 },
                 window,
                 cx,
             ),
-            PropAction::DeleteOption => {
-                self.edit_option(
-                    pid.clone(),
-                    |options, i| {
-                        options.remove(i);
-                    },
-                    window,
-                    cx,
-                );
-                if let Some(pid) = pid {
-                    self.open_page(pid, Page::Options, window, cx);
-                }
-            }
             PropAction::Delete => {
                 if let Some(p) = p {
                     self.delete_property(&p, window, cx)
@@ -927,38 +944,27 @@ impl TableView {
         }
     }
 
-    /// Back a page: from an option's name to its page, from an option's page or a new option to
-    /// the options, from the currency to the format, from the new relation to the add-property menu, else to the column's menu.
+    /// Back from a step to the column's menu, on the entry the step came from (or to the +
+    /// menu, on Relation, from a new relation's database). A part of the menu opened on its own
+    /// closes.
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(nr) = self.new_relation.take() {
-            self.open_add_property(nr.name, window, cx);
-            if let Some(i) = PropertyType::ADDABLE
-                .iter()
-                .position(|k| *k == PropertyType::Relation)
-            {
-                self.add_kind = (i, self.add_kind.1 + 1);
-            }
+        if self.new_relation.take().is_some() {
+            self.open_add_property(Some(PropertyType::Relation.label().into()), cx);
             return;
         }
         let Some(Popover::Property { property_id, page }) = self.popover.clone() else {
             self.close_menu(window, cx);
             return;
         };
-        match page {
-            Page::RenameOption(oid) => {
-                self.open_page(property_id, Page::Option(oid), window, cx);
+        let from = match page {
+            Page::Rename => "Rename",
+            Page::RenameOption(_) | Page::NewOption => "Edit options",
+            Page::Delete => "Delete property",
+            _ => {
+                self.close_menu(window, cx);
                 return;
             }
-            Page::Option(_) | Page::NewOption => {
-                self.open_page(property_id, Page::Options, window, cx);
-                return;
-            }
-            Page::Currency => {
-                self.open_page(property_id, Page::Number, window, cx);
-                return;
-            }
-            _ => {}
-        }
+        };
         self.close_property_menu();
         match self
             .shown
@@ -969,6 +975,7 @@ impl TableView {
             Some(column) => {
                 window.focus(&self.focus, cx);
                 self.open_header_menu(column, cx);
+                self.reopen_on = Some(from.into());
             }
             None => self.close_menu(window, cx),
         }
@@ -1042,9 +1049,15 @@ impl TableView {
         }
     }
 
-    /// A new property named as typed (its type's name when nothing is), of `kind`, after the
+    /// A new property named `typed` (its type's name when it's empty), of `kind`, after the
     /// others; a relation asks for its database first.
-    fn add_property(&mut self, kind: PropertyType, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn add_property(
+        &mut self,
+        kind: PropertyType,
+        typed: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(fields) = self.database.database.clone() else {
             return;
         };
@@ -1053,7 +1066,7 @@ impl TableView {
             self.refuse(full_note(&self.database.title, limits.properties), cx);
             return;
         }
-        let typed = truncate_chars(&self.typed(cx), limits.name_chars).to_owned();
+        let typed = truncate_chars(typed.trim(), limits.name_chars).to_owned();
         if !typed.is_empty() && name_taken(&fields.properties, &typed, None) {
             self.refuse(format!("There's already a property named {typed}"), cx);
             return;
@@ -1377,23 +1390,15 @@ impl TableView {
 
     // --- Options -----------------------------------------------------------------------------
 
-    /// Changes the open option page's option (by its place in the options) and emits the
-    /// property.
+    /// Changes a property's option (by its place in the options) and emits the property.
     fn edit_option(
         &mut self,
         pid: Option<String>,
+        oid: &str,
         f: impl FnOnce(&mut Vec<SelectOption>, usize),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(Popover::Property {
-            page: Page::Option(oid),
-            ..
-        }) = &self.popover
-        else {
-            return;
-        };
-        let oid = oid.clone();
         let Some(mut p) = pid.and_then(|pid| {
             self.database
                 .database
@@ -1450,7 +1455,7 @@ impl TableView {
                 color: Color::Default,
             });
         self.change(vec![self.changed(p)], window, cx);
-        self.open_page(pid.to_owned(), Page::Options, window, cx);
+        self.back(window, cx);
     }
 
     fn rename_option(
@@ -1491,6 +1496,6 @@ impl TableView {
             o.name = name;
             self.change(vec![self.changed(p)], window, cx);
         }
-        self.open_page(pid.to_owned(), Page::Option(oid.to_owned()), window, cx);
+        self.back(window, cx);
     }
 }

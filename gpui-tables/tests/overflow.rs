@@ -147,6 +147,13 @@ fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
 
 /// The same, with a field open in place within `field`: its text scrolls in it, so a glyph may
 /// be cut off by a clip inside it (but never shown past the table or the window).
+/// A + menu's field: the top of its picker, over its first entry.
+fn picker_field(cx: &mut VisualTestContext, first: &str) -> Bounds<Pixels> {
+    let picker = rect(cx, "menu-picker");
+    let row = rect(cx, format!("menu-item-{first}"));
+    Bounds::from_corners(picker.origin, point(picker.right(), row.top()))
+}
+
 fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> Vec<String> {
     draw(cx);
     let table = cx
@@ -179,6 +186,8 @@ fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> 
             (
                 f32::from(f.left()) * scale - ink,
                 f32::from(f.right()) * scale + ink,
+                f32::from(f.top()) * scale - ink,
+                f32::from(f.bottom()) * scale + ink,
             )
         });
         let mut out = Vec::new();
@@ -207,7 +216,13 @@ fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> 
                 m.origin.x.as_f32(),
                 m.origin.x.as_f32() + m.size.width.as_f32(),
             );
-            let in_field = field.is_some_and(|(l, r)| clip_left >= l && clip_right <= r);
+            let (clip_top, clip_bottom) = (
+                m.origin.y.as_f32(),
+                m.origin.y.as_f32() + m.size.height.as_f32(),
+            );
+            let in_field = field.is_some_and(|(l, r, t, b)| {
+                clip_left >= l && clip_right <= r && clip_top >= t && clip_bottom <= b
+            });
             let at_tabs = |x: f32, edge: fn(&Bounds<Pixels>) -> Pixels| {
                 tabs.is_some_and(|t| (x - f32::from(edge(&t)) * scale).abs() <= scale)
             };
@@ -375,8 +390,8 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 }
                 keys(cx, "escape");
                 // The property menus: the + menu with the worst name typed, a select's options
-                // and an option's page, a number's format, a relation's databases, the delete
-                // confirm, and the rename field.
+                // and an option's submenu beside them, the types, a number's format, a
+                // relation's databases, the delete confirm, and the rename field.
                 cx.update(|window, cx| {
                     table.update(cx, |t, cx| {
                         t.close_popover(cx);
@@ -385,7 +400,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 });
                 draw(cx);
                 type_text(cx, &worst());
-                let field = rect(cx, "menu-field");
+                let field = picker_field(cx, "Text");
                 for o in overflows_with(cx, Some(field)) {
                     found.push(format!("{case}, the + menu open: {o}"));
                 }
@@ -394,7 +409,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                     let f = t.database().database.as_ref().unwrap();
                     f.property(STAGE).unwrap().options()[0].name.clone()
                 });
-                let pages: [(&str, &[String]); 5] = [
+                let pages: [(&str, &[String]); 6] = [
                     (
                         STAGE,
                         &[
@@ -403,6 +418,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                         ],
                     ),
                     (STAGE, &["menu-item-Edit options".into()]),
+                    (ROLE, &["menu-item-Change type".into()]),
                     (WARMTH, &["menu-item-Number format".into()]),
                     (COMPANY, &["menu-item-Relation".into()]),
                     (ROLE, &["menu-item-Delete property".into()]),
@@ -657,12 +673,12 @@ fn no_view_tab_or_view_menu_lets_its_text_out() {
                 cx.update(|window, cx| table.update(cx, |t, cx| t.open_add_view_menu(window, cx)));
                 draw(cx);
                 type_text(cx, &worst());
-                let field = rect(cx, "menu-field");
+                let field = picker_field(cx, "Table");
                 for o in overflows_with(cx, Some(field)) {
                     found.push(format!("{case}, the + menu open: {o}"));
                 }
                 keys(cx, "escape");
-                // The view's menu and its pages.
+                // The view's menu and its submenus beside it, and the delete confirm.
                 let pages: [&[&str]; 6] = [
                     &[],
                     &["menu-item-View settings"],
