@@ -9,13 +9,13 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use gpui_kit::*;
+use gpui::*;
 use serde_json::json;
 // The built-in #[test] (which GPUI's test attribute expands to), not GPUI's, which
-// gpui_kit::* brings in.
+// gpui::* brings in.
 use std::prelude::v1::test;
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_button_hands_its_words_to_the_host(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (_, cx) = open(cx, &sample("buttons"), &host, Some(400.));
@@ -43,7 +43,7 @@ fn a_button_hands_its_words_to_the_host(cx: &mut TestAppContext) {
     assert_eq!(host.sent.borrow().len(), 2, "a link isn't a message");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn only_web_links_reach_the_host(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (_, cx) = open(cx, &sample("hostile-links"), &host, Some(400.));
@@ -66,7 +66,7 @@ fn only_web_links_reach_the_host(cx: &mut TestAppContext) {
     assert_eq!(host.opened.borrow().len(), 1);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_markdown_link_goes_to_the_host_and_markdown_copies(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let program = r#"root = Stack([TextContent("[Docs](https://example.com/docs) and more"), TextContent("[Bad](javascript:alert(1)) and more"), MarkDownRenderer("Copy **these** words")])"#;
@@ -113,7 +113,7 @@ fn a_markdown_link_goes_to_the_host_and_markdown_copies(cx: &mut TestAppContext)
     assert!(host.opened.borrow().len() == 1 && host.sent.borrow().is_empty());
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn markdown_shows_html_as_text_and_images_as_their_alt_text(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     // An HTML block would swallow the Markdown after it up to a blank line if it were parsed.
@@ -141,7 +141,7 @@ fn markdown_shows_html_as_text_and_images_as_their_alt_text(cx: &mut TestAppCont
     assert!(host.asked.borrow().is_empty() && host.opened.borrow().is_empty());
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_press_sets_variables_and_the_card_draws_from_them(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("syntax-each-actions"), &host, Some(400.));
@@ -159,7 +159,7 @@ fn a_press_sets_variables_and_the_card_draws_from_them(cx: &mut TestAppContext) 
     assert!(texts(&card, cx).contains("Picked: none (0)"));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_form_checks_its_rules_then_sends_its_values(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("form-contact"), &host, Some(400.));
@@ -214,7 +214,7 @@ fn a_form_checks_its_rules_then_sends_its_values(cx: &mut TestAppContext) {
     assert!(host.sent.borrow()[1].starts_with("Cancel"));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn choices_write_the_store(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("form-inputs"), &host, Some(736.));
@@ -256,7 +256,7 @@ fn choices_write_the_store(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn text_fields_and_the_slider_write_the_store_from_the_keyboard_and_the_pointer(
     cx: &mut TestAppContext,
 ) {
@@ -329,7 +329,7 @@ fn run_frames(cx: &mut VisualTestContext) -> usize {
     panic!("the frames never stopped");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn tabs_and_sections_switch_with_motion_that_ends(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (_, cx) = open(cx, &sample("tabs-accordion"), &host, Some(400.));
@@ -354,7 +354,7 @@ fn tabs_and_sections_switch_with_motion_that_ends(cx: &mut TestAppContext) {
     assert_eq!(run_frames(cx), 0);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_carousel_slides_one_way_and_back(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (_, cx) = open(cx, &sample("steps-carousel-separator"), &host, Some(400.));
@@ -369,7 +369,7 @@ fn a_carousel_slides_one_way_and_back(cx: &mut TestAppContext) {
     assert!(drawn(cx, "r.c2:slide1"));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_modal_opens_checks_and_closes_through_its_variable(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("modal"), &host, Some(736.));
@@ -419,7 +419,7 @@ fn a_modal_opens_checks_and_closes_through_its_variable(cx: &mut TestAppContext)
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn an_editable_table_saves_its_edits_as_the_web_does(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (_, cx) = open(cx, &sample("editable-table"), &host, Some(736.));
@@ -442,7 +442,7 @@ fn an_editable_table_saves_its_edits_as_the_web_does(cx: &mut TestAppContext) {
     assert!(s.matches("\"eng\"").count() == 2, "both rows' roles: {s}");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn images_come_only_from_the_host(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Later);
     let (card, cx) = open(cx, &sample("images"), &host, Some(400.));
@@ -472,7 +472,7 @@ fn images_come_only_from_the_host(cx: &mut TestAppContext) {
     let _ = card;
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn nothing_draws_while_nothing_changes(cx: &mut TestAppContext) {
     for name in [
         "form-contact",
@@ -508,7 +508,7 @@ fn key(cx: &mut VisualTestContext, key: &'static str) {
     draw(cx);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_keyboard_reaches_every_button(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (_, cx) = open(cx, &sample("buttons"), &host, Some(400.));
@@ -528,7 +528,7 @@ fn the_keyboard_reaches_every_button(cx: &mut TestAppContext) {
     assert!(host.sent.borrow()[1].starts_with("Explain the second chart"));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_card_that_cant_be_read_says_so(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, "just some prose", &host, Some(400.));
@@ -539,7 +539,7 @@ fn a_card_that_cant_be_read_says_so(cx: &mut TestAppContext) {
     assert!(drawn(cx, "note"), "a note takes its place");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_card_too_large_says_so(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let big = format!(
@@ -552,4 +552,58 @@ fn a_card_too_large_says_so(cx: &mut TestAppContext) {
         Some(gpui_chatwidgets::openui::CardError::TooLarge)
     );
     assert!(drawn(cx, "note"));
+}
+
+#[gpui::test]
+fn date_pickers_show_and_write_the_store_s_dates(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    let program = r#"root = Stack([Form("trip", Buttons([Button("Move", @Set($d, "2026-05-06"), "secondary")]), [FormControl("Day", DatePicker("day", "single", null, $d)), FormControl("Stay", DatePicker("stay", "range", null, $r))])])
+$d = "2026-03-04"
+$r = {from: "2026-01-10", to: "2026-01-12"}"#;
+    let (card, cx) = open(cx, program, &host, Some(400.));
+    let var = |card: &Entity<gpui_chatwidgets::CardView>, cx: &mut VisualTestContext, name| {
+        card.read_with(cx, |c, _| c.store().var(name))
+    };
+    let open_field = |cx: &mut VisualTestContext, sel: &'static str| {
+        let at = cx.debug_bounds(sel).expect("the date field").center();
+        cx.simulate_click(at, Modifiers::none());
+        draw(cx);
+    };
+    // The month opens on the stored day: one to the right and Enter picks the next.
+    open_field(cx, "field:t:r.c0/f0.date");
+    key(cx, "right");
+    key(cx, "enter");
+    assert_eq!(var(&card, cx, "$d"), Some(json!("2026-03-05")));
+    // A press that sets the $variable moves the picker too.
+    click(cx, "button:Move");
+    open_field(cx, "field:t:r.c0/f0.date");
+    key(cx, "right");
+    key(cx, "enter");
+    assert_eq!(var(&card, cx, "$d"), Some(json!("2026-05-07")));
+
+    // A range: Enter starts a new one on the stored start, and the second pick ends it.
+    open_field(cx, "field:t:r.c0/f1.date");
+    key(cx, "enter");
+    assert_eq!(
+        var(&card, cx, "$r"),
+        Some(json!({"from": "2026-01-10", "to": null}))
+    );
+    key(cx, "down");
+    key(cx, "enter");
+    assert_eq!(
+        var(&card, cx, "$r"),
+        Some(json!({"from": "2026-01-10", "to": "2026-01-17"}))
+    );
+    // Escape closes the month without picking.
+    open_field(cx, "field:t:r.c0/f1.date");
+    assert!(
+        cx.debug_bounds("day-2026-01-10").is_some(),
+        "the month is open"
+    );
+    key(cx, "escape");
+    assert!(
+        cx.debug_bounds("day-2026-01-10").is_none(),
+        "Escape closed it"
+    );
+    assert!(host.sent.borrow().is_empty(), "nothing was sent");
 }

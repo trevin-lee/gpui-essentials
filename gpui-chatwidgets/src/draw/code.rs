@@ -1,8 +1,8 @@
 //! Code blocks: the code in a monospace font on a dark ground, lightly highlighted, scrolling
 //! sideways when a line is long, with a Copy button.
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 
 use super::content::Glyph;
 use super::{Draw, pressable};
@@ -294,7 +294,7 @@ impl Draw<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+    // The built-in #[test], not GPUI's, which gpui::* brings in.
     use crate::CardTheme;
     use std::prelude::v1::test;
 

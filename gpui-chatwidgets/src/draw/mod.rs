@@ -14,9 +14,9 @@ mod form;
 mod layout;
 mod table;
 
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_core::Press;
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
 
 use crate::openui::{Action, ButtonVariant, Card, Cell, Component, Gap, Size, Tone};
 use crate::theme::{CardTheme, ToneColors};

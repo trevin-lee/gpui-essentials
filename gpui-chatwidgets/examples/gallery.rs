@@ -15,11 +15,11 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_chatwidgets::openui::{ImageSrc, Link};
 use gpui_chatwidgets::*;
-use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui_core::Theme;
 
 /// A few programs of the gallery's own, after the golden ones: charts split so each fits a
 /// picture, and the worst a card can be asked to fit.
@@ -93,44 +93,18 @@ fn load_fonts(cx: &mut App) {
     ]);
 }
 
-/// The gallery's assets: gpui-core's Lucide icons, which `lucide_icon` names for the cards,
-/// then GPUI Kit's own for its date picker. Both serve `icons/<name>.svg`.
-struct Assets;
-
-impl AssetSource for Assets {
-    fn load(&self, path: &str) -> Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        match gpui_core::Icons.load(path)? {
-            Some(svg) => Ok(Some(svg)),
-            None => gpui_kit::assets::Assets::new("").load(path),
-        }
-    }
-
-    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        let mut all = gpui_core::Icons.list(path)?;
-        all.extend(gpui_kit::assets::Assets::new("").list(path)?);
-        all.sort();
-        all.dedup();
-        Ok(all)
-    }
-}
-
-/// GPUI Kit's theme (its date picker) in the same mode as the cards. gpui-core's text fields,
-/// slider, tooltips and Markdown take their colours from the card.
+/// gpui-core's theme (its date picker, a tooltip's font, the window's rem) in the same mode as
+/// the cards, in Inter at 16 pixels. gpui-core's text fields, slider, tooltips and Markdown take
+/// their colours from the card.
 fn apply_theme(dark: bool, cx: &mut App) {
-    Theme::change(
-        if dark {
-            ThemeMode::Dark
-        } else {
-            ThemeMode::Light
+    Theme::set(
+        Theme {
+            font_family: "Inter".into(),
+            font_size: px(16.),
+            ..if dark { Theme::dark() } else { Theme::light() }
         },
-        None,
         cx,
     );
-    let t = Theme::global_mut(cx);
-    t.font_family = "Inter".into();
-    t.font_size = px(16.);
-    t.radius = px(8.);
-    t.radius_lg = px(10.);
 }
 
 /// A picture for any image a card asks for: a landscape drawn as SVG, so no file or network
@@ -171,7 +145,7 @@ impl CardHost for Host {
         } else {
             CardTheme::light()
         };
-        // The window's rem is GPUI Kit's font size, 16 here.
+        // The window's rem is gpui-core's theme's font size, 16 here.
         t.rem_base = 16.;
         t
     }
@@ -410,16 +384,16 @@ impl Render for Gallery {
 
 actions!(gallery, [Quit]);
 
-/// GPUI Kit's desktop application. On iOS and Android an app brings GPUI's platform itself
+/// GPUI's platform for the Mac. On iOS and Android an app brings GPUI's platform itself
 /// (`Application::with_platform`), so there the gallery builds but doesn't run.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(target_os = "macos")]
 fn application() -> Application {
-    gpui_kit::application()
+    gpui_platform::application()
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
+#[cfg(not(target_os = "macos"))]
 fn application() -> Application {
-    panic!("the gallery runs on a desktop; an iOS or Android app hands GPUI its platform")
+    panic!("the gallery runs on a Mac; an iOS or Android app hands GPUI its platform")
 }
 
 fn main() {
@@ -433,9 +407,11 @@ fn main() {
         }
         out
     };
-    application().with_assets(Assets).run(move |cx| {
+    // gpui-core's Lucide icons, which `lucide_icon` names for the cards and its date picker
+    // draws.
+    application().with_assets(gpui_core::Icons).run(move |cx| {
         load_fonts(cx);
-        gpui_kit::init(cx);
+        gpui_core::init(cx);
         apply_theme(true, cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());
@@ -456,7 +432,7 @@ fn main() {
             show: !offscreen,
             ..Default::default()
         };
-        let (window, root) = gpui_kit::open_window(options, cx, |window, cx| {
+        let (window, root) = gpui_core::open_window(options, cx, |window, cx| {
             cx.new(|cx| Gallery::new(offscreen, window, cx))
         })
         .expect("the window");

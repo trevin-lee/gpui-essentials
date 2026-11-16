@@ -15,8 +15,8 @@ use std::sync::Arc;
 
 use ::gpui::TestDispatcher;
 use common::*;
-use gpui_kit::*;
-// The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+use gpui::*;
+// The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
 
 /// One word, with nowhere to break.

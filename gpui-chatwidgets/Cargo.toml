@@ -22,22 +22,19 @@ serde = { version = "1", features = ["derive"] }
 # agent writes the card's values in that order, as OpenUI's web renderer does.
 serde_json = { version = "1", features = ["preserve_order"] }
 url = "2"
-# The renderer (the gpui feature). Pinned exactly: GPUI comes as GPUI Kit, which pins a snapshot
-# of Zed's GPUI (gpui-pre 0.3.12), and a host using this crate must link the same one.
-gpui-kit = { workspace = true, optional = true }
+# The renderer (the gpui feature): GPUI under its own name, pinned exactly in the workspace
+# (gpui-pre 0.3.12), and a host using this crate must link the same one.
+gpui = { workspace = true, optional = true }
 # Everything pressable (buttons, tabs, chips, table cells) through its Press, the text fields,
-# the slider, tooltips and Markdown: gpui-core, on the same GPUI. GPUI Kit still draws the date
-# picker.
+# the slider, the date picker, tooltips and Markdown: gpui-core, on the same GPUI.
 gpui-core = { path = "../gpui-core", optional = true }
-# The date picker's dates; the version GPUI Kit's own date picker uses.
+# The date picker's dates; the version gpui-core's date picker uses.
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"], optional = true }
-# Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
-# GPUI's version of the image crate to save the picture.
-gpui-pre = { workspace = true, features = ["test-support"], optional = true }
+# Only for the shots feature: GPUI's version of the image crate to save the picture.
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
-# The shots feature's offscreen window is the Mac's. On iOS an app brings GPUI's platform itself
-# (gpui-pre-ios), and GPUI Kit pulls in no platform there.
+# The shots feature's offscreen window is the Mac's (its platform with test support on). On iOS
+# an app brings GPUI's platform itself (gpui-pre-ios), and the crate pulls in none there.
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 
@@ -45,18 +42,23 @@ gpui-pre-macos = { workspace = true, features = ["test-support"], optional = tru
 default = ["gpui"]
 # The GPUI renderer. Without it (default-features = false) the crate is the parser and model
 # alone, with no GPUI in the build.
-gpui = ["dep:gpui-kit", "dep:gpui-core", "dep:chrono"]
+gpui = ["dep:gpui", "dep:gpui-core", "dep:chrono"]
 # Pictures of the gallery example rendered offscreen (`--shots`).
-shots = ["gpui", "dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
+shots = ["gpui", "gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 
 [[example]]
 name = "gallery"
 required-features = ["gpui"]
 
-# GPUI's test support (a test window, simulated input) is macOS-only here, so the parser-only
-# build and its tests on Linux never pull GPUI in.
+# GPUI's test support (a test window, simulated input) and the gallery's window are the Mac's,
+# so the parser-only build and its tests on Linux never pull GPUI in.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-gpui-kit = { workspace = true, features = ["test-support"] }
-# The overflow test lays text out with Core Text, as on screen, and reads the drawn scene.
-gpui-pre = { workspace = true, features = ["test-support", "bench-support"] }
-gpui-pre-apple = { workspace = true, features = ["font-kit"] }
+# bench-support: the overflow test reads the drawn scene.
+gpui = { workspace = true, features = ["test-support", "bench-support"] }
+# The gallery's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+# Shaders compiled when a window opens, so tests and the gallery build without Xcode's separate
+# Metal Toolchain. Only here: what apps ship stays on precompiled shaders.
+gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
+# The overflow test lays text out with Core Text, as on screen.
+gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }
