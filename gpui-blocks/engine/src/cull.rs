@@ -149,7 +149,6 @@ pub(crate) struct UnitDesc {
     pub(crate) node_ix: usize,
     /// For a list chunk: its item range and the list's item ids.
     pub(crate) items: Option<(std::ops::Range<usize>, Rc<[BlockId]>)>,
-    pub(crate) flow: gpui_kit::base::text::editor_host::FlowPosition,
 }
 
 #[derive(Default)]

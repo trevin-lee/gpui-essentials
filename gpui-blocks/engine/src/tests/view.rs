@@ -1101,47 +1101,6 @@ fn exiting_code_block_then_typing_is_two_undo_steps(cx: &mut TestAppContext) {
     }
 }
 
-#[gpui::test]
-fn code_block_highlighter_is_applied(cx: &mut TestAppContext) {
-    use std::sync::{Arc, Mutex};
-    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
-    let (editor, cx) = open(cx, "```rust\nfn a\n```");
-    let log = seen.clone();
-    cx.update(|_, cx| {
-        gpui_kit::base::text::TextViewDefaults::new()
-            .with_code_block_highlighter(move |block| {
-                log.lock().unwrap().push(block.code().to_string());
-                vec![(
-                    0..2,
-                    gpui::HighlightStyle {
-                        color: Some(gpui::red()),
-                        ..Default::default()
-                    },
-                )]
-            })
-            .install(cx)
-    });
-    editor.update(cx, |_, cx| cx.notify());
-    draw(cx);
-    assert!(
-        seen.lock().unwrap().iter().any(|c| c == "fn a"),
-        "the editor's code block is highlighted: {:?}",
-        seen.lock().unwrap()
-    );
-    // Editing re-highlights the new code.
-    let id = editor.read_with(cx, |e, _| {
-        e.model().document().leaves().next().unwrap().id()
-    });
-    editor.update(cx, |e, _| {
-        e.model
-            .set_selection(BlockSelection::caret(BlockPosition::new(id, 4)))
-            .unwrap()
-    });
-    type_text(cx, "()");
-    draw(cx);
-    assert!(seen.lock().unwrap().iter().any(|c| c == "fn a()"));
-}
-
 /// With the host's highlighter the engine draws code blocks itself: the highlighter sees the
 /// language and the code, runs again only when they change, and the caret and clicks land in
 /// the code it drew.

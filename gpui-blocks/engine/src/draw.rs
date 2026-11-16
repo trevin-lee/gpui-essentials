@@ -694,8 +694,7 @@ pub(crate) struct TableTree {
     rows: Vec<Vec<(u64, InlineText)>>,
 }
 
-/// `block` as a tree the engine can draw: `None` when something in it is still drawn by GPUI
-/// Kit (a code block, when the host gave no highlighter).
+/// `block` as a tree the engine can draw: `None` when its content doesn't match its kind.
 pub(crate) fn tree(
     doc: &super::document::EditorDocument,
     block: super::id::BlockId,
@@ -756,17 +755,20 @@ pub(crate) fn tree(
             }
             (K::HorizontalRule, _) => Tree::Rule,
             (K::CodeBlock { lang, .. }, Some(BlockContent::Plain(text))) => {
-                let code = code?;
                 let lang = lang.clone().unwrap_or_default();
                 Tree::Code {
                     key: block.as_u64(),
-                    highlights: crate::state::highlights(
-                        &code.cache,
-                        &code.highlighter,
-                        block,
-                        &lang,
-                        text,
-                    ),
+                    // Uncoloured without the host's highlighter.
+                    highlights: match code {
+                        Some(code) => crate::state::highlights(
+                            &code.cache,
+                            &code.highlighter,
+                            block,
+                            &lang,
+                            text,
+                        ),
+                        None => Rc::from([]),
+                    },
                     lang,
                     code: text.clone(),
                 }

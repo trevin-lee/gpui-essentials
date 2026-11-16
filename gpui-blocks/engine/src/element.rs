@@ -25,9 +25,7 @@ use gpui::{
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
 use crate::support::secondary_modifier;
 use gpui_kit::base::StyledExt as _;
-use gpui_kit::base::text::editor_host::{
-    BlockNode, FlowPosition, RenderContext, collect_leaf_geometry,
-};
+use gpui_kit::base::text::editor_host::{BlockNode, collect_leaf_geometry};
 
 /// Items per cull unit of a long top-level list.
 const LIST_CHUNK: usize = 32;
@@ -84,15 +82,8 @@ impl RenderOnce for BlockEditor {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         // The editor's look: gpui-core's theme, which the host sets.
         let look = gpui_core::Theme::global(cx).clone();
-        // Links are followed by the editor itself (Cmd/Ctrl-click); the shared
-        // renderer must never open a URL on its own.
-        let mut render_cx = RenderContext::from_app(cx).on_link_click(|_, _, _, _| {});
         // Pictures load through the host's loader when it gives one.
         let image_source = self.state.read(cx).image_source();
-        if let Some(source) = image_source.clone() {
-            render_cx = render_cx.with_image_source(move |uri| source(uri));
-        }
-        let text_style = render_cx.style().clone();
         let mut style = self.state.read(cx).style.resolved(&look);
         if style.selection_is_default() {
             style = style.with_selection(look.selection());
@@ -113,53 +104,48 @@ impl RenderOnce for BlockEditor {
                         .is_some_and(|caret| handle.bounds().contains(&caret.center()))
                 })
         };
-        let (focus, snapshot, backgrounds, extensions, keep, list_items) =
-            self.state.update(cx, |state, _| {
-                let snapshot = state.snapshot();
-                let mut backgrounds: HashMap<u64, Vec<(Range<usize>, Hsla)>> = HashMap::new();
-                for (block, range) in state.selection_ranges() {
-                    // Atoms paint whole (O(1) lookup, not a scan of the leaves).
-                    let range = match state.model.doc.get(block).map(|e| &e.content) {
-                        Some(super::document::BlockContent::Atom(_)) => {
-                            0..state.model.doc.leaf_len(block).unwrap_or(range.end)
-                        }
-                        _ => range,
-                    };
-                    backgrounds
-                        .entry(block.as_u64())
-                        .or_default()
-                        .push((range, style.selection()));
-                }
-                (
-                    state.focus_handle.clone(),
-                    snapshot,
-                    backgrounds,
-                    state.model.doc.extensions.clone(),
-                    state.pinned_blocks(),
-                    // Only needed to rebuild the cached cull units.
-                    (!state.cull.borrow().index.is_current(state.model.revision())).then(|| {
-                        let doc = &state.model.doc;
-                        doc.children(doc.root)
-                            .iter()
-                            .filter(|id| {
-                                matches!(
-                                    doc.kind(**id),
-                                    Some(super::kind::BlockKindData::List { .. })
-                                ) && doc.children(**id).len() > LIST_CHUNK
-                            })
-                            .map(|id| (*id, Rc::<[BlockId]>::from(doc.children(*id))))
-                            .collect::<HashMap<_, _>>()
-                    }),
-                )
-            });
+        let (focus, snapshot, backgrounds, keep, list_items) = self.state.update(cx, |state, _| {
+            let snapshot = state.snapshot();
+            let mut backgrounds: HashMap<u64, Vec<(Range<usize>, Hsla)>> = HashMap::new();
+            for (block, range) in state.selection_ranges() {
+                // Atoms paint whole (O(1) lookup, not a scan of the leaves).
+                let range = match state.model.doc.get(block).map(|e| &e.content) {
+                    Some(super::document::BlockContent::Atom(_)) => {
+                        0..state.model.doc.leaf_len(block).unwrap_or(range.end)
+                    }
+                    _ => range,
+                };
+                backgrounds
+                    .entry(block.as_u64())
+                    .or_default()
+                    .push((range, style.selection()));
+            }
+            (
+                state.focus_handle.clone(),
+                snapshot,
+                backgrounds,
+                state.pinned_blocks(),
+                // Only needed to rebuild the cached cull units.
+                (!state.cull.borrow().index.is_current(state.model.revision())).then(|| {
+                    let doc = &state.model.doc;
+                    doc.children(doc.root)
+                        .iter()
+                        .filter(|id| {
+                            matches!(
+                                doc.kind(**id),
+                                Some(super::kind::BlockKindData::List { .. })
+                            ) && doc.children(**id).len() > LIST_CHUNK
+                        })
+                        .map(|id| (*id, Rc::<[BlockId]>::from(doc.children(*id))))
+                        .collect::<HashMap<_, _>>()
+                }),
+            )
+        });
 
         // Match the native root's effective inherited/instance typography
         // before deriving body-relative node metrics and culling geometry.
         let mut typography = window.text_style();
         typography.refine(&self.style.text);
-        let node_cx = render_cx
-            .with_markdown_extensions(extensions)
-            .with_body_font_size(typography.font_size.to_pixels(window.rem_size()));
         let (cull, revision) = {
             let state = self.state.read(cx);
             (state.cull.clone(), state.model.revision())
@@ -177,7 +163,8 @@ impl RenderOnce for BlockEditor {
             border: look.border,
             surface: look.background,
         };
-        let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
+        // The gap below a block, as GPUI Kit's Markdown leaves.
+        let paragraph_gap = gpui::rems(0.75).to_pixels(rem);
         // The theme's sizes are in rems of its own text size.
         let in_px = |r: gpui::Rems| look.font_size * r.0;
         let code_look = super::draw::CodeLook {
@@ -248,14 +235,12 @@ impl RenderOnce for BlockEditor {
                 let mut node_ix = 0;
                 for (block_ix, block) in snapshot.blocks.iter().enumerate() {
                     for (node_in_block, node) in block.nodes.iter().enumerate() {
-                        let flow = FlowPosition::at(&nodes, node_ix, false);
                         let unit = |id, items| super::cull::UnitDesc {
                             id,
                             block: block_ix,
                             node: node_in_block,
                             node_ix,
                             items,
-                            flow,
                         };
                         match (node, list_items.get(&block.id)) {
                             (BlockNode::List { children, .. }, Some(ids))
@@ -344,19 +329,10 @@ impl RenderOnce for BlockEditor {
                 }
                 cursor = top + index.height(unit_ix);
                 rendered += 1;
-                let flow = unit.flow;
                 let is_last_node = node_ix + 1 == count;
                 let node = &snapshot.blocks[unit.block].nodes[unit.node];
                 let element = match (&unit.items, node) {
-                    (
-                        Some((range, ids)),
-                        BlockNode::List {
-                            children: items,
-                            ordered,
-                            start,
-                            ..
-                        },
-                    ) => {
+                    (Some((range, ids)), BlockNode::List { .. }) => {
                         let last_chunk = range.end == ids.len();
                         let block_id = snapshot.blocks[unit.block].id;
                         let tree = super::draw::list_tree(
@@ -365,23 +341,8 @@ impl RenderOnce for BlockEditor {
                             Some(range.clone()),
                             highlighting.as_ref(),
                         );
-                        let chunk = BlockNode::List {
-                            children: items[range.clone()].to_vec(),
-                            ordered: *ordered,
-                            start: if *ordered {
-                                Some(start.unwrap_or(1) + range.start as u32)
-                            } else {
-                                *start
-                            },
-                            span: None,
-                        };
-                        let flow = if range.start == 0 {
-                            flow
-                        } else {
-                            flow.first(false)
-                        };
-                        if let Some(tree) = tree {
-                            super::draw::draw(
+                        match tree {
+                            Some(tree) => super::draw::draw(
                                 &super::draw::Tree::List(tree),
                                 super::draw::Place {
                                     first: node_ix == 0 && range.start == 0,
@@ -394,16 +355,8 @@ impl RenderOnce for BlockEditor {
                                 &draw_cx,
                                 window,
                                 cx,
-                            )
-                        } else {
-                            chunk.render(
-                                node_ix,
-                                // Inner chunks drop the list's bottom gap.
-                                flow.last(!last_chunk || is_last_node),
-                                &node_cx,
-                                window,
-                                cx,
-                            )
+                            ),
+                            None => div().into_any_element(),
                         }
                     }
                     _ => {
@@ -437,9 +390,7 @@ impl RenderOnce for BlockEditor {
                                 window,
                                 cx,
                             ),
-                            None => {
-                                node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx)
-                            }
+                            None => div().into_any_element(),
                         }
                     }
                 };
@@ -491,13 +442,7 @@ impl RenderOnce for BlockEditor {
                                 window,
                                 cx,
                             ),
-                            None => node.render(
-                                node_ix,
-                                flow.first(true).last(true),
-                                &node_cx,
-                                window,
-                                cx,
-                            ),
+                            None => div().into_any_element(),
                         };
                         let theme = gpui_core::Theme::global(cx);
                         deferred(
