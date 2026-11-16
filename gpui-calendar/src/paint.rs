@@ -22,6 +22,11 @@ use crate::time::{self, DstChange};
 pub(crate) const MIN_CHIP_HEIGHT: f32 = 20.;
 
 const GUTTER: f32 = 56.;
+/// The gutter when the calendar is narrow, as on a phone.
+const GUTTER_NARROW: f32 = 46.;
+/// Below this width (in CSS pixels) the calendar lays itself out for a phone: a narrower
+/// gutter, shorter labels, and the compact header.
+pub(crate) const NARROW: f32 = 600.;
 const HEAD: f32 = 40.;
 const LANE: f32 = 22.;
 const MONTH_HEAD: f32 = 28.;
@@ -257,6 +262,9 @@ pub(crate) struct Scene {
     pub ghost: Option<Ghost>,
     pub cursor: CursorStyle,
     pub all_day_expanded: bool,
+    /// Whether the header was drawn for a narrow calendar, if there is a header: when the
+    /// body turns out to be the other width, the calendar draws again with the right one.
+    pub header_narrow: Option<bool>,
 }
 
 impl Scene {
@@ -302,7 +310,8 @@ fn geometry(scene: &Scene, bounds: Bounds<Pixels>, rem: Pixels, shared: &Shared)
     let u = |v: f32| px(v * s);
     match scene.kind {
         Kind::Grid => {
-            let gutter = u(GUTTER);
+            let narrow = bounds.size.width < u(NARROW);
+            let gutter = u(if narrow { GUTTER_NARROW } else { GUTTER });
             let head_bottom = bounds.top() + u(HEAD);
             let lanes = scene.all_day_lanes().min(scene.all_day_rows()).max(1);
             let all_day_bottom = head_bottom + u(LANE * lanes as f32 + 8.);
@@ -480,10 +489,18 @@ pub(crate) fn body(
     this: WeakEntity<Calendar>,
 ) -> impl IntoElement {
     let prepaint_shared = shared.clone();
+    let prepaint_this = this.clone();
     canvas(
-        move |bounds, window, _| {
+        move |bounds, window, cx| {
             let geo = geometry(&scene, bounds, window.rem_size(), &prepaint_shared);
             prepaint_shared.geo.set(Some(geo));
+            let narrow = bounds.size.width < px(NARROW * geo.s);
+            if scene.header_narrow.is_some_and(|n| n != narrow) {
+                let this = prepaint_this.clone();
+                window.defer(cx, move |_, cx| {
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                });
+            }
             let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
             (scene, geo, hitbox)
         },
@@ -551,6 +568,14 @@ pub(crate) mod drawn {
     pub fn take() -> Vec<Text> {
         TEXTS.with(|t| t.borrow_mut().replace(Vec::new()).unwrap_or_default())
     }
+}
+
+/// The fewest letters a cut line keeps before its "…"; with less room it draws nothing.
+pub(crate) const MIN_KEPT: usize = 2;
+
+/// The characters a cut line keeps before its ellipsis.
+pub(crate) fn kept_chars(cut: &str) -> usize {
+    cut.trim_end_matches('…').trim_end().chars().count()
 }
 
 /// The pen: quads and text at the calendar's scale.
@@ -665,6 +690,10 @@ impl Ink<'_> {
             let runs = [run];
             let (cut, cut_runs) = wrapper.truncate_line(line, w, "…", &runs, TruncateFrom::End);
             let next = cut_runs.into_owned().into_iter().next()?;
+            // A lone "…", or one letter and "…", says nothing: leave the text out.
+            if cut.as_ref() != text && kept_chars(&cut) < MIN_KEPT {
+                return None;
+            }
             line = cut;
             run = next;
         }
@@ -696,7 +725,7 @@ impl Ink<'_> {
         };
         let width = shaped.width;
         let leading = self.u(leading);
-        self.note(text, at, width, leading);
+        self.note(&shaped.text.clone(), at, width, leading);
         let _ = shaped.paint(at, leading, TextAlign::Left, None, self.window, self.cx);
         width
     }
@@ -718,7 +747,12 @@ impl Ink<'_> {
         };
         let width = shaped.width;
         let leading = self.u(leading);
-        self.note(text, point(right - width, top), width, leading);
+        self.note(
+            &shaped.text.clone(),
+            point(right - width, top),
+            width,
+            leading,
+        );
         let _ = shaped.paint(
             point(right - width, top),
             leading,
@@ -1145,6 +1179,16 @@ fn paint_span_chip(
     out
 }
 
+/// "+3 more", or "+3" where that doesn't fit.
+fn more_label(ink: &mut Ink, hidden: usize, room: Pixels) -> String {
+    let long = format!("+{hidden} more");
+    if ink.measure(&long, SMALL, FontWeight::MEDIUM) <= room {
+        long
+    } else {
+        format!("+{hidden}")
+    }
+}
+
 /// A ghost: the drag's proposal, outlined in its colour.
 fn ghost_colors(color: u32, colors: &CalendarColors) -> (ChipColors, Hsla) {
     let accent: Hsla = rgb(color).into();
@@ -1404,7 +1448,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     FontWeight::SEMIBOLD,
                     c.on_now,
                     point(pill.left() + pad, pill.top()),
-                    None,
+                    Some(w + px(1.)),
                 );
             });
     }
@@ -1430,57 +1474,70 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         let x = geo.col_x(i) + ink.u(10.);
         let mid = b.top() + ink.u(HEAD) / 2.;
         let name = time::weekday_name(date.weekday(), days > 1);
-        let w = ink.text(
-            name,
-            LABEL,
-            18.,
-            FontWeight::NORMAL,
-            c.muted_text,
-            point(x, mid - ink.u(9.)),
-            Some(geo.col_w - ink.u(14.)),
-        );
         let number = date.day().to_string();
-        // The same gap after the weekday on every day, today's badge included.
-        let nx = x + w + ink.u(6.);
-        let number_right = if date == scene.today {
-            let nw = ink.measure(&number, LABEL, FontWeight::SEMIBOLD);
-            let d = ink.u(24.).max(nw + ink.u(10.));
-            let pill = Bounds::new(point(nx, mid - ink.u(12.)), size(d, ink.u(24.)));
-            ink.rounded(pill, ink.u(12.), c.now);
-            ink.text(
-                &number,
-                LABEL,
-                24.,
-                FontWeight::SEMIBOLD,
-                c.on_now,
-                point(pill.left() + (d - nw) / 2., pill.top()),
-                None,
-            );
-            pill.right()
+        let today = date == scene.today;
+        let room = geo.col_w - ink.u(14.);
+        let name_w = ink.measure(name, LABEL, FontWeight::NORMAL);
+        let nw = ink.measure(&number, LABEL, FontWeight::SEMIBOLD);
+        let badge = if today {
+            ink.u(24.).max(nw + ink.u(10.))
         } else {
-            nx + ink.text(
-                &number,
+            nw
+        };
+        if name_w + ink.u(6.) + badge > room {
+            // Too narrow for "Mon 16" on a line: the name over the number, centred, as a
+            // phone's week does; the name's first letter where even that's too wide.
+            paint_stacked_head(ink, scene, geo, i, name, &number, today);
+        } else {
+            let w = ink.text(
+                name,
                 LABEL,
                 18.,
-                FontWeight::SEMIBOLD,
-                c.text,
-                point(nx, mid - ink.u(9.)),
-                None,
-            )
-        };
-        // A day the clocks change says how long it is.
-        let length = time::day_length(date, scene.options.time_zone).num_hours();
-        if length != 24 {
-            let note_x = number_right + ink.u(8.);
-            ink.text(
-                &format!("{length} hours"),
-                SMALL,
-                18.,
-                FontWeight::MEDIUM,
-                c.now,
-                point(note_x, mid - ink.u(8.)),
-                Some(geo.col_x(i) + geo.col_w - note_x - ink.u(4.)),
+                FontWeight::NORMAL,
+                c.muted_text,
+                point(x, mid - ink.u(9.)),
+                Some(room),
             );
+            // The same gap after the weekday on every day, today's badge included.
+            let nx = x + w + ink.u(6.);
+            let number_right = if today {
+                let pill = Bounds::new(point(nx, mid - ink.u(12.)), size(badge, ink.u(24.)));
+                ink.rounded(pill, ink.u(12.), c.now);
+                ink.text(
+                    &number,
+                    LABEL,
+                    24.,
+                    FontWeight::SEMIBOLD,
+                    c.on_now,
+                    point(pill.left() + (badge - nw) / 2., pill.top()),
+                    Some(nw + px(1.)),
+                );
+                pill.right()
+            } else {
+                nx + ink.text(
+                    &number,
+                    LABEL,
+                    18.,
+                    FontWeight::SEMIBOLD,
+                    c.text,
+                    point(nx, mid - ink.u(9.)),
+                    Some(nw + px(1.)),
+                )
+            };
+            // A day the clocks change says how long it is.
+            let length = time::day_length(date, scene.options.time_zone).num_hours();
+            if length != 24 {
+                let note_x = number_right + ink.u(8.);
+                ink.text(
+                    &format!("{length} hours"),
+                    SMALL,
+                    18.,
+                    FontWeight::MEDIUM,
+                    c.now,
+                    point(note_x, mid - ink.u(8.)),
+                    Some(geo.col_x(i) + geo.col_w - note_x - ink.u(4.)),
+                );
+            }
         }
         if days > 1 {
             shared.dates.borrow_mut().push((
@@ -1493,16 +1550,18 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         }
     }
 
-    // The all-day row.
-    ink.text_right(
-        "All day",
-        SMALL,
-        SMALL_LEADING,
-        FontWeight::NORMAL,
-        c.muted_text,
-        geo.left - ink.u(8.),
-        geo.head_bottom + ink.u(7.),
-    );
+    // The all-day row, named where the gutter has room for it.
+    if ink.measure("All day", SMALL, FontWeight::NORMAL) <= geo.left - b.left() - ink.u(12.) {
+        ink.text_right(
+            "All day",
+            SMALL,
+            SMALL_LEADING,
+            FontWeight::NORMAL,
+            c.muted_text,
+            geo.left - ink.u(8.),
+            geo.head_bottom + ink.u(7.),
+        );
+    }
     let max_rows = scene.all_day_rows();
     let ranges: Vec<(i32, i32)> = scene.laid.spans.iter().map(|s| (s.first, s.last)).collect();
     let lanes: Vec<usize> = scene.laid.spans.iter().map(|s| s.lane).collect();
@@ -1524,7 +1583,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         if f.hidden > 0 {
             let x = geo.col_x(i as i32);
             let y = row_top(f.shown_rows);
-            let label = format!("+{} more", f.hidden);
+            let label = more_label(ink, f.hidden, geo.col_w - ink.u(10.));
             let w = ink.text(
                 &label,
                 SMALL,
@@ -1547,6 +1606,64 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
     }
     // The line under the all-day row.
     ink.hline(b.left(), b.right(), geo.grid_top - px(1.), c.line);
+}
+
+/// A day's name over its number, centred in its column, for narrow columns.
+fn paint_stacked_head(
+    ink: &mut Ink,
+    scene: &Scene,
+    geo: &Geo,
+    i: i32,
+    name: &str,
+    number: &str,
+    today: bool,
+) {
+    let c = &scene.colors;
+    let top = geo.bounds.top();
+    let center = geo.col_x(i) + geo.col_w / 2.;
+    let room = geo.col_w - ink.u(4.);
+    let first_letter: String = name.chars().take(1).collect();
+    let name = if ink.measure(name, SMALL, FontWeight::MEDIUM) <= room {
+        name.to_string()
+    } else {
+        first_letter
+    };
+    let w = ink.measure(&name, SMALL, FontWeight::MEDIUM);
+    ink.text(
+        &name,
+        SMALL,
+        SMALL_LEADING,
+        FontWeight::MEDIUM,
+        c.muted_text,
+        point(center - w / 2., top + ink.u(3.)),
+        Some(room),
+    );
+    let nw = ink.measure(number, TITLE, FontWeight::SEMIBOLD);
+    let y = top + ink.u(18.);
+    if today {
+        let d = ink.u(20.).max(nw + ink.u(8.)).min(room);
+        let pill = Bounds::new(point(center - d / 2., y), size(d, ink.u(20.)));
+        ink.rounded(pill, ink.u(10.), c.now);
+        ink.text(
+            number,
+            TITLE,
+            20.,
+            FontWeight::SEMIBOLD,
+            c.on_now,
+            point(center - nw / 2., y),
+            Some(room),
+        );
+    } else {
+        ink.text(
+            number,
+            TITLE,
+            20.,
+            FontWeight::SEMIBOLD,
+            c.text,
+            point(center - nw / 2., y),
+            Some(room),
+        );
+    }
 }
 
 /// One span, in the pieces its days' fits let show.
@@ -1650,16 +1767,21 @@ fn paint_dot_row(
         }
     }
     let w = w - badge;
-    let tw = ink.text(
-        &chip.time,
-        SMALL,
-        TITLE_LEADING,
-        FontWeight::NORMAL,
-        cc.muted_text.opacity(alpha),
-        point(x, y + ink.u(0.5)),
-        Some(w),
-    );
-    let gap = ink.u(5.);
+    // A narrow day keeps its room for the title: the time goes.
+    let tw = if rect.size.width < ink.u(90.) {
+        px(0.)
+    } else {
+        ink.text(
+            &chip.time,
+            SMALL,
+            TITLE_LEADING,
+            FontWeight::NORMAL,
+            cc.muted_text.opacity(alpha),
+            point(x, y + ink.u(0.5)),
+            Some(w),
+        )
+    };
+    let gap = if tw > px(0.) { ink.u(5.) } else { px(0.) };
     ink.text(
         &chip.title,
         TITLE,
@@ -1844,7 +1966,7 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
             if f.hidden > 0 {
                 let x = geo.col_x(col as i32);
                 let y = content_top + lane_h * f.shown_rows as f32;
-                let label = format!("+{} more", f.hidden);
+                let label = more_label(ink, f.hidden, geo.col_w - ink.u(10.));
                 let w = ink.text(
                     &label,
                     SMALL,

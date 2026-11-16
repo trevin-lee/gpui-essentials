@@ -227,6 +227,9 @@ pub(crate) struct AgendaRow {
     pub end: SharedString,
 }
 
+/// What a button in the narrow header does.
+type HeaderAction = Rc<dyn Fn(&mut Calendar, &mut Context<Calendar>)>;
+
 /// A calendar: day, week, N-day and month views of the host's events.
 pub struct Calendar {
     calendars: Vec<CalendarSource>,
@@ -613,6 +616,11 @@ impl Calendar {
     /// What the header calls the period on screen.
     pub fn title(&self) -> String {
         time::title(self.view, self.anchor, self.options.week_start)
+    }
+
+    /// A shorter name for the period, as the narrow header shows it.
+    pub fn short_title(&self) -> String {
+        time::short_title(self.view, self.anchor, self.options.week_start)
     }
 
     pub fn set_view(&mut self, view: CalendarView, cx: &mut Context<Self>) {
@@ -1569,6 +1577,119 @@ impl Calendar {
         })
     }
 
+    /// The header for a narrow calendar, as on a phone: the title, Today, the period arrows,
+    /// and Day, Month and List. Drawn with plain elements, not GPUI Kit's buttons.
+    fn render_compact_header(&self, colors: CalendarColors, cx: &mut Context<Self>) -> Div {
+        let this = cx.entity().downgrade();
+        let on = move |f: HeaderAction| {
+            let this = this.clone();
+            move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                this.update(cx, |c, cx| {
+                    f(c, cx);
+                    c.focus.focus(window, cx);
+                })
+                .ok();
+            }
+        };
+        let control = |id: ElementId, label: SharedString, selected: bool| {
+            div()
+                .id(id)
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .h(rems(32. / 15.))
+                .px(rems(8. / 15.))
+                .rounded(rems(8. / 15.))
+                .text_size(rems(13. / 15.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(if selected {
+                    colors.text
+                } else {
+                    colors.muted_text
+                })
+                .when(selected, |d| d.bg(colors.highlight))
+                .cursor_pointer()
+                .child(label)
+        };
+        let view = self.view;
+        let views = [
+            (CalendarView::Day, "Day"),
+            (CalendarView::Month, "Month"),
+            (CalendarView::AGENDA, "List"),
+        ];
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(rems(6. / 15.))
+            .h(rems(52. / 15.))
+            .px(rems(12. / 15.))
+            .border_b_1()
+            .border_color(colors.line)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(rems(1.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(colors.text)
+                    .debug_selector(|| "calendar-title".into())
+                    .child(SharedString::from(self.short_title())),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(rems(2. / 15.))
+                    .debug_selector(|| "calendar-controls".into())
+                    .child(
+                        control("today".into(), "Today".into(), false)
+                            .on_click(on(Rc::new(|c, cx| c.go_to_today(cx)))),
+                    )
+                    .child(
+                        control("previous".into(), "‹".into(), false)
+                            .on_click(on(Rc::new(|c, cx| c.previous(cx)))),
+                    )
+                    .child(
+                        control("next".into(), "›".into(), false)
+                            .on_click(on(Rc::new(|c, cx| c.next(cx)))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .ml(rems(4. / 15.))
+                            .p(rems(2. / 15.))
+                            .rounded(rems(10. / 15.))
+                            .border_1()
+                            .border_color(colors.line)
+                            .children(views.into_iter().enumerate().map(|(i, (v, label))| {
+                                let on_view = match (v, view) {
+                                    (CalendarView::Day, CalendarView::Days(_)) => true,
+                                    (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
+                                    _ => v == view,
+                                };
+                                control(("view", i).into(), label.into(), on_view)
+                                    .on_click(on(Rc::new(move |c, cx| c.set_view(v, cx))))
+                            })),
+                    ),
+            )
+    }
+
+    /// Whether the calendar is laid out for a narrow place: from the width it was last drawn
+    /// at, or the window's before the first frame.
+    fn is_narrow(&self, window: &Window) -> bool {
+        let width = self
+            .shared
+            .geo
+            .get()
+            .map_or(window.viewport_size().width, |g| g.bounds.size.width);
+        width < px(paint::NARROW * f32::from(window.rem_size()) / 15.)
+    }
+
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::global(cx);
         let colors = theme.colors;
@@ -1600,18 +1721,25 @@ impl Calendar {
             .px(rems(16. / 15.))
             .border_b_1()
             .border_color(colors.border)
+            .gap(rems(12. / 15.))
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
                     .text_size(rems(18. / 15.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(colors.foreground)
+                    .debug_selector(|| "calendar-title".into())
                     .child(SharedString::from(self.title())),
             )
             .child(
                 div()
                     .flex()
+                    .flex_none()
                     .items_center()
                     .gap(rems(6. / 15.))
+                    .debug_selector(|| "calendar-controls".into())
                     .child(
                         Button::new("today")
                             .label("Today")
@@ -1660,7 +1788,7 @@ impl Calendar {
 }
 
 impl Render for Calendar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self
             .colors
             .unwrap_or_else(|| CalendarColors::from_theme(cx));
@@ -1700,6 +1828,7 @@ impl Render for Calendar {
                 _ => self.hover_cursor,
             },
             all_day_expanded: self.all_day_expanded,
+            header_narrow: self.header.then(|| self.is_narrow(window)),
         };
         let this = cx.entity().downgrade();
         let body = paint::body(scene, self.shared.clone(), this);
@@ -1726,7 +1855,13 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &OpenSelected, _, cx| c.open_selected(cx)))
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
             .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
-            .when(self.header, |d| d.child(self.render_header(cx)))
+            .when(self.header, |d| {
+                if self.is_narrow(window) {
+                    d.child(self.render_compact_header(colors, cx))
+                } else {
+                    d.child(self.render_header(cx).into_any_element())
+                }
+            })
             .child(
                 div()
                     .id("calendar-body")
