@@ -19,8 +19,8 @@ gpui-blocks/engine (gpui-blocks-engine) is a fork of gpui-kit-markdown-editor
 (https://github.com/wabzqem/gpui-kit-markdown-editor), Copyright Richard
 Nelson and contributors, licensed under the Apache License, Version 2.0, with
 changes Copyright 2026 Trevin Lee. Its changed files say so. It was developed
-at https://github.com/trevin-lee/gpui-kit-markdown-editor and brought here
-with its history. Its LICENSE-APACHE carries the notice of GPUI Kit, from
+in a fork of that repository and brought here with its history. Its
+LICENSE-APACHE carries the notice of GPUI Kit, from
 which it derives.
 
 gpui-blocks-engine draws through GPUI Kit
