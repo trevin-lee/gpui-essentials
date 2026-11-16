@@ -253,3 +253,26 @@ fn touch_days_are_44_points_and_marked_days_have_dots(cx: &mut TestAppContext) {
     });
     assert_eq!(dots, 1);
 }
+
+#[gpui::test]
+fn a_hosts_today_is_where_the_keyboard_starts(cx: &mut TestAppContext) {
+    let (state, _, vcx) = open(cx, false);
+    // A day that isn't the Mac's today: a host's own clock or zone.
+    let pinned = NaiveDate::from_ymd_opt(2031, 2, 10).unwrap();
+    vcx.update(|_, cx| state.update(cx, |s, cx| s.set_today(Some(pinned), cx)));
+    assert_eq!(state.read_with(vcx, |s, _| s.today_date()), pinned);
+    keys(vcx, "tab enter enter");
+    assert_eq!(state.read_with(vcx, |s, _| s.value().start()), Some(pinned));
+    // Back to the Mac's date.
+    vcx.update(|_, cx| state.update(cx, |s, cx| s.set_today(None, cx)));
+    assert_eq!(state.read_with(vcx, |s, _| s.today_date()), today());
+}
+
+#[gpui::test]
+fn a_state_made_with_a_today_shows_its_month(cx: &mut TestAppContext) {
+    let pinned = NaiveDate::from_ymd_opt(2031, 2, 10).unwrap();
+    let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
+    let state =
+        vcx.update(|window, cx| cx.new(|cx| DatePickerState::new(window, cx).today(pinned)));
+    assert_eq!(state.read_with(vcx, |s, _| s.shown()), pinned);
+}
