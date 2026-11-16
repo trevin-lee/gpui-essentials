@@ -691,7 +691,7 @@ pub fn labeled_node(node: &Node, ctx: &NodeContext, target: bool, source: bool) 
         })
         .when(node.height.is_some(), |d| d.h_full())
         .gap(units(6.))
-        .child(node.label_text())
+        .child(label(node))
         .children(ctx.link_button())
         .when(target, |d| {
             d.child(ctx.handle(HandleKind::Target, node.target_position))
@@ -702,9 +702,20 @@ pub fn labeled_node(node: &Node, ctx: &NodeContext, target: bool, source: bool) 
         .into_any_element()
 }
 
+/// A node's label as the built-in kinds show it: wrapped to the box (a word too long for it
+/// breaks), and cut off where a box of a fixed height ends.
+fn label(node: &Node) -> Div {
+    div()
+        .min_w_0()
+        .max_h_full()
+        .overflow_hidden()
+        .child(node.label_text())
+}
+
 /// The built-in `group` kind: a plain area other nodes can be children of.
 pub fn group_node(node: &Node, ctx: &NodeContext) -> AnyElement {
     div()
+        .overflow_hidden()
         .w(units(node.width.unwrap_or(200.)))
         .h(units(node.height.unwrap_or(150.)))
         .rounded(units(3.))
@@ -744,7 +755,7 @@ pub fn topic_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .flex()
         .items_center()
         .gap(units(6.))
-        .child(node.label_text())
+        .child(label(node))
         .children(ctx.link_button())
         .into_any_element()
 }
