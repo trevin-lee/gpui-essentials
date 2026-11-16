@@ -1,16 +1,16 @@
 # gpui-calendar
 
-Day, week, N-day, month and agenda calendar views for [GPUI](https://www.gpui.rs) apps built with
-[GPUI Kit](https://github.com/longbridge/gpui-kit) 0.9. GPUI Kit has a date picker and a month
-picker; this adds the time grid and the views a calendar app needs. You drag empty time to make
+Day, week, N-day, month and agenda calendar views for [GPUI](https://www.gpui.rs) apps built on
+[gpui-core](../gpui-core): the time grid and the views a calendar app needs. You drag empty time to make
 an event, drag an event to move it, drag its edge to change its length, and press Delete to
 delete it, and every change comes back to your app as a proposal. Your app supplies the calendars
 (their colours, which are shown, which are read-only) and the events, recurring ones already
 expanded, and the crate never touches a network.
 
-It uses GPUI Kit's types throughout (GPUI Kit builds on `gpui-pre`, a snapshot of Zed's GPUI), so
-it works in GPUI Kit apps but not with Zed's own `gpui` crate. It follows how FullCalendar,
-react-big-calendar and Notion Calendar behave, without their code or their look.
+It uses GPUI as `gpui-pre` (a snapshot of Zed's GPUI) and takes its colours, font and header
+buttons from gpui-core, so it works in apps on the same GPUI but not with Zed's own `gpui` crate.
+It follows how FullCalendar, react-big-calendar and Notion Calendar behave, without their code or
+their look.
 
 ![A week in gpui-calendar: all-day spans, overlapping events side by side, and the line at the current time](docs/week.png)
 
@@ -72,13 +72,13 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
   - The header is the plain one, with 44-point controls and no arrows: the swipe changes the
     period.
 - **Narrow widths:** below 600 pixels the calendar lays itself out for a phone. The header is a
-  compact one, drawn without GPUI Kit: a short title ("Wed, Nov 18", "Nov 2026"), Today, the
+  compact one, drawn from plain elements: a short title ("Wed, Nov 18", "Nov 2026"), Today, the
   arrows, and Day, Month and List. The gutter narrows, days too narrow for "Mon 16" show the name
   over the number, "+3 more" becomes "+3", and the month's rows drop their times for the
   title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
   to "L…". `short_title()` gives the short title for a header of your own.
 - **Theming:** each calendar's colour, the week's first day, 12- or 24-hour time, and colours
-  from GPUI Kit's theme. It scales with the window's rem, so it follows an app's zoom.
+  from gpui-core's theme. It scales with the window's rem, so it follows an app's zoom.
 
 | Overlapping events | The month |
 |---|---|
@@ -86,29 +86,34 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
 
 ## Use it
 
-It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
+It needs Rust 1.100 or newer. It uses GPUI as `gpui-pre = "=0.3.12"` and takes its theme from
+gpui-core, so your app must use the same GPUI, or two would be linked:
 
 ```toml
 [dependencies]
-gpui-kit = "=0.9.1"
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 gpui-calendar = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
+
+Call `gpui_core::init(cx)` and then `gpui_calendar::init(cx)` once at startup.
 
 Pin a commit: until it's on crates.io, any commit can change the API.
 
 ```rust,no_run
 use chrono::{Duration, Utc};
 use gpui_calendar::{Calendar, CalendarEvent, CalendarSource, CalendarView, Event};
-use gpui_kit::*;
+use gpui::*;
 
 fn main() {
-    gpui_kit::application()
-        // The header's chevrons are GPUI Kit's icons, so the app needs GPUI Kit's assets.
-        .with_assets(gpui_kit::assets::Assets::new(""))
+    // GPUI's platform for this OS (the `gpui-pre-platform` crate); on iOS the app's own.
+    gpui_platform::application()
+        // The header's chevrons are gpui-core's icons, so the app needs its assets.
+        .with_assets(gpui_core::Icons)
         .run(|cx| {
-            gpui_kit::init(cx);
+            gpui_core::init(cx);
             gpui_calendar::init(cx);
-            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            gpui_core::open_window(WindowOptions::default(), cx, |_, cx| {
                 let now = Utc::now();
                 let calendar = cx.new(|cx| {
                     Calendar::new(cx)
@@ -183,8 +188,8 @@ fn main() {
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
   `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.
-- **The header:** the title, Today, previous and next, and Day / Week / Month are GPUI Kit's
-  buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
+- **The header:** the title, Today, previous and next, and Day / Week / Month / Agenda are
+  gpui-core's buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
 - **Keys:** the actions (`gpui_calendar::Today`, `SelectLeft` and the rest) work in the
   `Calendar` key context. Bind them to other keys after `gpui_calendar::init`.
@@ -229,13 +234,14 @@ November 2026, 10:40 in Los Angeles. Pictures and the bench draw a window that's
 never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `drag-create`,
 `drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag`, `links`, `agenda` (drawn
 720 pixels wide) and, at an iPhone's 390 by 844 and taken by touch, `compact` (with an event
-selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger halfway
-through a swipe to the next day) and `compact-hold` (a long press on empty time, drawn down). `tests/touch.rs` drives the
-calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
+selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger
+halfway through a swipe to the next day) and `compact-hold` (a long press on empty time, drawn
+down). `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
+presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
-SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from GPUI
-Kit's theme.
+SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from
+gpui-core's theme.
 
 | Dragging out a new event | Moving an event to another day |
 |---|---|
@@ -275,7 +281,7 @@ moves once a minute.
 ## Status
 
 Early, and used for one app so far. It's tested on macOS, and CI builds it for the iOS
-simulator (`aarch64-apple-ios-sim`): on iOS, GPUI Kit leaves the platform to the app, which links
+simulator (`aarch64-apple-ios-sim`): the crate takes no platform, and on iOS the app links
 `gpui-pre-ios` itself. GPUI also runs on Linux and Windows, but this crate hasn't been tried
 there.
 

@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc, Weekday};
-use gpui_kit::*;
+use gpui::*;
 
 use crate::calendar::{AgendaRow, Calendar, Chip, Laid, SpanPiece};
 use crate::layout;
@@ -731,7 +731,7 @@ pub(crate) fn body(
 pub(crate) mod drawn {
     use std::cell::RefCell;
 
-    use gpui_kit::{Bounds, Pixels};
+    use gpui::{Bounds, Pixels};
 
     #[derive(Clone, Debug)]
     pub struct Text {

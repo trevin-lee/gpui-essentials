@@ -1,11 +1,13 @@
 name: gpui-calendar
 
-# Runs when gpui-calendar, or something every crate shares, changes.
+# Runs when gpui-calendar, gpui-core (which it draws with), or something every crate shares,
+# changes.
 on:
   push:
     branches: [main]
     paths:
       - "gpui-calendar/**"
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -13,6 +15,7 @@ on:
   pull_request:
     paths:
       - "gpui-calendar/**"
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -42,7 +45,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then echo own=true >> "$GITHUB_OUTPUT"; exit 0; fi
           gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename' > files
-          if grep -qE '^(gpui\-calendar/|\.github/workflows/gpui\-calendar\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
+          if grep -qE '^(gpui\-calendar/|gpui\-core/|\.github/workflows/gpui\-calendar\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
