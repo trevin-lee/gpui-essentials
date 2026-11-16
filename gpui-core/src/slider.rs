@@ -3,7 +3,7 @@
 //! End go to the ends.
 
 use gpui::{
-    App, Bounds, Context, DispatchPhase, ElementId, Entity, EventEmitter, FocusHandle,
+    App, Bounds, Context, DispatchPhase, ElementId, Entity, EventEmitter, FocusHandle, Hsla,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Rems, RenderOnce, Role,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, canvas, div,
@@ -187,6 +187,9 @@ pub struct Slider {
     state: Entity<SliderState>,
     disabled: bool,
     touch: bool,
+    track: Option<Hsla>,
+    fill: Option<Hsla>,
+    thumb: Option<Hsla>,
     style: StyleRefinement,
 }
 
@@ -196,8 +199,30 @@ impl Slider {
             state: state.clone(),
             disabled: false,
             touch: false,
+            track: None,
+            fill: None,
+            thumb: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// The empty track's colour (otherwise the theme's input colour in the dark, its muted
+    /// colour in the light), for a host with a palette of its own.
+    pub fn track_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.track = Some(color.into());
+        self
+    }
+
+    /// The filled track's colour, and the thumb's ring (otherwise the theme's primary).
+    pub fn fill_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.fill = Some(color.into());
+        self
+    }
+
+    /// The thumb's colour (otherwise the theme's background).
+    pub fn thumb_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.thumb = Some(color.into());
+        self
     }
 
     /// At least 44 points tall, for a finger.
@@ -232,6 +257,15 @@ impl RenderOnce for Slider {
             (s.value, s.fraction(), s.range(), s.step)
         };
         let disabled = self.disabled;
+        // The empty track: the input colour in the dark (muted is all but the page there), the
+        // muted colour in the light.
+        let track = self.track.unwrap_or(if theme.mode.is_dark() {
+            theme.input
+        } else {
+            theme.muted
+        });
+        let fill_color = self.fill.unwrap_or(theme.primary);
+        let thumb_color = self.thumb.unwrap_or(theme.background);
         let ring = focus_ring(cx);
         let thumb = css(16.);
 
@@ -293,7 +327,7 @@ impl RenderOnce for Slider {
                 .flex_1()
                 .h(css(6.))
                 .rounded_full()
-                .bg(theme.muted)
+                .bg(track)
                 .child(
                     div()
                         .absolute()
@@ -302,7 +336,7 @@ impl RenderOnce for Slider {
                         .bottom_0()
                         .w(relative(fraction))
                         .rounded_full()
-                        .bg(theme.primary),
+                        .bg(fill_color),
                 )
                 .child(
                     div()
@@ -313,8 +347,8 @@ impl RenderOnce for Slider {
                         .size(thumb)
                         .rounded_full()
                         .border_1()
-                        .border_color(theme.primary)
-                        .bg(theme.background),
+                        .border_color(fill_color)
+                        .bg(thumb_color),
                 )
                 // Measures the track, and follows a drag past its edges until the button is let go.
                 .child(

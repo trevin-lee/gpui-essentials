@@ -11,19 +11,46 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt as _, AnyView, App, AppContext as _, Context, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Window, div, ease_out_quint, rems,
+    Animation, AnimationExt as _, AnyView, App, AppContext as _, Context, Hsla, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div, ease_out_quint,
+    prelude::FluentBuilder as _, rems,
 };
 
 use crate::theme::ActiveTheme as _;
 
 pub struct Tooltip {
     text: SharedString,
+    background: Option<Hsla>,
+    color: Option<Hsla>,
+    border: Option<Hsla>,
 }
 
 impl Tooltip {
     pub fn new(text: impl Into<SharedString>) -> Self {
-        Self { text: text.into() }
+        Self {
+            text: text.into(),
+            background: None,
+            color: None,
+            border: None,
+        }
+    }
+
+    /// Its fill (otherwise the theme's foreground), for a host with a palette of its own.
+    pub fn background(mut self, color: impl Into<Hsla>) -> Self {
+        self.background = Some(color.into());
+        self
+    }
+
+    /// Its text's colour (otherwise the theme's background).
+    pub fn text_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.color = Some(color.into());
+        self
+    }
+
+    /// A one-pixel border in this colour (otherwise none).
+    pub fn border_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.border = Some(color.into());
+        self
     }
 
     /// The view `.tooltip()` asks for.
@@ -51,8 +78,9 @@ impl Render for Tooltip {
                     .px(css(12.))
                     .py(css(6.))
                     .rounded(theme.radius_md())
-                    .bg(theme.foreground)
-                    .text_color(theme.background)
+                    .bg(self.background.unwrap_or(theme.foreground))
+                    .text_color(self.color.unwrap_or(theme.background))
+                    .when_some(self.border, |d, c| d.border_1().border_color(c))
                     .text_size(theme.text.xs)
                     .font_family(theme.font_family.clone())
                     .child(self.text.clone())
