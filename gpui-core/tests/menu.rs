@@ -8,22 +8,29 @@ use std::rc::Rc;
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ParentElement as _, Render, SharedString,
-    Styled as _, TestAppContext, VisualTestContext, Window, div, px, size,
+    Styled as _, TestAppContext, VisualTestContext, Window, div, prelude::FluentBuilder as _, px,
+    size,
 };
-use gpui_core::{IconName, Popover, PopupMenu, PopupMenuItem, Press, Root};
+use gpui_core::{IconName, MenuSelect, Popover, PopupMenu, PopupMenuItem, Press, Root};
 
 struct Panel {
     open: bool,
     touch: bool,
     trigger: FocusHandle,
-    picked: Rc<RefCell<Vec<SharedString>>>,
+    picked: Rc<RefCell<Vec<(SharedString, gpui::Modifiers)>>>,
     draws: Rc<Cell<usize>>,
+    /// The entry it opens on, if the host says.
+    start: Option<SharedString>,
+    /// What `on_highlight` was told.
+    highlights: Rc<RefCell<Vec<Option<String>>>>,
 }
 
 impl Render for Panel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.draws.set(self.draws.get() + 1);
         let picked = self.picked.clone();
+        let highlights = self.highlights.clone();
+        let start = self.start.clone();
         div().size_full().p(px(20.)).child(
             Popover::new("pop")
                 .open(self.open)
@@ -46,6 +53,10 @@ impl Render for Panel {
                 .p(px(4.))
                 .child(
                     PopupMenu::new("menu")
+                        .when_some(start, |m, s| m.highlight(s))
+                        .on_highlight(move |id, _| {
+                            highlights.borrow_mut().push(id.map(|s| s.to_string()))
+                        })
                         .touch(self.touch)
                         .item(
                             PopupMenuItem::new("copy", "Copy")
@@ -59,8 +70,8 @@ impl Render for Panel {
                             "long",
                             "A label long enough that it has to be cut short in a narrow window",
                         ))
-                        .on_select(cx.listener(move |this, id: &SharedString, _, cx| {
-                            picked.borrow_mut().push(id.clone());
+                        .on_select(cx.listener(move |this, pick: &MenuSelect, _, cx| {
+                            picked.borrow_mut().push((pick.id.clone(), pick.modifiers));
                             this.open = false;
                             cx.notify();
                         })),
@@ -71,14 +82,14 @@ impl Render for Panel {
 
 struct Opened<'a> {
     panel: Entity<Panel>,
-    picked: Rc<RefCell<Vec<SharedString>>>,
+    picked: Rc<RefCell<Vec<(SharedString, gpui::Modifiers)>>>,
     draws: Rc<Cell<usize>>,
     vcx: &'a mut VisualTestContext,
 }
 
 fn open(cx: &mut TestAppContext, touch: bool, width: f32) -> Opened<'_> {
     cx.update(gpui_core::init);
-    let picked: Rc<RefCell<Vec<SharedString>>> = Rc::default();
+    let picked: Rc<RefCell<Vec<(SharedString, gpui::Modifiers)>>> = Rc::default();
     let draws = Rc::new(Cell::new(0));
     let (p, d) = (picked.clone(), draws.clone());
     let made = Rc::new(RefCell::new(None));
@@ -90,6 +101,8 @@ fn open(cx: &mut TestAppContext, touch: bool, width: f32) -> Opened<'_> {
             trigger: cx.focus_handle(),
             picked: p,
             draws: d,
+            start: None,
+            highlights: Rc::default(),
         });
         *m.borrow_mut() = Some(panel.clone());
         Root::new(panel, window, cx)
@@ -123,7 +136,7 @@ fn picked(o: &Opened<'_>) -> Vec<&'static str> {
     o.picked
         .borrow()
         .iter()
-        .map(|s| match s.as_ref() {
+        .map(|s| match s.0.as_ref() {
             "copy" => "copy",
             "cut" => "cut",
             "wrap" => "wrap",
@@ -138,8 +151,8 @@ fn the_keys_skip_what_cant_be_picked_and_enter_picks(cx: &mut TestAppContext) {
     let o = open(cx, false, 600.);
     keys(o.vcx, "tab space");
     assert!(o.vcx.debug_bounds("menu-item-copy").is_some(), "open");
-    // Down: Copy; down again passes over disabled Cut and the separator to Wrap.
-    keys(o.vcx, "down down enter");
+    // It opens on Copy; down passes over disabled Cut and the separator to Wrap.
+    keys(o.vcx, "down enter");
     assert_eq!(picked(&o), ["wrap"]);
     assert!(
         o.vcx.debug_bounds("menu-item-copy").is_none(),
@@ -182,7 +195,8 @@ fn a_disabled_entry_cant_be_picked(cx: &mut TestAppContext) {
     o.vcx.simulate_click(cut.center(), Modifiers::none());
     o.vcx.run_until_parked();
     keys(o.vcx, "enter");
-    assert!(o.picked.borrow().is_empty());
+    // Neither the press nor the hover reached Cut: Enter picks Copy, where it opened.
+    assert_eq!(picked(&o), ["copy"]);
 }
 
 #[gpui::test]
@@ -228,4 +242,46 @@ fn open_and_idle_nothing_redraws(cx: &mut TestAppContext) {
         o.vcx.run_until_parked();
     }
     assert_eq!(o.draws.get(), before);
+}
+
+#[gpui::test]
+fn it_opens_on_its_first_entry_or_the_hosts(cx: &mut TestAppContext) {
+    let o = open(cx, false, 600.);
+    keys(o.vcx, "tab space enter");
+    assert_eq!(picked(&o), ["copy"]);
+    o.panel.update(o.vcx, |p, _| p.start = Some("wrap".into()));
+    keys(o.vcx, "space enter");
+    assert_eq!(picked(&o), ["copy", "wrap"]);
+}
+
+#[gpui::test]
+fn the_host_is_told_where_the_highlight_moves(cx: &mut TestAppContext) {
+    let o = open(cx, false, 600.);
+    keys(o.vcx, "tab space down down");
+    let seen = o
+        .panel
+        .read_with(o.vcx, |p, _| p.highlights.borrow().clone());
+    assert_eq!(seen, [Some("wrap".to_string()), Some("long".to_string())]);
+}
+
+#[gpui::test]
+fn a_pick_comes_with_the_modifiers_held(cx: &mut TestAppContext) {
+    let o = open(cx, false, 600.);
+    keys(o.vcx, "tab space shift-enter");
+    keys(o.vcx, "space");
+    let wrap = o.vcx.debug_bounds("menu-item-wrap").unwrap();
+    o.vcx.simulate_click(wrap.center(), Modifiers::shift());
+    o.vcx.run_until_parked();
+    keys(o.vcx, "space enter");
+    let got = o.picked.borrow().clone();
+    assert_eq!(got.len(), 3, "{got:?}");
+    assert!(
+        got[0].1.shift && got[0].0.as_ref() == "copy",
+        "Shift-Enter: {got:?}"
+    );
+    assert!(
+        got[1].1.shift && got[1].0.as_ref() == "wrap",
+        "a Shift-click: {got:?}"
+    );
+    assert!(!got[2].1.shift, "Enter alone: {got:?}");
 }

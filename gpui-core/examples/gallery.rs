@@ -302,9 +302,9 @@ impl Render for Gallery {
                                 .separator()
                                 .item(PopupMenuItem::new("copy", "Copy the list").icon(IconName::Copy).shortcut("⌘C"))
                                 .item(PopupMenuItem::new("delete", "Delete all").icon(IconName::Trash).disabled(true))
-                                .on_select(cx.listener(|g, id: &SharedString, _, cx| {
-                                    if matches!(id.as_ref(), "name" | "date" | "size") {
-                                        g.sort = id.clone();
+                                .on_select(cx.listener(|g, pick: &MenuSelect, _, cx| {
+                                    if matches!(pick.id.as_ref(), "name" | "date" | "size") {
+                                        g.sort = pick.id.clone();
                                     }
                                     g.sort_open = false;
                                     cx.notify();
@@ -337,8 +337,8 @@ impl Render for Gallery {
                                 .items(["Work", "Home", "Errands", "Reading", "Travel"].map(|t| {
                                     PopupMenuItem::new(t, t).checked(self.tag.as_ref() == t)
                                 }))
-                                .on_select(cx.listener(|g, id: &SharedString, _, cx| {
-                                    g.tag = id.clone();
+                                .on_select(cx.listener(|g, pick: &MenuSelect, _, cx| {
+                                    g.tag = pick.id.clone();
                                     g.tag_open = false;
                                     cx.notify();
                                 })),
