@@ -9,7 +9,7 @@
 //! ```
 //!
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
-//! `dst-spring`, `dense`, `month-drag`, `links`. Pictures and the bench draw a window that's never shown
+//! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`. Pictures and the bench draw a window that's never shown
 //! and never takes the keyboard.
 
 use std::path::PathBuf;
@@ -587,6 +587,12 @@ impl Root {
         let mut now_at = now;
         match args.scene.as_str() {
             "day" => view = CalendarView::Day,
+            // Tuesday morning, the day with the most links.
+            "agenda" => {
+                view = CalendarView::AGENDA;
+                date = monday + Duration::days(1);
+                now_at = local(date, 8, 10);
+            }
             // Monday to Wednesday, where the events with links are.
             "links" => {
                 view = CalendarView::Days(3);
@@ -796,7 +802,12 @@ fn main() {
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.on_action(|_: &Quit, cx| cx.quit());
             let offscreen = args.shot.is_some() || args.bench;
-            let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
+            // The agenda is pictured at the width it's meant for: a narrow column.
+            let window_size = match args.scene.as_str() {
+                "agenda" => size(px(720.), px(900.)),
+                _ => size(px(1280.), px(820.)),
+            };
+            let bounds = Bounds::centered(None, window_size, cx);
             let options = WindowOptions {
                 titlebar: Some(TitlebarOptions {
                     title: Some("Calendar".into()),
@@ -1102,6 +1113,13 @@ mod shots {
                         .read_with(cx, |c, _| c.point_at(monday + Duration::days(11), 0.))
                         .expect("on screen");
                     drag_to(window, cx, point(grab.x + (to.x - grab.x) * 0.0, to.y));
+                }
+                "agenda" => {
+                    let _ = cx.update_window(window, |_, _, cx| {
+                        calendar.update(cx, |c, cx| {
+                            c.select(Some(Selection::Event("section".into())), cx)
+                        })
+                    });
                 }
                 "week" => {
                     let _ = cx.update_window(window, |_, _, cx| {

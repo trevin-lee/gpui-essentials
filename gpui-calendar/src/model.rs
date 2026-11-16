@@ -249,12 +249,19 @@ pub enum CalendarView {
     /// This many days from the anchor date, on the time grid (2 to 14 is sensible).
     Days(u32),
     Month,
+    /// A list of this many days' events from the anchor date, grouped by day: the compact view
+    /// for narrow places such as a phone.
+    Agenda(u32),
 }
 
 impl CalendarView {
-    /// Whether the view is the time grid (day, week, N days) rather than the month.
+    /// The agenda the header's Agenda button shows: two weeks.
+    pub const AGENDA: CalendarView = CalendarView::Agenda(14);
+
+    /// Whether the view is the time grid (day, week, N days) rather than the month or the
+    /// agenda.
     pub fn is_time_grid(self) -> bool {
-        !matches!(self, CalendarView::Month)
+        !matches!(self, CalendarView::Month | CalendarView::Agenda(_))
     }
 
     pub fn label(self) -> &'static str {
@@ -263,6 +270,7 @@ impl CalendarView {
             CalendarView::Week => "Week",
             CalendarView::Days(_) => "Days",
             CalendarView::Month => "Month",
+            CalendarView::Agenda(_) => "Agenda",
         }
     }
 }

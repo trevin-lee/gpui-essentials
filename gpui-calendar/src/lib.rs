@@ -1,8 +1,9 @@
-//! Day, week, N-day and month calendar views with a time grid, in GPUI.
+//! Day, week, N-day, month and agenda calendar views with a time grid, in GPUI.
 //!
 //! A [`Calendar`] is an entity that shows the host's [`Event`]s. The day and week views share a
 //! time grid (an all-day row, hour lines, a line at the current time, and a scroll position that
 //! opens near it); the month view shows each day's events with "+N more" for what doesn't fit.
+//! The agenda lists the days' events, with their links, for narrow places such as a phone.
 //! Overlapping timed events sit side by side in columns, and events across days are spans.
 //!
 //! People drag empty time to make an event, drag an event to move it (to other days too), drag
