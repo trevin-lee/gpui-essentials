@@ -11,8 +11,8 @@ use gpui::{
     StyleRefinement, Styled, Window, svg,
 };
 
-use lucide::ICONS;
 pub use lucide::LUCIDE_VERSION;
+use lucide::{ALIASES, ICONS};
 
 /// A bundled Lucide icon. Each has a constant named after it (`IconName::ChevronLeft` is
 /// Lucide's `chevron-left`); [`IconName::named`] finds one by its Lucide name.
@@ -20,8 +20,13 @@ pub use lucide::LUCIDE_VERSION;
 pub struct IconName(&'static str);
 
 impl IconName {
-    /// The icon Lucide calls `name` (`"chevron-left"`), if it's bundled.
+    /// The icon Lucide calls `name` (`"chevron-left"`), if it's bundled. Lucide's old names
+    /// for its icons (`circle-alert`, now `circle-exclamation-point`), which lucide-react still
+    /// takes and so agents still write, find the icon they're now called.
     pub fn named(name: &str) -> Option<Self> {
+        let name = ALIASES
+            .binary_search_by(|(a, _)| (*a).cmp(name))
+            .map_or(name, |i| ALIASES[i].1);
         ICONS
             .binary_search_by(|(n, _)| (*n).cmp(name))
             .ok()
@@ -159,6 +164,28 @@ mod tests {
             assert_eq!(IconName::named(name).map(IconName::name), Some(*name));
         }
         assert_eq!(IconName::named("mail"), Some(IconName::Mail));
+        // Old names find the icon they're now called, in names and in asset paths.
+        assert_eq!(
+            IconName::named("circle-alert"),
+            IconName::named("circle-exclamation-point")
+        );
+        assert_eq!(
+            IconName::named("alert-circle"),
+            IconName::named("circle-exclamation-point")
+        );
+        assert!(IconName::named("triangle-alert").is_some());
+        assert!(IconName::named("building-2").is_some());
+        assert!(Icons.load("icons/circle-alert.svg").unwrap().is_some());
+        for pair in super::lucide::ALIASES.windows(2) {
+            assert!(pair[0].0 < pair[1].0, "{} before {}", pair[0].0, pair[1].0);
+        }
+        for (old, new) in super::lucide::ALIASES {
+            assert_eq!(
+                IconName::named(old).map(IconName::name),
+                Some(*new),
+                "{old}"
+            );
+        }
         assert_eq!(IconName::named("bell"), Some(IconName::Bell));
     }
 }
