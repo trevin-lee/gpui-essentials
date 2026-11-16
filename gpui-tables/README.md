@@ -152,14 +152,15 @@ rendered offscreen).
 | ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: sort, filter by an option, move, hide](docs/table-menu.png) |
 | ![A select's options open under its cell, the current one checked; the event log on the right](docs/table-picker.png) | ![The day grid under a date cell](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
+| ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | |
 
 ![The Companies table in the light theme, sorted by two columns](docs/table-light.png)
 
 - **The host's part.** `TableHost` gives the theme (`TableTheme`: colours, the ten option
   colours, fonts, sizes, the rem base, and touch), names for people (`person_name`) and related
   rows (`row_title`), the choices of the person and relation pickers (`people`,
-  `relation_rows`), the time now and the viewer's zone, and the limits. It receives every
-  `TableEvent` in `event`. Both are called after the table's own update, so the host can hand
+  `relation_rows`), the time now and the viewer's zone, and the limits, and may give a text
+  field of its own (`edit_text`). It receives every `TableEvent` in `event`. Both are called after the table's own update, so the host can hand
   the table its new docs from there.
 - **Rows.** Only the rows on screen are drawn (GPUI's `uniform_list`; group headers and New
   rows are lines of the same height). The rows are worked out again, through `engine::query`,
@@ -185,16 +186,34 @@ rendered offscreen).
   Backspace empty a cell. Created and edited times and people are read-only: their column's
   menu sorts, filters (by a person, for created-by and edited-by) and groups by them, but a
   press only focuses the cell.
-- **Typed values** (titles, text, numbers, URLs, emails, phones, and the filters of those
-  types) go through `TableHost::edit_text`: the host shows a field over the cell's bounds and
-  answers with `reply.commit(text)` or `reply.cancel()`. gpui-core has no text input yet, and
-  one written here would need IME, selection and the platform's editing keys to be right, so the
-  host's own field does it. The table reads the text as the property's type (`1,200`,
-  `$1,200`, `25%`), cuts it to the limits and emits the edit. The example has a bare stand-in
-  field.
+- **Typed values** (titles, text, numbers, URLs, emails, phones) are edited in place, in
+  gpui-core's `Input`, so input methods, selection, the clipboard, undo and the platform's
+  editing keys work as in any field. Enter, F2, a second press or a double-click opens the field
+  holding the value (a title's opens with F2 or a press, as Enter opens its row). A title,
+  number, URL, email or phone is typed on one line inside its cell, sized to it. A text value
+  can have several lines: its field is a textarea over the cell, at least a menu's width, that
+  grows down over the rows below as lines are added (to eight, then it scrolls), with
+  Shift-Enter making a new line. Enter commits, Tab and Shift-Tab commit and move to the next
+  or previous cell, a press anywhere else commits (the field losing the focus; the window going
+  to the background doesn't), and Escape closes it with nothing changed. The table reads the
+  text as the property's type (`1,200`, `$1,200`, `25%`), cuts it to the limits and emits the
+  edit (`rowTitleChanged` for a title); text committed unchanged, or that isn't a number for a
+  number, emits nothing. The field is drawn in the theme: the table's text and font, the
+  accent's caret and selection, faint placeholder text, the focus colour's edge.
+- **Filter values** (a text column's Contains…, a number's Equals…, Greater than… and Less
+  than…) are typed the same way, in a field under the column's header: Enter, Tab or a press
+  elsewhere filters by it, Escape doesn't.
+- **A field of the host's own.** A host that implements `TableHost::edit_text` gets each typed
+  value instead (a `TextEdit` with the target, the type, the text, its limit and the cell's
+  bounds) and answers with `reply.commit(text)` or `reply.cancel()`; the table reads, limits and
+  emits the answer as it does its own field's. `reply.edit_in_place()` hands an edit back to the
+  table's field. The trait's default does just that, so hosts that never implemented it edit in
+  place and hosts that did keep their field.
 - **Keys.** The arrows move the focused cell, Tab and shift-Tab move along a row and on to the
   next, Enter edits a cell, opens a row from its title, folds a group or makes a row; Escape
-  closes a menu and then lets go of the cell; ⌥↓ opens the column's menu. In menus the arrows
+  closes a menu and then lets go of the cell; ⌥↓ opens the column's menu. While a value is
+  typed in place the keys are the field's: the arrows move its caret, never the focused cell,
+  and Delete and Backspace delete text, not the cell's value. In menus the arrows
   and Enter choose; in the day grid the arrows move by days and weeks, Page Up and Page Down by
   months.
 - **New rows.** The New row at the end of the table, or of each group, emits a `rowCreated` with
@@ -726,8 +745,10 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
   group headers and column resize handles (whose visible line stays thin).
 - Nothing is hover-only. What a pointer finds by hovering (the Open button, a column's menu, a
   card's handle) is a tap away on touch.
-- A tap selects a cell and a second tap edits it; pickers open as popovers on iPad and sheets on
-  iPhone. A long press picks up a card or row to drag. Tables scroll both ways with momentum, and
+- A tap selects a cell and a second tap edits it: a typed value's field takes the focus, so the
+  keyboard comes up (gpui-core's `Input` is the platform's text input client, input methods and
+  dictation included), with suggestions and capitals for titles and text and none for numbers,
+  links, addresses and phones. Pickers open as popovers on iPad and sheets on iPhone. A long press picks up a card or row to drag. Tables scroll both ways with momentum, and
   the title column stays put.
 
 ## Not in v1
@@ -768,7 +789,11 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
 - `tests/performance.rs`: 10,000 rows, timed, as above.
 - `tests/view.rs`: the table view driven by mouse, keyboard and finger: sorting (and adding a
   sort with shift), filtering, grouping and folding, resizing and moving columns, hiding and
-  showing them, an edit of every editable type (typed ones through the host's field), keyboard
+  showing them, an edit of every editable type, typed values in place (typed, then committed
+  with Enter, Tab, Shift-Tab or a press elsewhere, or closed with Escape; numbers read with
+  grouping, currency and percent signs; text cut to its limits; a text value over several lines;
+  a filter's value in the column's menu; the arrows, Delete and Backspace kept to the field; a
+  tap editing a focused cell on touch), the host's own field winning when it has one, keyboard
   navigation, opening rows, new rows in groups and filters, created-by and edited-by cells
   (named by the host, never edited, filtered and grouped by), 44-point targets on touch, a finger
   resizing a column, swipes both ways with the title in place, and no frames while idle.
@@ -784,7 +809,8 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   their group's and filter's values, a long press carrying a row while a pan scrolls, 44-point
   targets on touch, no frames while idle, and no icon drawn for an `asset:` or invalid one.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu at 360, 700 and
-  1400 wide, columns at their widths and their narrowest, on a board's cards, columns and
+  1400 wide (and in each typed value's field open in place, which stays in its cell, a text
+  value's in the window), columns at their widths and their narrowest, on a board's cards, columns and
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
   (grouped or not, focused, with a finger's sizes, and the worst valid icons), laid out with
   Core Text; no glyph leaves its place.

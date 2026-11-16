@@ -8,13 +8,14 @@
 //!
 //! The host here keeps the docs in memory and applies the edits itself (both sides of a two-way
 //! relation too), so the table changes as you use it. Typed values (titles, text, numbers,
-//! emails...) go through `TableHost::edit_text`, which this example answers with a bare
-//! one-line field of its own: gpui-core has no text input yet.
+//! emails...) are edited in place, in gpui-core's `Input`: the host doesn't implement
+//! `TableHost::edit_text`.
 //!
 //! `--shot` takes a picture of the window without showing it. Scenes: `people` (the default),
 //! `grouped` (Interactions by month), `menu` (a column's menu), `picker` (a select's options),
-//! `date` (the day grid), `scrolled` (scrolled sideways, the title column in place), `light`
-//! and `worst` (worst-case text, every cell ending in an ellipsis); and boards: `board` (People's
+//! `date` (the day grid), `edit` (a text value typed in place, grown over the rows below),
+//! `scrolled` (scrolled sideways, the title column in place), `light` and `worst` (worst-case
+//! text, every cell ending in an ellipsis); and boards: `board` (People's
 //! Pipeline by stage), `board-drag` (a card of Interactions by kind dragged to another column),
 //! `board-light` (Companies by industry, in the light theme) and `board-worst`; and lists:
 //! `list` (Interactions, most recent first), `list-grouped` (People by stage) and `list-light`
@@ -28,7 +29,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{ActiveTheme as _, Press, Selectable as _, Theme};
 use gpui_tables::engine::relation;
-use gpui_tables::view::{RelatedRow, TableHost, TableTheme, TableView, TextEdit};
+use gpui_tables::view::{RelatedRow, TableHost, TableTheme, TableView};
 use gpui_tables::*;
 
 const PEOPLE: &str = include_str!("../tests/fixtures/people.json");
@@ -127,13 +128,6 @@ fn worst_row(db: &Db) -> Doc {
     row.created = NOW;
     row.updated = NOW;
     row
-}
-
-/// A bare one-line field for a typed value: characters, Backspace, Enter and Escape. No IME,
-/// no selection; it stands in until gpui-core has an input.
-struct Field {
-    edit: TextEdit,
-    text: String,
 }
 
 struct Host {
@@ -318,19 +312,6 @@ impl TableHost for Host {
         rows
     }
 
-    fn edit_text(&self, edit: TextEdit, window: &mut Window, cx: &mut App) {
-        if let Some(crm) = self.crm.borrow().as_ref().and_then(WeakEntity::upgrade) {
-            crm.update(cx, |crm, cx| {
-                crm.field = Some(Field {
-                    text: edit.text.clone(),
-                    edit,
-                });
-                window.focus(&crm.field_focus, cx);
-                cx.notify();
-            });
-        }
-    }
-
     fn now(&self) -> i64 {
         NOW
     }
@@ -340,8 +321,6 @@ struct Crm {
     host: Rc<Host>,
     tables: Vec<Entity<TableView>>,
     current: Rc<Cell<usize>>,
-    field: Option<Field>,
-    field_focus: FocusHandle,
 }
 
 impl Crm {
@@ -360,8 +339,6 @@ impl Crm {
             host,
             tables,
             current: Rc::new(Cell::new(0)),
-            field: None,
-            field_focus: cx.focus_handle(),
         }
     }
 
@@ -379,85 +356,6 @@ impl Crm {
 
     fn table(&self) -> Entity<TableView> {
         self.tables[self.current.get()].clone()
-    }
-
-    fn finish_field(&mut self, commit: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(f) = self.field.take() {
-            if commit {
-                f.edit.reply.commit(&f.text, window, cx);
-            } else {
-                f.edit.reply.cancel(window, cx);
-            }
-            cx.notify();
-        }
-    }
-
-    fn render_field(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let f = self.field.as_ref()?;
-        let theme = cx.theme();
-        let b = f.edit.bounds;
-        let empty = f.text.is_empty();
-        Some(
-            deferred(
-                anchored().position(b.origin).snap_to_window().child(
-                    div()
-                        .id("field")
-                        .track_focus(&self.field_focus)
-                        .occlude()
-                        .w(b.size.width.max(px(220.)))
-                        .h(b.size.height)
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .overflow_hidden()
-                        .bg(theme.popover)
-                        .border_2()
-                        .border_color(theme.ring)
-                        .text_sm()
-                        .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
-                            let k = &e.keystroke;
-                            match k.key.as_str() {
-                                "enter" => this.finish_field(true, window, cx),
-                                "escape" => this.finish_field(false, window, cx),
-                                "backspace" => {
-                                    if let Some(f) = &mut this.field {
-                                        f.text.pop();
-                                    }
-                                }
-                                _ => {
-                                    if let (Some(ch), Some(f)) = (&k.key_char, &mut this.field)
-                                        && !k.modifiers.platform
-                                        && !k.modifiers.control
-                                    {
-                                        let max = f.edit.max_chars.unwrap_or(usize::MAX);
-                                        if f.text.chars().count() < max {
-                                            f.text.push_str(ch);
-                                        }
-                                    }
-                                }
-                            }
-                            cx.stop_propagation();
-                            cx.notify();
-                        }))
-                        .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                            this.finish_field(true, window, cx)
-                        }))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .when(empty, |d| d.text_color(theme.muted_foreground))
-                                .child(if empty {
-                                    SharedString::from(f.edit.label.clone())
-                                } else {
-                                    SharedString::from(format!("{}▏", f.text))
-                                }),
-                        ),
-                ),
-            )
-            .with_priority(2)
-            .into_any_element(),
-        )
     }
 }
 
@@ -599,7 +497,6 @@ impl Render for Crm {
                             })),
                     ),
             )
-            .children(self.render_field(cx))
     }
 }
 
@@ -694,6 +591,7 @@ mod shots {
     const LAST_CONTACTED: &str = "ae97ba94-d0ed-482f-8f6d-05584ef8aa38";
     const IMANI: &str = "1d87cec3-1f72-46ab-b961-fd925d39d0a8";
     const FOLLOW_UP: &str = "923a7369-94e3-4f91-9a61-dbe22e44158b";
+    const ROLE: &str = "0fd630f1-f29d-4da9-953f-48f1a09f76b5";
 
     /// The database's first board view.
     fn board_view(t: &Entity<TableView>, cx: &App) -> String {
@@ -819,6 +717,10 @@ mod shots {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| t.edit(IMANI, LAST_CONTACTED, window, cx));
                     }
+                    "edit" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| t.edit(IMANI, ROLE, window, cx));
+                    }
                     "board" => {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| t.set_view(PIPELINE, cx));
@@ -870,6 +772,19 @@ mod shots {
                 }
             });
             settle(window, cx).await;
+            if scene == "edit" {
+                // A second line typed (Shift-Enter makes one), so the field grows.
+                let _ = cx.update_window(window, |_, window, cx| {
+                    let t = crm.read(cx).table();
+                    if let Some(state) = t.read(cx).editor_state() {
+                        state.update(cx, |s, cx| {
+                            let text = format!("{}\nAdvises two seed-stage founders", s.value());
+                            s.set_value(text, window, cx)
+                        });
+                    }
+                });
+                settle(window, cx).await;
+            }
             if scene == "board-drag" {
                 drag_a_card(window, &crm, cx).await;
             }

@@ -4,7 +4,8 @@
 //! it draws as a board when the view's type is `board`, as a list when it's `list`, and as a
 //! table otherwise. It
 //! asks its [`TableHost`] for its look ([`TableTheme`]), for names it can't know (people,
-//! related rows), for pickers' choices and for a text field, and hands it every change as a
+//! related rows) and for pickers' choices, edits typed values in place with gpui-core's `Input`
+//! (or in the host's own field), and hands the host every change as a
 //! [`TableEvent`](crate::TableEvent). Call [`init`] once, before opening a window, for its keys.
 //!
 //! ```no_run

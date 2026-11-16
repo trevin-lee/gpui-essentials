@@ -3,10 +3,11 @@
 //! Arabic and emoji, numbers of twenty digits), under headers and options with the same names,
 //! are laid out with Core Text (as on screen) in windows 360, 700 and 1400 wide, with the
 //! columns at their widths and at their narrowest, grouped and not, with a menu and a picker
-//! open; and on a board's cards and a list's lines, with every property on them. Any glyph or
-//! icon drawn past what clips it, past the table or past the window fails the test with where
-//! it is. The one place a glyph may cross its clip is the edges of the
-//! strip the columns after the title scroll in, where they're cut off until scrolled to.
+//! open, and with each typed value's field open in place; and on a board's cards and a list's
+//! lines, with every property on them. Any glyph or icon drawn past what clips it, past the table
+//! or past the window fails the test with where it is. The places a glyph may cross its clip are
+//! the edges of the strip the columns after the title scroll in, where they're cut off until
+//! scrolled to, and the edges of a field being typed in, whose text scrolls in it.
 
 #![cfg(all(target_os = "macos", feature = "gpui"))]
 
@@ -137,6 +138,12 @@ fn app_with_text() -> TestAppContext {
 /// board) or of the window, except where the table's right edge, or the edges of what scrolls
 /// sideways, cut it off.
 fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
+    overflows_with(cx, None)
+}
+
+/// The same, with a field open in place within `field`: its text scrolls in it, so a glyph may
+/// be cut off by a clip inside it (but never shown past the table or the window).
+fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> Vec<String> {
     draw(cx);
     let table = cx
         .debug_bounds("table")
@@ -160,6 +167,14 @@ fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
         let scene = window.rendered_scene();
         // A glyph's tile has a pixel of padding either side.
         let slack = 2.0 * scale;
+        // A field's text is clipped to it with a few pixels' room for ink.
+        let field = field.map(|f| {
+            let ink = 4.0 * scale;
+            (
+                f32::from(f.left()) * scale - ink,
+                f32::from(f.right()) * scale + ink,
+            )
+        });
         let mut out = Vec::new();
         let sprites = scene
             .monochrome_sprites
@@ -186,9 +201,11 @@ fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
                 m.origin.x.as_f32(),
                 m.origin.x.as_f32() + m.size.width.as_f32(),
             );
+            let in_field = field.is_some_and(|(l, r)| clip_left >= l && clip_right <= r);
             let cut_at_edge = (clip_right - right_edge).abs() <= scale
-                || (clip_right - strip_right).abs() <= scale;
-            let cut_at_left = (clip_left - strip_left).abs() <= scale;
+                || (clip_right - strip_right).abs() <= scale
+                || in_field;
+            let cut_at_left = (clip_left - strip_left).abs() <= scale || in_field;
             let past_clip = (left < clip_left - slack && !cut_at_left)
                 || (right > clip_right + slack && !cut_at_edge);
             // What a clip cuts off isn't drawn: past the table or the window is what shows.
@@ -294,6 +311,57 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                         found.push(format!("{case}, {what} open: {o}"));
                     }
                 }
+                // Each typed value's field, open in place with the worst text in it: on one line
+                // inside its cell, or for a text value, grown over the rows below inside the
+                // window. And a filter's value typed in its column's menu.
+                cx.update(|_, cx| table.update(cx, |t, cx| t.close_popover(cx)));
+                let typed = [
+                    ("title", NAME),
+                    ("text", ROLE),
+                    ("email", EMAIL),
+                    ("url", PROFILE),
+                    ("number", WARMTH),
+                ];
+                for (what, p) in typed {
+                    cx.update(|window, cx| table.update(cx, |t, cx| t.edit(ROWAN, p, window, cx)));
+                    draw(cx);
+                    assert!(
+                        table.read_with(cx, |t, cx| t.editing(cx)).is_some(),
+                        "{case}: {what}'s field opened"
+                    );
+                    let field = rect(cx, "editor");
+                    let place = rect(cx, cell(ROWAN, p));
+                    let window = cx.update(|window, _| window.viewport_size());
+                    let inside = if p == ROLE {
+                        field.left() >= px(0.)
+                            && field.right() <= window.width
+                            && field.top() >= place.top() - px(1.)
+                    } else {
+                        field.left() >= place.left()
+                            && field.right() <= place.right()
+                            && field.top() >= place.top()
+                            && field.bottom() <= place.bottom()
+                    };
+                    if !inside {
+                        found.push(format!(
+                            "{case}, {what}'s field at {field:?} leaves its cell {place:?}"
+                        ));
+                    }
+                    for o in overflows_with(cx, Some(field)) {
+                        found.push(format!("{case}, {what}'s field open: {o}"));
+                    }
+                    keys(cx, "escape");
+                    assert!(table.read_with(cx, |t, cx| t.editing(cx)).is_none());
+                }
+                cx.update(|_, cx| table.update(cx, |t, cx| t.open_column_menu(ROLE, cx)));
+                draw(cx);
+                click(cx, "entry:Contains…");
+                type_text(cx, &worst());
+                let field = rect(cx, "editor");
+                for o in overflows_with(cx, Some(field)) {
+                    found.push(format!("{case}, a filter's field open: {o}"));
+                }
+                keys(cx, "escape");
             }
         }
     }

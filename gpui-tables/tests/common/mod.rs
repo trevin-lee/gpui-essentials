@@ -95,7 +95,11 @@ pub fn view_id(db: &Doc, name: &str) -> String {
 
 pub struct TestHost {
     pub events: RefCell<Vec<TableEvent>>,
+    /// Every typed value the table asked for, whoever edits it.
     pub texts: RefCell<Vec<TextEdit>>,
+    /// Whether the host shows its own field for typed values (overriding
+    /// `TableHost::edit_text`), else hands them back to be edited in place.
+    pub hook: Cell<bool>,
     /// Times the table drew (it asks for its theme once a draw).
     pub draws: Cell<usize>,
     pub theme: RefCell<TableTheme>,
@@ -110,12 +114,20 @@ impl TestHost {
         Rc::new(TestHost {
             events: RefCell::default(),
             texts: RefCell::default(),
+            hook: Cell::new(false),
             draws: Cell::new(0),
             theme: RefCell::new(TableTheme::dark().with_touch(false)),
             apply: Cell::new(true),
             table: RefCell::default(),
             companies: load("companies").1,
         })
+    }
+
+    /// A host with a field of its own: typed values come to it, answered through their reply.
+    pub fn with_hook() -> Rc<TestHost> {
+        let host = TestHost::new();
+        host.hook.set(true);
+        host
     }
 
     pub fn touch() -> Rc<TestHost> {
@@ -275,7 +287,10 @@ impl TableHost for TestHost {
             .collect()
     }
 
-    fn edit_text(&self, edit: TextEdit, _: &mut Window, _: &mut App) {
+    fn edit_text(&self, edit: TextEdit, window: &mut Window, cx: &mut App) {
+        if !self.hook.get() {
+            edit.reply.edit_in_place(window, cx);
+        }
         self.texts.borrow_mut().push(edit);
     }
 
@@ -337,6 +352,13 @@ pub fn open_people<'a>(
     open_with(cx, host, db, rows, None, size(px(2600.), px(700.)))
 }
 
+/// Brings the window to the front, as a person using it has it: a field loses the focus (and
+/// commits) only in an active window.
+pub fn activate(cx: &mut VisualTestContext) {
+    cx.update(|window, _| window.activate_window());
+    draw(cx);
+}
+
 pub fn draw(cx: &mut VisualTestContext) {
     cx.run_until_parked();
     cx.update(|window, cx| {
@@ -378,6 +400,33 @@ pub fn cell(row: &str, property: &str) -> String {
 
 pub fn keys(cx: &mut VisualTestContext, keys: &str) {
     cx.simulate_keystrokes(keys);
+    draw(cx);
+}
+
+/// Types text into the focused field, through the platform's input handler as a keyboard or
+/// an input method would.
+pub fn type_text(cx: &mut VisualTestContext, text: &str) {
+    cx.simulate_input(text);
+    draw(cx);
+}
+
+/// What's typed in place, and what for, while a field is open.
+pub fn editing(
+    table: &Entity<TableView>,
+    cx: &mut VisualTestContext,
+) -> Option<(gpui_tables::view::TextTarget, String)> {
+    table.update(cx, |t, cx| t.editing(cx))
+}
+
+/// Selects all the text in the field open in place, so typing replaces it.
+pub fn select_all(table: &Entity<TableView>, cx: &mut VisualTestContext) {
+    let state = table
+        .read_with(cx, |t, _| t.editor_state())
+        .expect("a field open in place");
+    state.update(cx, |s, cx| {
+        let n = s.value().len();
+        s.select(0..n, cx)
+    });
     draw(cx);
 }
 
