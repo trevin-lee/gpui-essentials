@@ -66,6 +66,8 @@ jobs:
         run: cargo clippy -p gpui-chatwidgets --locked --all-targets --features shots -- -D warnings
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-chatwidgets --locked
+      # The streaming performance bounds, as the README measures them.
+      - run: cargo test -p gpui-chatwidgets --locked --release --test stream_performance
       - run: cargo doc -p gpui-chatwidgets --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings

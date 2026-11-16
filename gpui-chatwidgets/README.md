@@ -244,6 +244,147 @@ The same presses and changes are also `CardEvent`s (`Send`, `Open`, `Changed`) f
 subscribed to the card. Every host call comes after the card's own update has finished, so a host
 may update the card from inside one.
 
+## Streaming
+
+`StreamingMarkdown` draws an agent's reply in Markdown as it's written, a few words at a time,
+the way a chat server's draft of a reply streams in. The host makes one when a draft starts and
+feeds it the text; the crate never touches the network.
+
+```rust,ignore
+// A draft at the chat's foot, drawn with the style the host draws its finished replies with.
+let draft = cx.new(|_| {
+    StreamingMarkdown::new(format!("draft-{id}"))
+        .style(reply_style())
+        .selectable(true)
+        .on_link_click(|url, _, _, _| open_if_web_address(url))
+});
+
+draft.update(cx, |d, cx| d.append("Paris in May", cx));   // a delta: Markdown cut anywhere
+draft.update(cx, |d, cx| d.replace(&whole_so_far, cx));    // the whole draft so far
+draft.update(cx, |d, cx| d.end(cx));                       // finished: the caret goes
+draft.update(cx, |d, cx| d.finish(&message_body, cx));     // its message's text, in place
+```
+
+| | |
+|---|---|
+| `StreamingMarkdown::new(id) -> StreamingMarkdown` | An empty draft, being written, showing only the caret. `id` prefixes its element ids. |
+| `.style(TextViewStyle)`, `.selectable(bool)`, `.on_link_click(f)` | As gpui-core's `TextView`'s. The text's colour, size, line height and font come from around it, as a TextView's do. |
+| `append(&mut self, text: &str, cx)` | Adds a delta. |
+| `replace(&mut self, text: &str, cx)` | The whole draft so far, in place of what it had. What the two share stays laid out. |
+| `end(&mut self, cx)` | The draft is finished: the caret goes and the text stays, read as written. |
+| `finish(&mut self, text: &str, cx)` | Ends it with its message's text, which may differ (below). |
+| `set_style(&mut self, TextViewStyle, cx)` | A new style, after a theme change. |
+| `text(&self) -> &str`, `is_writing(&self) -> bool` | The text so far; whether it's still being written. |
+
+`append` and `replace` after `end` or `finish` are ignored. A draft that's dropped (the person
+pressed Stop) is simply a view the host stops drawing.
+
+### Wiring it to a chat's events
+
+For a server that sends a reply's words as `delta` events with a draft id, as the owner's chat
+server does (`{id, text}`, `{id, text, whole: true}`, `{id, end: "message" | "drop"}`, then the
+message with `stream: id`):
+
+| Event | The host |
+|---|---|
+| `{id, text}` | Makes the draft at the chat's foot if there's none for `id`, then `append(text)`. |
+| `{id, text, whole: true}` | `replace(text)` (making the draft first if need be): a reconnect mid-reply. |
+| `{id, end: "message"}` | `end()`. Keeps drawing the draft until its message comes. |
+| `{id, end: "drop"}` | Stops drawing the draft. |
+| The message with `stream: id`, in Markdown | `finish(body)`, and draws the draft's entity as that message's text from then on, where it was. |
+| The message with `stream: id` and a card (`ui`) | Draws the message's `CardView` where the draft was, in the same frame as it stops drawing the draft. A card is drawn whole in its first frame. |
+| A `delta` for an id whose message came | Ignored. |
+
+A host that transforms a reply's text before drawing it (escaping dollar signs, say) calls
+`replace` with the transformed text so far instead of `append`: only what changed is read again.
+A chat list that measures its rows observes the draft (`cx.observe`) and measures it again when
+it draws again.
+
+### What it draws while the text comes
+
+Each block of the Markdown (a paragraph, a heading, a list, a code block, a table, a quote) is a
+gpui-core `TextView` of its own, spaced as one TextView spaces the same blocks (the style's
+`block_gap`, a heading's margins, the paragraph gap). A block settles when the line after it is
+whole and can't carry it on or change what it is: a paragraph after a blank line or a block that
+interrupts it, a list after something that isn't its next item, a fence once it's closed and the
+next line has come. From then on it's laid out once and kept: its text and style don't change,
+so gpui-core's layout cache holds. On each delta only the open last block is read and laid out
+again, once a frame however many deltas came in it. (The one exception is a block far off screen,
+below.)
+
+In the open block:
+
+- **A steady caret** (`StreamingMarkdown::CARET`, ▍, in the text's colour) at the end of the
+  text, wrapping with the last word. It doesn't blink or fade: nothing draws while no text
+  comes, and nothing draws after the draft ends.
+- **Emphasis, strikethrough and inline code open on the last line are closed for now**, after
+  the caret: `**bold` draws bold, and the rest of the text never flips bold and back. A marker
+  with nothing after it yet isn't drawn.
+- **A link being written draws as its words**, without its brackets or address, until it's
+  whole: `[the docs](https://exa` draws `the docs`.
+- **An open code fence draws as code**, with nothing inside closed or read as Markdown.
+- **A line of only Markdown marks waits for its words or its newline** (`1.`, `#`, `---`, a
+  fence's backticks), so a paragraph doesn't flash as a heading and back, and **a table's first
+  row waits for its delimiter row**, so it doesn't show as text first.
+
+**The height only grows while the draft is written**: should the open block lay out shorter for
+a moment (a caret's line turning into a heading), the space it had is kept until the next text
+fills it. At a new width the tallest so far starts again.
+
+### When it ends
+
+- **`end`, or `finish` with the same text: nothing moves.** Every block stays where it was, laid
+  out as it was; the caret goes from the last line.
+- **`finish` with other text: what the two share stays.** The blocks before the first difference
+  (and the line after each, which settling it read) keep their places and layouts; the rest is
+  read and laid out again. A reply split into several messages ends its draft with the first,
+  which is shorter: the draft becomes that message, the blocks before the cut are where they
+  were, and the draft is shorter by what follows in the next messages. Its height can shrink
+  only here, and by any space kept while it was written.
+- **A reference-style link** (`[docs]` with `[docs]: https://…` further down) reads as text
+  while it streams, as the definition hasn't come yet; a draft whose text defines one is read
+  again whole when it ends, as one view.
+
+### Cost
+
+Per delta (the text added, the blocks worked out, and the window laid out and painted), with Core
+Text laying the text out, in a release build on an Apple-silicon Mac, streaming
+`examples/replies/long.md` (10,300 characters) four characters a delta, 560 pixels wide, in a
+chat 900 pixels tall that follows the reply's end (medians of three runs):
+
+| Into the reply | Streaming | One TextView of the whole text, for comparison |
+|---|---|---|
+| 1,000 characters | 0.48 ms | 0.76 ms |
+| 5,000 characters | 0.79 ms | 3.13 ms |
+| 10,000 characters | 1.07 ms | 6.91 ms |
+
+What's left of the growth is the open block (at 10,000 characters it's a long list, at 1,000 a
+short paragraph) and the blocks' places in the window's layout. While the draft is written, a
+settled block far off screen (a chat's height or more away, as the start of a long reply is once
+the chat has followed its end) is drawn as the space it took, not built and measured each frame;
+one that comes back near the screen is drawn as text again from the next frame, and every block
+is text again when the draft ends, each where its space was. A block that's off screen but near
+it is laid out but not painted.
+
+`tests/stream_performance.rs` measures it, and fails if a delta at 10,000 characters costs more
+than three times one at 1,000 (plus half a millisecond), more than 4 ms, or more than half of
+laying the whole text out again, in a release build. CI runs it in release.
+
+### Limits
+
+- **Selection stays within a block**: a paragraph, a list or a code block can be selected and
+  copied, but a selection doesn't reach across two blocks, as each is its own TextView.
+- **One long block is laid out whole on each delta**: a list or a table that goes on for pages
+  without a blank line, or a long code block, is one block until it ends, so a delta inside it
+  costs what laying out that block costs.
+- **A block kept as space while the draft is written loses its state**: a selection in a block
+  the chat has scrolled far past goes, and the block is read and laid out again (once) when it
+  comes back near the screen or the draft ends.
+- gpui-core's TextView's limits apply to each block (512 KB of text, 32 levels of nesting).
+- `examples/stream.rs` replays the long reply at a model's pace (`--cps`, `--delta`), then a
+  short one whose message brings a card; `--shots <dir>` saves a picture mid-stream and one at the
+  end from a window that's never shown.
+
 ## iOS
 
 The renderer builds for iOS (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) with no change to
