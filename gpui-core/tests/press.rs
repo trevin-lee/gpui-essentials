@@ -308,3 +308,48 @@ fn a_press_that_doesnt_take_the_focus_leaves_it(cx: &mut TestAppContext) {
     assert_eq!(pressed.get(), 1);
     vcx.update(|window, _| assert!(keep.is_focused(window), "the press took the focus"));
 }
+
+struct Wide {
+    pressed: Rc<Cell<usize>>,
+}
+
+impl Render for Wide {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let p = self.pressed.clone();
+        div().size_full().p(px(100.)).child(
+            Press::new("wide")
+                .debug_selector(|| "wide".into())
+                .w(px(138.))
+                .h(px(40.))
+                .min_hit(px(44.))
+                .on_click(move |_, _, _| p.set(p.get() + 1)),
+        )
+    }
+}
+
+#[gpui::test]
+fn a_wide_short_press_grows_its_height_along_its_whole_width(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let pressed = Rc::new(Cell::new(0));
+    let p = pressed.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let wide = cx.new(|_| Wide { pressed: p });
+        Root::new(wide, window, cx)
+    });
+    vcx.run_until_parked();
+    let b = vcx.debug_bounds("wide").unwrap();
+    // 1 point above its left end: inside the 44-point height, which covers its whole width.
+    vcx.simulate_click(
+        gpui::point(b.left() + px(5.), b.top() - px(1.)),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    assert_eq!(pressed.get(), 1);
+    // 4 points above: outside it.
+    vcx.simulate_click(
+        gpui::point(b.left() + px(5.), b.top() - px(4.)),
+        Modifiers::none(),
+    );
+    vcx.run_until_parked();
+    assert_eq!(pressed.get(), 1);
+}
