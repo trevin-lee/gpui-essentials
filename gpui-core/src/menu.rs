@@ -118,6 +118,7 @@ pub struct PopupMenuItem {
     pub(crate) disabled: bool,
     shortcut: Option<SharedString>,
     chip: Option<AnyElement>,
+    label_element: Option<AnyElement>,
 }
 
 impl PopupMenuItem {
@@ -131,6 +132,7 @@ impl PopupMenuItem {
             disabled: false,
             shortcut: None,
             chip: None,
+            label_element: None,
         }
     }
 
@@ -158,6 +160,13 @@ impl PopupMenuItem {
         self
     }
 
+    /// Something the host draws in the label's place: a select option's coloured pill, say.
+    /// The label still names the entry to assistive tech and to a picker's filter.
+    pub fn label_element(mut self, element: impl IntoElement) -> Self {
+        self.label_element = Some(element.into_any_element());
+        self
+    }
+
     /// Something the host draws before the label: a colour's swatch, an avatar.
     pub fn chip(mut self, chip: impl IntoElement) -> Self {
         self.chip = Some(chip.into_any_element());
@@ -168,6 +177,16 @@ impl PopupMenuItem {
 pub(crate) enum Entry {
     Item(PopupMenuItem),
     Separator,
+    /// A section's title: shown, never highlighted or picked.
+    Heading(SharedString),
+}
+
+/// A row's height and text size, and the touch size over them.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct RowStyle {
+    pub touch: bool,
+    pub height: Option<gpui::AbsoluteLength>,
+    pub text_size: Option<gpui::AbsoluteLength>,
 }
 
 /// A menu's colours, each over the theme's when given.
@@ -181,6 +200,10 @@ pub struct PopupMenuColors {
     pub muted: Option<Hsla>,
     /// Separators (the theme's border).
     pub separator: Option<Hsla>,
+    /// A checked entry's check (the entry's text colour).
+    pub check: Option<Hsla>,
+    /// Section headings (the muted colour).
+    pub heading: Option<Hsla>,
 }
 
 /// Moves the highlight to an index, or clears it.
@@ -205,7 +228,7 @@ pub struct PopupMenu {
     on_select: Option<OnSelect>,
     on_highlight: Option<OnHighlight>,
     highlight: Option<SharedString>,
-    touch: bool,
+    row: RowStyle,
     take_focus: bool,
     colors: PopupMenuColors,
 }
@@ -218,7 +241,7 @@ impl PopupMenu {
             on_select: None,
             on_highlight: None,
             highlight: None,
-            touch: false,
+            row: RowStyle::default(),
             take_focus: true,
             colors: PopupMenuColors::default(),
         }
@@ -236,6 +259,25 @@ impl PopupMenu {
 
     pub fn separator(mut self) -> Self {
         self.entries.push(Entry::Separator);
+        self
+    }
+
+    /// A section's title, between entries: shown muted, passed over by the keys and the pointer.
+    pub fn heading(mut self, title: impl Into<SharedString>) -> Self {
+        self.entries.push(Entry::Heading(title.into()));
+        self
+    }
+
+    /// A row's height (32 CSS pixels unless given; at least 44 points with
+    /// [`touch`](Self::touch)).
+    pub fn row_height(mut self, height: impl Into<gpui::AbsoluteLength>) -> Self {
+        self.row.height = Some(height.into());
+        self
+    }
+
+    /// The entries' text size (the theme's small size unless given).
+    pub fn text_size(mut self, size: impl Into<gpui::AbsoluteLength>) -> Self {
+        self.row.text_size = Some(size.into());
         self
     }
 
@@ -262,7 +304,7 @@ impl PopupMenu {
 
     /// Entries 44 points tall, for touch.
     pub fn touch(mut self, touch: bool) -> Self {
-        self.touch = touch;
+        self.row.touch = touch;
         self
     }
 
@@ -340,7 +382,7 @@ impl RenderOnce for PopupMenu {
                 .iter()
                 .map(|e| match e {
                     Entry::Item(i) => Some(i.id.clone()),
-                    Entry::Separator => None,
+                    Entry::Separator | Entry::Heading(_) => None,
                 })
                 .collect(),
         );
@@ -418,7 +460,7 @@ impl RenderOnce for PopupMenu {
             &self.id,
             self.entries,
             highlighted,
-            self.touch,
+            self.row,
             self.colors,
             Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
             on_select,
@@ -451,7 +493,7 @@ pub(crate) fn rows(
     menu_id: &ElementId,
     entries: Vec<Entry>,
     highlighted: Option<usize>,
-    touch: bool,
+    row_style: RowStyle,
     colors: PopupMenuColors,
     set_highlight: SetHighlight,
     on_select: Option<OnSelect>,
@@ -462,11 +504,9 @@ pub(crate) fn rows(
     let highlight_text = colors.highlight_text.unwrap_or(theme.accent_foreground);
     let muted = colors.muted.unwrap_or(theme.muted_foreground);
     let separator = colors.separator.unwrap_or(theme.border);
-    let row_h: gpui::DefiniteLength = if touch {
-        theme.touch_target.into()
-    } else {
-        css(32.).into()
-    };
+    let row_h: gpui::DefiniteLength = row_style.height.map(Into::into).unwrap_or(css(32.).into());
+    let touch_h: Option<gpui::Pixels> = row_style.touch.then_some(theme.touch_target);
+    let text_size: gpui::AbsoluteLength = row_style.text_size.unwrap_or(theme.text.sm.into());
     let menu_id = std::sync::Arc::new(menu_id.clone());
     entries
         .into_iter()
@@ -480,6 +520,21 @@ pub(crate) fn rows(
                         .my(css(4.))
                         .mx(css(-4.))
                         .bg(separator)
+                        .into_any_element();
+                }
+                Entry::Heading(title) => {
+                    return div()
+                        .flex_none()
+                        .px(css(8.))
+                        .pt(css(6.))
+                        .pb(css(2.))
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(colors.heading.unwrap_or(muted))
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .child(title)
                         .into_any_element();
                 }
                 Entry::Item(item) => item,
@@ -511,9 +566,10 @@ pub(crate) fn rows(
                 .w_full()
                 .min_w_0()
                 .min_h(row_h)
+                .when_some(touch_h, |r, h| r.min_h(h))
                 .px(css(8.))
                 .rounded(theme.radius_sm())
-                .text_size(theme.text.sm)
+                .text_size(text_size)
                 .when(on, |r| r.bg(highlight).text_color(highlight_text))
                 .when(item.disabled, |r| r.text_color(muted).opacity(0.6))
                 .on_hover(move |hovered, _, cx| {
@@ -547,7 +603,10 @@ pub(crate) fn rows(
                         // Room either side for ink past a glyph's advance.
                         .px(css(3.))
                         .mx(css(-3.))
-                        .child(item.label),
+                        .map(|d| match item.label_element {
+                            Some(el) => d.flex().items_center().child(el),
+                            None => d.child(item.label),
+                        }),
                 )
                 .when_some(item.shortcut, |r, s| {
                     r.child(
@@ -559,7 +618,7 @@ pub(crate) fn rows(
                     )
                 })
                 .when(item.checked == Some(true), |r| {
-                    r.child(Icon::new(IconName::Check))
+                    r.child(Icon::new(IconName::Check).when_some(colors.check, |i, c| i.color(c)))
                 })
                 .into_any_element()
         })
