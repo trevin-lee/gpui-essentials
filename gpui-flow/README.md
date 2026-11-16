@@ -183,6 +183,14 @@ Run the example with `cargo run --release --example flow` from this folder.
   - Both give a `FlowObject` for `Flow::restore`. They read within limits and never panic
     on hostile input, and nothing they read makes the flow open anything: Mermaid's `click`
     lines are left out.
+- **Exporting.**
+  - **SVG.** `Flow::to_svg` draws every node and edge as one standalone SVG, in the flow's
+    colours: shapes with their outlines, frames, headings, link cards, pictures (as their
+    frame and alt text, so it never points at another file), and edges along the routes
+    they're drawn on, with dashes, arrowheads and labels. Text is wrapped and clipped to
+    each node, and everything from the flow is escaped, so the file is only ever a picture.
+  - **PNG.** With the `png` feature, `export::svg_to_png(svg, scale)` makes a PNG of it
+    with resvg and the system's fonts.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

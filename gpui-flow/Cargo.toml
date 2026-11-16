@@ -24,12 +24,16 @@ gpui-core = { path = "../gpui-core" }
 # Nodes and edges save and load as JSON, and a node's data is any JSON value.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Only for the png feature: SVG drawn into pixels, for `export::svg_to_png`.
+resvg = { version = "0.46", optional = true }
 # Only for the shots feature: the macOS platform with its test support (offscreen rendering)
 # on, and GPUI's version of the image crate to save the picture.
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [features]
+# PNG export (`export::svg_to_png`), through resvg.
+png = ["dep:resvg"]
 # Pictures of the example's window rendered offscreen (`--shot`), as the editor's.
 shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 
