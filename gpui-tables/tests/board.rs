@@ -471,7 +471,7 @@ fn keys_that_cant_be_put_between_renumber_the_order(cx: &mut TestAppContext) {
         let mut k: Vec<String> = t
             .rows()
             .iter()
-            .filter(|r| !r.deleted)
+            .filter(|r| !r.is_deleted())
             .map(|r| r.order.clone())
             .collect();
         k.sort();

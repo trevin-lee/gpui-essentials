@@ -58,7 +58,7 @@ pub enum Edit {
         row_ids: Vec<String>,
         orders: Vec<String>,
     },
-    /// Rows were deleted: the host tombstones them (`deleted: true`).
+    /// Rows were deleted: the host tombstones them, setting each one's `deleted` to the time.
     RowsDeleted {
         row_ids: Vec<String>,
     },

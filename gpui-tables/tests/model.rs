@@ -77,7 +77,7 @@ fn docs_read_as_databases_and_rows() {
         assert_eq!(r.parent_doc_id.as_deref(), Some(db.id.as_str()));
         assert!(r.database.is_none() && r.values.is_some());
     }
-    assert!(row(&people, "Duplicate of Rowan").deleted);
+    assert!(row(&people, "Duplicate of Rowan").is_deleted());
 
     // An inline database: under a page, embedded by one of its blocks.
     let interactions = docs("interactions.json");
@@ -186,7 +186,7 @@ fn the_fixtures_relations_agree_on_both_sides() {
             let t = p.relation().unwrap();
             let b = sets.iter().find(|s| s[0].id == t.database_id).unwrap();
             let index = RowIndex::new(&b[1..]);
-            for r in a[1..].iter().filter(|r| !r.deleted) {
+            for r in a[1..].iter().filter(|r| !r.is_deleted()) {
                 let ids = r.value(&p.id).and_then(Value::as_ids).unwrap_or(&[]);
                 assert_eq!(index.dangling(ids), Vec::<&str>::new());
                 for other in index.resolve(ids) {
@@ -222,7 +222,7 @@ fn unknown_fields_and_kinds_survive_a_round_trip() {
         "updated": 2,
         "rev": null,
         "seq": null,
-        "deleted": false,
+        "deleted": null,
         "values": {
             "a": {"start": 0, "tz": "Europe/Paris"},
             "b": [1, "x"],
@@ -265,7 +265,7 @@ fn created_by_and_edited_by_come_from_the_doc_and_round_trip() {
         "order": "a0", "folderId": null, "parentDocId": null, "parentObjectId": null,
         "cover": null, "favorite": false, "agents": [], "author": {"kind": "owner"},
         "updatedBy": {"kind": "owner"}, "created": 1_793_000_000_000_i64,
-        "updated": 1_793_000_000_000_i64, "rev": 1, "seq": 1, "deleted": false,
+        "updated": 1_793_000_000_000_i64, "rev": 1, "seq": 1, "deleted": null,
         "database": {"properties": [
             {"id": "name", "name": "Name", "type": "title", "config": {}, "order": "a0"},
             {"id": "by", "name": "Added by", "type": "createdBy", "config": {}, "order": "a1"},
@@ -322,7 +322,58 @@ fn a_minimal_doc_reads_with_defaults() {
         serde_json::from_value(json!({"id": "x", "kind": "page", "title": null, "order": null}))
             .unwrap();
     assert_eq!((untitled.title.as_str(), untitled.order.as_str()), ("", ""));
-    assert!(!doc.deleted && doc.values.is_none() && doc.author.is_none());
+    assert!(!doc.is_deleted() && doc.values.is_none() && doc.author.is_none());
+}
+
+#[test]
+fn deleted_is_the_time_a_doc_was_deleted() {
+    // A tombstone keeps its time exactly, and a live doc writes null.
+    let tombstone = json!({"id": "x", "kind": "page", "deleted": 1_793_613_600_123_i64});
+    let doc: Doc = serde_json::from_value(tombstone.clone()).unwrap();
+    assert_eq!(doc.deleted, Some(1_793_613_600_123));
+    assert!(doc.is_deleted());
+    let written = serde_json::to_value(&doc).unwrap();
+    assert_eq!(written["deleted"], tombstone["deleted"]);
+    let live = Doc::new("y", DocKind::Page, "Live");
+    assert!(!live.is_deleted());
+    assert_eq!(serde_json::to_value(&live).unwrap()["deleted"], Json::Null);
+
+    // Purged docs are tombstoned at the epoch, which is still deleted.
+    let purged: Doc =
+        serde_json::from_value(json!({"id": "x", "kind": "page", "deleted": 0})).unwrap();
+    assert_eq!(purged.deleted, Some(0));
+    assert!(purged.is_deleted());
+
+    // Older data's forms: null, absent and false are live; true is deleted at an unknown time,
+    // and writes back as the epoch.
+    for (deleted, want) in [
+        (Some(Json::Null), None),
+        (None, None),
+        (Some(json!(false)), None),
+        (Some(json!(true)), Some(0)),
+    ] {
+        let mut doc = json!({"id": "x", "kind": "page"});
+        if let Some(d) = &deleted {
+            doc["deleted"] = d.clone();
+        }
+        let doc: Doc = serde_json::from_value(doc).unwrap();
+        assert_eq!(doc.deleted, want, "{deleted:?}");
+        assert_eq!(doc.is_deleted(), want.is_some(), "{deleted:?}");
+        assert_eq!(serde_json::to_value(&doc).unwrap()["deleted"], json!(want));
+    }
+
+    // Anything else isn't a time.
+    for bad in [
+        json!("2026-11-15"),
+        json!(1.5),
+        json!(u64::MAX),
+        json!({}),
+        json!([]),
+    ] {
+        let read =
+            serde_json::from_value::<Doc>(json!({"id": "x", "kind": "page", "deleted": bad}));
+        assert!(read.is_err(), "{bad} read as a time");
+    }
 }
 
 #[test]
