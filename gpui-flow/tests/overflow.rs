@@ -303,3 +303,142 @@ fn text_that_runs_on_is_caught() {
     let (bad, _) = overflows(&flow, cx);
     assert!(!bad.is_empty());
 }
+
+/// Strokes of every tool, wide, scaled, turned and tightly curled, at the size a stroke can be.
+fn worst_strokes() -> Vec<Node> {
+    use gpui_flow::ink::{InkPoint, InkStroke, InkTool};
+    let tools = [
+        InkTool::Fountain,
+        InkTool::Ball,
+        InkTool::Brush,
+        InkTool::Pencil,
+        InkTool::Highlighter,
+    ];
+    let curl: Vec<InkPoint> = (0..200)
+        .map(|i| {
+            let a = i as f32 * 0.3;
+            let r = 4. + i as f32 * 0.4;
+            InkPoint {
+                force: (i % 7) as f32 / 4.,
+                ..InkPoint::at(
+                    r * a.cos(),
+                    r * a.sin(),
+                    i as f32 / 60.,
+                    2. + (i % 9) as f32,
+                )
+            }
+        })
+        .collect();
+    let mut nodes = Vec::new();
+    for (i, tool) in tools.into_iter().enumerate() {
+        let mut s = InkStroke::new(tool, 0x2040_80ff, 6., curl.clone());
+        s.translate(i as f64 * 250., 0.);
+        nodes.push(Node::ink(format!("{tool:?}"), &s));
+        // Scaled up and turned, as a transform from the iPad can be.
+        let mut turned = s.clone();
+        turned.transform = Some([1.2, 0.7, -0.7, 1.2, i as f64 * 250., 300.]);
+        nodes.push(Node::ink(format!("turned {tool:?}"), &turned));
+    }
+    // One point, and the widest tool.
+    nodes.push(Node::ink(
+        "dot",
+        &InkStroke::new(
+            InkTool::Ball,
+            0xff00_00ff,
+            200.,
+            vec![InkPoint::at(0., 600., 0., 200.)],
+        ),
+    ));
+    nodes
+}
+
+#[test]
+fn every_stroke_stays_in_its_box() {
+    let mut found = Vec::new();
+    for (zoom, selected) in [(0.5, false), (1., true), (2.5, false)] {
+        let mut cx = app();
+        let mut nodes = worst_strokes();
+        nodes.iter_mut().for_each(|n| n.selected = selected);
+        let count = nodes.len();
+        let (flow, cx) = cx.add_window_view(move |_, cx| {
+            Flow::new(cx)
+                .with_nodes(nodes)
+                .with_options(|o| {
+                    o.min_zoom = 0.25;
+                    o.max_zoom = 4.;
+                    o.simplify_below_zoom = 0.;
+                    o.only_render_visible = false;
+                })
+                .with_viewport(Viewport::new(300., 300., zoom))
+        });
+        draw(cx);
+        let boxes: Vec<(String, Bounds<Pixels>)> = flow.read_with(cx, |f, _| {
+            f.nodes()
+                .iter()
+                .filter_map(|n| {
+                    let r = f.node_rect(&n.id)?;
+                    let a = f.flow_to_screen(xy(r.x, r.y));
+                    let b = f.flow_to_screen(xy(r.right(), r.bottom()));
+                    Some((n.id.to_string(), Bounds::from_corners(a, b)))
+                })
+                .collect()
+        });
+        assert_eq!(boxes.len(), count, "zoom {zoom}: every stroke measured");
+        cx.update(|window, _| {
+            let scale = window.scale_factor();
+            // A selected stroke's halo is a few points wider than its ink.
+            let slack = if selected { 3.5 } else { 1. } * scale;
+            let paths = &window.rendered_scene().paths;
+            // Close in, some are off the window, and GPUI leaves out what it can't show: at
+            // least every stroke on it is drawn.
+            let size = window.viewport_size();
+            let shown = boxes
+                .iter()
+                .filter(|(_, b)| {
+                    b.origin.x < size.width
+                        && b.origin.y < size.height
+                        && b.origin.x + b.size.width > gpui::px(0.)
+                        && b.origin.y + b.size.height > gpui::px(0.)
+                })
+                .count();
+            assert!(shown > 0, "zoom {zoom}: nothing on the window");
+            assert!(
+                paths.len() >= shown,
+                "zoom {zoom}: {} paths for {shown} strokes",
+                paths.len()
+            );
+            for p in paths {
+                let b = p.bounds;
+                let (l, t) = (b.origin.x.as_f32(), b.origin.y.as_f32());
+                let (r, btm) = (l + b.size.width.as_f32(), t + b.size.height.as_f32());
+                let (mx, my) = ((l + r) / 2. / scale, (t + btm) / 2. / scale);
+                let within = |n: &Bounds<Pixels>| {
+                    let (x, y) = (f32::from(n.origin.x) * scale, f32::from(n.origin.y) * scale);
+                    let (w, h) = (
+                        f32::from(n.size.width) * scale,
+                        f32::from(n.size.height) * scale,
+                    );
+                    l >= x - slack && r <= x + w + slack && t >= y - slack && btm <= y + h + slack
+                };
+                let mine = boxes.iter().filter(|(_, n)| {
+                    let (x, y) = (f32::from(n.origin.x), f32::from(n.origin.y));
+                    mx >= x
+                        && mx <= x + f32::from(n.size.width)
+                        && my >= y
+                        && my <= y + f32::from(n.size.height)
+                });
+                if !mine.clone().any(|(_, n)| within(n)) {
+                    found.push(format!(
+                        "zoom {zoom}: a path at x {:.0}–{:.0}, y {:.0}–{:.0}, in {:?}",
+                        l / scale,
+                        r / scale,
+                        t / scale,
+                        btm / scale,
+                        mine.map(|(id, _)| id.as_str()).collect::<Vec<_>>()
+                    ));
+                }
+            }
+        });
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}

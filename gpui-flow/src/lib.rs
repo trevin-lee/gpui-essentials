@@ -37,6 +37,7 @@ mod flow;
 pub mod geometry;
 pub mod graph;
 pub mod import;
+pub mod ink;
 pub mod json;
 pub mod limits;
 pub mod node;
@@ -56,7 +57,7 @@ pub use flow::{
 };
 pub use node::{
     HANDLE_SIZE, Handle, ImageLoader, NodeContext, NodeInput, NodeRenderer, drawing_node,
-    font_size, frame_node, group_node, image_node, labeled_node, link_node, parse_points,
+    font_size, frame_node, group_node, image_node, ink_node, labeled_node, link_node, parse_points,
     shape_node, text_node, topic_node, units,
 };
 pub use paint::{BackgroundVariant, FlowBackground};

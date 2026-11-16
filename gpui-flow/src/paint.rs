@@ -685,3 +685,180 @@ pub(crate) fn paint_shape(
         window.paint_path(path, stroke);
     }
 }
+
+/// How an ink stroke of this `0xRRGGBBAA` colour is drawn: a pencil a little lighter, a
+/// highlighter see-through, and black ink light on a dark canvas, as PencilKit draws it in dark
+/// mode.
+pub(crate) fn ink_color(rgba: u32, tool: crate::ink::InkTool, colors: &FlowColors) -> Hsla {
+    use crate::ink::InkTool;
+    let mut c: Hsla = gpui::Rgba {
+        r: ((rgba >> 24) & 0xff) as f32 / 255.,
+        g: ((rgba >> 16) & 0xff) as f32 / 255.,
+        b: ((rgba >> 8) & 0xff) as f32 / 255.,
+        a: (rgba & 0xff) as f32 / 255.,
+    }
+    .into();
+    if colors.background.l < 0.5 && c.l < 0.2 && c.s < 0.25 {
+        c = Hsla {
+            a: c.a,
+            ..colors.node_text
+        };
+    }
+    match tool {
+        InkTool::Pencil => c.a *= 0.85,
+        InkTool::Highlighter => c.a *= 0.45,
+        _ => {}
+    }
+    c
+}
+
+/// An ink stroke's outline (points from the corner of its box, in flow units, each with half
+/// the width laid down there) at `origin` in the window, `scale` points a flow unit: a band
+/// along the line with round ends and joins, points too close together to tell apart skipped.
+/// A selected stroke has a halo.
+pub(crate) fn paint_ink(
+    outline: &[(XY, f32)],
+    origin: Point<Pixels>,
+    scale: f32,
+    color: Hsla,
+    halo: Option<Hsla>,
+    window: &mut Window,
+) {
+    let screen = ink_screen(outline, origin, scale);
+    if screen.is_empty() {
+        return;
+    }
+    if let Some(halo) = halo {
+        let mut band = Solid::new();
+        ink_band(&screen, 2.5, &mut band);
+        band.paint(halo, window);
+    }
+    // GPUI lays each triangle of a path over the ones under it, so where a see-through band's
+    // pieces overlap it would come out darker: one fill of their union instead.
+    // A see-through stroke is one strip with no piece over another (GPUI lays each triangle
+    // of a path over those under it, so overlaps would come out darker).
+    if color.a < 0.999 {
+        let mut band = Solid::new();
+        ink_strip(&screen, &mut band);
+        band.paint(color, window);
+        return;
+    }
+    let mut band = Solid::new();
+    ink_band(&screen, 0., &mut band);
+    band.paint(color, window);
+}
+
+/// A band along window points as one strip: the edges each side of the line, half the width
+/// out at each point, joined by two triangles a step, and a half disc at each end. Nothing
+/// overlaps except where the line crosses itself or turns tighter than it's wide.
+fn ink_strip(points: &[(XY, f32)], band: &mut Solid) {
+    let pt = |p: XY| point(px(p.x), px(p.y));
+    let unit = |d: XY| {
+        let len = (d.x * d.x + d.y * d.y).sqrt();
+        (len > 1e-4).then(|| xy(d.x / len, d.y / len))
+    };
+    let n = points.len();
+    if n == 1 {
+        let (c, r) = points[0];
+        let k = (r * 1.2).ceil().clamp(6., 20.) as usize;
+        let at = |i: usize| {
+            let a = std::f32::consts::TAU * i as f32 / k as f32;
+            pt(xy(c.x + r * a.cos(), c.y + r * a.sin()))
+        };
+        for i in 1..k - 1 {
+            band.triangle(at(0), at(i), at(i + 1));
+        }
+        return;
+    }
+    // The direction at each point: along its two neighbours.
+    let dirs: Vec<XY> = (0..n)
+        .map(|i| {
+            let (a, b) = (points[i.saturating_sub(1)].0, points[(i + 1).min(n - 1)].0);
+            unit(b - a).unwrap_or(xy(1., 0.))
+        })
+        .collect();
+    let side = |i: usize, s: f32| {
+        let ((p, r), d) = (points[i], dirs[i]);
+        pt(xy(p.x - d.y * r * s, p.y + d.x * r * s))
+    };
+    for i in 0..n - 1 {
+        let (l0, r0, l1, r1) = (side(i, 1.), side(i, -1.), side(i + 1, 1.), side(i + 1, -1.));
+        band.triangle(l0, l1, r1);
+        band.triangle(l0, r1, r0);
+    }
+    // Round ends, out past the first and last point.
+    for (i, out) in [(0, -1.), (n - 1, 1.)] {
+        let ((c, r), d) = (points[i], dirs[i]);
+        let base = d.y.atan2(d.x) - std::f32::consts::FRAC_PI_2 * out;
+        let k = (r * 0.6).ceil().clamp(3., 10.) as usize;
+        let at = |j: usize| {
+            // From one side round the back (or the front) to the other.
+            let a = base + std::f32::consts::PI * j as f32 / k as f32;
+            pt(xy(c.x + r * a.cos(), c.y + r * a.sin()))
+        };
+        for j in 0..k {
+            band.triangle(pt(c), at(j), at(j + 1));
+        }
+    }
+}
+
+/// The outline in window points, with points too close together to tell apart skipped (the
+/// outline is smoothed already, in flow units).
+fn ink_screen(outline: &[(XY, f32)], origin: Point<Pixels>, scale: f32) -> Vec<(XY, f32)> {
+    let (ox, oy) = (f32::from(origin.x), f32::from(origin.y));
+    let mut thin: Vec<(XY, f32)> = Vec::with_capacity(outline.len());
+    for (i, &(p, r)) in outline.iter().enumerate() {
+        let q = (xy(ox + p.x * scale, oy + p.y * scale), (r * scale).max(0.4));
+        let last = i + 1 == outline.len();
+        if let Some(&(prev, _)) = thin.last() {
+            let d = q.0 - prev;
+            if !last && d.x * d.x + d.y * d.y < 0.75 * 0.75 {
+                continue;
+            }
+        }
+        thin.push(q);
+    }
+    thin
+}
+
+/// A band along window points, `grow` points wider on each side: a quadrilateral between each
+/// two, and a disc at each point for the joins and ends.
+fn ink_band(points: &[(XY, f32)], grow: f32, band: &mut Solid) {
+    let pt = |p: XY| point(px(p.x), px(p.y));
+    let disc = |band: &mut Solid, c: XY, r: f32| {
+        if r < 0.75 {
+            return band.rect(c.x - r, c.y - r, r * 2., r * 2.);
+        }
+        let n = (r * 1.2).ceil().clamp(6., 20.) as usize;
+        let at = |i: usize| {
+            let a = std::f32::consts::TAU * i as f32 / n as f32;
+            pt(xy(c.x + r * a.cos(), c.y + r * a.sin()))
+        };
+        for i in 1..n - 1 {
+            band.triangle(at(0), at(i), at(i + 1));
+        }
+    };
+    for (i, &(p, r)) in points.iter().enumerate() {
+        let r = r + grow;
+        disc(band, p, r);
+        if let Some(&(q, rq)) = points.get(i + 1) {
+            let rq = rq + grow;
+            let d = q - p;
+            let len = (d.x * d.x + d.y * d.y).sqrt();
+            if len < 1e-3 {
+                continue;
+            }
+            let n = xy(-d.y / len, d.x / len);
+            let (a, b) = (
+                pt(xy(p.x + n.x * r, p.y + n.y * r)),
+                pt(xy(q.x + n.x * rq, q.y + n.y * rq)),
+            );
+            let (c, e) = (
+                pt(xy(q.x - n.x * rq, q.y - n.y * rq)),
+                pt(xy(p.x - n.x * r, p.y - n.y * r)),
+            );
+            band.triangle(a, b, c);
+            band.triangle(a, c, e);
+        }
+    }
+}

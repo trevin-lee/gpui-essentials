@@ -49,6 +49,11 @@ Run the example with `cargo run --release --example flow` from this folder.
   kept. Nothing selected is stored, and `Flow::set_document()` keeps the selection. New ids are
   random, so two editors adding at once don't clash. [docs/json.md](docs/json.md) has every
   field.
+- **Ink.** A stroke drawn with a pen or the Pencil is an `ink` node holding the iPad's Notes
+  payload as is (`tool`, `#RRGGBBAA` colour, width, base64 points with pressure and tilt, and
+  a transform), so the same strokes show on iPad and Mac (`ink::InkStroke`, `Node::ink`).
+  Strokes are drawn with their width at each point, smoothed, take a press only on their ink,
+  and move by their transform, never their points.
 - **Limits.** `limits::Limits` checks a document or a batch against what Docs stores (10,000
   nodes, 20,000 edges, 10,000-character texts, frames 16 deep, …), and
   `tests/fixtures/limits` has the cases a server tests against too, with the exact problem

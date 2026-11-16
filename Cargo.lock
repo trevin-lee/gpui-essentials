@@ -2718,6 +2718,7 @@ dependencies = [
 name = "gpui-flow"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "gpui-core",
  "gpui-pre",
  "gpui-pre-apple",

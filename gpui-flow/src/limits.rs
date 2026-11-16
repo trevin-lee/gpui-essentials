@@ -7,6 +7,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::ink;
 use crate::json::{Document, MAX_ID, Op, valid_id};
 use crate::types::{Edge, Node};
 
@@ -84,6 +85,11 @@ pub enum ProblemKind {
     BadId,
     /// Two nodes, or two edges, share this id.
     Duplicate(String),
+    /// An `ink` node whose `data.ink` doesn't read as a stroke (see [`crate::ink`]).
+    NotInk,
+    /// A stroke's width not more than 0 and at most 200, or a value of a point not a number
+    /// within ±20,000.
+    OutOfRange,
 }
 
 impl fmt::Display for ProblemKind {
@@ -98,6 +104,8 @@ impl fmt::Display for ProblemKind {
             Self::TooLarge { limit, .. } => write!(f, "more than {limit} bytes"),
             Self::BadId => f.write_str("not a valid id"),
             Self::Duplicate(id) => write!(f, "{id} is used twice"),
+            Self::NotInk => f.write_str("not an ink stroke"),
+            Self::OutOfRange => f.write_str("out of range"),
         }
     }
 }
@@ -264,6 +272,9 @@ impl Limits {
                 self.chars(format!("{path}.card.{field}"), value.as_deref(), text, out);
             }
         }
+        if node.kind == "ink" {
+            self.ink(path, node, out);
+        }
         let bytes = serde_json::to_string(node).map_or(0, |s| s.len());
         if bytes > self.node_bytes {
             out.push(problem(
@@ -272,6 +283,51 @@ impl Limits {
                     limit: self.node_bytes,
                     found: bytes,
                 },
+            ));
+        }
+    }
+
+    /// An ink node's stroke: one that reads, of at most [`ink::MAX_POINTS`] points, each value
+    /// a number within ±[`ink::MAX_COORDINATE`], drawn at a width above 0 and at most
+    /// [`ink::MAX_WIDTH`].
+    fn ink(&self, path: &str, node: &Node, out: &mut Vec<Problem>) {
+        let Some(stroke) = ink::InkStroke::of(node) else {
+            out.push(problem(format!("{path}.data.ink"), ProblemKind::NotInk));
+            return;
+        };
+        if stroke.points.len() > ink::MAX_POINTS {
+            out.push(problem(
+                format!("{path}.data.ink.points"),
+                ProblemKind::TooMany {
+                    limit: ink::MAX_POINTS,
+                    found: stroke.points.len(),
+                },
+            ));
+        }
+        let fine = |v: f32| v.is_finite() && v.abs() <= ink::MAX_COORDINATE;
+        if !stroke.points.iter().all(|p| {
+            [p.x, p.y, p.t, p.force, p.azimuth, p.altitude, p.size]
+                .into_iter()
+                .all(fine)
+        }) {
+            out.push(problem(
+                format!("{path}.data.ink.points"),
+                ProblemKind::OutOfRange,
+            ));
+        }
+        if !(stroke.width > 0. && stroke.width <= ink::MAX_WIDTH) {
+            out.push(problem(
+                format!("{path}.data.ink.width"),
+                ProblemKind::OutOfRange,
+            ));
+        }
+        if stroke
+            .transform
+            .is_some_and(|t| !t.iter().all(|v| v.is_finite()))
+        {
+            out.push(problem(
+                format!("{path}.data.ink.transform"),
+                ProblemKind::OutOfRange,
             ));
         }
     }

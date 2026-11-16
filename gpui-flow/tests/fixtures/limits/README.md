@@ -8,8 +8,8 @@ listed problems.
 - `valid.json`: documents with no problems, including every text, address and id at its limit,
   a node 16 frames deep, and the cases a reader must tolerate (a loop of parents, an edge to a
   node that isn't there, unknown fields).
-- `invalid.json`: documents that each break one limit or check (one breaks two), with the
-  problems they must give.
+- `invalid.json`: documents that each break one limit or check (one breaks two), ink strokes
+  among them, with the problems they must give.
 - `batches.json`: batches of edits, checked on their own (`Limits::check_batch`).
 
 ## The format
@@ -50,6 +50,8 @@ N is the number found and L the limit. Strings count Unicode characters, not byt
 | `not a valid id` | An id that's empty or has a character other than `A-Z a-z 0-9 - _ . : ~` (and isn't too long) |
 | `<id> is used twice` | A node or edge id used before in the same list: given for each use after the first |
 | `N levels is more than L` | A node inside more frames than L, counted up its `parentId`s until a parent that isn't there or one met again |
+| `not an ink stroke` | An `ink` node whose `data.ink` doesn't read (path `nodes[i].data.ink`): missing, an unknown tool, a colour not hex, points not base64 of whole points, a transform not 6 numbers |
+| `out of range` | A stroke's `width` not above 0 and at most 200, a point's value not finite or beyond ±20,000, or a transform value not finite (paths `….data.ink.width`, `….points`, `….transform`) |
 | `more than L bytes` | A node, edge or patch whose compact JSON is larger than L. The size isn't given, since serializers differ by a few bytes (`1` or `1.0`); the cases stay well away from the limit |
 
 The cases were written by a one-off script, and are kept as data, not regenerated. When a limit or
