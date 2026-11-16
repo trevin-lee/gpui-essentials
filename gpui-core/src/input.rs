@@ -231,6 +231,7 @@ impl Focusable for InputState {
 impl InputState {
     /// A one-line field.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        crate::init(cx);
         let focus = cx.focus_handle().tab_stop(true);
         let subscriptions = vec![
             cx.on_focus(&focus, window, |_, _, cx| cx.emit(InputEvent::Focus)),
@@ -1298,7 +1299,18 @@ pub struct Input {
     state: Entity<InputState>,
     appearance: bool,
     label: Option<SharedString>,
+    colors: InputColors,
     style: StyleRefinement,
+}
+
+/// Colours an [`Input`] draws its caret, selection and placeholder in, over the theme's: for a
+/// host with a palette of its own (a light card in a dark app). The text itself takes the colour
+/// of the text around the field.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct InputColors {
+    caret: Option<Hsla>,
+    selection: Option<Hsla>,
+    placeholder: Option<Hsla>,
 }
 
 impl Input {
@@ -1307,8 +1319,28 @@ impl Input {
             state: state.clone(),
             appearance: true,
             label: None,
+            colors: InputColors::default(),
             style: StyleRefinement::default(),
         }
+    }
+
+    /// The caret's colour (otherwise the theme's foreground).
+    pub fn caret_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.colors.caret = Some(color.into());
+        self
+    }
+
+    /// The selection's colour, drawn behind the text as given (otherwise the theme's ring at
+    /// 30%).
+    pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.colors.selection = Some(color.into());
+        self
+    }
+
+    /// The placeholder's colour (otherwise the theme's muted foreground).
+    pub fn placeholder_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.colors.placeholder = Some(color.into());
+        self
     }
 
     /// Whether it draws the web's field (a border, the input fill, padding and a focus ring).
@@ -1417,13 +1449,17 @@ impl RenderOnce for Input {
                     .focus_visible(move |s| s.border_color(theme.ring).shadow(vec![ring]))
             });
         el.style().refine(&self.style);
-        el.child(TextBox { state: s })
+        el.child(TextBox {
+            state: s,
+            colors: self.colors,
+        })
     }
 }
 
 /// The text, the selection and the caret, laid out to the width it's given.
 struct TextBox {
     state: Entity<InputState>,
+    colors: InputColors,
 }
 
 impl IntoElement for TextBox {
@@ -1597,10 +1633,16 @@ impl Element for TextBox {
         let font_size = style.font_size.to_pixels(window.rem_size());
         let lh = window.line_height();
         let focused = self.state.read(cx).focus.is_focused(window);
+        let colors = self.colors;
         self.state.update(cx, |s, _| {
             let shown = s.shown();
-            let (text, runs) =
-                runs_for(s, &shown, style.color, theme.muted_foreground, style.font());
+            let (text, runs) = runs_for(
+                s,
+                &shown,
+                style.color,
+                colors.placeholder.unwrap_or(theme.muted_foreground),
+                style.font(),
+            );
             let wrap = s.multiline.then_some(bounds.size.width);
             let mut lines = Vec::new();
             for (start, line, lr) in split_lines(&text, &runs) {
@@ -1694,7 +1736,7 @@ impl Element for TextBox {
         );
         window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
             for b in p.selection.drain(..) {
-                window.paint_quad(fill(b, theme.selection()));
+                window.paint_quad(fill(b, self.colors.selection.unwrap_or(theme.selection())));
             }
             // The shaped lines stay with the state (the pointer and the input method read
             // them between draws); they're borrowed out of it to paint.
@@ -1706,7 +1748,7 @@ impl Element for TextBox {
             }
             self.state.update(cx, |s, _| s.layout.lines = lines);
             if let Some(c) = p.caret.take() {
-                window.paint_quad(fill(c, theme.foreground));
+                window.paint_quad(fill(c, self.colors.caret.unwrap_or(theme.foreground)));
             }
         });
         // A drag that leaves the field keeps selecting until the button is let go.
