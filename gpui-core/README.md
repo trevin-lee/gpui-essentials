@@ -27,6 +27,11 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   panel across the bottom of the window over a scrim, centred and capped at `max_width` on a
   wide window, scrolling past nine tenths of its height. A press on the scrim or Escape calls
   `on_dismiss`; it takes the keyboard while open and hands it back on closing.
+- **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
+  .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
+  text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
+  picked (the pointer moves it too), Enter or a press picks, and Escape closes the popover.
+  `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
 - **Rules.** Nothing redraws while nothing changes, text stays in its box at any width,
   everything works from the keyboard with a focus ring, nothing works by hover alone, and links
   and actions are events for the host.
