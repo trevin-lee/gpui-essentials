@@ -39,6 +39,7 @@ mod date_picker;
 pub mod icon;
 pub mod input;
 mod menu;
+mod picker;
 mod popover;
 mod press;
 mod root;
@@ -57,6 +58,7 @@ pub use date_picker::{
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
 pub use menu::{PopupMenu, PopupMenuColors, PopupMenuItem};
+pub use picker::Picker;
 pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
@@ -88,6 +90,7 @@ pub fn init(cx: &mut App) {
     date_picker::init(cx);
     input::init(cx);
     menu::init(cx);
+    picker::init(cx);
     popover::init(cx);
     text::init(cx);
 }
