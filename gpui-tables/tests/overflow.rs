@@ -132,13 +132,18 @@ fn app_with_text() -> TestAppContext {
     )
 }
 
-/// Every glyph or icon drawn past the left or right edge of what clips it, of the table or of
-/// the window, except across the table's right edge.
+/// Every glyph or icon drawn past the left or right edge of what clips it, of the table (or
+/// board) or of the window, except where the table's right edge, or the edges of what scrolls
+/// sideways, cut it off.
 fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
     draw(cx);
-    let table = cx.debug_bounds("table").expect("the table is drawn");
-    // The columns after the title scroll sideways in a strip that cuts them off at its edges.
-    let strip = cx.debug_bounds("strip").expect("the header is drawn");
+    let table = cx
+        .debug_bounds("table")
+        .or_else(|| cx.debug_bounds("board"))
+        .expect("the table or board is drawn");
+    // The columns after the title scroll sideways in a strip that cuts them off at its edges
+    // (a board's columns scroll in the board itself).
+    let strip = cx.debug_bounds("strip").unwrap_or(table);
     cx.update(|window, _| {
         let scale = window.scale_factor();
         let width = f32::from(window.viewport_size().width) * scale;
@@ -190,7 +195,13 @@ fn overflows(cx: &mut VisualTestContext) -> Vec<String> {
             } else {
                 right
             };
-            let past_table = left < left_edge - slack || shown_right > width + slack;
+            // And on the left, where a board's columns scrolled past its edge are cut off.
+            let shown_left = if cut_at_left {
+                left.max(clip_left)
+            } else {
+                left
+            };
+            let past_table = shown_left < left_edge - slack || shown_right > width + slack;
             if past_clip || past_table {
                 out.push(format!(
                     "x {:.0}–{:.0}, y {:.0} (clip {:.0}–{:.0}, table {:.0}–{:.0})",
@@ -242,6 +253,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 let host = host();
                 let (db, rows) = hostile();
                 let db = if narrow { narrowest(db) } else { db };
+                let db = as_table(db, PIPELINE);
                 let (table, cx) =
                     open_with(&mut app, &host, db, rows, view, size(px(width), px(900.)));
                 let case = format!(
@@ -279,6 +291,75 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                     for o in overflows(cx) {
                         found.push(format!("{case}, {what} open: {o}"));
                     }
+                }
+            }
+        }
+    }
+    found.dedup();
+    assert!(
+        found.is_empty(),
+        "{} glyphs past their place:\n{}",
+        found.len(),
+        found
+            .iter()
+            .take(60)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// The Pipeline board with every property on its cards and every column open.
+fn hostile_board() -> (Doc, Vec<Doc>) {
+    let (mut db, rows) = hostile();
+    let f = db.database.as_mut().unwrap();
+    let ids: Vec<String> = f.properties.iter().map(|p| p.id.clone()).collect();
+    let v = f.views.iter_mut().find(|v| v.id == PIPELINE).unwrap();
+    v.card_properties = ids;
+    v.collapsed_groups.clear();
+    (db, rows)
+}
+
+#[test]
+fn no_card_column_or_folded_line_lets_its_text_out() {
+    let mut found = Vec::new();
+    for width in [360., 700., 1400.] {
+        for touch in [false, true] {
+            let mut app = app_with_text();
+            let host = if touch {
+                let h = host();
+                let t = h.theme.borrow().clone().with_touch(true);
+                *h.theme.borrow_mut() = t;
+                h
+            } else {
+                host()
+            };
+            let (db, rows) = hostile_board();
+            let (table, cx) = open_with(
+                &mut app,
+                &host,
+                db,
+                rows,
+                Some(PIPELINE),
+                size(px(width), px(900.)),
+            );
+            assert!(table.update(cx, |t, _| t.is_board()));
+            let case = format!("board {width} wide{}", if touch { ", touch" } else { "" });
+            // From the left, then scrolled to the end, with Active folded among the rest.
+            for (step, what) in ["left", "end", "folded"].iter().enumerate() {
+                match step {
+                    1 => table.update(cx, |t, cx| t.set_board_scroll_x(px(100_000.), cx)),
+                    2 => cx.update(|window, cx| {
+                        table.update(cx, |t, cx| {
+                            t.toggle_column(3, window, cx);
+                            t.toggle_column(1, window, cx);
+                        })
+                    }),
+                    _ => {}
+                }
+                draw(cx);
+                for o in overflows(cx) {
+                    found.push(format!("{case}, {what}: {o}"));
                 }
             }
         }

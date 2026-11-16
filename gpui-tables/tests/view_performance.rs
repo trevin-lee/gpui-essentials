@@ -242,3 +242,85 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
     report("a frame while scrolling", scrolls, 12);
     report("sort, filter and group, then draw", sorts, 50);
 }
+
+#[test]
+fn ten_thousand_cards_draw_and_scroll_without_dropping_frames() {
+    let (mut db, rows) = (database(), rows());
+    // A board of the same rows: six columns of about 1,700 cards, each showing four values.
+    let mut board = View::new("b", "Board", ViewType::Board, "a1");
+    board.group_by = Some("stage".into());
+    board.card_properties = vec!["note".into(), "n".into(), "tags".into(), "when".into()];
+    db.database.as_mut().unwrap().views = vec![board];
+    let mut firsts = Vec::new();
+    let mut scrolls = Vec::new();
+    let mut drags = Vec::new();
+    for run in 0..3 {
+        let mut app = TestAppContext::build_with_text_system(
+            TestDispatcher::new(run),
+            None,
+            Arc::new(gpui_apple::AppleTextSystem::new()),
+        );
+        setup(&mut app);
+        let host = TestHost::new();
+        host.apply.set(false);
+        let h: Rc<dyn TableHost> = host.clone();
+        let (db, rows) = (db.clone(), rows.clone());
+        let made: Rc<std::cell::RefCell<Option<Entity<TableView>>>> = Rc::default();
+        let (_, cx) = app.add_window_view({
+            let made = made.clone();
+            move |window, cx| {
+                let t = cx.new(|cx| TableView::new(h, db, rows, cx));
+                *made.borrow_mut() = Some(t.clone());
+                gpui_core::Root::new(t, window, cx)
+            }
+        });
+        let table = made.borrow().clone().unwrap();
+        cx.simulate_resize(size(px(1400.), px(900.)));
+        table.update(cx, |t, cx| t.set_rows(t.rows().to_vec(), cx));
+        firsts.push(frame(cx));
+        draw(cx);
+        let cols = table.update(cx, |t, _| t.board_columns().to_vec());
+        assert_eq!(cols.len(), 7, "no stage, then six options");
+        assert_eq!(cols.iter().map(|c| c.rows.len()).sum::<usize>(), ROWS);
+        // Down a column a page at a time.
+        for _ in 0..20 {
+            cx.simulate_event(ScrollEvent {
+                position: point(px(450.), px(400.)),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-800.))),
+                ..Default::default()
+            });
+            scrolls.push(frame(cx));
+        }
+        // And the board sideways.
+        for _ in 0..5 {
+            cx.simulate_event(ScrollEvent {
+                position: point(px(600.), px(400.)),
+                delta: ScrollDelta::Pixels(point(px(-120.), px(0.))),
+                ..Default::default()
+            });
+            scrolls.push(frame(cx));
+        }
+        assert!(table.read_with(cx, |t, _| t.board_scroll_x()) > px(0.));
+        // A card dragged across the columns, a frame for each move.
+        let from = table
+            .update(cx, |t, _| {
+                let r = t.board_columns()[2].rows[0];
+                let id = t.rows()[r].id.clone();
+                t.card_bounds(&id)
+            })
+            .expect("a card on screen")
+            .center();
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        frame(cx);
+        for i in 1..=10 {
+            let at = from + point(px(60. * i as f32), px(15. * i as f32));
+            cx.simulate_mouse_move(at, MouseButton::Left, Modifiers::none());
+            drags.push(frame(cx));
+        }
+        assert!(table.read_with(cx, |t, _| t.is_dragging_card()));
+        cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
+    }
+    report("first draw of a board of 10,000 cards", firsts, 50);
+    report("a frame while scrolling the board", scrolls, 12);
+    report("a frame while dragging a card", drags, 12);
+}

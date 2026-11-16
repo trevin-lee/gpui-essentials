@@ -1,5 +1,5 @@
 //! The CRM in the fixtures (People, Companies and Interactions, all made up) in a window, with
-//! the table view and a log of every event it emits.
+//! its table and board views and a log of every event they emit.
 //!
 //! ```sh
 //! cargo run --release -p gpui-tables --example crm
@@ -14,7 +14,9 @@
 //! `--shot` takes a picture of the window without showing it. Scenes: `people` (the default),
 //! `grouped` (Interactions by month), `menu` (a column's menu), `picker` (a select's options),
 //! `date` (the day grid), `scrolled` (scrolled sideways, the title column in place), `light`
-//! and `worst` (worst-case text, every cell ending in an ellipsis).
+//! and `worst` (worst-case text, every cell ending in an ellipsis); and boards: `board` (People's
+//! Pipeline by stage), `board-drag` (a card of Interactions by kind dragged to another column),
+//! `board-light` (Companies by industry, in the light theme) and `board-worst`.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -609,7 +611,7 @@ fn main() {
             gpui_core::init(cx);
             gpui_tables::view::init(cx);
             Theme::set(
-                if args.scene == "light" {
+                if args.scene.ends_with("light") {
                     Theme::light()
                 } else {
                     Theme::dark()
@@ -620,7 +622,7 @@ fn main() {
             cx.on_action(|_: &Quit, cx| cx.quit());
 
             let mut dbs = vec![load(PEOPLE), load(COMPANIES), load(INTERACTIONS)];
-            if args.scene == "worst" {
+            if args.scene.ends_with("worst") {
                 let row = worst_row(&dbs[0]);
                 dbs[0].rows.push(row);
             }
@@ -686,9 +688,83 @@ mod shots {
     }
 
     const STAGE: &str = "6b4cb242-4a23-4596-a217-beaddbc496cb";
+    const PIPELINE: &str = "f3aed0b6-c7ac-4491-9ef8-8334e647cb8f";
     const LAST_CONTACTED: &str = "ae97ba94-d0ed-482f-8f6d-05584ef8aa38";
     const IMANI: &str = "1d87cec3-1f72-46ab-b961-fd925d39d0a8";
     const FOLLOW_UP: &str = "923a7369-94e3-4f91-9a61-dbe22e44158b";
+
+    /// The database's first board view.
+    fn board_view(t: &Entity<TableView>, cx: &App) -> String {
+        t.read(cx)
+            .database()
+            .database
+            .as_ref()
+            .and_then(|f| f.views.iter().find(|v| v.kind == ViewType::Board))
+            .map(|v| v.id.clone())
+            .unwrap_or_default()
+    }
+
+    /// Picks the first card of the board's second column up with the mouse and carries it over
+    /// the third column, under its first card, without letting go.
+    async fn drag_a_card(window: AnyWindowHandle, crm: &Entity<Crm>, cx: &mut AsyncApp) {
+        let points = cx.update(|cx| {
+            let t = crm.read(cx).table();
+            t.update(cx, |t, _| {
+                let cols = t.board_columns().to_vec();
+                let card = |c: usize, i: usize| {
+                    cols.get(c)
+                        .and_then(|c| c.rows.get(i))
+                        .and_then(|&r| t.card_bounds(&t.rows()[r].id))
+                };
+                let from = card(1, 0)?;
+                let over = card(2, 0)?;
+                let start = point(from.left() + px(40.), from.top() + px(18.));
+                let end = point(over.left() + px(56.), over.bottom() - px(14.));
+                Some((start, end))
+            })
+        });
+        let Some((start, end)) = points else {
+            return;
+        };
+        let send = |event: PlatformInput, cx: &mut AsyncApp| {
+            let _ = cx.update_window(window, |_, window, cx| {
+                window.dispatch_event(event, cx);
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+        };
+        send(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: start,
+                pressed_button: None,
+                modifiers: Modifiers::none(),
+            }),
+            cx,
+        );
+        send(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: start,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        for i in 1..=6 {
+            let at = start + (end - start) * (i as f32 / 6.);
+            send(
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position: at,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::none(),
+                }),
+                cx,
+            );
+            wait(cx, 30).await;
+        }
+        settle(window, cx).await;
+    }
 
     /// A picture of the window, rendered offscreen, then quits.
     pub fn shot(
@@ -730,6 +806,31 @@ mod shots {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| t.edit(IMANI, LAST_CONTACTED, window, cx));
                     }
+                    "board" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| t.set_view(PIPELINE, cx));
+                    }
+                    "board-worst" => {
+                        // The worst row is Dormant, folded in the fixture: unfolded, and the
+                        // board scrolled to it.
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            t.set_view(PIPELINE, cx);
+                            if let Some(c) = t.board_columns().iter().position(|c| c.folded) {
+                                t.toggle_column(c, window, cx);
+                            }
+                        });
+                    }
+                    "board-light" => {
+                        let t = pick(1, cx);
+                        let id = board_view(&t, cx);
+                        t.update(cx, |t, cx| t.set_view(id, cx));
+                    }
+                    "board-drag" => {
+                        let t = pick(2, cx);
+                        let id = board_view(&t, cx);
+                        t.update(cx, |t, cx| t.set_view(id, cx));
+                    }
                     "scrolled" => {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| {
@@ -741,6 +842,16 @@ mod shots {
                 }
             });
             settle(window, cx).await;
+            if scene == "board-drag" {
+                drag_a_card(window, &crm, cx).await;
+            }
+            if scene == "board-worst" {
+                cx.update(|cx| {
+                    let t = crm.read(cx).table();
+                    t.update(cx, |t, cx| t.set_board_scroll_x(px(100_000.), cx));
+                });
+                settle(window, cx).await;
+            }
             let _ = cx.update_window(window, |_, window, cx| {
                 window.refresh();
                 let _ = window.draw(cx);

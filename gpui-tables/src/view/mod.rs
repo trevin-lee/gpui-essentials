@@ -1,7 +1,7 @@
-//! The views, drawn with GPUI and gpui-core: the table view, for now (boards and lists come
-//! next).
+//! The views, drawn with GPUI and gpui-core: tables and boards (lists come next).
 //!
-//! A [`TableView`] is a GPUI entity holding a database doc, its rows and the active view. It
+//! A [`TableView`] is a GPUI entity holding a database doc, its rows and the active view, which
+//! it draws as a board when the view's type is `board` and as a table otherwise. It
 //! asks its [`TableHost`] for its look ([`TableTheme`]), for names it can't know (people,
 //! related rows), for pickers' choices and for a text field, and hands it every change as a
 //! [`TableEvent`](crate::TableEvent). Call [`init`] once, before opening a window, for its keys.
@@ -34,6 +34,8 @@
 //! }
 //! ```
 
+mod board;
+mod board_render;
 pub mod format;
 mod host;
 pub mod ops;
@@ -41,6 +43,7 @@ mod render;
 mod table;
 mod theme;
 
+pub use board::{BoardColumn, BoardSpot, CardGhost};
 pub use host::{RelatedRow, TableHost, TextEdit, TextReply, TextTarget};
 pub use table::{CellRef, Item, TableView};
 pub use theme::{ChipColors, OptionColors, TableColors, TableFonts, TableSizes, TableTheme};

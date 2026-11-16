@@ -84,8 +84,10 @@ pub struct TableColors {
     pub popover: Hsla,
     /// A menu's or picker's edge.
     pub popover_border: Hsla,
-    /// A shadow under menus.
+    /// A shadow under menus (and under a board's card while it's dragged).
     pub shadow: Hsla,
+    /// A board's cards.
+    pub card: Hsla,
     /// The ten option colours.
     pub options: OptionColors,
 }
@@ -130,6 +132,8 @@ pub struct TableSizes {
     pub menu_width: f32,
     /// Medium weight, for headers and group names.
     pub medium: f32,
+    /// A board's column, cards and all.
+    pub board_column_width: f32,
 }
 
 /// The table's look. Build one from [`TableTheme::dark`], [`TableTheme::light`] or
@@ -203,6 +207,7 @@ impl TableTheme {
                 popover: hex(0x1b1b1f),
                 popover_border: hex(0x2e2e34),
                 shadow: hexa(0x00000080),
+                card: hex(0x1b1b1f),
                 options: OptionColors {
                     default: chip(0xffffff1a, 0xdcdce0),
                     gray: chip(0x8b8b9340, 0xd0d0d6),
@@ -241,6 +246,7 @@ impl TableTheme {
                 popover: hex(0xffffff),
                 popover_border: hex(0xdcdce0),
                 shadow: hexa(0x00000026),
+                card: hex(0xffffff),
                 options: OptionColors {
                     default: chip(0x0000000f, 0x3a3a40),
                     gray: chip(0xe3e2e0ff, 0x32302c),
@@ -281,6 +287,11 @@ impl TableTheme {
                 hover: core.accent,
                 popover: core.popover,
                 popover_border: core.border,
+                card: if core.mode.is_dark() {
+                    core.popover
+                } else {
+                    core.card
+                },
                 ..start.colors
             },
             fonts: TableFonts {
@@ -316,6 +327,7 @@ impl TableTheme {
                 icon: 14.,
                 menu_width: 240.,
                 medium: 500.,
+                board_column_width: 264.,
             },
             rem_base: 15.,
             min_hit: if touch { TableTheme::TOUCH_HIT } else { 0. },
@@ -347,6 +359,7 @@ impl TableTheme {
             popover: c,
             popover_border: c,
             shadow: c,
+            card: c,
             options: OptionColors {
                 default: ch,
                 gray: ch,
