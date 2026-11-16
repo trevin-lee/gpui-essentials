@@ -10,6 +10,7 @@
 
 use std::path::PathBuf;
 
+use chrono::Datelike as _;
 use gpui::*;
 use gpui_core::*;
 
@@ -49,6 +50,8 @@ struct Gallery {
     pressed: SharedString,
     view: usize,
     on: bool,
+    date: Entity<DatePickerState>,
+    month: Entity<DatePickerState>,
     level: Entity<SliderState>,
     name: Entity<InputState>,
     note: Entity<InputState>,
@@ -278,6 +281,15 @@ impl Render for Gallery {
                     .selectable(true),
                 ),
             )
+            .child(heading("A date, and a month in place (Monday first, dots on some days)", &theme))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(rems(1.))
+                    .child(div().w(rems(14.)).child(DatePicker::new(&self.date).placeholder("Pick a date")))
+                    .child(MonthGrid::new(&self.month).dots(|d| d.day() % 5 == 0)),
+            )
             .child(heading("Press, with a host's own look", &theme))
             .child(
                 Press::new("press")
@@ -349,9 +361,13 @@ fn main() {
                         .auto_grow(2, 6)
                         .default_value("A textarea grows with its text, from two rows to six, and wraps a long line rather than running out of its box.")
                 });
+                let date = cx.new(|cx| DatePickerState::new(window, cx));
+                let month = cx.new(|cx| DatePickerState::new(window, cx).week_start(chrono::Weekday::Mon));
                 cx.new(|cx| Gallery {
                     pressed: "nothing yet".into(),
                     on: true,
+                    date,
+                    month,
                     level: cx.new(|_| {
                         SliderState::new()
                             .min(0.)
