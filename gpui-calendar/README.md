@@ -19,10 +19,12 @@ their look.
 - **Views:** day, week, N days (`CalendarView::Days(n)`), month and agenda
   (`CalendarView::Agenda(n)`, two weeks from the header's button). Day and week share a time
   grid. It has a row of day names with today marked, an all-day row (three rows of spans, then
-  "+N more", which opens the row), hour lines, and a line at the current time with the time in the
+  "+N more", which opens the row; open or not, it never takes more than 40% of the calendar
+  under the day names, so a crowded day can't push the hours away), hour lines, and a line at the current time with the time in the
   gutter. The grid opens with the current time a third of the way down. The month shows spans for
   all-day and multi-day events, a dot, time and title for the rest, and "+N more", which opens
-  that day.
+  that day. A span is one bar across a week's days; where it goes on past the week (into the
+  month's next row, or the next period), that end is square with a chevron pointing on.
 - **Agenda:** a list of the days that have events (and today), each under a header that stays
   at the top while its day scrolls by. A row has the time (or "All day", "Day 2 of 3",
   "Until 2 AM"), the calendar's colour, the title, the place and every link as a pill. It opens
@@ -46,7 +48,9 @@ their look.
   a piece on each day.
 - **Dragging:** drag empty time to make an event, drag an event to move it (to other days too),
   and drag its bottom edge to change its end (an all-day event's right edge, in the all-day row
-  and the month). Drags snap to 15 minutes (`snap_minutes`), show a ghost of where the event would
+  and the month). On the grid a move crosses between the all-day row and the hours: an all-day
+  event dropped in the hours becomes a timed one starting there, `default_duration` long, and
+  a timed one dropped in the all-day row becomes that whole day. Drags snap to 15 minutes (`snap_minutes`), show a ghost of where the event would
   land with the original faded, and Escape drops them. Near the grid's top or bottom a drag
   scrolls it. Read-only events, and events in read-only calendars, can be selected and opened
   but not moved.
@@ -329,7 +333,10 @@ design review's panel as a sheet) and `compact-mini` (the mini month open behind
 the Mac's size, `zones` is the week with India's hours beside Los Angeles', `recurring` asks
 the recurring question in a popover, `find` finds "lunch" while the calendar takes typing,
 `panel` opens the design review's panel beside it, `mini` has the mini month beside the
-week, and `crowd` is the busy week with Thursday's "+N" open. Only `mini` and `compact-mini` are drawn with the mini month, so the other pictures stay
+week, `crowd` is the busy week with Thursday's "+N" open, `all-day` crowds Wednesday's
+all-day row and has a visit go on into next week, `all-day-month` is the same month, and
+`all-day-drag` carries Mom's birthday into Friday's hours. Only `mini` and `compact-mini` are
+drawn with the mini month, so the other pictures stay
 comparable. `tests/touch.rs` drives the calendar with real touch events on the Mac: taps, long
 presses, drags, swipes and pans.
 
@@ -342,6 +349,10 @@ gpui-core's theme.
 | ![Empty time on Monday dragged out into a ghost](docs/drag-create.png) | ![Design review carried to Tuesday, the original faded](docs/drag-move.png) |
 | **Changing an event's end** | **Moving an all-day event in the month** |
 | ![Planning's end dragged to 1:15](docs/resize.png) | ![A trip dragged a week later](docs/month-drag.png) |
+| **A crowded all-day row, and a span going on** | **The span across the month's rows** |
+| ![Wednesday's all-day row with "+6 more", and Parents visiting with a chevron at its end](docs/all-day.png) | ![Parents visiting from the 21st into the next row, a chevron at each break](docs/all-day-month.png) |
+| **An all-day event dragged into the hours** | |
+| ![Mom's birthday carried into Friday at 2 PM, an hour long](docs/all-day-drag.png) | |
 | **A day** | **A busy week (160 events)** |
 | ![Wednesday on its own](docs/day.png) | ![A week packed with overlapping events, readable columns and "+N" for the rest](docs/dense.png) |
 | **What didn't fit, listed** | |
@@ -396,7 +407,6 @@ Not done yet:
   the series, is the app's job, as above).
 - A context menu (Delete is the key for now).
 - Year, resource and timeline views.
-- Dragging a timed event into the all-day row, or back.
 - A scrollbar on the grid.
 - A drag that keeps scrolling while the pointer rests at the grid's edge. Today it scrolls only
   while the pointer moves.
