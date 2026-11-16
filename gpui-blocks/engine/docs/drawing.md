@@ -11,13 +11,15 @@ the editor working after every step.
 1. **Geometry of its own** (done). `frame.rs` keeps each leaf's geometry as either GPUI Kit's
    `LeafGeometry` or the engine's own (a `ParagraphLayout` and where it was drawn). The caret,
    hit testing, selection and the table grips read either.
-2. **Blocks drawn by the engine**, top-level kind by kind. A block the engine draws reports its
+2. **Blocks drawn by the engine**, top-level kind by kind. A top-level block is drawn by the
+   engine when everything in it can be (`draw::tree`); otherwise the whole block still goes
+   through GPUI Kit. A block the engine draws reports its
    leaves' geometry itself; the rest still go through GPUI Kit, and both kinds of geometry make
    one frame. In order:
    - paragraphs and headings without pictures (done);
    - dividers, custom blocks (extensions) and source atoms (done);
-   - quotes, callouts and toggles (with `surfaces.rs`' containers);
-   - lists, with their markers and task boxes (done, when they hold only paragraphs and lists);
+   - quotes, callouts and toggles (with `surfaces.rs`' containers) (done);
+   - lists, with their markers and task boxes (done);
    - tables, with the grips;
    - pictures, inline and alone (through the host's image loader);
    - code blocks, once syntax highlighting has a home outside GPUI Kit.
