@@ -161,6 +161,12 @@ fn time<T>(label: &str, bound_ms: u64, mut f: impl FnMut() -> T) -> T {
     times.sort();
     let median = times[2];
     eprintln!("{label}: {:.2} ms", median.as_secs_f64() * 1e3);
+    // Four times looser on CI (`CI` set): shared runners' timings swing with their load.
+    let bound_ms = if std::env::var_os("CI").is_some() {
+        bound_ms * 4
+    } else {
+        bound_ms
+    };
     assert!(
         median < Duration::from_millis(bound_ms),
         "{label} took {median:?}, over {bound_ms} ms"
