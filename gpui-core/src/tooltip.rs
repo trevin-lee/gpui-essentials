@@ -23,6 +23,7 @@ pub struct Tooltip {
     background: Option<Hsla>,
     color: Option<Hsla>,
     border: Option<Hsla>,
+    font: Option<SharedString>,
 }
 
 impl Tooltip {
@@ -32,6 +33,7 @@ impl Tooltip {
             background: None,
             color: None,
             border: None,
+            font: None,
         }
     }
 
@@ -48,6 +50,13 @@ impl Tooltip {
     }
 
     /// A one-pixel border in this colour (otherwise none).
+    /// Its font's family (otherwise the theme's). A tooltip is drawn over the window, apart from
+    /// the element it's for, so it can't take that element's text style by itself.
+    pub fn font_family(mut self, family: impl Into<SharedString>) -> Self {
+        self.font = Some(family.into());
+        self
+    }
+
     pub fn border_color(mut self, color: impl Into<Hsla>) -> Self {
         self.border = Some(color.into());
         self
@@ -82,7 +91,11 @@ impl Render for Tooltip {
                     .text_color(self.color.unwrap_or(theme.background))
                     .when_some(self.border, |d, c| d.border_1().border_color(c))
                     .text_size(theme.text.xs)
-                    .font_family(theme.font_family.clone())
+                    .font_family(
+                        self.font
+                            .clone()
+                            .unwrap_or_else(|| theme.font_family.clone()),
+                    )
                     .child(self.text.clone())
                     .with_animation(
                         "tooltip-in",

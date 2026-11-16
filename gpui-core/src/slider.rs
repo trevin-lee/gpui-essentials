@@ -188,6 +188,7 @@ pub struct Slider {
     disabled: bool,
     touch: bool,
     track: Option<Hsla>,
+    ring: Option<Hsla>,
     fill: Option<Hsla>,
     thumb: Option<Hsla>,
     style: StyleRefinement,
@@ -200,6 +201,7 @@ impl Slider {
             disabled: false,
             touch: false,
             track: None,
+            ring: None,
             fill: None,
             thumb: None,
             style: StyleRefinement::default(),
@@ -208,6 +210,13 @@ impl Slider {
 
     /// The empty track's colour (otherwise the theme's input colour in the dark, its muted
     /// colour in the light), for a host with a palette of its own.
+    /// The keyboard focus ring's colour, drawn as given (otherwise the theme's ring at half
+    /// strength), for a host with a palette of its own.
+    pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.ring = Some(color.into());
+        self
+    }
+
     pub fn track_color(mut self, color: impl Into<Hsla>) -> Self {
         self.track = Some(color.into());
         self
@@ -266,7 +275,13 @@ impl RenderOnce for Slider {
         });
         let fill_color = self.fill.unwrap_or(theme.primary);
         let thumb_color = self.thumb.unwrap_or(theme.background);
-        let ring = focus_ring(cx);
+        let ring = match self.ring {
+            Some(color) => gpui::BoxShadow {
+                color,
+                ..focus_ring(cx)
+            },
+            None => focus_ring(cx),
+        };
         let thumb = css(16.);
 
         let mut el = div()
