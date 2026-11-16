@@ -125,6 +125,41 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
 8. **The Mac app**, last. It needs 1–5 and Switch, and moves in one PR in open-cloud-agents
    that Main merges.
 
+## After the kit: Popover, Menu, Picker
+
+No crate used the kit's popovers or menus: the Mac app, gpui-blocks' slash menu,
+gpui-chatwidgets' select and gpui-tables' header menus each build their own on GPUI's
+`deferred(anchored())`. gpui-tables asked for shared ones (2026-11-16), in three layers, each on
+the one before:
+
+1. **Popover.**
+   - **Anchoring:** it anchors to an element's bounds. It goes below by default, flips above or
+     shifts sideways at the window's edge, and is at least as wide as its anchor, at most as wide
+     as the window, with a maximum height and its own scrolling.
+   - **Closing:** a click outside, Escape, or its anchor scrolling out of view closes it, and a
+     second press on the anchor toggles it.
+   - **Focus:** while open it holds the keyboard. On close the focus goes back to whatever opened
+     it, or to a focus handle the host names (the table's cell focus).
+   - **Content:** it hosts any content, such as the date grid. DatePicker's month moves onto it.
+   **Sheet** is the same API for touch: a bottom sheet with 44-point rows. gpui-calendar asked
+   for it (2026-11-16) for its recurring-edit choice and event details: a popover at the
+   event on the Mac, a sheet on touch. The planned shape is
+   `Popover::new(id).anchor(bounds or point).open(open).on_dismiss(…).child(content)`; the
+   calendar draws a stand-in in that shape until it lands.
+2. **Menu.**
+   - **Entries:** each has an icon and a label, can be checked (toggles, the current option) or
+     disabled, and can carry a host-drawn chip (a select option's colour). There are
+     separators, and 44 pt entries on touch.
+   - **Keys:** Up and Down move a highlight that the pointer moves too, Enter picks, Escape
+     closes.
+3. **Picker.** A Menu with an Input at the top that filters its entries as you type. A
+   single-select picker closes on a pick; a multi-select one stays open.
+
+Rules for all three, beyond the crate's:
+- no global state, and nothing drawn while closed;
+- colours from a palette the host passes in (gpui-chatwidgets' `CardTheme` and gpui-tables'
+  `TableTheme` have their own), with the global Theme as the default.
+
 ## Switch order
 
 1. **gpui-flow first**, after step 1. Its kit use is GPUI through `gpui_kit::*`,

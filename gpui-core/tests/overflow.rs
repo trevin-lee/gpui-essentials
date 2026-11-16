@@ -15,8 +15,8 @@ use gpui::{
     Styled as _, TestAppContext, TestDispatcher, Window, div, px, size,
 };
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariant, ButtonVariants as _, ControlSize, IconName, Input,
-    InputState, Root, Sizable as _, TextView, Theme, Tooltip,
+    Button, ButtonGroup, ButtonVariant, ButtonVariants as _, ControlSize, DatePicker,
+    DatePickerState, IconName, Input, InputState, Root, Sizable as _, TextView, Theme, Tooltip,
 };
 
 const WORD: &str = "Pneumonoultramicroscopicsilicovolcanoconiosis-Antidisestablishmentarianism";
@@ -42,6 +42,18 @@ type Make = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 /// Every component that shows text, in every variant and size, with each worst text.
 fn components() -> Vec<(String, Make)> {
     let mut out: Vec<(String, Make)> = Vec::new();
+    for (t, text) in texts().into_iter().enumerate() {
+        let placeholder = text.clone();
+        out.push((
+            format!("DatePicker placeholder {t}"),
+            Rc::new(move |window, cx| {
+                let state = cx.new(|cx| DatePickerState::new(window, cx));
+                DatePicker::new(&state)
+                    .placeholder(placeholder.clone())
+                    .into_any_element()
+            }),
+        ));
+    }
     for (t, text) in texts().into_iter().enumerate() {
         for (kind, multi) in [("one-line", false), ("textarea", true)] {
             let value = text.clone();
@@ -268,10 +280,10 @@ fn every_component_keeps_its_text_in_its_box() {
                     continue;
                 }
                 // Under 60 CSS pixels there's no room for a character: a field's padding and
-                // border take 26, and a table's cells and a nested list's text have less than one
+                // border take 26 (a date field's its icon too), and a table's cells and a nested list's text have less than one
                 // (such a character is cut at its cell, never drawn over it).
-                if (name.starts_with("Input") || name.starts_with("TextView")) && width / zoom < 60.
-                {
+                let narrow = ["Input", "TextView", "DatePicker"];
+                if narrow.iter().any(|n| name.starts_with(n)) && width / zoom < 60. {
                     continue;
                 }
                 let mut cx = app_with_text();
