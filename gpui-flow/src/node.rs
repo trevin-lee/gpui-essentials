@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
+use serde_json::Value;
 
 use crate::flow::Flow;
 use crate::shapes::geometry;
@@ -259,6 +260,62 @@ pub(crate) struct Shared {
     /// Whether the last frame drew an animated edge, and whether the one before did.
     pub animating: Cell<bool>,
     pub was_animating: Cell<bool>,
+    /// Each ink node's stroke, read once for as long as its stored form stays the same.
+    pub ink: RefCell<HashMap<NodeId, InkCache>>,
+}
+
+/// An ink node's stroke as read, and what it was read from: the points by where their text is
+/// and a little of it, the rest as it was.
+pub(crate) struct InkCache {
+    points: (usize, usize, [u8; 8], [u8; 8]),
+    rest: [Value; 4],
+    pub drawn: Rc<crate::ink::Drawn>,
+}
+
+impl Shared {
+    /// An ink node's stroke ready to draw; none when its `data.ink` doesn't read as one.
+    pub fn ink(&self, node: &Node) -> Option<Rc<crate::ink::Drawn>> {
+        let ink = node.data.get("ink")?;
+        let text = ink.get("points")?.as_str()?;
+        let b = text.as_bytes();
+        let ends = |s: &[u8]| {
+            let mut a = [0u8; 8];
+            let n = s.len().min(8);
+            a[..n].copy_from_slice(&s[..n]);
+            a
+        };
+        let points = (
+            text.as_ptr() as usize,
+            b.len(),
+            ends(b),
+            ends(&b[b.len().saturating_sub(8)..]),
+        );
+        let field = |k: &str| ink.get(k).cloned().unwrap_or(Value::Null);
+        let rest = [
+            field("tool"),
+            field("color"),
+            field("width"),
+            field("transform"),
+        ];
+        let mut cache = self.ink.borrow_mut();
+        if let Some(c) = cache.get(&node.id)
+            && c.points == points
+            && c.rest == rest
+        {
+            return Some(c.drawn.clone());
+        }
+        let stroke = crate::ink::InkStroke::of(node)?;
+        let drawn = Rc::new(crate::ink::Drawn::of(&stroke));
+        cache.insert(
+            node.id.clone(),
+            InkCache {
+                points,
+                rest,
+                drawn: drawn.clone(),
+            },
+        );
+        Some(drawn)
+    }
 }
 
 impl Shared {
@@ -1348,6 +1405,43 @@ pub fn drawing_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .into_any_element()
 }
 
+/// The built-in `ink` kind: a stroke drawn with a pen, stored as the iPad's Notes stores
+/// PencilKit's (see [`crate::ink`]). It's drawn in its box, which is the stroke's bounds; one
+/// that doesn't read draws nothing.
+pub fn ink_node(node: &Node, ctx: &NodeContext) -> AnyElement {
+    let Some(drawn) = ctx.shared.ink(node) else {
+        return div().into_any_element();
+    };
+    let (w, h) = (drawn.size.x.max(0.5), drawn.size.y.max(0.5));
+    let color = crate::paint::ink_color(drawn.color, drawn.tool, &ctx.colors);
+    let halo = ctx.selected.then_some(ctx.colors.selected);
+    div()
+        .relative()
+        .w(units(w))
+        .h(units(h))
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    let scale = f32::from(bounds.size.width) / w;
+                    crate::paint::paint_ink(
+                        &drawn.outline,
+                        bounds.origin,
+                        scale,
+                        color,
+                        halo,
+                        window,
+                    );
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
+        .into_any_element()
+}
+
 /// Points as subcanvas keeps a drawing's: "x,y x,y …", each kept from 0 to 1. What isn't a pair
 /// of numbers is skipped, and a line is cut short at 4000 points.
 pub fn parse_points(text: &str) -> Vec<XY> {
@@ -1377,6 +1471,7 @@ pub(crate) fn built_in() -> HashMap<SharedString, NodeRenderer> {
         Rc::new(|n, c, _, _, _| labeled_node(n, c, true, false)),
     );
     kinds.insert("group".into(), Rc::new(|n, c, _, _, _| group_node(n, c)));
+    kinds.insert("ink".into(), Rc::new(|n, c, _, _, _| ink_node(n, c)));
     kinds.insert("topic".into(), Rc::new(|n, c, _, _, _| topic_node(n, c)));
     kinds.insert("shape".into(), Rc::new(|n, c, _, _, _| shape_node(n, c)));
     kinds.insert("frame".into(), Rc::new(|n, c, _, _, _| frame_node(n, c)));

@@ -24,6 +24,8 @@ gpui-core = { path = "../gpui-core" }
 # Nodes and edges save and load as JSON, and a node's data is any JSON value.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Ink points are stored as base64, as the iPad's Notes stores them.
+base64 = "0.22"
 # Only for the png feature: SVG drawn into pixels, for `export::svg_to_png`.
 resvg = { version = "0.46", optional = true }
 # Only for the shots feature: the macOS platform with its test support (offscreen rendering)

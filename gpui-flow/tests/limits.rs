@@ -59,12 +59,12 @@ fn run(file: &str, at_least: usize, valid: bool) {
 
 #[test]
 fn valid_documents_have_no_problems() {
-    run("valid.json", 16, true);
+    run("valid.json", 20, true);
 }
 
 #[test]
 fn invalid_documents_have_exactly_their_problems() {
-    run("invalid.json", 37, false);
+    run("invalid.json", 48, false);
 }
 
 #[test]

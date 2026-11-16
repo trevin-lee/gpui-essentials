@@ -259,7 +259,7 @@ fn note_node(node: &Node, ctx: &NodeContext) -> AnyElement {
 /// with an icon or an emoji.
 fn whiteboard() -> (Vec<Node>, Vec<Edge>) {
     let at = |x: f32, y: f32| xy(x, y);
-    let nodes = vec![
+    let nodes: Vec<Node> = vec![
         Node::new("user", at(0., 120.))
             .shape(NodeShape::Ellipse)
             .label("Someone signs up")
@@ -308,7 +308,10 @@ fn whiteboard() -> (Vec<Node>, Vec<Edge>) {
             .label("Rate-limit sign-ups from one address")
             .color("pink")
             .text_align(LabelAlign::Left),
-    ];
+    ]
+    .into_iter()
+    .chain(ink_strokes())
+    .collect();
     let edge = |id: &str, s: &str, sh: &str, t: &str, th: &str| {
         Edge::new(id, s, t)
             .source_handle(sh)
@@ -333,6 +336,55 @@ fn whiteboard() -> (Vec<Node>, Vec<Edge>) {
             .dash(EdgeDash::Dotted),
     ];
     (nodes, edges)
+}
+
+/// Ink as a hand leaves it: a red ring round the question, a highlighter under the note, and
+/// a pressed-harder pen's arrow to the cloud.
+fn ink_strokes() -> Vec<Node> {
+    use gpui_flow::ink::{InkPoint, InkStroke, InkTool};
+    let wobble = |i: usize| ((i as f32 * 0.7).sin() + (i as f32 * 1.9).cos() * 0.5) * 1.5;
+    let ring: Vec<InkPoint> = (0..=90)
+        .map(|i| {
+            let a = -1.2 + i as f32 / 90. * std::f32::consts::TAU * 1.08;
+            let (rx, ry) = (92. + wobble(i), 58. + wobble(i + 9));
+            InkPoint::at(548. + rx * a.cos(), 128. + ry * a.sin(), i as f32 / 60., 3.)
+        })
+        .collect();
+    let underline: Vec<InkPoint> = (0..=40)
+        .map(|i| {
+            InkPoint::at(
+                4. + i as f32 * 4.6,
+                392. + wobble(i) * 0.6,
+                i as f32 / 80.,
+                14.,
+            )
+        })
+        .collect();
+    let arrow: Vec<InkPoint> = (0..=30)
+        .map(|i| {
+            let t = i as f32 / 30.;
+            InkPoint {
+                force: 0.3 + (t * std::f32::consts::PI).sin() * 0.9,
+                ..InkPoint::at(170. + t * 50., 430. - (t * 2.6).sin() * 34., t, 4.)
+            }
+        })
+        .chain([
+            InkPoint::at(212., 414., 1.1, 4.),
+            InkPoint::at(221., 423., 1.15, 4.),
+            InkPoint::at(209., 430., 1.2, 4.),
+        ])
+        .collect();
+    vec![
+        Node::ink("ring", &InkStroke::new(InkTool::Ball, 0xd03030ff, 3., ring)),
+        Node::ink(
+            "underline",
+            &InkStroke::new(InkTool::Highlighter, 0xffd23fff, 14., underline),
+        ),
+        Node::ink(
+            "arrow",
+            &InkStroke::new(InkTool::Brush, 0x1d4ed8ff, 4., arrow),
+        ),
+    ]
 }
 
 fn mind_map() -> (Vec<Node>, Vec<Edge>) {
