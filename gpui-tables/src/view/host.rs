@@ -155,6 +155,15 @@ pub trait TableHost {
         edit.reply.edit_in_place(window, cx);
     }
 
+    /// The view shown changed because the person asked: a tab pressed in the bar of views, a
+    /// view made or duplicated (it's shown), the shown view deleted (its neighbour is). For a
+    /// host that remembers the last view each person had open; the table keeps the view shown
+    /// itself. Not called for the host's own [`TableView::set_view`]. Called after the table's
+    /// own update.
+    fn view_shown(&self, view_id: &str, window: &mut Window, cx: &mut App) {
+        let _ = (view_id, window, cx);
+    }
+
     /// The time now, in milliseconds since the epoch: for date groups and filters relative to
     /// today. Read when the rows are worked out again, never on a timer.
     fn now(&self) -> i64 {

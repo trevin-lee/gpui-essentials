@@ -111,6 +111,8 @@ pub struct TestHost {
     pub databases: RefCell<Vec<RelatedDatabase>>,
     /// The limits the table is held to.
     pub limits: Cell<Limits>,
+    /// The views the table said it showed, as a person switched them.
+    pub shown: RefCell<Vec<String>>,
 }
 
 impl TestHost {
@@ -126,6 +128,7 @@ impl TestHost {
             companies: load("companies").1,
             databases: RefCell::new(vec![related(&load("companies").0)]),
             limits: Cell::new(Limits::default()),
+            shown: RefCell::default(),
         })
     }
 
@@ -265,6 +268,20 @@ fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
                 *v = view.clone();
             }
         }
+        Edit::ViewCreated { database_id, view } if *database_id == db.id => {
+            let f = db.database.as_mut().unwrap();
+            match f.views.iter_mut().find(|v| v.id == view.id) {
+                Some(v) => *v = view.clone(),
+                None => f.views.push(view.clone()),
+            }
+        }
+        Edit::ViewDeleted {
+            database_id,
+            view_id,
+        } if *database_id == db.id => {
+            let f = db.database.as_mut().unwrap();
+            f.views.retain(|v| v.id != *view_id);
+        }
         _ => {}
     }
 }
@@ -349,6 +366,10 @@ impl TableHost for TestHost {
 
     fn limits(&self) -> Limits {
         self.limits.get()
+    }
+
+    fn view_shown(&self, view_id: &str, _: &mut Window, _: &mut App) {
+        self.shown.borrow_mut().push(view_id.to_owned());
     }
 }
 

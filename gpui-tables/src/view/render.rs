@@ -37,12 +37,20 @@ impl Render for TableView {
         }
         // A board view draws as a board, a list view as a list, any other as a table: one
         // entity and one host.
-        if self.shown.board.is_some() {
-            return self.render_board(window, cx);
-        }
-        if self.shown.list.is_some() {
-            return self.render_list(window, cx);
-        }
+        let body = if self.shown.board.is_some() {
+            self.render_board(window, cx)
+        } else if self.shown.list.is_some() {
+            self.render_list(window, cx)
+        } else {
+            self.render_table(window, cx)
+        };
+        // The bar of views over it (when it's on), and the bar's menus.
+        self.render_frame(body, window, cx)
+    }
+}
+
+impl TableView {
+    fn render_table(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.clamp_scroll();
         let t = self.theme.clone();
         let n = self.shown.items.len();
@@ -133,7 +141,11 @@ impl Render for TableView {
                     .as_ref()
                     .map_or(self.database.title.clone(), |v| v.name.clone()),
             ))
-            .on_action(cx.listener(|this, _: &super::Up, _, cx| this.on_vertical(-1, cx)))
+            .on_action(cx.listener(|this, _: &super::Up, window, cx| {
+                if !this.up_to_bar(window, cx) {
+                    this.on_vertical(-1, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &super::Down, _, cx| this.on_vertical(1, cx)))
             .on_action(cx.listener(|this, _: &super::Left, _, cx| this.on_horizontal(-1, cx)))
             .on_action(cx.listener(|this, _: &super::Right, _, cx| this.on_horizontal(1, cx)))
@@ -1180,7 +1192,8 @@ impl TableView {
             .on_dismiss(cx.listener(|this, reason: &DismissReason, window, cx| {
                 this.dismiss(*reason, window, cx)
             }));
-        let Some(open) = self.popover.clone() else {
+        // The bar's menus are drawn with the bar.
+        let Some(open) = self.popover.clone().filter(|p| !p.is_view_menu()) else {
             return popover.into_any_element();
         };
         let target = match &open {
@@ -1203,6 +1216,9 @@ impl TableView {
                 .iter()
                 .position(|c| c.property_id == *property_id)
                 .map_or_else(|| self.add_button_bounds(), |c| self.header_bounds(c)),
+            Popover::AddView | Popover::NewBoard | Popover::View { .. } => {
+                return popover.into_any_element();
+            }
         };
         // A header partly scrolled past the table's left edge hangs its menu from what shows of
         // it, so the menu stays in the window.
@@ -1302,6 +1318,9 @@ impl TableView {
                 .py(t.px(4.))
                 .child(body.w(width).child(self.render_filter_value(column)))
                 .into_any_element(),
+            Popover::AddView | Popover::NewBoard | Popover::View { .. } => {
+                popover.open(false).into_any_element()
+            }
             // The month took the keyboard when it opened; the popover leaves it there.
             Popover::Date { cell } => {
                 let Some((state, _)) = &self.date else {
@@ -1338,7 +1357,12 @@ impl TableView {
 
     /// The popover asks to close: a press elsewhere, or Escape. A filter value being typed is
     /// applied by a press elsewhere, as a cell's is, and dropped by Escape.
-    fn dismiss(&mut self, reason: DismissReason, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn dismiss(
+        &mut self,
+        reason: DismissReason,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if matches!(self.popover, Some(Popover::FilterValue { .. })) {
             let escape = reason == DismissReason::Escape;
             self.finish_editor(!escape, escape, window, cx);
@@ -1693,7 +1717,7 @@ impl TableView {
     }
 
     /// A menu's field: gpui-core's Input in a box drawn as the table's other fields.
-    fn field_box(&self, state: &Entity<InputState>, label: String) -> gpui::Div {
+    pub(crate) fn field_box(&self, state: &Entity<InputState>, label: String) -> gpui::Div {
         let t = &self.theme;
         let field = FieldColors::of(t);
         div()
@@ -1719,7 +1743,7 @@ impl TableView {
             )
     }
 
-    fn small_menu(&self, id: &'static str) -> PopupMenu {
+    pub(crate) fn small_menu(&self, id: &'static str) -> PopupMenu {
         let t = &self.theme;
         PopupMenu::new(ElementId::NamedInteger(id.into(), self.menu_serial))
             .take_focus(false)

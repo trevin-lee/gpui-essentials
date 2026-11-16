@@ -142,6 +142,10 @@ pub(crate) enum FieldFor {
     Rename(String),
     NewOption(String),
     RenameOption(String, String),
+    /// A new view's name, in the bar's + menu.
+    NewView,
+    /// A view's name.
+    RenameView(String),
 }
 
 /// A menu's field: gpui-core's Input, what it names and its limit.
@@ -299,6 +303,7 @@ impl TableView {
         self.field = None;
         self.note = None;
         self.new_relation = None;
+        self.new_view = None;
     }
 
     /// The property the open menu is about: the column's, or a property page's.
@@ -397,7 +402,7 @@ impl TableView {
         cx.notify();
     }
 
-    fn open_field(
+    pub(crate) fn open_field(
         &mut self,
         names: FieldFor,
         text: String,
@@ -462,11 +467,17 @@ impl TableView {
             FieldFor::Rename(pid) => self.rename_property(&pid, &name, window, cx),
             FieldFor::NewOption(pid) => self.add_option(&pid, &name, window, cx),
             FieldFor::RenameOption(pid, oid) => self.rename_option(&pid, &oid, &name, window, cx),
+            FieldFor::NewView => self.commit_new_view(window, cx),
+            FieldFor::RenameView(id) => self.rename_view(&id, window, cx),
         }
     }
 
     /// Up or Down in the add-property menu's field: the type above or below.
     pub(crate) fn move_add_kind(&mut self, by: isize, cx: &mut Context<Self>) {
+        if matches!(self.popover, Some(Popover::AddView)) {
+            self.move_view_kind(by, cx);
+            return;
+        }
         if !matches!(self.popover, Some(Popover::AddProperty)) {
             return;
         }
@@ -478,6 +489,12 @@ impl TableView {
 
     /// Why the open menu can't do something now: a note it refused with, or a limit reached.
     pub(crate) fn page_note(&self, cx: &App) -> Option<String> {
+        if matches!(
+            self.popover,
+            Some(Popover::AddView | Popover::NewBoard | Popover::View { .. })
+        ) {
+            return self.view_note(cx);
+        }
         if let Some(n) = &self.note {
             return Some(n.clone());
         }
@@ -527,7 +544,7 @@ impl TableView {
         }
     }
 
-    fn refuse(&mut self, note: String, cx: &mut Context<Self>) {
+    pub(crate) fn refuse(&mut self, note: String, cx: &mut Context<Self>) {
         self.note = Some(note);
         cx.notify();
     }
