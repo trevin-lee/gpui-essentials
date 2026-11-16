@@ -254,6 +254,9 @@ pub struct Editor {
     /// A selection handle being dragged by touch: the selection's other end, which stays, and
     /// how far the finger is from the end it moves.
     touch_drag: Option<(BlockPosition, Point<Pixels>)>,
+    /// The selection the touch edit menu was used on: it stays hidden until the selection
+    /// changes.
+    menu_used_on: Option<(BlockPosition, BlockPosition)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -326,6 +329,7 @@ impl Editor {
             hovered: None,
             ids: Default::default(),
             touch_drag: None,
+            menu_used_on: None,
             _subscriptions: vec![subscription],
         }
     }
@@ -1014,12 +1018,22 @@ impl Editor {
         let targets: Vec<(Bounds<Pixels>, Point<Pixels>, BlockPosition)> = ends
             .iter()
             .map(|(_, b, other, start)| {
-                let knob_center = if *start {
-                    point(b.center().x, b.top() - knob / 2.)
+                // A target `reach` wide and tall, from the knob outward: it reaches over the
+                // line beside the selection, never far into the selected text, so a press inside
+                // the selection is still the text's.
+                let x = b.center().x;
+                let inside = px(8.);
+                let target = if *start {
+                    Bounds::from_corners(
+                        point(x - reach + inside, b.top() - knob - px(16.)),
+                        point(x + inside, b.bottom().max(b.top() - knob - px(16.) + reach)),
+                    )
                 } else {
-                    point(b.center().x, b.bottom() + knob / 2.)
+                    Bounds::from_corners(
+                        point(x - inside, b.top().min(b.bottom() + knob + px(16.) - reach)),
+                        point(x + reach - inside, b.bottom() + knob + px(16.)),
+                    )
                 };
-                let target = Bounds::centered_at(knob_center, size(reach, reach));
                 (target, b.center(), *other)
             })
             .collect();
@@ -1085,6 +1099,124 @@ impl Editor {
         )
     }
 
+    /// On a touch screen, Cut, Copy, Paste and Select all above a text selection (Copy and Select
+    /// all when read-only), as iOS shows them. Hidden while a handle moves, and after an item is
+    /// used until the selection changes.
+    fn edit_menu(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        use markdown_editor::actions::{Copy, Cut, Paste, SelectAll};
+        let state = self.state.read(cx);
+        let BlockSelection::Text { anchor, head } = *state.model().selection() else {
+            return None;
+        };
+        if anchor == head
+            || self.touch_drag.is_some()
+            || self.menu_used_on == Some((anchor, head))
+            || state.is_composing()
+            || !window.last_input_was_touch()
+            || !state.focus_handle(cx).is_focused(window)
+        {
+            return None;
+        }
+        let (a, h) = (state.position_bounds(anchor)?, state.position_bounds(head)?);
+        let (first, last) = if (a.top(), a.left()) <= (h.top(), h.left()) {
+            (a, h)
+        } else {
+            (h, a)
+        };
+        // Centred over the selection on one row, else over its start; above the start's knob.
+        let x = if (first.top() - last.top()).abs() < px(1.) {
+            (first.left() + last.left()) / 2.
+        } else {
+            first.left()
+        };
+        let at = point(x, first.top() - px(18.));
+        let readonly = state.is_readonly();
+        let theme = cx.theme();
+        let (bg, fg, border) = (theme.popover, theme.popover_foreground, theme.border);
+        let this = cx.entity().downgrade();
+        let item = move |label: &'static str, action: Box<dyn Action>| {
+            let this = this.clone();
+            div()
+                .id(label)
+                .h(px(44.))
+                .px(px(14.))
+                .flex()
+                .items_center()
+                .text_size(px(15.))
+                .whitespace_nowrap()
+                .child(label)
+                .debug_selector(move || format!("blocks-menu-{label}"))
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    cx.stop_propagation();
+                    let _ = this.update(cx, |this, cx| this.used_menu(cx));
+                    window.dispatch_action(action.boxed_clone(), cx);
+                })
+        };
+        let mut items = Vec::new();
+        if !readonly {
+            items.push(item("Cut", Box::new(Cut)));
+        }
+        items.push(item("Copy", Box::new(Copy)));
+        if !readonly {
+            items.push(item("Paste", Box::new(Paste)));
+        }
+        items.push(item("Select all", Box::new(SelectAll)));
+        Some(
+            deferred(
+                anchored()
+                    .position(at)
+                    .anchor(Anchor::BottomCenter)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        div()
+                            .flex()
+                            .rounded(px(10.))
+                            .border_1()
+                            .border_color(border)
+                            .bg(bg)
+                            .text_color(fg)
+                            .shadow_md()
+                            .overflow_hidden()
+                            .debug_selector(|| "blocks-edit-menu".into())
+                            .children(items),
+                    ),
+            )
+            .with_priority(3),
+        )
+    }
+
+    /// A new long press brings the edit menu back, even over the selection it was used on.
+    fn long_press_watch(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let this = cx.entity().downgrade();
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                let this = this.clone();
+                window.on_mouse_event(move |event: &LongPressEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Capture && event.phase == TouchPhase::Started {
+                        let _ = this.update(cx, |this, cx| {
+                            if this.menu_used_on.take().is_some() {
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            },
+        )
+        .size_0()
+    }
+
+    fn used_menu(&mut self, cx: &mut Context<Self>) {
+        if let BlockSelection::Text { anchor, head } = *self.state.read(cx).model().selection() {
+            self.menu_used_on = Some((anchor, head));
+            cx.notify();
+        }
+    }
+
     fn touch_handle(
         &mut self,
         event: &TouchDragEvent,
@@ -1141,6 +1273,7 @@ impl Render for Editor {
         let side_menu = self.side_menu(cx);
         let slash_menu = self.slash_menu(cx);
         let handles = self.selection_handles(window, cx);
+        let edit_menu = self.edit_menu(window, cx);
         div()
             .id("gpui-blocks")
             .size_full()
@@ -1185,6 +1318,8 @@ impl Render for Editor {
             .children(side_menu)
             .children(slash_menu)
             .children(handles)
+            .children(edit_menu)
+            .child(self.long_press_watch(cx))
     }
 }
 
@@ -1459,6 +1594,67 @@ mod tests {
         drag_handle(cx, "blocks-handle-start", start);
         assert_eq!(selected(&editor, cx), (17, 0));
         assert_eq!(markdown(&editor, cx), "hello world again");
+    }
+
+    fn long_press(cx: &mut VisualTestContext, at: gpui_kit::Point<gpui_kit::Pixels>) {
+        touch(cx, gpui_kit::TouchPhase::Started, at);
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        draw(cx);
+        touch(cx, gpui_kit::TouchPhase::Ended, at);
+    }
+
+    fn tap(cx: &mut VisualTestContext, name: &'static str) {
+        let at = cx
+            .debug_bounds(name)
+            .unwrap_or_else(|| panic!("{name} isn't drawn"))
+            .center();
+        touch(cx, gpui_kit::TouchPhase::Started, at);
+        touch(cx, gpui_kit::TouchPhase::Ended, at);
+    }
+
+    #[gpui_kit::test]
+    fn the_touch_menu_copies_pastes_and_selects_all(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world again");
+        let at = point_at(&editor, cx, 8);
+        long_press(cx, at);
+        assert!(cx.debug_bounds("blocks-edit-menu").is_some());
+        tap(cx, "blocks-menu-Copy");
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+            Some("world")
+        );
+        assert_eq!(
+            selected(&editor, cx),
+            (6, 11),
+            "copying keeps the selection"
+        );
+        assert!(
+            cx.debug_bounds("blocks-edit-menu").is_none(),
+            "and closes the menu"
+        );
+        // Selected again, then pasted over.
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("planet".into()));
+        let at = point_at(&editor, cx, 8);
+        long_press(cx, at);
+        tap(cx, "blocks-menu-Paste");
+        assert_eq!(markdown(&editor, cx), "hello planet again");
+        let at = point_at(&editor, cx, 2);
+        long_press(cx, at);
+        tap(cx, "blocks-menu-Select all");
+        assert_eq!(selected(&editor, cx), (0, 18));
+    }
+
+    #[gpui_kit::test]
+    fn a_read_only_touch_menu_only_copies(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world");
+        editor.update(cx, |e, cx| e.set_readonly(true, cx));
+        draw(cx);
+        let at = point_at(&editor, cx, 8);
+        long_press(cx, at);
+        assert!(cx.debug_bounds("blocks-menu-Copy").is_some());
+        assert!(cx.debug_bounds("blocks-menu-Cut").is_none());
+        assert!(cx.debug_bounds("blocks-menu-Paste").is_none());
     }
 
     #[gpui_kit::test]
