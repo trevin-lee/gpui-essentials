@@ -49,6 +49,10 @@ Run the example with `cargo run --release --example flow` from this folder.
   kept. Nothing selected is stored, and `Flow::set_document()` keeps the selection. New ids are
   random, so two editors adding at once don't clash. [docs/json.md](docs/json.md) has every
   field.
+- **Limits.** `limits::Limits` checks a document or a batch against what Docs stores (10,000
+  nodes, 20,000 edges, 10,000-character texts, frames 16 deep, …), and
+  `tests/fixtures/limits` has the cases a server tests against too, with the exact problem
+  each gives.
 - **Edits as operations.** Each settled edit is sent as one batch (`FlowEvent::Edits`) of
   `addNode`, `patchNode`, `removeNode` and the same for edges, by id, a patch holding only the
   fields that changed (a JSON merge patch). A drag of many nodes is one batch, at its end.

@@ -38,6 +38,7 @@ pub mod geometry;
 pub mod graph;
 pub mod import;
 pub mod json;
+pub mod limits;
 pub mod node;
 mod paint;
 pub mod routing;
