@@ -1105,6 +1105,15 @@ mod shots {
                     sketch(window, cx, &flow, Tool::Pen(marker), p[2], p[3], 1.5, true).await;
                     sketch(window, cx, &flow, Tool::Pen(red), p[4], p[5], 20., false).await;
                 }
+                // The board at a quarter size, too small to read: shapes, colors and ink stay.
+                "far" => {
+                    let _ = cx.update_window(window, |_, _, cx| {
+                        flow.update(cx, |f, cx| {
+                            f.options.min_zoom = 0.05;
+                            f.set_viewport(Viewport::new(330., 220., 0.25), cx);
+                        })
+                    });
+                }
                 "zoom" => {
                     let _ = cx.update_window(window, |_, _, cx| {
                         flow.update(cx, |f, cx| {

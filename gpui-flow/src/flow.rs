@@ -12,6 +12,7 @@ use gpui::*;
 use crate::geometry::{EdgePath, distance_to_polyline, edge_path, longest_middle, rounded_path};
 use crate::graph;
 use crate::json::{self, DocLayout, Document, Op};
+use crate::node::FastMap;
 use crate::node::{
     EdgeLine, FRAME_BORDER, FRAME_TITLE, Measured, NodeContext, NodeInput as _, NodeRenderer,
     Reach, Shared, TouchTarget, Zoomed, built_in, measure_node, touch_target, units,
@@ -627,7 +628,7 @@ pub struct Flow {
     asked: HashSet<(NodeId, SharedString)>,
     /// Where each node is in `nodes`, built on the first lookup after the list changes: a
     /// frame looks nodes up by id several times each.
-    index: RefCell<Option<HashMap<NodeId, usize>>>,
+    index: RefCell<Option<FastMap<NodeId, usize>>>,
     shared: Rc<Shared>,
     focus: FocusHandle,
     drag: Option<Drag>,
@@ -707,6 +708,8 @@ const DASH_SPEED: f32 = 20.;
 /// How wide (in flow units) the band around an edge's line is that takes a press, as React
 /// Flow's `interactionWidth`.
 const INTERACTION_WIDTH: f32 = 20.;
+/// How many nodes out of view that have never been drawn are drawn (to be measured) a frame.
+const MEASURE_PER_FRAME: usize = 300;
 /// How far (in points) from a stroke's ink a press still takes it.
 const INK_REACH: f32 = 6.;
 /// The least distance (in points) a press may be from a line and take it, at any zoom.
@@ -744,16 +747,28 @@ fn sanitize_edge(e: &mut Edge) {
     }
 }
 
-/// Items by id as stored: unselected.
+/// Each node's place in the flow, level and box for a frame, by its index (see `Flow::geo`).
+struct Geo {
+    at: Vec<XY>,
+    z: Vec<i64>,
+    rect: Vec<Option<Rect>>,
+    /// Whether it's the first node with its id (a later one with the same id isn't drawn).
+    first: Vec<bool>,
+    /// Whether it has measured itself.
+    measured: Vec<bool>,
+}
+
+/// Items by id as stored: unselected, and the first of any with the same id.
 fn stored<T: Clone + Stored>(items: &[T]) -> HashMap<SharedString, T> {
-    items
-        .iter()
-        .map(|i| {
-            let mut i = i.clone();
+    let mut map = HashMap::with_capacity(items.len());
+    for item in items {
+        map.entry(item.key().clone()).or_insert_with(|| {
+            let mut i = item.clone();
             i.deselect();
-            (i.key().clone(), i)
-        })
-        .collect()
+            i
+        });
+    }
+    map
 }
 
 /// A node or an edge, as the stored copy sees it.
@@ -1073,7 +1088,7 @@ impl Flow {
     fn index_of(&self, id: &str) -> Option<usize> {
         let mut index = self.index.borrow_mut();
         let index = index.get_or_insert_with(|| {
-            let mut index = HashMap::with_capacity(self.nodes.len());
+            let mut index = FastMap::with_capacity_and_hasher(self.nodes.len(), Default::default());
             for (i, node) in self.nodes.iter().enumerate() {
                 index.entry(node.id.clone()).or_insert(i);
             }
@@ -1682,18 +1697,105 @@ impl Flow {
             .any(|a| (a.selected || Some(&a.id) == pressed) && self.draggable(a))
     }
 
+    /// A node's own level, before its parents': a frame is a level below what isn't, so what
+    /// it's over can still be pressed.
+    fn own_z(&self, n: &Node) -> i64 {
+        n.z_index as i64 - i64::from(is_frame(n))
+            + if self.options.elevate_nodes_on_select && n.selected {
+                1000
+            } else {
+                0
+            }
+    }
+
+    /// Every node's place in the flow, level and box, worked out together in one pass (each
+    /// from its parent's), for a frame: what [`Flow::absolute_position`], [`Flow::node_z`]
+    /// and [`Flow::node_rect`] give, without each one walking up its parents.
+    fn geo(&self) -> Geo {
+        let n = self.nodes.len();
+        let parent: Vec<Option<usize>> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                node.parent
+                    .as_ref()
+                    .and_then(|p| self.index_of(p))
+                    .filter(|&p| p != i)
+            })
+            .collect();
+        let mut geo = Geo {
+            at: vec![XY::default(); n],
+            z: vec![0; n],
+            rect: vec![None; n],
+            first: vec![false; n],
+            measured: vec![false; n],
+        };
+        // 0: not yet, 1: on the way up, 2: done.
+        let mut state = vec![0u8; n];
+        let mut chain = Vec::new();
+        for i in 0..n {
+            if state[i] == 2 {
+                continue;
+            }
+            chain.clear();
+            let mut k = Some(i);
+            let mut looped = false;
+            while let Some(j) = k {
+                match state[j] {
+                    2 => break,
+                    1 => {
+                        looped = true;
+                        break;
+                    }
+                    _ => {
+                        state[j] = 1;
+                        chain.push(j);
+                        k = parent[j];
+                    }
+                }
+            }
+            for &j in chain.iter().rev() {
+                let node = &self.nodes[j];
+                if looped {
+                    // Round a loop each node is reckoned on its own, as its parents cut it.
+                    geo.at[j] = self.absolute_position(&node.id).unwrap_or(node.position);
+                    geo.z[j] = self.node_z(node);
+                } else {
+                    let own = self.own_z(node);
+                    match parent[j] {
+                        Some(p) => {
+                            geo.at[j] = geo.at[p] + node.position;
+                            geo.z[j] = if geo.z[p] >= own { geo.z[p] + 1 } else { own };
+                        }
+                        None => {
+                            geo.at[j] = node.position;
+                            geo.z[j] = own;
+                        }
+                    }
+                }
+                state[j] = 2;
+            }
+        }
+        let measured = self.shared.measured.borrow();
+        for (i, node) in self.nodes.iter().enumerate() {
+            geo.first[i] = self.index_of(&node.id) == Some(i);
+            let m = measured.get(&node.id).and_then(|m| m.size);
+            geo.measured[i] = m.is_some();
+            let size = match (node.width, node.height, m) {
+                (Some(w), Some(h), _) => Some((w, h)),
+                (w, h, Some(m)) => Some((w.unwrap_or(m.0), h.unwrap_or(m.1))),
+                _ => None,
+            };
+            geo.rect[i] = size.map(|(w, h)| Rect::new(geo.at[i].x, geo.at[i].y, w, h));
+        }
+        geo
+    }
+
     /// The level a node is drawn at, as React Flow reckons it: its own `z_index`, raised by
     /// 1000 while it's selected, and always above its parent's.
     fn node_z(&self, node: &Node) -> i64 {
-        let own = |n: &Node| {
-            // A frame is a level below what isn't, so what it's over can still be pressed.
-            n.z_index as i64 - i64::from(is_frame(n))
-                + if self.options.elevate_nodes_on_select && n.selected {
-                    1000
-                } else {
-                    0
-                }
-        };
+        let own = |n: &Node| self.own_z(n);
         let mut z: Option<i64> = None;
         for n in self
             .ancestors(node)
@@ -1712,7 +1814,7 @@ impl Flow {
 
     /// The level an edge is drawn at: its own `z_index`, raised by 1000 while selected when
     /// edges are elevated, and up to the level of a child or selected node at either end.
-    fn edge_z(&self, edge: &Edge, source: &Node, target: &Node) -> i64 {
+    fn edge_z(&self, edge: &Edge, ends: [(&Node, i64); 2]) -> i64 {
         let o = &self.options;
         let own = edge.z_index as i64
             + if o.elevate_edges_on_select && edge.selected {
@@ -1721,10 +1823,10 @@ impl Flow {
                 0
             };
         let lifted = |n: &Node| n.parent.is_some() || (o.elevate_nodes_on_select && n.selected);
-        let ends = [source, target]
+        let ends = ends
             .into_iter()
-            .filter(|n| lifted(n))
-            .map(|n| self.node_z(n))
+            .filter(|(n, _)| lifted(n))
+            .map(|(_, z)| z)
             .max()
             .unwrap_or(0);
         own + ends
@@ -2077,7 +2179,12 @@ impl Flow {
         let mut adds = Vec::new();
         let mut patches = Vec::new();
         let mut removes = Vec::new();
-        for node in &self.nodes {
+        // A node or edge whose id an earlier one has can't be told apart by it: only the first
+        // is stored.
+        for (i, node) in self.nodes.iter().enumerate() {
+            if self.index_of(&node.id) != Some(i) {
+                continue;
+            }
             let Some(was) = self.stored_nodes.get(&node.id) else {
                 let mut node = node.clone();
                 node.selected = false;
@@ -2107,6 +2214,7 @@ impl Flow {
             }
         }
         if self.stored_nodes.len() + adds.len() != self.nodes.len() {
+            // (Also when ids repeat; then this finds nothing gone.)
             let mut gone: Vec<&NodeId> = self
                 .stored_nodes
                 .keys()
@@ -2116,7 +2224,11 @@ impl Flow {
             removes.extend(gone.into_iter().map(|id| Op::RemoveNode { id: id.clone() }));
         }
         let mut edge_adds = 0;
+        let mut seen: HashSet<&EdgeId> = HashSet::with_capacity(self.edges.len());
         for edge in &self.edges {
+            if !seen.insert(&edge.id) {
+                continue;
+            }
             let Some(was) = self.stored_edges.get(&edge.id) else {
                 let mut edge = edge.clone();
                 edge.selected = false;
@@ -3644,6 +3756,7 @@ impl Flow {
     /// Lines the selected nodes up: their left sides with the leftmost, their middles with
     /// the selection's, and so on. Says whether there were two or more to line up.
     pub fn align_selected(&mut self, align: Align, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         let boxes = self.arrangeable();
         if boxes.len() < 2 {
             return false;
@@ -3674,6 +3787,7 @@ impl Flow {
     /// Spaces the selected nodes evenly across (or down) the room the outermost ones span,
     /// keeping their order. Says whether there were three or more to space.
     pub fn distribute_selected(&mut self, axis: Distribute, cx: &mut Context<Self>) -> bool {
+        self.edited = true;
         let mut boxes = self.arrangeable();
         if boxes.len() < 3 {
             return false;
@@ -3888,7 +4002,6 @@ impl Flow {
     /// Puts every node with an extent inside it, as drawing would show it: a child saved
     /// outside its parent, or left outside when the parent shrank.
     fn enforce_extents(&mut self) {
-        self.edited = true;
         for i in 0..self.nodes.len() {
             if self.nodes[i].extent.is_none() {
                 continue;
@@ -3897,6 +4010,7 @@ impl Flow {
             let to = self.within_extent(&self.nodes[i], p);
             if to != p {
                 self.nodes[i].position = to;
+                self.edited = true;
             }
         }
     }
@@ -4547,30 +4661,71 @@ impl Flow {
     /// children, and what's selected (and what's inside it) above the rest. Of two nodes with
     /// one id only the first is drawn, and a node off screen only once it's been measured.
     fn draw_order(&self) -> Vec<(i64, usize)> {
-        let (w, h) = self.pane_size();
+        self.draw_order_in(&self.geo())
+    }
+
+    /// The part of the flow in view, and a margin round it.
+    fn visible_area(&self) -> Option<Rect> {
+        let (mut w, mut h) = self.pane_size();
+        if w <= 0. {
+            // Before the pane's first layout: the window's size, which it's no larger than.
+            (w, h) = self.shared.window.get();
+            if w <= 0. {
+                return None;
+            }
+        }
         let margin = OVERDRAW / self.viewport.zoom;
-        let visible = self.viewport.visible(w, h);
-        let visible = Rect::new(
-            visible.x - margin,
-            visible.y - margin,
-            visible.w + margin * 2.,
-            visible.h + margin * 2.,
-        );
-        let cull = self.options.only_render_visible && w > 0.;
-        let measured = self.shared.measured.borrow();
-        let mut order: Vec<(i64, usize)> = self
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(i, n)| self.shown(n) && self.index_of(&n.id) == Some(*i))
-            .filter(|(_, n)| {
-                !cull
-                    || !measured.get(&n.id).is_some_and(|m| m.size.is_some())
-                    || self.node_rect(&n.id).is_none_or(|r| r.intersects(&visible))
-            })
-            .map(|(i, n)| (self.node_z(n), i))
-            .collect();
-        order.sort();
+        let v = self.viewport.visible(w, h);
+        Some(Rect::new(
+            v.x - margin,
+            v.y - margin,
+            v.w + margin * 2.,
+            v.h + margin * 2.,
+        ))
+    }
+
+    /// What to draw, bottom first: what's in view, and of what's never been drawn (so has no
+    /// size yet) a few hundred more a frame until all of it has been, so a large flow opens
+    /// over a few frames rather than in one long one. A fit waiting for every size draws all
+    /// of it at once. Says, in `self.shared.unmeasured`, how many are still to come.
+    fn draw_order_in(&self, geo: &Geo) -> Vec<(i64, usize)> {
+        let cull = self.options.only_render_visible;
+        let visible = self.visible_area();
+        let mut budget = if self.pending_fit.is_some() {
+            usize::MAX
+        } else {
+            MEASURE_PER_FRAME
+        };
+        let mut left = 0;
+        let mut order: Vec<(i64, usize)> = Vec::new();
+        for (i, n) in self.nodes.iter().enumerate() {
+            if !geo.first[i] || !self.shown(n) {
+                continue;
+            }
+            let draw = match (cull, visible) {
+                (true, Some(v)) if geo.measured[i] => geo.rect[i].is_none_or(|r| r.intersects(&v)),
+                (true, Some(v)) => {
+                    let at = geo.at[i];
+                    let guess =
+                        Rect::new(at.x, at.y, n.width.unwrap_or(1.), n.height.unwrap_or(1.));
+                    if guess.intersects(&v) {
+                        true
+                    } else if budget > 0 {
+                        budget -= 1;
+                        true
+                    } else {
+                        left += 1;
+                        false
+                    }
+                }
+                _ => true,
+            };
+            if draw {
+                order.push((geo.z[i], i));
+            }
+        }
+        self.shared.unmeasured.set(left);
+        order.sort_unstable();
         order
     }
 
@@ -4717,7 +4872,8 @@ impl Flow {
     }
 
     /// What the edge canvases need of each edge, so they don't hold the flow while they paint.
-    fn edge_draws(&self, colors: &FlowColors) -> Vec<EdgeDraw> {
+    fn edge_draws(&self, colors: &FlowColors, geo: &Geo) -> Vec<EdgeDraw> {
+        let visible = self.visible_area();
         // What routed edges go round: every node drawn but frames and groups, which edges run
         // inside of.
         let obstacles: Option<Rc<Vec<Rect>>> = self.options.avoid_nodes.then(|| {
@@ -4733,22 +4889,39 @@ impl Flow {
             .iter()
             .filter(|e| !e.hidden)
             .filter_map(|e| {
-                let (source, target) = (self.node(&e.source)?, self.node(&e.target)?);
+                let (si, ti) = (self.index_of(&e.source)?, self.index_of(&e.target)?);
+                let (source, target) = (&self.nodes[si], &self.nodes[ti]);
                 if !self.shown(source) || !self.shown(target) {
                     return None;
                 }
+                // Off screen, and far enough that no curve, route or label of it can reach in.
+                if self.options.only_render_visible
+                    && let (Some(v), Some(a), Some(b)) = (visible, geo.rect[si], geo.rect[ti])
+                {
+                    let span = a.union(&b);
+                    let pad = span.w.max(span.h) * 0.25 + OVERDRAW / self.viewport.zoom;
+                    let reach = Rect::new(
+                        span.x - pad,
+                        span.y - pad,
+                        span.w + pad * 2.,
+                        span.h + pad * 2.,
+                    );
+                    if !reach.intersects(&v) {
+                        return None;
+                    }
+                }
                 Some(EdgeDraw {
                     id: e.id.clone(),
-                    z: self.edge_z(e, source, target),
+                    z: self.edge_z(e, [(source, geo.z[si]), (target, geo.z[ti])]),
                     kind: e.kind.clone(),
                     source: End {
                         node: source.id.clone(),
-                        at: self.absolute_position(&source.id)?,
+                        at: geo.at[si],
                         handle: e.source_handle.clone(),
                     },
                     target: End {
                         node: target.id.clone(),
-                        at: self.absolute_position(&target.id)?,
+                        at: geo.at[ti],
                         handle: e.target_handle.clone(),
                     },
                     label: e.label.clone(),
@@ -5066,6 +5239,19 @@ struct NodeBox {
     rect: Rect,
     fill: Hsla,
     border: Hsla,
+    look: BoxLook,
+}
+
+/// What a node too small to read still shows of itself: a whiteboard's shapes, colors and ink
+/// stay as they are, so a board zoomed right out still looks like itself.
+enum BoxLook {
+    Plain,
+    /// The outline, `w` flow units wide.
+    Shape(crate::shapes::NodeShape, f32),
+    /// A stroke, drawn as it is, in its color.
+    Ink(Rc<crate::ink::Drawn>, Hsla, f32),
+    /// A heading with no box: a bar where its text is.
+    Text,
 }
 
 /// A canvas that paints nodes too small to read as boxes of their size and colors.
@@ -5079,14 +5265,57 @@ fn box_layer(boxes: Vec<NodeBox>) -> AnyElement {
                     point(o.x + px(b.rect.x), o.y + px(b.rect.y)),
                     size(px(b.rect.w), px(b.rect.h)),
                 );
-                window.paint_quad(quad(
-                    area,
-                    px(1.),
-                    b.fill,
-                    px(1.),
-                    b.border,
-                    BorderStyle::default(),
-                ));
+                match &b.look {
+                    BoxLook::Plain => window.paint_quad(quad(
+                        area,
+                        px(1.),
+                        b.fill,
+                        px(1.),
+                        b.border,
+                        BorderStyle::default(),
+                    )),
+                    // Too small for its outline to show (and outlines cost a tessellation
+                    // each): a box, round for the round shapes.
+                    BoxLook::Shape(shape, _) if b.rect.w.min(b.rect.h) < 24. => {
+                        use crate::shapes::NodeShape::*;
+                        let r = match shape {
+                            Ellipse | Cloud => b.rect.w.min(b.rect.h) / 2.,
+                            Rounded | Hexagon | Diamond => b.rect.w.min(b.rect.h) / 4.,
+                            _ => 1.,
+                        };
+                        window.paint_quad(quad(
+                            area,
+                            px(r),
+                            b.fill,
+                            px(1.),
+                            b.border,
+                            BorderStyle::default(),
+                        ));
+                    }
+                    BoxLook::Shape(shape, w) => {
+                        let h = *w * b.rect.h / b.rect.w.max(0.01);
+                        let g = crate::shapes::geometry(*shape, *w, h);
+                        paint::paint_shape(&g.outline, &[], area, *w, b.fill, b.border, 1., window);
+                    }
+                    BoxLook::Ink(drawn, color, zoom) => {
+                        let halo = (b.border != b.fill).then_some(b.border);
+                        paint::paint_ink(&drawn.outline, area.origin, *zoom, *color, halo, window);
+                    }
+                    BoxLook::Text => {
+                        let bar = Bounds::new(
+                            point(area.origin.x, area.origin.y + area.size.height * 0.3),
+                            size(area.size.width, area.size.height * 0.4),
+                        );
+                        window.paint_quad(quad(
+                            bar,
+                            px(1.),
+                            b.border,
+                            px(0.),
+                            b.border,
+                            BorderStyle::default(),
+                        ));
+                    }
+                }
             }
         },
     )
@@ -5102,7 +5331,7 @@ fn box_layer(boxes: Vec<NodeBox>) -> AnyElement {
 /// Loose, a handle of the other kind will do. None when there's no such handle: the edge isn't
 /// drawn.
 fn endpoint(
-    measured: &HashMap<NodeId, Measured>,
+    measured: &FastMap<NodeId, Measured>,
     node: &NodeId,
     at: XY,
     handle: &Option<SharedString>,
@@ -5130,6 +5359,10 @@ fn endpoint(
 impl Render for Flow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self.colors.unwrap_or_else(|| FlowColors::from_theme(cx));
+        let window_size = window.viewport_size();
+        self.shared
+            .window
+            .set((f32::from(window_size.width), f32::from(window_size.height)));
         self.enforce_extents();
         self.frame_time = now(cx);
         self.ask_for_cards(cx);
@@ -5247,8 +5480,9 @@ impl Render for Flow {
 
         // The nodes, bottom first, with the edges of each level drawn just under the nodes of
         // that level: an edge between two children sits above their parent.
+        let geo = self.geo();
         let mut draws = if ready {
-            self.edge_draws(&colors)
+            self.edge_draws(&colors, &geo)
         } else {
             Vec::new()
         };
@@ -5272,7 +5506,12 @@ impl Render for Flow {
         let simple = self.simplified();
         let mut layers: Vec<AnyElement> = Vec::new();
         let mut boxes: Vec<NodeBox> = Vec::new();
-        for (z, i) in self.draw_order() {
+        let order = self.draw_order_in(&geo);
+        if self.shared.unmeasured.get() > 0 {
+            // More to measure: the next frame takes the next few hundred.
+            window.request_animation_frame();
+        }
+        for (z, i) in order {
             while let Some((level, _)) = levels.peek()
                 && *level <= z
             {
@@ -5295,18 +5534,39 @@ impl Render for Flow {
                 && let Some(rect) = self.node_rect(&node.id)
             {
                 let a = viewport.to_pane(xy(rect.x, rect.y));
+                let pencil = colors.pencil(node.color.as_deref());
+                let (mut fill, mut border) = match node.kind.as_ref() {
+                    "group" | "frame" => (colors.group, colors.node_border),
+                    _ => (pencil.fill, pencil.stroke),
+                };
+                let look = match node.kind.as_ref() {
+                    "shape" => BoxLook::Shape(node.shape.unwrap_or_default(), rect.w),
+                    "ink" => match self.shared.ink(node) {
+                        Some(drawn) => {
+                            let color = paint::ink_color(drawn.color, drawn.tool, &colors);
+                            fill = color;
+                            border = color;
+                            BoxLook::Ink(drawn, color, zoom)
+                        }
+                        None => BoxLook::Plain,
+                    },
+                    "text" => {
+                        border = Hsla {
+                            a: 0.35,
+                            ..pencil.text
+                        };
+                        BoxLook::Text
+                    }
+                    _ => BoxLook::Plain,
+                };
+                if node.selected {
+                    border = colors.selected;
+                }
                 boxes.push(NodeBox {
                     rect: Rect::new(a.x, a.y, rect.w * zoom, rect.h * zoom),
-                    fill: if node.kind == "group" {
-                        colors.group
-                    } else {
-                        colors.node
-                    },
-                    border: if node.selected {
-                        colors.selected
-                    } else {
-                        colors.node_border
-                    },
+                    fill,
+                    border,
+                    look,
                 });
                 continue;
             }
