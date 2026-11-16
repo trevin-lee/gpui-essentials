@@ -46,6 +46,8 @@ actions!(
         AgendaView,
         PreviousPeriod,
         NextPeriod,
+        /// Proposes a new event at the selected slot, or at the next round half hour today.
+        NewEvent,
         /// Opens the selected event, or makes one in the selected slot.
         OpenSelected,
         /// Asks the host to delete the selected event.
@@ -76,7 +78,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("k", PreviousPeriod, c),
         KeyBinding::new("p", PreviousPeriod, c),
         KeyBinding::new("j", NextPeriod, c),
-        KeyBinding::new("n", NextPeriod, c),
+        KeyBinding::new("n", NewEvent, c),
         KeyBinding::new("enter", OpenSelected, c),
         KeyBinding::new("backspace", DeleteSelected, c),
         KeyBinding::new("delete", DeleteSelected, c),
@@ -342,6 +344,24 @@ const SETTLE: StdDuration = StdDuration::from_millis(200);
 const FLICK_SPEED: f32 = 500.;
 const FLICK_WINDOW: StdDuration = StdDuration::from_millis(80);
 
+/// The time now, by GPUI's clock: the wall clock when the calendar was made, plus the time
+/// GPUI has counted since (so tests that move GPUI's clock move the calendar's), never behind
+/// the wall clock (which keeps going while a Mac sleeps and GPUI's clock doesn't).
+#[derive(Clone)]
+struct Clock {
+    executor: BackgroundExecutor,
+    utc: DateTime<Utc>,
+    at: Instant,
+}
+
+impl Clock {
+    fn now(&self) -> DateTime<Utc> {
+        let counted = self.executor.now().duration_since(self.at);
+        let since = self.utc + Duration::from_std(counted).unwrap_or_default();
+        since.max(Utc::now())
+    }
+}
+
 /// What a button in the narrow header does.
 type HeaderAction = Rc<dyn Fn(&mut Calendar, &mut Context<Calendar>)>;
 
@@ -375,6 +395,7 @@ pub struct Calendar {
     focus: FocusHandle,
     pub(crate) shared: Rc<Shared>,
     _tick: Option<Task<()>>,
+    clock: Clock,
 
     /// Where a touch that's dragging something landed, and whether it has moved off it yet.
     touch_from: Option<Point<Pixels>>,
@@ -412,15 +433,26 @@ impl Calendar {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let options = CalendarOptions::default();
         let anchor = Utc::now().with_timezone(&options.time_zone).date_naive();
-        // The line at the current time moves once a minute; nothing else draws on its own.
-        let tick = cx.spawn(async move |this, cx| {
-            loop {
-                let secs = 60 - Utc::now().timestamp() % 60;
-                cx.background_executor()
-                    .timer(StdDuration::from_secs(secs as u64))
-                    .await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
-                    break;
+        let clock = Clock {
+            executor: cx.background_executor().clone(),
+            utc: Utc::now(),
+            at: cx.background_executor().now(),
+        };
+        // The line at the current time moves once a minute, on the minute; nothing else draws
+        // on its own.
+        let tick = cx.spawn({
+            let clock = clock.clone();
+            async move |this, cx| {
+                loop {
+                    let now = clock.now();
+                    let into = now.timestamp_subsec_millis() as u64
+                        + (now.timestamp().rem_euclid(60) as u64) * 1000;
+                    cx.background_executor()
+                        .timer(StdDuration::from_millis(60_000 - into))
+                        .await;
+                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                        break;
+                    }
                 }
             }
         });
@@ -449,6 +481,7 @@ impl Calendar {
             focus: cx.focus_handle(),
             shared: Rc::default(),
             _tick: Some(tick),
+            clock,
             touch_from: None,
             touch_moved: false,
             swipe: 0.,
@@ -523,7 +556,7 @@ impl Calendar {
     }
 
     pub fn now(&self) -> DateTime<Utc> {
-        self.now_override.unwrap_or_else(Utc::now)
+        self.now_override.unwrap_or_else(|| self.clock.now())
     }
 
     /// Today in the display zone.
@@ -2129,6 +2162,34 @@ impl Calendar {
         }
     }
 
+    /// `n`: a new event of the usual length at the selected slot (a day in the month), or, with
+    /// no slot selected, at the next round half hour today, bringing today into view.
+    pub fn new_event(&mut self, cx: &mut Context<Self>) {
+        if self.asking.is_some() {
+            return;
+        }
+        let tz = self.options.time_zone;
+        let length = self.options.default_duration;
+        let time = match self.selection.clone() {
+            Some(Selection::Slot { date, .. }) if self.view == CalendarView::Month => {
+                time::created_days(date, date)
+            }
+            Some(Selection::Slot { date, minute }) => {
+                let start = time::at_minutes(date, minute as f32, tz);
+                EventTime::timed(start, start + length)
+            }
+            _ => {
+                let (today, now) = time::local(self.now(), tz);
+                let start_minute = time::snap_ceil(now + 0.001, 30.);
+                let start = time::at_minutes(today, start_minute, tz);
+                let (date, minute) = time::local(start, tz);
+                self.reveal(date, minute, cx);
+                EventTime::timed(start, start + length)
+            }
+        };
+        self.propose_create(time, cx);
+    }
+
     fn open_selected(&mut self, cx: &mut Context<Self>) {
         match self.selection.clone() {
             Some(Selection::Event(id)) => self.open_event(id, cx),
@@ -2771,6 +2832,7 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &AgendaView, _, cx| c.set_view(CalendarView::AGENDA, cx)))
             .on_action(cx.listener(|c, _: &PreviousPeriod, _, cx| c.previous(cx)))
             .on_action(cx.listener(|c, _: &NextPeriod, _, cx| c.next(cx)))
+            .on_action(cx.listener(|c, _: &NewEvent, _, cx| c.new_event(cx)))
             .on_action(cx.listener(|c, _: &OpenSelected, _, cx| {
                 match c.asking.as_ref().map(|a| a.highlighted) {
                     Some(i) => c.answer(EditScope::ALL[i], cx),
