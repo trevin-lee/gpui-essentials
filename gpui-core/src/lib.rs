@@ -42,6 +42,7 @@ mod root;
 mod size;
 mod slider;
 mod switch;
+pub mod text;
 pub mod theme;
 mod tooltip;
 
@@ -53,6 +54,7 @@ pub use root::{FocusNext, FocusPrev, Root};
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
 pub use slider::{Slider, SliderEvent, SliderState};
 pub use switch::Switch;
+pub use text::{TextView, TextViewStyle};
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
 pub use tooltip::Tooltip;
 
@@ -66,6 +68,7 @@ pub fn init(cx: &mut App) {
     }
     root::init(cx);
     input::init(cx);
+    text::init(cx);
 }
 
 /// Opens a window with `build`'s view inside a [`Root`], and returns the window and the view.
