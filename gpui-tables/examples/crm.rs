@@ -13,7 +13,7 @@
 //!
 //! `--shot` takes a picture of the window without showing it. Scenes: `people` (the default),
 //! `grouped` (Interactions by month), `menu` (a column's menu), `picker` (a select's options),
-//! `date` (a date's month), `edit` (a text value typed in place, grown over the rows below),
+//! `date` (a date's month, today ringed), `edit` (a text value typed in place, grown over the rows below),
 //! `scrolled` (scrolled sideways, the title column in place), `light` and `worst` (worst-case
 //! text, every cell ending in an ellipsis); and boards: `board` (People's
 //! Pipeline by stage), `board-drag` (a card of Interactions by kind dragged to another column),
@@ -610,6 +610,7 @@ mod shots {
     const PIPELINE: &str = "f3aed0b6-c7ac-4491-9ef8-8334e647cb8f";
     const LAST_CONTACTED: &str = "ae97ba94-d0ed-482f-8f6d-05584ef8aa38";
     const IMANI: &str = "1d87cec3-1f72-46ab-b961-fd925d39d0a8";
+    const ANA: &str = "f3b7a50d-f373-4a53-b488-f87605e999f3";
     const FOLLOW_UP: &str = "923a7369-94e3-4f91-9a61-dbe22e44158b";
     const ROLE: &str = "0fd630f1-f29d-4da9-953f-48f1a09f76b5";
 
@@ -734,8 +735,9 @@ mod shots {
                         t.update(cx, |t, cx| t.edit(IMANI, STAGE, window, cx));
                     }
                     "date" => {
+                        // Ana's November 12, so the month shows today (the 15th) ringed.
                         let t = pick(0, cx);
-                        t.update(cx, |t, cx| t.edit(IMANI, LAST_CONTACTED, window, cx));
+                        t.update(cx, |t, cx| t.edit(ANA, LAST_CONTACTED, window, cx));
                     }
                     "edit" => {
                         let t = pick(0, cx);
