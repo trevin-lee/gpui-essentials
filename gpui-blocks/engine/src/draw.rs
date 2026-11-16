@@ -8,11 +8,12 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
+use gpui::StyledImage as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId, Hsla,
-    InspectorElementId, IntoElement, LayoutId, ParentElement as _, Pixels, Point, Size, Style,
-    Styled as _, Window, div, point, px, relative, size,
+    ImageSource, InspectorElementId, IntoElement, LayoutId, ParentElement as _, Pixels, Point,
+    Size, Style, Styled as _, Window, div, point, px, relative, size,
 };
 use gpui_core::text::paragraph::{
     Affinity, CodeStyle, InlineBox, Marks, Paragraph, ParagraphLayout, ParagraphStyle,
@@ -75,6 +76,8 @@ pub(crate) type OwnLeaves = Rc<RefCell<HashMap<u64, OwnLeaf>>>;
 enum Run {
     Text(String, Marks),
     Box(AnyElement, Pixels),
+    /// A picture, through the host's image loader.
+    Picture(ImageSource),
 }
 
 /// A text leaf (a paragraph's or a heading's) drawn on the paragraph layer.
@@ -85,20 +88,24 @@ pub(crate) struct TextLeaf {
     bands: Vec<(Range<usize>, Hsla)>,
     leaves: OwnLeaves,
     /// Its paragraph and inline boxes, once built (to measure it before it's laid out).
-    built: Option<(Rc<Paragraph>, Vec<AnyElement>)>,
+    built: Option<Built>,
+}
+
+/// A leaf's paragraph and what's drawn in its boxes.
+struct Built {
+    paragraph: Rc<Paragraph>,
+    boxes: Vec<AnyElement>,
+    /// For each box, the picture drawn in it, if it's one: it's made at the box's size once
+    /// that's known.
+    pictures: Vec<Option<ImageSource>>,
 }
 
 /// What a text leaf needs besides its text.
 pub(crate) struct LeafContext<'a> {
     pub(crate) extensions: &'a Extensions,
     pub(crate) leaves: &'a OwnLeaves,
-}
-
-/// Whether the engine draws this text itself: everything but pictures, for now.
-pub(crate) fn draws(inline: &InlineText) -> bool {
-    !inline
-        .pieces()
-        .any(|(_, _, atom)| matches!(atom, Some(InlineAtom::Image(_))))
+    /// The host's image loader. Without one, pictures show as their descriptions.
+    pub(crate) images: Option<&'a crate::ImageSourceFn>,
 }
 
 impl TextLeaf {
@@ -144,14 +151,21 @@ impl TextLeaf {
                     };
                     runs.push(Run::Box(element, baseline));
                 }
-                Some(InlineAtom::Image(image)) => {
-                    // Not drawn here yet (see `draws`): its description.
-                    let alt = image.alt.clone().unwrap_or_default().to_string();
-                    runs.push(Run::Box(
-                        text_box(alt, &style, true),
-                        text_baseline(&style, window),
-                    ));
-                }
+                Some(InlineAtom::Image(image)) => match cx.images {
+                    Some(load) => runs.push(Run::Picture(load(&image.url))),
+                    // Never loaded without the host's loader: its description in its place.
+                    None => {
+                        let label = image
+                            .alt
+                            .clone()
+                            .filter(|alt| !alt.is_empty())
+                            .map_or_else(|| "Image".to_string(), |alt| alt.to_string());
+                        runs.push(Run::Box(
+                            text_box(label, &style, false),
+                            text_baseline(&style, window),
+                        ));
+                    }
+                },
             }
         }
         Self {
@@ -166,11 +180,13 @@ impl TextLeaf {
 
     /// Its paragraph and inline boxes, built from its runs once (the boxes are laid out then).
     fn build(&mut self, window: &mut Window, app: &mut App) -> Rc<Paragraph> {
-        if let Some((paragraph, _)) = &self.built {
-            return paragraph.clone();
+        if let Some(built) = &self.built {
+            return built.paragraph.clone();
         }
         let mut paragraph = Paragraph::default();
         let mut boxes = Vec::new();
+        let mut pictures = Vec::new();
+        let baseline_of_text = text_baseline(&self.style, window);
         for run in std::mem::take(&mut self.runs) {
             match run {
                 Run::Text(text, marks) => paragraph.push(&text, marks),
@@ -189,11 +205,33 @@ impl TextLeaf {
                         baseline: baseline.min(size.height),
                     });
                     boxes.push(element);
+                    pictures.push(None);
+                }
+                Run::Picture(source) => {
+                    // Its own size once it's loaded (laying it out starts the load), and a
+                    // square three quarters of the line high until then.
+                    let mut measure = gpui::img(source.clone())
+                        .object_fit(gpui::ObjectFit::Contain)
+                        .into_any_element();
+                    let natural = measure.layout_as_root(AvailableSpace::min_size(), window, app);
+                    let size = if natural.width > px(0.) && natural.height > px(0.) {
+                        natural
+                    } else {
+                        let side = (self.style.line_height * 0.75).max(px(1.));
+                        size(side, side)
+                    };
+                    paragraph.push_box(picture_box(size, baseline_of_text, self.style.line_height));
+                    boxes.push(measure);
+                    pictures.push(Some(source));
                 }
             }
         }
         let paragraph = Rc::new(paragraph);
-        self.built = Some((paragraph.clone(), boxes));
+        self.built = Some(Built {
+            paragraph: paragraph.clone(),
+            boxes,
+            pictures,
+        });
         paragraph
     }
 
@@ -206,6 +244,54 @@ impl TextLeaf {
             .iter()
             .map(|row| layout.caret(row.range.end, Affinity::Upstream).left())
             .fold(px(0.), Pixels::max)
+    }
+}
+
+/// A picture's box at `size`, centred on the text's middle, as GPUI Kit places pictures.
+fn picture_box(size: Size<Pixels>, text_baseline: Pixels, line: Pixels) -> InlineBox {
+    InlineBox {
+        width: size.width,
+        height: size.height,
+        baseline: (size.height / 2. + text_baseline - line / 2.)
+            .max(px(0.))
+            .min(size.height),
+    }
+}
+
+/// How a leaf's pictures fit the width it's laid out to.
+#[derive(Clone)]
+struct Fit {
+    /// Which boxes are pictures.
+    pictures: Rc<[bool]>,
+    text_baseline: Pixels,
+    line: Pixels,
+}
+
+impl Fit {
+    fn new(pictures: &[Option<ImageSource>], style: &ParagraphStyle, window: &Window) -> Self {
+        Self {
+            pictures: pictures.iter().map(Option::is_some).collect(),
+            text_baseline: text_baseline(style, window),
+            line: style.line_height,
+        }
+    }
+
+    /// `paragraph` with each picture wider than `width` narrowed to it, in its ratio.
+    fn apply(&self, paragraph: &Rc<Paragraph>, width: Pixels) -> Rc<Paragraph> {
+        let wide = |(i, (_, b)): (usize, &(usize, InlineBox))| {
+            self.pictures.get(i).copied().unwrap_or(false) && b.width > width
+        };
+        if !paragraph.boxes.iter().enumerate().any(wide) || width <= px(0.) {
+            return paragraph.clone();
+        }
+        let mut fitted = Paragraph::clone(paragraph);
+        for (i, (_, b)) in fitted.boxes.iter_mut().enumerate() {
+            if self.pictures.get(i).copied().unwrap_or(false) && b.width > width {
+                let size = size(width, b.height * (width / b.width));
+                *b = picture_box(size, self.text_baseline, self.line);
+            }
+        }
+        Rc::new(fitted)
     }
 }
 
@@ -263,6 +349,8 @@ type LayoutCache = Rc<RefCell<Option<(Pixels, Rc<ParagraphLayout>)>>>;
 pub(crate) struct TextLeafState {
     paragraph: Rc<Paragraph>,
     boxes: Vec<AnyElement>,
+    pictures: Vec<Option<ImageSource>>,
+    fit: Fit,
     cache: LayoutCache,
 }
 
@@ -293,9 +381,15 @@ impl Element for TextLeaf {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         self.build(window, cx);
-        let (paragraph, boxes) = self.built.take().expect("built above");
+        let Built {
+            paragraph,
+            boxes,
+            pictures,
+        } = self.built.take().expect("built above");
         let cache: LayoutCache = Rc::default();
+        let fit = Fit::new(&pictures, &self.style, window);
         let (measured, style, written) = (paragraph.clone(), self.style.clone(), cache.clone());
+        let fits = fit.clone();
         let mut layout_style = Style::default();
         layout_style.size.width = relative(1.).into();
         let id =
@@ -304,7 +398,8 @@ impl Element for TextLeaf {
                     AvailableSpace::Definite(w) => w,
                     _ => px(100_000.),
                 });
-                let layout = Rc::new(ParagraphLayout::new(&measured, &style, width, window));
+                let fitted = fits.apply(&measured, width);
+                let layout = Rc::new(ParagraphLayout::new(&fitted, &style, width, window));
                 let height = layout.height;
                 *written.borrow_mut() = Some((width, layout));
                 size(width, height)
@@ -314,6 +409,8 @@ impl Element for TextLeaf {
             TextLeafState {
                 paragraph,
                 boxes,
+                pictures,
+                fit,
                 cache,
             },
         )
@@ -336,7 +433,7 @@ impl Element for TextLeaf {
             .map(|(_, l)| l.clone());
         let layout = cached.unwrap_or_else(|| {
             Rc::new(ParagraphLayout::new(
-                &state.paragraph,
+                &state.fit.apply(&state.paragraph, bounds.size.width),
                 &self.style,
                 bounds.size.width,
                 window,
@@ -356,7 +453,20 @@ impl Element for TextLeaf {
                 caret_height,
             },
         );
-        for ((_, b), element) in layout.boxes().into_iter().zip(&mut state.boxes) {
+        for (((_, b), element), picture) in layout
+            .boxes()
+            .into_iter()
+            .zip(&mut state.boxes)
+            .zip(&state.pictures)
+        {
+            // A picture fills its box, now that its size is known.
+            if let Some(source) = picture {
+                *element = gpui::img(source.clone())
+                    .object_fit(gpui::ObjectFit::Contain)
+                    .w(b.size.width)
+                    .h(b.size.height)
+                    .into_any_element();
+            }
             element.prepaint_as_root(
                 bounds.origin + b.origin,
                 Size {
@@ -511,7 +621,7 @@ pub(crate) struct TableTree {
 }
 
 /// `block` as a tree the engine can draw: `None` when something in it is still drawn by GPUI
-/// Kit (code, pictures).
+/// Kit (code).
 pub(crate) fn tree(
     doc: &super::document::EditorDocument,
     block: super::id::BlockId,
@@ -522,18 +632,16 @@ pub(crate) fn tree(
         |id| -> Option<Vec<Tree>> { doc.children(id).iter().map(|c| tree(doc, *c)).collect() };
     Some(
         match (doc.kind(block)?, doc.get(block).map(|e| &e.content)) {
-            (K::Paragraph, Some(BlockContent::Inline(inline))) if draws(inline) => Tree::Text {
+            (K::Paragraph, Some(BlockContent::Inline(inline))) => Tree::Text {
                 key: block.as_u64(),
                 level: None,
                 inline: inline.clone(),
             },
-            (K::Heading { level }, Some(BlockContent::Inline(inline))) if draws(inline) => {
-                Tree::Text {
-                    key: block.as_u64(),
-                    level: Some(*level),
-                    inline: inline.clone(),
-                }
-            }
+            (K::Heading { level }, Some(BlockContent::Inline(inline))) => Tree::Text {
+                key: block.as_u64(),
+                level: Some(*level),
+                inline: inline.clone(),
+            },
             (K::List { .. }, _) => Tree::List(list_tree(doc, block, None)?),
             (K::Table { aligns }, _) => Tree::Table(TableTree {
                 aligns: aligns.clone(),
@@ -544,7 +652,7 @@ pub(crate) fn tree(
                         doc.children(*row)
                             .iter()
                             .map(|cell| match doc.get(*cell).map(|e| &e.content) {
-                                Some(BlockContent::Inline(inline)) if draws(inline) => {
+                                Some(BlockContent::Inline(inline)) => {
                                     Some((cell.as_u64(), inline.clone()))
                                 }
                                 _ => None,
