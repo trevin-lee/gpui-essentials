@@ -156,6 +156,7 @@ pub fn visible_days(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -
         CalendarView::Day => (anchor, 1),
         CalendarView::Week => (week_start(anchor, first_day), 7),
         CalendarView::Days(n) => (anchor, n.clamp(1, 31)),
+        CalendarView::Agenda(n) => (anchor, n.clamp(1, 366)),
         CalendarView::Month => {
             let first = month_start(anchor);
             let last = first + Months::new(1) - Duration::days(1);
@@ -188,6 +189,7 @@ pub fn step(view: CalendarView, anchor: NaiveDate, dir: i32) -> NaiveDate {
         CalendarView::Day => days(1),
         CalendarView::Week => days(7),
         CalendarView::Days(n) => days(n.clamp(1, 31).into()),
+        CalendarView::Agenda(n) => days(n.clamp(1, 366).into()),
         CalendarView::Month => {
             let m = Months::new(dir.unsigned_abs());
             if dir >= 0 { anchor + m } else { anchor - m }
@@ -435,6 +437,26 @@ pub fn title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -> Strin
             anchor.day(),
             anchor.year()
         ),
+        CalendarView::Agenda(_) => {
+            let (first, days) = visible_days(view, anchor, first_day);
+            let last = first + Duration::days(days as i64 - 1);
+            let short = |d: NaiveDate| format!("{} {}", month_short(d.month()), d.day());
+            if first == last {
+                format!("{}, {}", short(first), first.year())
+            } else if first.year() == last.year() && first.month() == last.month() {
+                format!("{} – {}, {}", short(first), last.day(), last.year())
+            } else if first.year() == last.year() {
+                format!("{} – {}, {}", short(first), short(last), last.year())
+            } else {
+                format!(
+                    "{}, {} – {}, {}",
+                    short(first),
+                    first.year(),
+                    short(last),
+                    last.year()
+                )
+            }
+        }
         CalendarView::Week | CalendarView::Days(_) => {
             let (first, days) = visible_days(view, anchor, first_day);
             let last = first + Duration::days(days as i64 - 1);
@@ -639,6 +661,7 @@ mod tests {
         assert_eq!(step(CalendarView::Week, a, 1), d(2026, 2, 7));
         assert_eq!(step(CalendarView::Day, a, -1), d(2026, 1, 30));
         assert_eq!(step(CalendarView::Days(4), a, 1), d(2026, 2, 4));
+        assert_eq!(step(CalendarView::Agenda(14), a, 1), d(2026, 2, 14));
     }
 
     #[test]
@@ -798,6 +821,22 @@ mod tests {
         assert_eq!(
             title(CalendarView::Week, d(2026, 12, 30), Weekday::Mon),
             "Dec 2026 – Jan 2027"
+        );
+        assert_eq!(
+            title(CalendarView::Agenda(14), a, Weekday::Mon),
+            "Nov 18 – Dec 1, 2026"
+        );
+        assert_eq!(
+            title(CalendarView::Agenda(7), d(2026, 12, 28), Weekday::Mon),
+            "Dec 28, 2026 – Jan 3, 2027"
+        );
+        assert_eq!(
+            title(CalendarView::Agenda(1), a, Weekday::Mon),
+            "Nov 18, 2026"
+        );
+        assert_eq!(
+            title(CalendarView::Agenda(7), d(2026, 11, 2), Weekday::Mon),
+            "Nov 2 – 8, 2026"
         );
     }
 

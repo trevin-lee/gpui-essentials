@@ -667,3 +667,74 @@ fn a_drag_that_starts_on_a_link_moves_its_event(cx: &mut TestAppContext) {
     );
     unchanged(&c, cx);
 }
+
+#[gpui_kit::test]
+fn the_agenda_lists_events_by_day_and_the_arrows_walk_it(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    cx.simulate_keystrokes("a");
+    draw(cx);
+    draw(cx);
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::AGENDA);
+    let (start, end) = c.read_with(cx, |c, _| c.visible_range());
+    assert!(has(
+        &seen,
+        &CalendarEvent::RangeChange {
+            view: CalendarView::AGENDA,
+            start,
+            end
+        }
+    ));
+    // Two weeks from Wednesday: Planning is listed; Monday's trip isn't in range.
+    assert!(c.read_with(cx, |c, _| c.event_bounds("a")).is_some());
+    assert!(c.read_with(cx, |c, _| c.event_bounds("trip")).is_none());
+    // Planning (Wednesday) is listed above the all-hands (Thursday).
+    let (a, ro) = c.read_with(cx, |c, _| {
+        (c.event_bounds("a").unwrap(), c.event_bounds("ro").unwrap())
+    });
+    assert!(a.bottom() <= ro.top());
+    // The arrows go from event to event in the list's order.
+    let selected = |c: &Entity<Calendar>, cx: &VisualTestContext| {
+        c.read_with(cx, |c, _| c.selected_event().cloned())
+    };
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected(&c, cx), Some("a".into()));
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected(&c, cx), Some("ro".into()));
+    cx.simulate_keystrokes("enter");
+    assert!(has(&seen, &CalendarEvent::Open("ro".into())));
+    cx.simulate_keystrokes("up backspace");
+    assert!(has(&seen, &CalendarEvent::Delete(reference("a"))));
+    unchanged(&c, cx);
+}
+
+#[gpui_kit::test]
+fn the_agenda_opens_links_and_moves_nothing(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    cx.simulate_keystrokes("a");
+    draw(cx);
+    draw(cx);
+    // A drag in the list is a press, not a move.
+    let a = c.read_with(cx, |c, _| c.event_bounds("a")).unwrap();
+    drag(cx, a.center(), point(a.center().x, a.center().y + px(120.)));
+    assert!(!proposed_edit(&seen));
+    assert!(has(&seen, &CalendarEvent::Select(Some("a".into()))));
+    // Every link is a pill in the list.
+    for _ in 0..3 {
+        cx.simulate_event(gpui_kit::ScrollEvent {
+            position: a.center(),
+            delta: gpui_kit::ScrollDelta::Pixels(point(px(0.), px(-200.))),
+            ..Default::default()
+        });
+        draw(cx);
+    }
+    let pill = c
+        .read_with(cx, |c, _| c.link_bounds("notes", 1))
+        .expect("listed");
+    cx.simulate_click(pill.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        opened_links(&seen),
+        vec![("notes".into(), EventLink::agent("main", "Main"))]
+    );
+    unchanged(&c, cx);
+}
