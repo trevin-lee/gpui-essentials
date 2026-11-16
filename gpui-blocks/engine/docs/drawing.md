@@ -15,7 +15,7 @@ the editor working after every step.
    leaves' geometry itself; the rest still go through GPUI Kit, and both kinds of geometry make
    one frame. In order:
    - paragraphs and headings without pictures (done);
-   - dividers, custom blocks (extensions) and source atoms;
+   - dividers, custom blocks (extensions) and source atoms (done);
    - quotes, callouts and toggles (with `surfaces.rs`' containers);
    - lists, with their markers and task boxes;
    - tables, with the grips;
