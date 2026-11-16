@@ -8,11 +8,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gpui_core::{InputEvent, InputState, SliderEvent, SliderState};
 use gpui_kit::component::date_picker::{DatePickerEvent, DatePickerState};
-use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
-use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, Image, SharedString, Subscription, Window,
+    AppContext as _, Autocapitalize, Context, Entity, EventEmitter, Image, SharedString,
+    Subscription, TextInputAction, TextInputConfiguration, Window,
 };
 use serde_json::{Value as Json, json};
 
@@ -53,13 +53,9 @@ pub(crate) struct Binding {
     pub field: Field,
 }
 
-pub(crate) enum TextState {
-    Line(Entity<InputState>),
-    Area(Entity<TextareaState>),
-}
-
+/// A text field or text area: gpui-core's input, and where its text goes.
 pub(crate) struct TextEntry {
-    pub state: TextState,
+    pub state: Entity<InputState>,
     pub binding: Binding,
     _subs: Vec<Subscription>,
 }
@@ -436,17 +432,8 @@ impl CardView {
             let Some(e) = self.texts.get(&key) else {
                 continue;
             };
-            match &e.state {
-                TextState::Line(s) => {
-                    if s.read(cx).value().as_ref() != text {
-                        s.update(cx, |s, cx| s.set_value(text, window, cx));
-                    }
-                }
-                TextState::Area(s) => {
-                    if s.read(cx).value().as_ref() != text {
-                        s.update(cx, |s, cx| s.set_value(text, window, cx));
-                    }
-                }
+            if e.state.read(cx).value().as_ref() != text {
+                e.state.update(cx, |s, cx| s.set_value(text, window, cx));
             }
         }
         let want: Vec<(String, f32)> = self
@@ -456,9 +443,9 @@ impl CardView {
             .collect();
         for (key, v) in want {
             if let Some(e) = self.sliders.get(&key)
-                && (e.state.read(cx).value().start() - v).abs() > f32::EPSILON
+                && (e.state.read(cx).value() - v).abs() > f32::EPSILON
             {
-                e.state.update(cx, |s, cx| s.set_value(v, window, cx));
+                e.state.update(cx, |s, cx| s.set_value(v, cx));
             }
         }
     }
@@ -518,16 +505,20 @@ impl CardView {
                 let value = text_of(self.read(&binding));
                 let (kind, placeholder) = (*kind, placeholder.clone().unwrap_or_default());
                 let state = cx.new(|cx| {
-                    InputState::new(window, cx)
+                    let s = InputState::new(window, cx)
                         .placeholder(placeholder)
                         .masked(kind == InputKind::Password)
-                        .default_value(value)
+                        .default_value(value);
+                    match keyboard(kind) {
+                        Some(k) => s.keyboard(k),
+                        None => s,
+                    }
                 });
                 let subs = self.text_subscriptions(&key, &state, window, cx);
                 self.texts.insert(
                     key,
                     TextEntry {
-                        state: TextState::Line(state),
+                        state,
                         binding,
                         _subs: subs,
                     },
@@ -540,18 +531,20 @@ impl CardView {
                 }
                 let value = text_of(self.read(&binding));
                 let rows = rows.unwrap_or(3.).clamp(1., 12.) as usize;
-                // Its placeholder is drawn by the card, wrapping (draw/form.rs).
-                let _ = placeholder;
+                let placeholder = placeholder.clone().unwrap_or_default();
+                // As tall as its rows, and then as its text, as the web's (field-sizing:
+                // content) does, up to the most rows a card asks for.
                 let state = cx.new(|cx| {
-                    TextareaState::new(window, cx)
-                        .rows(rows)
+                    InputState::textarea(window, cx)
+                        .auto_grow(rows, rows.max(12))
+                        .placeholder(placeholder)
                         .default_value(value)
                 });
                 let subs = self.text_subscriptions(&key, &state, window, cx);
                 self.texts.insert(
                     key,
                     TextEntry {
-                        state: TextState::Area(state),
+                        state,
                         binding,
                         _subs: subs,
                     },
@@ -578,10 +571,9 @@ impl CardView {
                 let sub = cx.subscribe(
                     &state,
                     move |this: &mut CardView, _, e: &SliderEvent, cx| {
-                        if let SliderEvent::Release(v) | SliderEvent::Change(v) = e
-                            && let Some(b) = this.sliders.get(&k).map(|e| e.binding.clone())
-                        {
-                            let n = round_to(v.start() as f64);
+                        let (SliderEvent::Release(v) | SliderEvent::Change(v)) = e;
+                        if let Some(b) = this.sliders.get(&k).map(|e| e.binding.clone()) {
+                            let n = round_to(*v as f64);
                             if this.read(&b).as_ref() != Some(&json!([n])) {
                                 this.edit(&k, &b, json!([n]), cx);
                             }
@@ -645,10 +637,10 @@ impl CardView {
         }
     }
 
-    fn text_subscriptions<T: gpui_kit::EventEmitter<InputEvent> + TextValue>(
+    fn text_subscriptions(
         &mut self,
         key: &str,
-        state: &Entity<T>,
+        state: &Entity<InputState>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<Subscription> {
@@ -662,18 +654,24 @@ impl CardView {
                 };
                 match e {
                     InputEvent::Change => {
-                        let text = state.read(cx).text_value();
+                        let text = state.read(cx).value().to_string();
                         if text_of(this.read(&b)) != text {
                             this.edit(&k, &b, Json::String(text), cx);
                         }
                     }
-                    // As the web's inputs: checked when left, cleared when entered.
-                    InputEvent::Blur if !b.field.rules.is_empty() => {
-                        this.validate(&k, &b);
+                    // As the web's inputs: checked when left, cleared when entered. Either way
+                    // the card draws again, for the field's focus ring.
+                    InputEvent::Blur => {
+                        if !b.field.rules.is_empty() {
+                            this.validate(&k, &b);
+                        }
                         cx.notify();
                     }
-                    InputEvent::Focus if this.ui.errors.remove(&k).is_some() => cx.notify(),
-                    _ => {}
+                    InputEvent::Focus => {
+                        this.ui.errors.remove(&k);
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { .. } => {}
                 }
             },
         )]
@@ -899,21 +897,17 @@ fn round_to(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
 }
 
-/// Reading the text out of an input or a text area.
-pub(crate) trait TextValue {
-    fn text_value(&self) -> String;
-}
-
-impl TextValue for InputState {
-    fn text_value(&self) -> String {
-        self.value().to_string()
-    }
-}
-
-impl TextValue for TextareaState {
-    fn text_value(&self) -> String {
-        self.value().to_string()
-    }
+/// The on-screen keyboard for an address, a link or a number, as the web's input types
+/// give one: no capitals, corrections or suggestions. Text and passwords keep gpui-core's own.
+fn keyboard(kind: InputKind) -> Option<TextInputConfiguration> {
+    matches!(kind, InputKind::Email | InputKind::Url | InputKind::Number).then_some(
+        TextInputConfiguration {
+            autocorrect: false,
+            autocapitalize: Autocapitalize::None,
+            suggestions: false,
+            input_action: TextInputAction::Done,
+        },
+    )
 }
 
 /// Finds the fields, images and editable tables under a component, with the keys the drawing

@@ -4,7 +4,6 @@
 use std::rc::Rc;
 
 use gpui_core::Disableable as _;
-use gpui_kit::component::input::Input as KitInput;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -255,8 +254,9 @@ impl Draw<'_, '_> {
                 let text = row.get(c).cloned().unwrap_or_default();
                 let key = path.to_string();
                 let content = match (&editing, col.kind.as_str()) {
-                    (Some((er, ec, s)), _) if *er == r && *ec == c => self
-                        .sideways(
+                    (Some((er, ec, s)), _) if *er == r && *ec == c => {
+                        let field = self.text_field(s, false, false);
+                        self.sideways(
                             div()
                                 .id(self.id(&format!("{path}.e{r}.{c}")))
                                 .w_full()
@@ -264,8 +264,9 @@ impl Draw<'_, '_> {
                                 .px(self.px(4.)),
                             &format!("{path}.e{r}.{c}"),
                         )
-                        .child(KitInput::new(s).w_full())
-                        .into_any_element(),
+                        .child(field)
+                        .into_any_element()
+                    }
                     (_, "select") => {
                         let opts: Vec<(String, String)> = col
                             .options
