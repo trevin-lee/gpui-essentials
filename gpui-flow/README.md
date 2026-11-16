@@ -158,6 +158,17 @@ Run the example with `cargo run --release --example flow` from this folder.
   `Flow::align_selected` lines the selection up by its left, centre, right, top, middle or
   bottom; `distribute_selected` spaces it evenly across or down. Both work by where nodes are
   in the flow, frames' children included, and send `NodeMove`.
+- **Pictures and link cards.** The flow fetches and opens nothing itself.
+  - **Pictures.** An `image` node (`Node::image(src, width, height, alt)`) shows what the
+    host's loader returns for its `src` (`with_image_loader`: a `src` in, a GPUI
+    `ImageSource` out). It keeps the picture's proportions, also when resized, and shows its
+    caption (the label) under it and its alt text in its place until the picture loads.
+  - **Link cards.** A `link` node (`Node::link_card(url)`) is a card for an address. The
+    flow asks the host once to fill it in (`FlowEvent::LinkCardNeeded`); the host sets the
+    site, title, description and preview picture with `update_node`. Its open button sends
+    `FlowEvent::OpenUrl`.
+  - **Dropped files.** Files dropped on the canvas send `FlowEvent::FilesDropped` with
+    where they landed, for the host to make into nodes.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

@@ -182,6 +182,26 @@ fn worst_nodes() -> Vec<Node> {
             .text_align(LabelAlign::Right),
     ]
     .into_iter()
+    // A picture with no loader, its alt text in its place, and link cards filled in with the
+    // worst a page could give.
+    .chain(
+        [
+            Node::new("pic", xy(0., 1400.))
+                .image("x", 1600., 900., text.clone())
+                .label(text.clone()),
+            Node::new("card", xy(400., 1400.))
+                .link_card(format!("https://example.com/{}", "x".repeat(300))),
+            Node::new("filled", xy(800., 1400.)).link_card("https://example.com"),
+        ]
+        .map(|mut n| {
+            if let Some(card) = n.card.as_mut().filter(|_| n.id == "filled") {
+                card.title = Some(text.clone().into());
+                card.description = Some(text.clone().into());
+                card.site = Some(WORD.into());
+            }
+            n
+        }),
+    )
     // Frames, titled with the worst text, colored and not.
     .chain([
         Node::new("frame", xy(0., 1100.))

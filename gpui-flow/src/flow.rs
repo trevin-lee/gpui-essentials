@@ -382,6 +382,24 @@ pub enum FlowEvent {
         node: NodeId,
         parent: Option<NodeId>,
     },
+    /// Someone pressed a link card's open button: the host opens the address, if it will. The
+    /// flow never opens anything itself.
+    OpenUrl {
+        node: NodeId,
+        url: SharedString,
+    },
+    /// A link card for this address has nothing filled in: the host looks the address up and
+    /// fills in the card (`update_node`). Asked once for each node and address.
+    LinkCardNeeded {
+        node: NodeId,
+        url: SharedString,
+    },
+    /// Files were dropped on the canvas, at this flow point: the host decides what they become
+    /// (pictures, say).
+    FilesDropped {
+        paths: Vec<std::path::PathBuf>,
+        position: XY,
+    },
     /// A node joined a frame (`parent`) or left one (none): dropped in or dragged out, taken
     /// in by a frame dropped over it, or framed or unframed with ⌘G and ⇧⌘G.
     NodeParentChange {
@@ -485,6 +503,8 @@ enum Drag {
         /// The size the node was given before, for escape to put back.
         given: (Option<f32>, Option<f32>),
         min: (f32, f32),
+        /// Width over height, when the node keeps its proportions.
+        aspect: Option<f32>,
         moved: bool,
     },
     Minimap,
@@ -538,6 +558,9 @@ pub struct Flow {
     valid_connection: Option<ConnectionCheck>,
     delete_check: Option<DeleteCheck>,
     transform_listener: Option<TransformListener>,
+    image_loader: Option<crate::node::ImageLoader>,
+    /// The link cards already asked about, by node and address.
+    asked: HashSet<(NodeId, SharedString)>,
     /// Where each node is in `nodes`, built on the first lookup after the list changes: a
     /// frame looks nodes up by id several times each.
     index: RefCell<Option<HashMap<NodeId, usize>>>,
@@ -653,6 +676,8 @@ impl Flow {
             valid_connection: None,
             delete_check: None,
             transform_listener: None,
+            image_loader: None,
+            asked: HashSet::new(),
             index: RefCell::new(None),
             shared: Rc::default(),
             focus: cx.focus_handle(),
@@ -798,6 +823,37 @@ impl Flow {
     pub fn with_new_node(mut self, make: impl Fn(Option<&Node>, &Flow) -> Node + 'static) -> Self {
         self.new_node = Some(Rc::new(make));
         self
+    }
+
+    /// Gives `image` nodes and link cards their pictures: called with a picture's `src` while a
+    /// node is drawn, it returns what GPUI should draw, or none. The host decides what a `src`
+    /// is and where it comes from; the flow never fetches anything itself.
+    pub fn with_image_loader(
+        mut self,
+        load: impl Fn(&str, &mut Window, &mut App) -> Option<ImageSource> + 'static,
+    ) -> Self {
+        self.image_loader = Some(Rc::new(load));
+        self
+    }
+
+    /// Asks the host to open a link card's address. Says whether the node has one.
+    pub fn open_url(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(node) = self.node(id) else {
+            return false;
+        };
+        let Some(url) = node
+            .card
+            .as_ref()
+            .map(|c| c.url.clone())
+            .filter(|u| !u.is_empty())
+        else {
+            return false;
+        };
+        cx.emit(FlowEvent::OpenUrl {
+            node: node.id.clone(),
+            url,
+        });
+        true
     }
 
     /// The canvas's transform as of the last frame drawn.
@@ -2162,11 +2218,13 @@ impl Flow {
 
     /// Starts resizing a node by one of its resizer's corners. Says whether the press was the
     /// flow's.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn resize_mouse_down(
         &mut self,
         node: &NodeId,
         corner: ResizeCorner,
         min: (f32, f32),
+        keep: bool,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -2189,6 +2247,7 @@ impl Flow {
             size,
             given: (n.width, n.height),
             min,
+            aspect: (keep && size.1 > 0.).then(|| size.0 / size.1),
             moved: false,
         };
         self.drag_button = event.button;
@@ -2352,9 +2411,12 @@ impl Flow {
             TouchTarget::Handle { node, handle, kind } => {
                 self.handle_mouse_down(node, handle.clone(), *kind, &down, window, cx)
             }
-            TouchTarget::Resize { node, corner, min } => {
-                self.resize_mouse_down(node, *corner, *min, &down, window, cx)
-            }
+            TouchTarget::Resize {
+                node,
+                corner,
+                min,
+                keep,
+            } => self.resize_mouse_down(node, *corner, *min, *keep, &down, window, cx),
         };
         if !took || self.drag.is_none() {
             return false;
@@ -2697,6 +2759,25 @@ impl Flow {
         self.selection_changed(cx);
         cx.notify();
         true
+    }
+
+    /// Asks the host to fill in each link card that has only its address, once for each.
+    fn ask_for_cards(&mut self, cx: &mut Context<Self>) {
+        let wanted: Vec<(NodeId, SharedString)> = self
+            .nodes
+            .iter()
+            .filter(|n| n.kind == "link")
+            .filter_map(|n| {
+                let card = n.card.as_ref()?;
+                let empty = card.title.is_none() && card.description.is_none();
+                (empty && !card.url.trim().is_empty()).then(|| (n.id.clone(), card.url.clone()))
+            })
+            .filter(|key| !self.asked.contains(key))
+            .collect();
+        for (node, url) in wanted {
+            self.asked.insert((node.clone(), url.clone()));
+            cx.emit(FlowEvent::LinkCardNeeded { node, url });
+        }
     }
 
     // Lining up.
@@ -3283,6 +3364,7 @@ impl Flow {
                 position,
                 size,
                 min,
+                aspect,
                 moved,
                 ..
             } => {
@@ -3293,8 +3375,20 @@ impl Flow {
                 let delta = pointer - *start;
                 let left = matches!(corner, ResizeCorner::TopLeft | ResizeCorner::BottomLeft);
                 let top = matches!(corner, ResizeCorner::TopLeft | ResizeCorner::TopRight);
-                let w = (size.0 + if left { -delta.x } else { delta.x }).max(min.0);
-                let h = (size.1 + if top { -delta.y } else { delta.y }).max(min.1);
+                let mut w = (size.0 + if left { -delta.x } else { delta.x }).max(min.0);
+                let mut h = (size.1 + if top { -delta.y } else { delta.y }).max(min.1);
+                // Keeping proportions, the way the pointer went further decides the size.
+                if let Some(a) = *aspect {
+                    if w / size.0 >= h / size.1 {
+                        h = w / a;
+                    } else {
+                        w = h * a;
+                    }
+                    if w < min.0 || h < min.1 {
+                        w = min.0.max(min.1 * a);
+                        h = w / a;
+                    }
+                }
                 // The corner opposite the one held stays where it is.
                 let x = if left {
                     position.x + size.0 - w
@@ -3690,6 +3784,7 @@ impl Flow {
             children: self.tree.children_of(&node.id).len(),
             collapsed: node.collapsed,
             link: node.link.clone(),
+            images: self.image_loader.clone(),
         };
         let renderer = self
             .node_kinds
@@ -4219,6 +4314,7 @@ impl Render for Flow {
         let colors = self.colors.unwrap_or_else(|| FlowColors::from_theme(cx));
         self.enforce_extents();
         self.frame_time = now(cx);
+        self.ask_for_cards(cx);
         self.lay_out_tree(self.frame_time, window);
         self.try_pending_fit(cx);
         self.step_transition(window, cx);
@@ -4629,6 +4725,16 @@ impl Render for Flow {
                 cx.listener(|flow, event, _, cx| flow.pane_context_menu(event, cx)),
             )
             .on_scroll(cx.listener(|flow, event, _, cx| flow.scroll(event, cx)))
+            .on_drop(cx.listener(|flow, paths: &ExternalPaths, window, cx| {
+                if flow.options.pointer_mode == PointerMode::Off {
+                    return;
+                }
+                let position = flow.screen_to_flow(window.mouse_position());
+                cx.emit(FlowEvent::FilesDropped {
+                    paths: paths.paths().to_vec(),
+                    position,
+                });
+            }))
             .on_pinch(cx.listener(|flow, event, _, cx| flow.pinch(event, cx)))
             .child(keys)
             .children(layers)
