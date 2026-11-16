@@ -12,6 +12,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc, Weekday};
 use gpui::*;
 
 use crate::calendar::{AgendaRow, Calendar, Chip, Laid, SpanPiece};
+use crate::find::Query;
 use crate::layout;
 use crate::model::{CalendarOptions, EventId, EventLink, EventTime, LinkKind, Selection};
 use crate::theme::{CalendarColors, ChipColors, mix};
@@ -309,6 +310,8 @@ pub(crate) struct Scene {
     /// The all-day row's lanes, when they're another period's: the period a swipe brings in
     /// keeps the one on screen's, so their hours line up.
     pub lanes: Option<usize>,
+    /// The find query and the colour its finds are marked in, while there is one.
+    pub find: Option<(Rc<Query>, Hsla)>,
 }
 
 impl Scene {
@@ -333,6 +336,16 @@ impl Scene {
 
     fn selected(&self, id: &EventId) -> bool {
         matches!(&self.selection, Some(Selection::Event(s)) if s == id)
+    }
+
+    /// Whether a find query leaves this chip out (dimmed on the grid).
+    fn dimmed(&self, chip: &Chip) -> bool {
+        self.find.is_some() && !chip.found
+    }
+
+    /// Marks found words while drawing a found chip's text.
+    fn mark(&self, chip: &Chip) -> Option<(Rc<Query>, Hsla)> {
+        self.find.clone().filter(|_| chip.found)
     }
 
     fn moving(&self, id: &EventId) -> bool {
@@ -648,6 +661,7 @@ pub(crate) fn body(
                     cx,
                     s: geo.s,
                     family: scene.family.clone(),
+                    mark: None,
                 };
                 // Days are drawn right of the gutter only, and the gutter after them, still.
                 let days_area =
@@ -659,6 +673,7 @@ pub(crate) fn body(
                             cx: ink.cx,
                             s: ink.s,
                             family: ink.family.clone(),
+                            mark: ink.mark.clone(),
                         };
                         // The period a swipe brings in, beside this one. Drawn first: what
                         // it leaves in the shared hit lists is replaced by this period's
@@ -786,6 +801,8 @@ struct Ink<'a> {
     cx: &'a mut App,
     s: f32,
     family: SharedString,
+    /// While set, text is drawn with what the query finds in it marked in this colour.
+    mark: Option<(Rc<Query>, Hsla)>,
 }
 
 impl Ink<'_> {
@@ -856,6 +873,29 @@ impl Ink<'_> {
         }
     }
 
+    /// The runs for `text`: one, or, while marking, the found words with a background of the
+    /// mark's colour.
+    fn runs(&self, text: &str, weight: FontWeight, color: Hsla) -> Vec<TextRun> {
+        let Some((query, mark)) = &self.mark else {
+            return vec![self.run(text.len(), weight, color)];
+        };
+        let mut out = Vec::new();
+        let mut at = 0;
+        for r in query.ranges(text) {
+            if r.start > at {
+                out.push(self.run(r.start - at, weight, color));
+            }
+            let mut found = self.run(r.end - r.start, weight, color);
+            found.background_color = Some(*mark);
+            out.push(found);
+            at = r.end;
+        }
+        if at < text.len() || out.is_empty() {
+            out.push(self.run(text.len() - at, weight, color));
+        }
+        out
+    }
+
     fn run(&self, len: usize, weight: FontWeight, color: Hsla) -> TextRun {
         TextRun {
             len,
@@ -880,7 +920,7 @@ impl Ink<'_> {
         }
         let font_size = self.u(size);
         let mut line: SharedString = text.to_string().into();
-        let mut run = self.run(line.len(), weight, color);
+        let mut runs = self.runs(text, weight, color);
         if let Some(w) = max_w {
             if w <= px(1.) {
                 return None;
@@ -888,21 +928,23 @@ impl Ink<'_> {
             let mut wrapper = self
                 .window
                 .text_system()
-                .line_wrapper(run.font.clone(), font_size);
-            let runs = [run];
+                .line_wrapper(runs[0].font.clone(), font_size);
             let (cut, cut_runs) = wrapper.truncate_line(line, w, "…", &runs, TruncateFrom::End);
-            let next = cut_runs.into_owned().into_iter().next()?;
+            let next = cut_runs.into_owned();
+            if next.is_empty() {
+                return None;
+            }
             // A lone "…", or one letter and "…", says nothing: leave the text out.
             if cut.as_ref() != text && kept_chars(&cut) < MIN_KEPT {
                 return None;
             }
             line = cut;
-            run = next;
+            runs = next;
         }
         let shaped = self
             .window
             .text_system()
-            .shape_line(line, font_size, &[run], None);
+            .shape_line(line, font_size, &runs, None);
         // Too narrow for even the ellipsis: draw nothing rather than spill over.
         if max_w.is_some_and(|w| shaped.width > w) {
             return None;
@@ -928,6 +970,10 @@ impl Ink<'_> {
         let width = shaped.width;
         let leading = self.u(leading);
         self.note(&shaped.text.clone(), at, width, leading);
+        if self.mark.is_some() {
+            let _ =
+                shaped.paint_background(at, leading, TextAlign::Left, None, self.window, self.cx);
+        }
         let _ = shaped.paint(at, leading, TextAlign::Left, None, self.window, self.cx);
         width
     }
@@ -988,12 +1034,12 @@ impl Ink<'_> {
             self.text(text, size, leading, weight, color, at, Some(width));
             return 1;
         }
-        let run = self.run(text.len(), weight, color);
+        let runs = self.runs(text, weight, color);
         let font_size = self.u(size);
         let Ok(lines) = self.window.text_system().shape_text(
             text.to_string().into(),
             font_size,
-            &[run],
+            &runs,
             Some(width),
             Some(max_lines),
         ) else {
@@ -1009,6 +1055,16 @@ impl Ink<'_> {
                 line.width(),
                 line.size(leading).height,
             );
+            if self.mark.is_some() {
+                let _ = line.paint_background(
+                    point(at.x, y),
+                    leading,
+                    TextAlign::Left,
+                    None,
+                    self.window,
+                    self.cx,
+                );
+            }
             let _ = line.paint(
                 point(at.x, y),
                 leading,
@@ -1180,6 +1236,7 @@ fn paint_timed_chip(
                 cx: ink.cx,
                 s: ink.s,
                 family: ink.family.clone(),
+                mark: ink.mark.clone(),
             };
             let pad = ink.u(3.);
             let links = text.links;
@@ -1440,6 +1497,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 cx: ink.cx,
                 s: ink.s,
                 family: ink.family.clone(),
+                mark: ink.mark.clone(),
             };
             // The hours the clocks skip or repeat.
             for (col, change) in &scene.laid.dst {
@@ -1517,6 +1575,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 cx: ink.cx,
                 s: ink.s,
                 family: ink.family.clone(),
+                mark: ink.mark.clone(),
             };
             let mut hits = shared.hits.borrow_mut();
             for piece in &scene.laid.timed {
@@ -1536,7 +1595,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     ),
                 );
                 let selected = scene.selected(&chip.id);
-                let faded = scene.moving(&chip.id);
+                let faded = scene.moving(&chip.id) || scene.dimmed(chip);
                 let cc = ChipColors::new(chip.color, c, selected, scene.past(chip));
                 let text = ChipText {
                     title: &chip.title,
@@ -1544,7 +1603,12 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     location: chip.location.as_deref(),
                     links: &chip.links,
                 };
+                ink.mark = scene.mark(chip);
                 let links = paint_timed_chip(&mut ink, rect, &text, cc, c.background, faded);
+                ink.mark = None;
+                if scene.find.is_some() && chip.found {
+                    ink.outlined(rect, ink.u(4.), transparent_black(), ink.u(1.5), c.find);
+                }
                 push_links(shared, chip, links, &grid_area, Area::Grid);
                 let resize = (piece.ends && !chip.read_only)
                     .then(|| {
@@ -1909,6 +1973,7 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 cx: ink.cx,
                 s: ink.s,
                 family: ink.family.clone(),
+                mark: ink.mark.clone(),
             };
             // The hours, out of the way of the time now.
             for h in 1..24 {
@@ -1997,15 +2062,17 @@ fn paint_span(
         LANE
     });
     let selected = scene.selected(&chip.id);
-    let faded = scene.moving(&chip.id);
+    let faded = scene.moving(&chip.id) || scene.dimmed(chip);
     let past = scene.past(chip);
     let cc = ChipColors::new(chip.color, c, selected, past);
+    let ring = scene.find.is_some() && chip.found && !span.dot;
     for (a, z) in layout::visible_runs(span.first, span.last, span.lane, fits) {
         let open_left = a == span.first && span.cont_left;
         let open_right = z == span.last && span.cont_right;
         let x0 = geo.col_x(a) + if open_left { px(0.) } else { ink.u(3.) };
         let x1 = geo.col_x(z + 1) - if open_right { px(0.) } else { ink.u(4.) };
         let rect = Bounds::from_corners(point(x0, top), point(x1, top + lane_h - ink.u(2.)));
+        ink.mark = scene.mark(chip);
         let links = if span.dot {
             paint_dot_row(ink, rect, chip, cc, selected, faded)
         } else {
@@ -2020,6 +2087,10 @@ fn paint_span(
                 faded,
             )
         };
+        ink.mark = None;
+        if ring {
+            ink.outlined(rect, ink.u(4.), transparent_black(), ink.u(1.5), c.find);
+        }
         push_links(shared, chip, links, &geo.bounds, area);
         let resize = (chip.all_day && !chip.read_only && z == span.last && !span.cont_right)
             .then(|| {
@@ -2561,7 +2632,9 @@ fn paint_agenda(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     cx: ink.cx,
                     s: ink.s,
                     family: ink.family.clone(),
+                    mark: ink.mark.clone(),
                 };
+                ink.mark = scene.mark(&scene.laid.chips[row.chip]);
                 paint_agenda_row(&mut ink, scene, shared, &cols, row, place, top, rows_area);
             });
     }

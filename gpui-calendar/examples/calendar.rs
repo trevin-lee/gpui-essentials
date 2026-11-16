@@ -11,8 +11,8 @@
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
 //! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
-//! `compact-recurring`. Pictures and the bench draw a window that's never shown
-//! and never takes the keyboard.
+//! `compact-recurring`, `find`, `compact-find`. Pictures and the bench draw a window that's
+//! never shown and never takes the keyboard.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -550,7 +550,7 @@ struct Root {
 }
 
 impl Root {
-    fn new(args: &Args, cx: &mut Context<Self>) -> Self {
+    fn new(args: &Args, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let pictures = args.shot.is_some() || args.bench;
         let now = if pictures { picture_now() } else { Utc::now() };
         let today = now.with_timezone(&TZ).date_naive();
@@ -572,6 +572,7 @@ impl Root {
         let mut now_at = now;
         match args.scene.as_str() {
             "day" | "compact-zones" => view = CalendarView::Day,
+            "compact-find" => view = CalendarView::AGENDA,
             // A phone: the day, the week and the agenda at an iPhone's width.
             "compact" | "compact-swipe" | "compact-hold" | "compact-recurring" => {
                 view = CalendarView::Day
@@ -658,6 +659,13 @@ impl Root {
             if touch || scene.starts_with("compact") {
                 c.options.touch = true;
             }
+            // Finding: lunches this week, and CS 162 on a phone's list.
+            if scene == "find" {
+                c.set_query("lunch", cx);
+            }
+            if scene == "compact-find" {
+                c.set_query("cs 162", cx);
+            }
             // A colleague in Bangalore: a second column of hours, half an hour off ours.
             if scene.ends_with("zones") {
                 c.options.secondary_zone = Some(chrono_tz::Asia::Kolkata);
@@ -673,9 +681,14 @@ impl Root {
             }
             c
         });
-        let subscription = cx.subscribe(&calendar, |this, calendar, event: &CalendarEvent, cx| {
-            this.host(calendar, event, cx);
-        });
+        let subscription =
+            cx.subscribe_in(&calendar, window, |this, calendar, event, window, cx| {
+                // This host has no search field of its own, so ⌘F lets the calendar take typing.
+                if matches!(event, CalendarEvent::Find) {
+                    calendar.update(cx, |c, cx| c.type_query(window, cx));
+                }
+                this.host(calendar.clone(), event, cx);
+            });
         // A phone's window has no room for the hint.
         let status = if scene.starts_with("compact") {
             ""
@@ -745,6 +758,11 @@ impl Root {
                     }
                 });
                 said
+            }
+            CalendarEvent::Find => "Find: type to filter; Enter keeps it, Escape clears it".into(),
+            CalendarEvent::QueryChange(q) => {
+                let n = calendar.read(cx).found().len();
+                format!("Finding \"{q}\": {n} in view")
             }
             CalendarEvent::OpenLink { event, link } => {
                 let what = match link.kind {
@@ -829,7 +847,7 @@ fn main() {
             };
             let (window, root) = gpui_core::open_window(options, cx, {
                 let args = &args;
-                move |_, cx| cx.new(|cx| Root::new(args, cx))
+                move |window, cx| cx.new(|cx| Root::new(args, window, cx))
             })
             .expect("the window");
             if !offscreen {
@@ -1197,6 +1215,12 @@ mod shots {
                         draw(window, cx);
                     }
                     finger(window, cx, TouchPhase::Ended, to);
+                }
+                // The calendar taking typing, as a host without a search field asks it to.
+                "find" => {
+                    let _ = cx.update_window(window, |_, window, cx| {
+                        calendar.update(cx, |c, cx| c.type_query(window, cx))
+                    });
                 }
                 "agenda" | "compact-agenda" => {
                     let _ = cx.update_window(window, |_, _, cx| {
