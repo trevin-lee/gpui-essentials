@@ -32,9 +32,9 @@ RadioGroup, SwitchGroup, Chips, OptionCards), Label, Button, Buttons and IconBut
 Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconText, ImageText and
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
 
-Text fields and text areas are gpui-core's `Input` (in this workspace), drawn in the card's
-colours, with the platform's input methods (on iOS, a tap raises the keyboard); the slider and
-an icon button's tooltip are gpui-core's too. The date picker is still GPUI Kit's. Everything
+Text fields and text areas are gpui-core's `Input` (in this workspace), with the platform's
+input methods (on iOS, a tap raises the keyboard); the slider and an icon button's tooltip are
+gpui-core's too, all drawn in the card's colours. The date picker is still GPUI Kit's. Everything
 else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
 keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there.
 Markdown goes through GPUI Kit's text view, so it can be selected and copied; a code block has
@@ -138,10 +138,6 @@ impl Render for Chat {
 fn main() {
     gpui_kit::application().run(|cx| {
         gpui_kit::init(cx);
-        // gpui-core's keys for the text fields, and its theme for their caret, selection and
-        // placeholder, the slider and tooltips: set it to match your app (light or dark).
-        gpui_core::init(cx);
-        gpui_core::Theme::set(gpui_core::Theme::dark(), cx);
         gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
             let host: Rc<dyn CardHost> = Rc::new(Host);
             let program = r#"root = Stack([TextContent("Ready to send?"), Button("Send it")])"#;
@@ -166,12 +162,24 @@ series), the font families, text sizes, corner radii and spacing. `CardTheme::da
 pixels and are drawn as `rems(size / rem_base)`, so a host that zooms by changing the window's
 rem zooms its cards too. `frame` draws the card in a rounded, bordered box, as a chat bubble.
 
-Text fields are drawn in the card's colours: their edge (`line_strong`, the accent while they
-have the focus, `danger.emphasis` when refused), a `sunk` fill on a dark card, their text, font
-and size, and the ring of the focus (`colors.focus_ring`), which is also the ring around a
-button, tab, chip or choice focused from the keyboard. gpui-core draws their caret, selection
-and placeholder in its own theme, as it draws the slider and tooltips (and GPUI Kit its date
-picker), so set gpui-core's `Theme` (and GPUI Kit's) to the same light or dark as the cards.
+The text fields, the slider and tooltips are gpui-core's, drawn in the card's colours, so a
+light card in a dark app (or the other way round) needs no change to gpui-core's global `Theme`:
+
+| | From `CardTheme.colors` |
+|---|---|
+| A text field's edge | `line_strong`, `accent` while it has the focus, `danger.emphasis` when refused |
+| Its fill | `sunk` on a dark card, none on a light one |
+| Its text and caret | `text` |
+| Its selection | `accent` at 30% |
+| Its placeholder | `text_muted` |
+| Its focus ring | `focus_ring`, also the ring around a button, tab, chip or choice focused from the keyboard |
+| The slider's track, fill and thumb | `line_strong`, `accent`, `background` with an `accent` edge |
+| An icon button's tooltip | `popover`, with `text` and a `line_strong` edge |
+
+gpui-core sets itself up when the first text field is made, so there's no `gpui_core::init` to
+call. Its `Theme` still gives the slider's keyboard focus ring and a tooltip's font; it's dark
+until a host sets it. GPUI Kit draws the date picker and Markdown in its own theme, so set GPUI
+Kit's `Theme` to the same light or dark as the cards.
 
 ### Hooks and events
 
