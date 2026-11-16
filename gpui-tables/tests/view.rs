@@ -77,7 +77,7 @@ fn the_header_menu_sorts_and_shift_adds_a_sort(cx: &mut TestAppContext) {
     let host = TestHost::new();
     let (table, cx) = open_people(cx, &host);
     menu(cx, "Warmth");
-    click(cx, "entry:Sort descending");
+    click(cx, "menu-item-Sort descending");
     assert!(!drawn(cx, "menu"), "the menu closes");
     let v = host.last_view();
     assert_eq!(v.sort, vec![Sort::descending(WARMTH)]);
@@ -95,7 +95,7 @@ fn the_header_menu_sorts_and_shift_adds_a_sort(cx: &mut TestAppContext) {
 
     // Shift adds a sort to the ones there.
     menu(cx, "Name");
-    click_with(cx, "entry:Sort ascending", Modifiers::shift());
+    click_with(cx, "menu-item-Sort ascending", Modifiers::shift());
     assert_eq!(
         host.last_view().sort,
         vec![Sort::descending(WARMTH), Sort::ascending(NAME)]
@@ -104,7 +104,7 @@ fn the_header_menu_sorts_and_shift_adds_a_sort(cx: &mut TestAppContext) {
 
     // And it can be taken away again.
     menu(cx, "Warmth");
-    click(cx, "entry:Remove sort");
+    click(cx, "menu-item-Remove sort");
     assert_eq!(host.last_view().sort, vec![Sort::ascending(NAME)]);
     // Every one of these is a viewChanged for this database.
     assert!(
@@ -119,7 +119,7 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
     let host = TestHost::new();
     let (table, cx) = open_people(cx, &host);
     menu(cx, "Stage");
-    click(cx, "entry:Warm");
+    click(cx, "menu-item-Warm");
     let v = host.last_view();
     assert_eq!(
         v.filter,
@@ -128,15 +128,15 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
     assert_eq!(titles(&table, cx), ["Imani Castell", "Sami Halloran"]);
     // Another column's filter is and-ed with it.
     menu(cx, "Follow up");
-    click(cx, "entry:Checked");
+    click(cx, "menu-item-Checked");
     assert!(matches!(&host.last_view().filter, Some(Filter::And { and }) if and.len() == 2));
     assert_eq!(titles(&table, cx), ["Imani Castell", "Sami Halloran"]);
     // Choosing another option replaces the first.
     menu(cx, "Stage");
-    click(cx, "entry:Lead");
+    click(cx, "menu-item-Lead");
     assert_eq!(titles(&table, cx), ["Theo Brandt"]);
     menu(cx, "Stage");
-    click(cx, "entry:Clear filter");
+    click(cx, "menu-item-Clear filter");
     assert_eq!(
         host.last_view().filter,
         Some(Filter::condition(
@@ -147,7 +147,7 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
     );
     // A text filter's value is typed in the menu, under the header; Enter applies it.
     menu(cx, "Role");
-    click(cx, "entry:Contains…");
+    click(cx, "menu-item-Contains…");
     assert!(
         drawn(cx, "menu") && drawn(cx, "editor"),
         "a field in the menu"
@@ -169,7 +169,7 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
     assert_eq!(titles(&table, cx), ["Sami Halloran"]);
     // A number's is read as a number, and Tab applies it too.
     menu(cx, "Warmth");
-    click(cx, "entry:Greater than…");
+    click(cx, "menu-item-Greater than…");
     type_text(cx, "2");
     keys(cx, "tab");
     let v = host.last_view();
@@ -180,14 +180,14 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
     // Escape closes the field and filters by nothing.
     let n = host.edits().len();
     menu(cx, "Warmth");
-    click(cx, "entry:Less than…");
+    click(cx, "menu-item-Less than…");
     type_text(cx, "9");
     keys(cx, "escape");
     assert!(!drawn(cx, "menu") && editing(&table, cx).is_none());
     assert_eq!(host.edits().len(), n);
     // Pressing elsewhere applies it, as a cell's value; with grouping and a currency sign.
     menu(cx, "Warmth");
-    click(cx, "entry:Equals…");
+    click(cx, "menu-item-Equals…");
     type_text(cx, "$1,0");
     click(cx, "header:Role");
     keys(cx, "escape");
@@ -199,7 +199,7 @@ fn the_header_menu_filters_by_its_column(cx: &mut TestAppContext) {
     // What isn't a number filters by nothing.
     let n = host.edits().len();
     menu(cx, "Warmth");
-    click(cx, "entry:Equals…");
+    click(cx, "menu-item-Equals…");
     type_text(cx, "warm");
     keys(cx, "enter");
     assert_eq!(host.edits().len(), n);
@@ -326,7 +326,7 @@ fn columns_hide_and_show_and_move_from_the_menu(cx: &mut TestAppContext) {
     let host = TestHost::new();
     let (table, cx) = open_people(cx, &host);
     menu(cx, "Role");
-    click(cx, "entry:Hide");
+    click(cx, "menu-item-Hide");
     assert!(
         host.last_view()
             .columns
@@ -335,24 +335,24 @@ fn columns_hide_and_show_and_move_from_the_menu(cx: &mut TestAppContext) {
     );
     assert!(!drawn(cx, "header:Role"));
     click(cx, "columns-button");
-    click(cx, "entry:Role");
+    click(cx, "menu-item-Role");
     assert!(
         host.last_view()
             .columns
             .iter()
             .any(|c| c.property_id == ROLE && !c.hidden)
     );
-    click(cx, "entry:Phone");
+    click(cx, "menu-item-Phone");
     assert!(table.update(cx, |t, _| t.columns().iter().any(|c| c.0 == PHONE)));
     keys(cx, "escape");
     menu(cx, "Stage");
-    click(cx, "entry:Move left");
+    click(cx, "menu-item-Move left");
     let cols: Vec<String> = table.update(cx, |t, _| t.columns().into_iter().map(|c| c.0).collect());
     assert_eq!(&cols[..4], [NAME, COMPANY, STAGE, ROLE]);
     // The title can't be hidden or moved.
     menu(cx, "Name");
-    assert!(!drawn(cx, "entry:Hide"));
-    assert!(!drawn(cx, "entry:Move left"));
+    assert!(!drawn(cx, "menu-item-Hide"));
+    assert!(!drawn(cx, "menu-item-Move left"));
 }
 
 #[gpui::test]
@@ -373,7 +373,7 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     click(cx, cell(IMANI, STAGE));
     assert!(!drawn(cx, "menu"), "the first press only focuses");
     click(cx, cell(IMANI, STAGE));
-    click(cx, "entry:Active");
+    click(cx, "menu-item-Active");
     assert_eq!(
         value_edit(&host.last_edit()),
         (IMANI, STAGE, Some(&Value::text(ACTIVE)))
@@ -382,12 +382,12 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     // A multi-select toggles options and stays open.
     click(cx, cell(IMANI, TAGS));
     click(cx, cell(IMANI, TAGS));
-    click(cx, "entry:Mentor");
+    click(cx, "menu-item-Mentor");
     assert!(drawn(cx, "menu"));
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     assert_eq!(v.and_then(Value::as_ids).unwrap().last().unwrap(), MENTOR);
-    click(cx, "entry:Investor");
+    click(cx, "menu-item-Investor");
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     assert!(
@@ -402,7 +402,7 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     click(cx, cell(ANA, COMPANY));
     click(cx, cell(ANA, COMPANY));
     host.clear();
-    click(cx, "entry:Bluefin Robotics");
+    click(cx, "menu-item-Bluefin Robotics");
     let edits = host.edits();
     assert_eq!(edits.len(), 2, "{edits:?}");
     assert!(
@@ -413,7 +413,7 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     // A date picks a day from the grid, keeping no time.
     click(cx, cell(ANA, LAST_CONTACTED));
     click(cx, cell(ANA, LAST_CONTACTED));
-    click(cx, "day:2026-11-20");
+    click(cx, "day-2026-11-20");
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     let day = engine::time::days_from_civil(2026, 11, 20);
@@ -511,7 +511,7 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     );
     // (Phone is hidden in this view: shown first.)
     click(cx, "columns-button");
-    click(cx, "entry:Phone");
+    click(cx, "menu-item-Phone");
     keys(cx, "escape");
     table.update(cx, |t, cx| t.focus_cell(ANA, PHONE, cx));
     keys(cx, "enter");
@@ -528,7 +528,7 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     // A person toggles people the property allows.
     table.update(cx, |t, cx| t.focus_cell(ANA, OWNER, cx));
     keys(cx, "enter");
-    click(cx, "entry:Career Planning");
+    click(cx, "menu-item-Career Planning");
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     assert_eq!(
@@ -739,7 +739,7 @@ fn the_hosts_field_wins_when_it_has_one(cx: &mut TestAppContext) {
     assert_eq!(host.edits().len(), n + 1);
     // A filter's value too, under its header.
     menu(cx, "Role");
-    click(cx, "entry:Contains…");
+    click(cx, "menu-item-Contains…");
     assert!(!drawn(cx, "editor"));
     let edit = host
         .texts
@@ -806,6 +806,236 @@ fn a_tap_on_a_focused_cell_edits_it_in_place(cx: &mut TestAppContext) {
     keys(cx, "escape");
 }
 
+/// The solid fill drawn exactly over `what` (a day of the month, say), if any.
+fn fill(cx: &mut VisualTestContext, what: &str) -> Option<Hsla> {
+    let b = rect(cx, what);
+    cx.update(|window, _| {
+        let s = window.scale_factor();
+        let near = |a: f32, b: Pixels| (a - f32::from(b) * s).abs() <= 1.;
+        window
+            .rendered_scene()
+            .quads
+            .iter()
+            .filter(|q| {
+                near(q.bounds.origin.x.as_f32(), b.origin.x)
+                    && near(q.bounds.origin.y.as_f32(), b.origin.y)
+                    && near(q.bounds.size.width.as_f32(), b.size.width)
+                    && near(q.bounds.size.height.as_f32(), b.size.height)
+            })
+            .filter_map(|q| q.background.as_solid())
+            .find(|c| c.a > 0.)
+    })
+}
+
+/// The last batch of edits the host was handed.
+fn last_batch(host: &TestHost) -> Vec<Edit> {
+    match host.events.borrow().last() {
+        Some(TableEvent::Edits { edits }) => edits.clone(),
+        other => panic!("not edits: {other:?}"),
+    }
+}
+
+#[gpui::test]
+fn options_are_pills_and_pickers_search(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people(cx, &host);
+    // An option is drawn as its pill, as in a cell, in the entry its name labels.
+    click(cx, cell(IMANI, STAGE));
+    click(cx, cell(IMANI, STAGE));
+    let row = rect(cx, "menu-item-Warm");
+    assert!(row.contains(&rect(cx, "pill:Warm").center()));
+    // Rows are 28 points at the table's text size (the theme's points are the window's rem
+    // over 15).
+    let rem = cx.update(|window, _| window.rem_size());
+    let expected = TableTheme::dark().pixels(28., rem);
+    assert!((row.size.height - expected).abs() < px(0.5), "{row:?}");
+    // It opens on the current option, Warm: Down and Enter pick the next one.
+    keys(cx, "down enter");
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (IMANI, STAGE, Some(&Value::text(ACTIVE)))
+    );
+    assert!(!drawn(cx, "menu"), "a select's picker closes on a pick");
+    // Typing searches the options by name (the label the pill stands for), and Enter picks
+    // the first match.
+    keys(cx, "enter");
+    type_text(cx, "dor");
+    assert!(drawn(cx, "pill:Dormant"));
+    assert!(!drawn(cx, "pill:Lead") && !drawn(cx, "pill:Active"));
+    keys(cx, "enter");
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (IMANI, STAGE, Some(&Value::text(DORMANT)))
+    );
+    // People are searched the same way, and their picker stays open on a pick.
+    table.update(cx, |t, cx| t.focus_cell(ANA, OWNER, cx));
+    keys(cx, "enter");
+    type_text(cx, "career");
+    assert!(drawn(cx, "menu-item-Career Planning"));
+    keys(cx, "enter");
+    let last = host.last_edit();
+    let (_, _, v) = value_edit(&last);
+    assert_eq!(
+        v.and_then(Value::as_people).unwrap(),
+        [Person::Owner, Person::agent("career-planning")]
+    );
+    assert!(drawn(cx, "menu"));
+}
+
+#[gpui::test]
+fn a_picker_creates_an_option(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people(cx, &host);
+    let options = |table: &Entity<TableView>, cx: &mut VisualTestContext, pid: &str| {
+        table.update(cx, |t, _| {
+            t.database()
+                .database
+                .as_ref()
+                .unwrap()
+                .property(pid)
+                .unwrap()
+                .options()
+                .to_vec()
+        })
+    };
+    let before = options(&table, cx, STAGE);
+    // A select: what's typed and matches no option is offered as a new one, and Enter makes
+    // it: the whole property with the option after the others, then the row's value, in one
+    // batch.
+    table.update(cx, |t, cx| t.focus_cell(IMANI, STAGE, cx));
+    keys(cx, "enter");
+    type_text(cx, "Prospect");
+    keys(cx, "enter");
+    let batch = last_batch(&host);
+    assert_eq!(batch.len(), 2, "{batch:?}");
+    let Edit::PropertyChanged {
+        database_id,
+        property,
+    } = &batch[0]
+    else {
+        panic!("first a propertyChanged: {batch:?}");
+    };
+    assert_eq!(
+        (database_id.as_str(), property.id.as_str()),
+        (PEOPLE, STAGE)
+    );
+    let made = property.options().last().unwrap().clone();
+    assert_eq!(property.options().len(), before.len() + 1);
+    assert_eq!(&property.options()[..before.len()], &before[..]);
+    assert_eq!(
+        (made.name.as_str(), &made.color),
+        ("Prospect", &Color::Default)
+    );
+    assert_eq!(made.id.len(), 36, "a new uuid");
+    assert!(before.iter().all(|o| o.id != made.id));
+    assert_eq!(
+        value_edit(&batch[1]),
+        (IMANI, STAGE, Some(&Value::text(made.id.clone())))
+    );
+    assert!(!drawn(cx, "menu"), "a select's picker closes");
+    assert_eq!(options(&table, cx, STAGE).last(), Some(&made));
+
+    // A multi-select: the new option is added to the others, and the picker stays open, its
+    // search emptied, with the new option checked.
+    table.update(cx, |t, cx| t.focus_cell(IMANI, TAGS, cx));
+    keys(cx, "enter");
+    let had = table.update(cx, |t, _| {
+        let r = t.rows().iter().find(|r| r.id == IMANI).unwrap();
+        r.value(TAGS).and_then(Value::as_ids).unwrap().to_vec()
+    });
+    type_text(cx, "Advisor");
+    keys(cx, "enter");
+    let batch = last_batch(&host);
+    let Edit::PropertyChanged { property, .. } = &batch[0] else {
+        panic!("first a propertyChanged: {batch:?}");
+    };
+    let made = property.options().last().unwrap().clone();
+    assert_eq!(made.name, "Advisor");
+    let mut ids = had.clone();
+    ids.push(made.id.clone());
+    assert_eq!(value_edit(&batch[1]), (IMANI, TAGS, Some(&Value::Ids(ids))));
+    assert!(drawn(cx, "menu"), "a multi-select's picker stays open");
+    assert!(drawn(cx, "pill:Advisor") && drawn(cx, "pill:Mentor"));
+    // A name that's an option's already (case aside) is no new option: Enter toggles it.
+    let n = host.edits().len();
+    type_text(cx, "mentor");
+    keys(cx, "enter");
+    let edits = host.edits();
+    assert_eq!(edits.len(), n + 1, "only the value");
+    let (_, _, v) = value_edit(edits.last().unwrap());
+    assert!(
+        v.and_then(Value::as_ids)
+            .unwrap()
+            .contains(&MENTOR.to_string())
+    );
+}
+
+#[gpui::test]
+fn the_month_is_the_tables_with_its_footer_and_ranges(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people(cx, &host);
+    let theme = TableTheme::dark();
+    // Imani was last contacted on October 2: picked in the table's accent, 28 points a day.
+    table.update(cx, |t, cx| t.focus_cell(IMANI, LAST_CONTACTED, cx));
+    keys(cx, "enter");
+    assert_eq!(fill(cx, "day-2026-10-02"), Some(theme.colors.accent));
+    let day = rect(cx, "day-2026-10-02");
+    let rem = cx.update(|window, _| window.rem_size());
+    let expected = theme.pixels(28., rem);
+    assert!((day.size.width - expected).abs() < px(0.5), "{day:?}");
+    // Today and Clear are in the month's footer, under its days and inside its popover.
+    let footer = rect(cx, "month-footer");
+    assert!(footer.top() > day.bottom());
+    assert!(rect(cx, "menu").contains(&footer.center()));
+    assert!(footer.contains(&rect(cx, "day-today").center()));
+    assert!(footer.contains(&rect(cx, "day-clear").center()));
+    click(cx, "day-today");
+    let today = NOW.div_euclid(engine::time::DAY_MS);
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (IMANI, LAST_CONTACTED, Some(&Value::date_on_day(today)))
+    );
+    assert!(!drawn(cx, "menu"));
+
+    // A range is shown as one: its ends picked, the days between tinted.
+    let d = |y, m, d| engine::time::days_from_civil(y, m, d) * engine::time::DAY_MS;
+    let range = Value::Date(DateValue {
+        start: d(2026, 11, 10),
+        end: Some(d(2026, 11, 13)),
+        include_time: false,
+    });
+    table.update(cx, |t, cx| {
+        let db = t.database().clone();
+        let mut rows = t.rows().to_vec();
+        let r = rows.iter_mut().find(|r| r.id == ANA).unwrap();
+        r.values
+            .get_or_insert_with(Default::default)
+            .insert(LAST_CONTACTED.into(), range.clone());
+        t.set_docs(db, rows, cx);
+    });
+    table.update(cx, |t, cx| t.focus_cell(ANA, LAST_CONTACTED, cx));
+    keys(cx, "enter");
+    assert_eq!(fill(cx, "day-2026-11-10"), Some(theme.colors.accent));
+    assert_eq!(fill(cx, "day-2026-11-13"), Some(theme.colors.accent));
+    assert_eq!(fill(cx, "day-2026-11-11"), Some(theme.colors.selection));
+    assert_eq!(fill(cx, "day-2026-11-12"), Some(theme.colors.selection));
+    assert_eq!(fill(cx, "day-2026-11-16"), None);
+    // A pick moves it, keeping its length.
+    click(cx, "day-2026-11-20");
+    assert_eq!(
+        value_edit(&host.last_edit()),
+        (
+            ANA,
+            LAST_CONTACTED,
+            Some(&Value::Date(DateValue {
+                start: d(2026, 11, 20),
+                end: Some(d(2026, 11, 23)),
+                include_time: false,
+            }))
+        )
+    );
+}
+
 #[gpui::test]
 fn the_keyboard_moves_the_focus_and_opens_rows(cx: &mut TestAppContext) {
     let host = TestHost::new();
@@ -850,11 +1080,26 @@ fn the_keyboard_moves_the_focus_and_opens_rows(cx: &mut TestAppContext) {
         Some(&TableEvent::OpenRow { row_id: ANA.into() })
     );
     assert_eq!(table.update(cx, |t, _| t.scroll_x()), px(0.));
-    // ⌥↓ opens the column's menu, and the arrows and Enter work in it.
+    // ⌥↓ opens the column's menu on its first entry, and the arrows and Enter work in it.
     keys(cx, "alt-down");
     assert!(drawn(cx, "menu"));
     keys(cx, "down enter");
     assert_eq!(host.last_view().sort, vec![Sort::descending(NAME)]);
+    // Shift-Enter adds a sort to the others, as a Shift-click does.
+    keys(cx, "right alt-down");
+    keys(cx, "shift-enter");
+    assert_eq!(
+        host.last_view().sort,
+        vec![Sort::descending(NAME), Sort::ascending(COMPANY)]
+    );
+    keys(cx, "left");
+    // Escape closes a menu and hands the keyboard back to the table: the arrows move the cell.
+    keys(cx, "alt-down");
+    assert!(drawn(cx, "menu"));
+    keys(cx, "escape");
+    assert!(!drawn(cx, "menu"));
+    keys(cx, "right");
+    assert_eq!(at(&table, cx), Some((ANA.into(), COMPANY.into())));
     // Escape lets go of the cell.
     keys(cx, "escape");
     assert_eq!(table.read_with(cx, |t, _| t.focused_cell()), None);
@@ -993,7 +1238,7 @@ fn created_by_and_edited_by_show_who_and_never_edit(cx: &mut TestAppContext) {
 
     // The header's menu filters by who.
     menu(cx, "Added by");
-    click(cx, "entry:Avery Lin");
+    click(cx, "menu-item-Avery Lin");
     assert_eq!(
         host.last_view().filter,
         Some(Filter::condition(BY, FilterOp::Is, "owner".into()))
@@ -1043,7 +1288,7 @@ fn created_by_and_edited_by_show_who_and_never_edit(cx: &mut TestAppContext) {
 fn touch_targets_are_44_points(cx: &mut TestAppContext) {
     let host = TestHost::touch();
     let (db, rows) = load("people");
-    let (_, cx) = open_with(
+    let (table, cx) = open_with(
         cx,
         &host,
         as_table(db, PIPELINE),
@@ -1078,16 +1323,23 @@ fn touch_targets_are_44_points(cx: &mut TestAppContext) {
     let at = rect(cx, "header:Stage").center();
     tap(cx, at);
     assert!(drawn(cx, "menu"), "a tap opens the column's menu");
-    check(cx, "entry:Sort ascending".into(), false);
+    check(cx, "menu-item-Sort ascending".into(), false);
     keys(cx, "escape");
-    // Menus' entries and the day grid's days too.
+    // Menus' entries and the month's days too.
     let at = rect(cx, cell(IMANI, STAGE)).center();
     tap(cx, at);
     let at = rect(cx, cell(IMANI, STAGE)).center();
     tap(cx, at);
-    check(cx, "entry:Lead".into(), false);
-    let at = rect(cx, "entry:Lead").center();
+    check(cx, "menu-item-Lead".into(), false);
+    let at = rect(cx, "menu-item-Lead").center();
     tap(cx, at);
+    // (Last contacted scrolled into view and focused first: a tap on it opens its month.)
+    table.update(cx, |t, cx| t.focus_cell(IMANI, LAST_CONTACTED, cx));
+    draw(cx);
+    let at = rect(cx, cell(IMANI, LAST_CONTACTED)).center();
+    tap(cx, at);
+    check(cx, "day-2026-10-02".into(), true);
+    keys(cx, "escape");
     // The visible line of a column's edge stays thin; only the target is wide.
     let edge = rect(cx, "resize:Stage");
     let header = rect(cx, "header:Stage");

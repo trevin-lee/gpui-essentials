@@ -13,7 +13,7 @@
 //!
 //! `--shot` takes a picture of the window without showing it. Scenes: `people` (the default),
 //! `grouped` (Interactions by month), `menu` (a column's menu), `picker` (a select's options),
-//! `date` (the day grid), `edit` (a text value typed in place, grown over the rows below),
+//! `date` (a date's month), `edit` (a text value typed in place, grown over the rows below),
 //! `scrolled` (scrolled sideways, the title column in place), `light` and `worst` (worst-case
 //! text, every cell ending in an ellipsis); and boards: `board` (People's
 //! Pipeline by stage), `board-drag` (a card of Interactions by kind dragged to another column),
@@ -228,6 +228,26 @@ impl Host {
                 for id in row_ids {
                     if let Some((d, i)) = row(&mut dbs, id) {
                         dbs[d].rows[i].deleted = true;
+                    }
+                }
+            }
+            // A property changed whole: an option made in a select's picker, say.
+            Edit::PropertyChanged {
+                database_id,
+                property,
+            }
+            | Edit::PropertyCreated {
+                database_id,
+                property,
+            } => {
+                if let Some(fields) = dbs
+                    .iter_mut()
+                    .find(|d| d.doc.id == *database_id)
+                    .and_then(|d| d.doc.database.as_mut())
+                {
+                    match fields.properties.iter_mut().find(|p| p.id == property.id) {
+                        Some(p) => *p = property.clone(),
+                        None => fields.properties.push(property.clone()),
                     }
                 }
             }

@@ -26,6 +26,8 @@ unicode-segmentation = "1.12"
 # (gpui-pre 0.3.12), and gpui-core for the theme, Press and icons.
 gpui = { workspace = true, optional = true }
 gpui-core = { path = "../gpui-core", optional = true }
+# Days as gpui-core's month (MonthGrid) takes and gives them: the version gpui-core uses.
+chrono = { version = "0.4.45", default-features = false, features = ["std"], optional = true }
 # Only for the shots feature: the macOS platform with its test support (offscreen rendering)
 # on, and GPUI's version of the image crate to save the picture.
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
@@ -35,7 +37,7 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 default = ["gpui"]
 # The GPUI views (tables, boards and lists). Without it (default-features = false) the crate
 # is the model and engine alone, with no GPUI in the build.
-gpui = ["dep:gpui", "dep:gpui-core"]
+gpui = ["dep:gpui", "dep:gpui-core", "dep:chrono"]
 # Pictures of the crm example's window rendered offscreen (`--shot`), for the README.
 shots = ["gpui", "gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 

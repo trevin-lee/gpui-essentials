@@ -3306,6 +3306,7 @@ checksum = "85701631a9bbecf47e6d19f145e85e57767e7c50f7192d5b1bf65b5ef43cb373"
 name = "gpui-tables"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "gpui-core",
  "gpui-pre",
  "gpui-pre-apple",
