@@ -62,6 +62,7 @@ stored text is read as a space.
 | `row` | | `cell`s |
 | `cell` | `text` | |
 | `toc` | | |
+| `embed` | `doc`: the document's id; `title`: its title when the embed was made; `view`: how the app shows it (`table`, `board`, `mindmap`, `calendar`, `page`, or another 1 to 24 of `a-z 0-9 -`); `height`: in points, 80 to 1600 | |
 | `page` | `doc`: the document's id; `title`: its title when the link was written | |
 | `widget` | `name`, `meta` (the rest of the info string), `body` | |
 | `markdown` | `markdown`: the block as Markdown | |
@@ -74,10 +75,12 @@ later versions any type a reader doesn't know.
 A document links to another in two ways, both by the other document's id:
 
 - a **mention**, inside any `text`: `[Roadmap](doc:4f2a)`;
-- a **sub-page**, a block: `{ "type": "page", "doc": "9c1e", "title": "Last week" }`.
+- a **sub-page**, a block: `{ "type": "page", "doc": "9c1e", "title": "Last week" }`;
+- an **embed**, a block that shows the other document inside this one: `{ "type": "embed",
+  "doc": "b1", "title": "Q4 board", "view": "board", "height": 480 }`.
 
 A document id is 1 to 128 of `A-Z a-z 0-9 - _ . ~`. To find every link without this crate,
-walk the blocks: take `doc` from each `page`, and from every `text` each match of
+walk the blocks: take `doc` from each `page` and `embed`, and from every `text` each match of
 
 ```
 \]\(doc:([A-Za-z0-9._~-]{1,128})\)

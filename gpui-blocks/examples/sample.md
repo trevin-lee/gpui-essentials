@@ -10,6 +10,8 @@ The plan is in [Roadmap](doc:roadmap), and last week has a page of its own:
 
 [Last week](doc:last-week "page")
 
+[Q4 board](doc:board "embed board 200")
+
 - [x] Send the lease renewal
 - [ ] Book the dentist
   - [ ] Ask about the Saturday slots

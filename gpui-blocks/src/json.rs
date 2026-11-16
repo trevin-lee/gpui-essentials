@@ -131,6 +131,14 @@ pub enum Kind {
     },
     /// A table of contents: the document's headings, listed where it is.
     Toc,
+    /// Another document drawn here: `view` is how the app shows it (`table`, `board`,
+    /// `mindmap`, `calendar`, `page`), `height` is in points.
+    Embed {
+        doc: String,
+        title: String,
+        view: String,
+        height: u32,
+    },
     /// A widget (see [`crate::widget`]): its name, the rest of its info string, and its body.
     Widget {
         name: String,
@@ -255,7 +263,7 @@ impl Document {
         let mut seen = HashSet::new();
         visit(&self.blocks, &mut |b| {
             let found = match &b.kind {
-                Kind::Page { doc, .. } => vec![doc.clone()],
+                Kind::Page { doc, .. } | Kind::Embed { doc, .. } => vec![doc.clone()],
                 Kind::Paragraph { text } | Kind::Heading { text, .. } | Kind::Cell { text } => {
                     mentions(text)
                 }
@@ -388,7 +396,11 @@ fn same_kind(b: BlockRef<'_>, kind: &Kind) -> bool {
             | (BlockKind::TableCell, Kind::Cell { .. })
             | (
                 BlockKind::Custom,
-                Kind::Page { .. } | Kind::Toc | Kind::Widget { .. } | Kind::Markdown { .. }
+                Kind::Page { .. }
+                    | Kind::Toc
+                    | Kind::Embed { .. }
+                    | Kind::Widget { .. }
+                    | Kind::Markdown { .. }
             )
             | (_, Kind::Markdown { .. })
     )
@@ -496,6 +508,14 @@ fn block(b: BlockRef<'_>, ids: &mut Ids, seen: &mut HashSet<BlockId>) -> Block {
 fn custom(markdown: &str) -> Kind {
     if markdown == crate::toc::MARKDOWN {
         return Kind::Toc;
+    }
+    if let Some((doc, title, view, height)) = docs::embed_of(markdown) {
+        return Kind::Embed {
+            doc,
+            title,
+            view,
+            height,
+        };
     }
     if let Some(page) = page_of(markdown) {
         return page;
@@ -655,6 +675,15 @@ fn markdown(b: &Block) -> String {
         }
         Kind::Divider => "---".into(),
         Kind::Toc => crate::toc::MARKDOWN.into(),
+        Kind::Embed {
+            doc,
+            title,
+            view,
+            height,
+        } => match docs::doc_id(&format!("{}{doc}", docs::SCHEME)) {
+            Some(id) => docs::embed(id, title, view, *height),
+            None => line(title),
+        },
         Kind::Table { align } => table(b, align),
         Kind::Row | Kind::Cell { .. } => String::new(),
         Kind::Page { doc, title } => match docs::doc_id(&format!("{}{doc}", docs::SCHEME)) {
@@ -837,6 +866,7 @@ mod tests {
             "````\n```\n````",
             "---",
             "[TOC]\n\n# Heading",
+            "[Q4 board](doc:b1 \"embed board 480\")\n\n[Plain](doc:b2 \"embed page 320\")",
             "| a | b | c |\n| :--- | :---: | --- |\n| 1 | \\| | 3 |",
             "[Notes](doc:9c1e \"page\")",
             "See [Roadmap](doc:4f2a) and ![alt](https://example.com/a.png).",
