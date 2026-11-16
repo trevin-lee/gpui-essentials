@@ -61,9 +61,13 @@ jobs:
       - run: cargo fmt -p gpui-core --check
       - run: cargo clippy -p gpui-core --locked --all-targets -- -D warnings
       - run: cargo clippy -p gpui-core --locked --all-targets --features shots -- -D warnings
+      # Syntax highlighting, off by default: its grammars and their queries.
+      - run: cargo clippy -p gpui-core --locked --all-targets --features highlight -- -D warnings
+      - run: cargo test -p gpui-core --locked --features highlight --lib
+      - run: cargo test -p gpui-core --locked --features highlight --doc
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-core --locked
-      - run: cargo doc -p gpui-core --locked --no-deps
+      - run: cargo doc -p gpui-core --locked --no-deps --features highlight
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -82,3 +86,5 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: rustup target add aarch64-apple-ios-sim
       - run: cargo build -p gpui-core --locked --target aarch64-apple-ios-sim
+      # The grammars are C, built for the simulator too.
+      - run: cargo build -p gpui-core --locked --target aarch64-apple-ios-sim --features highlight
