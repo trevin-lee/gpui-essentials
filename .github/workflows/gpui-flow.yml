@@ -63,9 +63,11 @@ jobs:
       - run: cargo fmt -p gpui-flow --check
       - run: cargo clippy -p gpui-flow --locked --all-targets -- -D warnings
       - if: needs.changes.outputs.own == 'true'
-        run: cargo clippy -p gpui-flow --locked --all-targets --features shots -- -D warnings
+        run: cargo clippy -p gpui-flow --locked --all-targets --features shots,png -- -D warnings
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-flow --locked
+      # PNG export, which takes resvg, only when asked for.
+      - run: cargo test -p gpui-flow --locked --features png --test export
       - run: cargo doc -p gpui-flow --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
