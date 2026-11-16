@@ -93,6 +93,24 @@ pub struct Colors {
     pub syntax_tag: Hsla,
     pub syntax_attribute: Hsla,
     pub syntax_punctuation: Hsla,
+    /// GitHub's five alerts drawn as callouts: each a colour for the bar, icon and title, and a
+    /// tint for the box (the colour at 8%). The colours are at least 4.5:1 on the page, a card
+    /// and their own tint: GitHub's, with the light ones darkened as little as that needs.
+    pub callout_note: Hsla,
+    pub callout_note_background: Hsla,
+    pub callout_tip: Hsla,
+    pub callout_tip_background: Hsla,
+    pub callout_important: Hsla,
+    pub callout_important_background: Hsla,
+    pub callout_warning: Hsla,
+    pub callout_warning_background: Hsla,
+    pub callout_caution: Hsla,
+    pub callout_caution_background: Hsla,
+}
+
+/// A callout's box: its colour at 8%.
+fn tint(hex: u32) -> Hsla {
+    c(hex).opacity(0.08)
 }
 
 fn c(hex: u32) -> Hsla {
@@ -150,6 +168,16 @@ impl Colors {
             syntax_tag: c(0xf28b82),
             syntax_attribute: c(0xe9c46a),
             syntax_punctuation: c(0xa1a1aa),
+            callout_note: c(0x4493f8),
+            callout_note_background: tint(0x4493f8),
+            callout_tip: c(0x3fb950),
+            callout_tip_background: tint(0x3fb950),
+            callout_important: c(0xab7df8),
+            callout_important_background: tint(0xab7df8),
+            callout_warning: c(0xd29922),
+            callout_warning_background: tint(0xd29922),
+            callout_caution: c(0xf85149),
+            callout_caution_background: tint(0xf85149),
         }
     }
 
@@ -199,6 +227,16 @@ impl Colors {
             syntax_tag: c(0xb3261e),
             syntax_attribute: c(0x8a5a00),
             syntax_punctuation: c(0x52525b),
+            callout_note: c(0x0968d8),
+            callout_note_background: tint(0x0968d8),
+            callout_tip: c(0x197c36),
+            callout_tip_background: tint(0x197c36),
+            callout_important: c(0x7e4ed8),
+            callout_important_background: tint(0x7e4ed8),
+            callout_warning: c(0x926200),
+            callout_warning_background: tint(0x926200),
+            callout_caution: c(0xcf242f),
+            callout_caution_background: tint(0xcf242f),
         }
     }
 
@@ -371,6 +409,71 @@ mod tests {
         assert_eq!(css(t.radius_sm()), 6.);
         assert_eq!(css(t.radius_md()), 8.);
         assert_eq!(css(t.radius_xl()), 14.);
+    }
+
+    /// WCAG contrast of `fg` over `bg` (each composited on `base` for its alpha).
+    fn contrast(fg: Hsla, bg: Hsla, base: Hsla) -> f32 {
+        let rgb = |c: Hsla| {
+            let c = gpui::Rgba::from(c);
+            [c.r, c.g, c.b, c.a]
+        };
+        let over = |top: [f32; 4], under: [f32; 3]| {
+            [0, 1, 2].map(|i| top[i] * top[3] + under[i] * (1. - top[3]))
+        };
+        let base = rgb(base);
+        let bg = over(rgb(bg), [base[0], base[1], base[2]]);
+        let fg = over(rgb(fg), bg);
+        let lum = |c: [f32; 3]| {
+            let f = |v: f32| {
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+        };
+        let (a, b) = (lum(fg), lum(bg));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn code_and_callout_colours_read_at_4_5_to_1() {
+        for c in [Colors::dark(), Colors::light()] {
+            let syntax = [
+                c.syntax_keyword,
+                c.syntax_string,
+                c.syntax_comment,
+                c.syntax_function,
+                c.syntax_type,
+                c.syntax_constant,
+                c.syntax_property,
+                c.syntax_tag,
+                c.syntax_attribute,
+                c.syntax_punctuation,
+            ];
+            for fg in syntax {
+                for bg in [c.background, c.card, c.muted] {
+                    let r = contrast(fg, bg, c.background);
+                    assert!(r >= 4.5, "{fg:?} on {bg:?}: {r:.2}");
+                }
+            }
+            let callouts = [
+                (c.callout_note, c.callout_note_background),
+                (c.callout_tip, c.callout_tip_background),
+                (c.callout_important, c.callout_important_background),
+                (c.callout_warning, c.callout_warning_background),
+                (c.callout_caution, c.callout_caution_background),
+            ];
+            for (fg, tint) in callouts {
+                for base in [c.background, c.card] {
+                    for bg in [base, tint] {
+                        let r = contrast(fg, bg, base);
+                        assert!(r >= 4.5, "{fg:?} on {bg:?} over {base:?}: {r:.2}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
