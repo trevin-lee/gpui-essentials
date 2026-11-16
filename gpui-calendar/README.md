@@ -34,6 +34,10 @@ react-big-calendar and Notion Calendar behave, without their code or their look.
   land with the original faded, and Escape drops them. Near the grid's top or bottom a drag
   scrolls it. Read-only events, and events in read-only calendars, can be selected and opened
   but not moved.
+- **Links:** an event can link to docs and agents. A chip with room lists them under its text,
+  each with a mark (a page for a doc, a ring for an agent) and its label. A smaller chip shows
+  the one link's mark by its title, or a chain and a count for several. A click on a link asks
+  your app to open it; a drag that starts on one moves the event.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event. With nothing selected, ← and → change the period. `j` or `n` goes to the
@@ -137,6 +141,9 @@ fn main() {
   (`default_calendar`, or the first visible one that can be edited); the others carry an
   `EventRef` with the event's id, its series and its calendar. `Select` and `Open` report clicks.
   Your app agrees by calling `set_events` or `upsert_event`, or `remove_event` for a delete.
+- **Links:** `Event::link(EventLink::doc(id, label))` or `EventLink::agent(id, label)`. A
+  click on one sends `CalendarEvent::OpenLink { event, link }`; the calendar never fetches or
+  opens anything. `link_bounds(id, index)` gives where a link was drawn.
 - **Recurring events:** your app expands them, supplying each occurrence in the range as an
   event of its own, with an id of its own and the series' id in `series`. An edit names the
   occurrence it touched and its series, and your app decides whether it changes that one or all
@@ -178,11 +185,15 @@ cargo run --release --example calendar -- --bench [--events 2000] [--packed]
 cargo run --release --features shots --example calendar -- --shot out.png --scene week
 ```
 
+`cargo test` also draws every view at widths from 720 to 2,200 pixels, with long titles,
+locations and links, laid out with Core Text and Inter as on screen, and fails if any text runs
+out of the area it's drawn in or into other text.
+
 The example is a week of sample events and a host that agrees to every proposal and says what
 happened at the bottom of the window. For pictures and the bench it pretends it's Wednesday 18
 November 2026, 10:40 in Los Angeles. Pictures and the bench draw a window that's never shown and
 never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `drag-create`,
-`drag-move`, `resize`, `dst`, `dst-spring`, `dense` and `month-drag`.
+`drag-move`, `resize`, `dst`, `dst-spring`, `dense`, `month-drag` and `links`.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from GPUI
@@ -195,6 +206,8 @@ Kit's theme.
 | ![Planning's end dragged to 1:15](docs/resize.png) | ![A trip dragged a week later](docs/month-drag.png) |
 | **A day** | **A busy week (160 events)** |
 | ![Wednesday on its own](docs/day.png) | ![A week packed with overlapping events](docs/dense.png) |
+| **Links to docs and agents** | |
+| ![Design review listing its notes; shorter events with a link's mark or a count](docs/links.png) | |
 
 ## Performance
 
