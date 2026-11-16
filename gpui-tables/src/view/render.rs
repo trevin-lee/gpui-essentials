@@ -24,6 +24,10 @@ impl Render for TableView {
         self.theme = self.host.theme(cx);
         self.rem = window.rem_size();
         self.ensure();
+        // A board view draws as a board, any other as a table: one entity and one host.
+        if self.shown.board.is_some() {
+            return self.render_board(window, cx);
+        }
         self.clamp_scroll();
         let t = self.theme.clone();
         let n = self.shown.items.len();
@@ -186,15 +190,16 @@ impl Render for TableView {
             .child(list)
             .child(probe)
             .children(popover)
+            .into_any_element()
     }
 }
 
 /// A one-line text that ends in an ellipsis when it doesn't fit.
-fn line(text: impl Into<SharedString>) -> gpui::Div {
+pub(crate) fn line(text: impl Into<SharedString>) -> gpui::Div {
     div().min_w_0().truncate().child(text.into())
 }
 
-fn icon(name: IconName, size: gpui::Rems, color: Hsla) -> Icon {
+pub(crate) fn icon(name: IconName, size: gpui::Rems, color: Hsla) -> Icon {
     Icon::new(name).size(size).color(color)
 }
 
@@ -752,7 +757,7 @@ impl TableView {
             .join(", ")
     }
 
-    fn chip(&self, name: impl Into<SharedString>, color: &Color) -> gpui::Div {
+    pub(crate) fn chip(&self, name: impl Into<SharedString>, color: &Color) -> gpui::Div {
         let t = &self.theme;
         let c = t.colors.options.get(color);
         div()
@@ -769,7 +774,7 @@ impl TableView {
             .child(line(name))
     }
 
-    fn cell_content(
+    pub(crate) fn cell_content(
         &self,
         ix: usize,
         row: usize,
@@ -905,7 +910,7 @@ impl TableView {
         }
     }
 
-    fn group_label(&self, key: &GroupKey) -> AnyElement {
+    pub(crate) fn group_label(&self, key: &GroupKey) -> AnyElement {
         let t = &self.theme;
         let p = self
             .shown

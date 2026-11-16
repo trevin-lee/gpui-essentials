@@ -55,6 +55,18 @@ pub fn load(name: &str) -> (Doc, Vec<Doc>) {
     (dbs.into_iter().next().unwrap(), rows)
 }
 
+/// The database with the view `view` drawn as a table (a board view drawn as a grouped table).
+pub fn as_table(mut db: Doc, view: &str) -> Doc {
+    if let Some(v) = db
+        .database
+        .as_mut()
+        .and_then(|f| f.views.iter_mut().find(|v| v.id == view))
+    {
+        v.kind = ViewType::Table;
+    }
+    db
+}
+
 /// A property's id by its name.
 pub fn prop(db: &Doc, name: &str) -> String {
     db.database
@@ -180,6 +192,13 @@ fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
                     None => {
                         v.remove(property_id);
                     }
+                }
+            }
+        }
+        Edit::RowsMoved { row_ids, orders } => {
+            for (id, o) in row_ids.iter().zip(orders) {
+                if let Some(r) = rows.iter_mut().find(|r| r.id == *id) {
+                    r.order = o.clone();
                 }
             }
         }
@@ -400,5 +419,29 @@ pub fn pan(cx: &mut VisualTestContext, from: Point<Pixels>, by: Point<Pixels>) {
 pub fn tap(cx: &mut VisualTestContext, at: Point<Pixels>) {
     touch(cx, TouchPhase::Started, at);
     touch(cx, TouchPhase::Ended, at);
+    draw(cx);
+}
+
+/// A finger pressed and held at `from` until it's a long press, then moved to `to` a frame at a
+/// time, held still and lifted.
+pub fn long_press(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>) {
+    touch(cx, TouchPhase::Started, from);
+    cx.executor().advance_clock(Duration::from_millis(800));
+    cx.run_until_parked();
+    draw(cx);
+    let steps = 8;
+    for i in 1..=steps {
+        cx.executor().advance_clock(Duration::from_millis(16));
+        cx.run_until_parked();
+        touch(
+            cx,
+            TouchPhase::Moved,
+            from + (to - from) * (i as f32 / steps as f32),
+        );
+        draw(cx);
+    }
+    cx.executor().advance_clock(Duration::from_millis(200));
+    cx.run_until_parked();
+    touch(cx, TouchPhase::Ended, to);
     draw(cx);
 }
