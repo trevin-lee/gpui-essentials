@@ -262,10 +262,11 @@ impl Draw<'_, '_> {
             list_item_gap: Some(css(8.)),
             list_marker_gap: Some(css(size * 0.27)),
             // A table's container has the web's radius-2xl corners, and its cells 12px round
-            // their text (`space-m`). The header has no fill, and its labels are muted and
-            // regular weight (`openui-table-head-label`).
+            // their text (`space-m`) at the small body size (`text-body-sm`, 14px). The header
+            // has no fill, and its labels are muted and regular weight (`openui-table-head-label`).
             table_radius: Some(css(t.radii.xl)),
             table_cell_padding: Some(css(12.)),
+            table_text_size: Some(css(t.text.sm)),
             table_header_weight: Some(FontWeight::NORMAL),
             // `code`: the body's own font at its size (`font: var(--openui-text-body-default)`),
             // on sunk in a 4px-cornered box, 4px either side and 2px above and below the font's
