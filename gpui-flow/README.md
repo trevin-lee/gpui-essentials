@@ -247,17 +247,21 @@ Run the example with `cargo run --release --example flow` from this folder.
     follows the zoom exactly asks for a new font size on every frame of a zoom, and making the
     font and its glyphs then costs more than the rest of the frame.
   - Nodes are looked up and changed by id through an index, not by searching the list.
-  - Below a zoom of 0.3, nodes are drawn as boxes of the size they measured, not built. A
+  - Below a zoom of 0.5 (12-point text is 6 high there), nodes are drawn as boxes of the
+    size they measured, not built. A
     whiteboard keeps its look: shapes keep their outline and colors (a rounded box once
     they're too small to tell), strokes their ink, and headings show as a bar.
 - **At scale.** `cargo bench -p gpui-flow --bench scale` lays out and paints a whiteboard of
   5,000 nodes and 5,000 edges (labelled boxes, shapes, frames, ink, edges of every kind)
   offscreen with Core Text, so it runs anywhere, CI included, and times the flow's own work
-  a frame (the GPU's part isn't counted). On an M-series Mac, medians: 2.3 ms still, 2.0 ms
-  panning at 100%, 5.2 ms with the whole board in view at 7.7%, 2.4 ms dragging a node,
-  editing a label or hovering. Panning at 40% (about 150 nodes built in full) takes 11 ms,
-  and 9 ms with 500 nodes: what a frame costs follows what's on screen, not how much there
-  is. `--nodes N` sets the size; `--only <scenario>` runs one for 3,000 frames, to profile.
+  a frame in the CPU time of the thread doing it (so a busy machine doesn't count; the GPU's
+  part isn't counted). Every scenario must keep 95 frames in 100 within 8.3 ms, a frame at
+  120 Hz, or the run fails. On an M-series Mac, p95: 2.8 ms still, 2.4 ms panning at 100%,
+  6.6 ms panning at 55% (the most built in full, just above where nodes turn into boxes),
+  1.9 ms at 40%, 6.0 ms with the whole board in view at 7.7%, 2.4 ms dragging a node,
+  3.2 ms editing a label, 2.1 ms hovering. What a frame costs follows what's on screen, not
+  how much there is. `--nodes N` sets the size; `--only <scenario>` runs one for 3,000
+  frames, to profile.
   What got it there:
   - Each frame works out every node's place, level and box in one pass, each from its
     parent's, instead of each node and edge walking up its parents and looking each up.
@@ -265,6 +269,10 @@ Run the example with `cargo run --release --example flow` from this folder.
   - The maps looked up for every node every frame hash with foldhash, seeded at random.
   - Nodes never drawn are drawn a few hundred a frame to measure them, so a large flow opens
     over a few frames (40 ms to build, 18 ms for the first frame at 5,000 nodes, not 300).
+  - A shape's outline is tessellated once and moved into place each frame.
+  - Finger-sized targets round nodes, handles and resizers (`touch_targets`) are built on
+    iOS, and on the Mac only once a finger has touched the canvas: each is an element more
+    for every node in view.
   - Only an edit makes the flow look for what changed: panning, hovering and selecting
     don't, and `tests/scale.rs` checks a 5,000-node flow draws one screen's worth of text.
   - Edges off screen are skipped before they're flattened.

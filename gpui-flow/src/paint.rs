@@ -1,6 +1,9 @@
 //! What the flow paints itself rather than building from elements: the pane's pattern, edges
 //! with their arrowheads and labels, the minimap, and the controls' icons.
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use gpui::*;
 
 use crate::geometry::clip_segment;
@@ -658,11 +661,76 @@ pub(crate) fn paint_shape(
     line: f32,
     window: &mut Window,
 ) {
-    use crate::shapes::PathOp;
     let scale = f32::from(bounds.size.width) / w.max(1.);
+    let paths = shape_paths(outline, detail, scale, line);
     let o = bounds.origin;
-    let at = |p: XY| point(o.x + px(p.x * scale), o.y + px(p.y * scale));
+    let at = |p: &Path<Pixels>| {
+        let mut p = p.clone();
+        for v in &mut p.vertices {
+            v.xy_position += o;
+        }
+        p.bounds.origin += o;
+        p
+    };
+    if let Some(p) = &paths[0] {
+        window.paint_path(at(p), fill);
+    }
+    for p in paths[1..].iter().flatten() {
+        window.paint_path(at(p), stroke);
+    }
+}
+
+thread_local! {
+    /// Shapes' outlines as GPUI paths at the origin (fill, stroke, detail), by the outline,
+    /// the scale and the line: tessellating them costs, and a shape's outline is the same from
+    /// one frame to the next while only its place changes.
+    static SHAPES: std::cell::RefCell<HashMap<u64, ShapePaths>> = Default::default();
+}
+
+/// A shape's fill, stroke and detail line, at the origin.
+type ShapePaths = Rc<[Option<Path<Pixels>>; 3]>;
+
+/// The most outlines kept; past it the cache starts again.
+const SHAPE_CACHE: usize = 4096;
+
+fn shape_paths(
+    outline: &[crate::shapes::PathOp],
+    detail: &[crate::shapes::PathOp],
+    scale: f32,
+    line: f32,
+) -> ShapePaths {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    let mut ops = |ops: &[crate::shapes::PathOp]| {
+        use crate::shapes::PathOp;
+        ops.len().hash(&mut h);
+        for op in ops {
+            let points: &[XY] = match op {
+                PathOp::Move(p) | PathOp::Line(p) => std::slice::from_ref(p),
+                PathOp::Cubic { c1, c2, to } => &[*c1, *c2, *to],
+                PathOp::Close => &[],
+            };
+            std::mem::discriminant(op).hash(&mut h);
+            for p in points {
+                p.x.to_bits().hash(&mut h);
+                p.y.to_bits().hash(&mut h);
+            }
+        }
+    };
+    ops(outline);
+    ops(detail);
+    scale.to_bits().hash(&mut h);
+    line.to_bits().hash(&mut h);
+    let key = h.finish();
+    if let Some(found) = SHAPES.with(|c| c.borrow().get(&key).cloned()) {
+        return found;
+    }
+    use crate::shapes::PathOp;
+    let at = |p: XY| point(px(p.x * scale), px(p.y * scale));
     let build = |ops: &[PathOp], mut b: PathBuilder| {
+        if ops.is_empty() {
+            return None;
+        }
         for op in ops {
             match *op {
                 PathOp::Move(p) => b.move_to(at(p)),
@@ -673,17 +741,19 @@ pub(crate) fn paint_shape(
         }
         b.build().ok()
     };
-    if let Some(path) = build(outline, PathBuilder::fill()) {
-        window.paint_path(path, fill);
-    }
-    if let Some(path) = build(outline, PathBuilder::stroke(px(line))) {
-        window.paint_path(path, stroke);
-    }
-    if !detail.is_empty()
-        && let Some(path) = build(detail, PathBuilder::stroke(px(line)))
-    {
-        window.paint_path(path, stroke);
-    }
+    let paths = Rc::new([
+        build(outline, PathBuilder::fill()),
+        build(outline, PathBuilder::stroke(px(line))),
+        build(detail, PathBuilder::stroke(px(line))),
+    ]);
+    SHAPES.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= SHAPE_CACHE {
+            c.clear();
+        }
+        c.insert(key, paths.clone());
+    });
+    paths
 }
 
 /// How an ink stroke of this `0xRRGGBBAA` colour is drawn: a pencil a little lighter, a

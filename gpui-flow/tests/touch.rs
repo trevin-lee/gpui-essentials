@@ -15,6 +15,16 @@ use gpui::{
 };
 use gpui_flow::*;
 
+/// A flow in a window, as on iPad: with finger-sized targets, as iOS has from the start.
+fn fingers(
+    cx: &mut TestAppContext,
+    build: impl FnOnce(Flow) -> Flow + 'static,
+) -> (gpui::Entity<Flow>, Events, &mut VisualTestContext) {
+    open(cx, move |f| {
+        build(f).with_options(|o| o.touch_targets = true)
+    })
+}
+
 /// One finger down at `from`, moved to `to` in a few steps, and lifted.
 fn swipe(cx: &mut VisualTestContext, from: Point<Pixels>, to: Point<Pixels>) {
     touch(cx, TouchPhase::Started, from);
@@ -64,7 +74,7 @@ fn menus(events: &Events) -> Vec<ContextTarget> {
 
 #[gpui::test]
 fn a_finger_drags_a_node_and_pans_the_pane(cx: &mut TestAppContext) {
-    let (flow, events, cx) = open(cx, with_three);
+    let (flow, events, cx) = fingers(cx, with_three);
     let at = center(&flow, cx, "b");
     swipe(cx, at, offset(at, 60., 40.));
     flow.read_with(cx, |f, _| {
@@ -102,7 +112,7 @@ fn a_finger_drags_a_node_and_pans_the_pane(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_tap_selects_and_a_second_tap_is_a_double_tap(cx: &mut TestAppContext) {
-    let (flow, events, cx) = open(cx, with_three);
+    let (flow, events, cx) = fingers(cx, with_three);
     let at = center(&flow, cx, "c");
     // A finger that wobbles less than the slop still taps, and leaves the node where it was.
     touch(cx, TouchPhase::Started, at);
@@ -131,7 +141,7 @@ fn a_tap_selects_and_a_second_tap_is_a_double_tap(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_finger_connects_handles_and_resizes(cx: &mut TestAppContext) {
-    let (flow, events, cx) = open(cx, |f| {
+    let (flow, events, cx) = fingers(cx, |f| {
         with_three(f).with_node_kind("box", |_, ctx, _, _, _| {
             div()
                 .size_full()
@@ -172,7 +182,7 @@ fn a_finger_connects_handles_and_resizes(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn holding_still_asks_for_a_context_menu(cx: &mut TestAppContext) {
-    let (flow, events, cx) = open(cx, with_three);
+    let (flow, events, cx) = fingers(cx, with_three);
     let at = center(&flow, cx, "b");
     hold(cx, at);
     assert_eq!(menus(&events), [ContextTarget::Node("b".into())]);
@@ -207,7 +217,7 @@ fn holding_still_asks_for_a_context_menu(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_right_click_asks_for_a_context_menu_too(cx: &mut TestAppContext) {
-    let (flow, events, cx) = open(cx, with_three);
+    let (flow, events, cx) = fingers(cx, with_three);
     cx.simulate_mouse_down(
         center(&flow, cx, "c"),
         MouseButton::Right,
@@ -233,7 +243,7 @@ fn a_right_click_asks_for_a_context_menu_too(cx: &mut TestAppContext) {
 fn a_finger_taps_a_nodrag_button_without_dragging_its_node(cx: &mut TestAppContext) {
     let clicks = Rc::new(Cell::new(0));
     let counted = clicks.clone();
-    let (flow, _, cx) = open(cx, move |f| {
+    let (flow, _, cx) = fingers(cx, move |f| {
         with_three(f).with_node_kind("button", move |_, _, _, _, _| {
             let counted = counted.clone();
             div()
@@ -262,7 +272,7 @@ fn a_finger_taps_a_nodrag_button_without_dragging_its_node(cx: &mut TestAppConte
 
 #[gpui::test]
 fn navigating_a_finger_only_pans(cx: &mut TestAppContext) {
-    let (flow, _, cx) = open(cx, with_three);
+    let (flow, _, cx) = fingers(cx, with_three);
     flow.update(cx, |f, cx| f.set_pointer_mode(PointerMode::Navigate, cx));
     let at = center(&flow, cx, "b");
     swipe(cx, at, offset(at, 60., 40.));
@@ -275,7 +285,7 @@ fn navigating_a_finger_only_pans(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_finger_takes_an_edge_from_further_than_the_mouse(cx: &mut TestAppContext) {
-    let (flow, _, cx) = open(cx, with_three);
+    let (flow, _, cx) = fingers(cx, with_three);
     let (s, t) = flow.read_with(cx, |f, _| {
         (
             f.handle_point("a", HandleKind::Source, None).unwrap(),
@@ -293,7 +303,7 @@ fn a_finger_takes_an_edge_from_further_than_the_mouse(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn a_hosts_pinch_zooms_about_the_fingers(cx: &mut TestAppContext) {
-    let (flow, _, cx) = open(cx, with_three);
+    let (flow, _, cx) = fingers(cx, with_three);
     let at = screen(&flow, cx, xy(300., 200.));
     flow.update(cx, |f, cx| f.zoom_by(1.5, at, cx));
     flow.read_with(cx, |f, _| {
@@ -308,4 +318,20 @@ fn a_hosts_pinch_zooms_about_the_fingers(cx: &mut TestAppContext) {
         ..Default::default()
     });
     assert!((flow.read_with(cx, |f, _| f.viewport().zoom) - 1.125).abs() < 1e-5);
+}
+
+#[gpui::test]
+fn on_the_mac_targets_come_with_the_first_finger(cx: &mut TestAppContext) {
+    let (flow, _, cx) = open(cx, with_three);
+    assert_eq!(
+        flow.read_with(cx, |f, _| f.options.touch_targets),
+        cfg!(target_os = "ios")
+    );
+    // The first finger is the pane's, and turns them on for the next.
+    let pane = screen(&flow, cx, xy(600., 60.));
+    swipe(cx, pane, offset(pane, -20., 0.));
+    assert!(flow.read_with(cx, |f, _| f.options.touch_targets));
+    let at = center(&flow, cx, "b");
+    swipe(cx, at, offset(at, 60., 40.));
+    assert_eq!(position(&flow, cx, "b"), xy(160., 290.));
 }
