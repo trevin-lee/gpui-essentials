@@ -137,6 +137,10 @@ pub struct CodeStyle {
     pub radius: Pixels,
     /// Its text's colour (the text's unless given).
     pub color: Option<Hsla>,
+    /// A border round its fill, outside the padding: room is made for it beside the code, as
+    /// CSS's is.
+    pub border_width: Pixels,
+    pub border_color: Hsla,
 }
 
 impl ParagraphStyle {
@@ -330,6 +334,7 @@ pub struct ParagraphLayout {
     code_fill: Hsla,
     code_radius: Pixels,
     code_pad_y: Pixels,
+    code_border: (Pixels, Hsla),
     pub line_height: Pixels,
     pub width: Pixels,
     pub height: Pixels,
@@ -353,7 +358,7 @@ impl ParagraphLayout {
         }
         let code_of = |offset: usize| code_spans.iter().position(|c| c.contains(&offset));
         let code_size = style.code.size.unwrap_or(style.size);
-        let pad = style.code.padding;
+        let pad = style.code.padding + style.code.border_width;
         let size_at = |offset: usize| {
             if code_of(offset).is_some() {
                 code_size
@@ -622,7 +627,9 @@ impl ParagraphLayout {
             pieces: pieces_by_row,
             code_fill: style.code_background,
             code_radius: style.code.radius,
-            code_pad_y: style.code.padding_y.unwrap_or(style.code.padding / 2.),
+            code_pad_y: style.code.padding_y.unwrap_or(style.code.padding / 2.)
+                + style.code.border_width,
+            code_border: (style.code.border_width, style.code.border_color),
             line_height: lh,
             width,
             height: top.max(lh),
@@ -830,8 +837,8 @@ impl ParagraphLayout {
                             b,
                             self.code_radius,
                             self.code_fill,
-                            px(0.),
-                            gpui::transparent_black(),
+                            self.code_border.0,
+                            self.code_border.1,
                             Default::default(),
                         ));
                     }

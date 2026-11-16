@@ -45,6 +45,39 @@ pub(crate) fn init(cx: &mut App) {
 
 type HeadingSize = Arc<dyn Fn(u8, Pixels) -> Pixels + Send + Sync + 'static>;
 
+/// What kind of block a [`TextView`] lays out, for [`TextViewStyle::block_gap`].
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlockKind {
+    Paragraph,
+    /// Its level, 1 to 6.
+    Heading(u8),
+    List {
+        ordered: bool,
+    },
+    Code,
+    Quote,
+    Rule,
+    Table,
+}
+
+/// The space between two blocks one after the other, or `None` for the view's own rule.
+pub type BlockGap = Arc<dyn Fn(BlockKind, BlockKind) -> Option<Pixels> + Send + Sync + 'static>;
+
+fn kind(b: &Block) -> BlockKind {
+    match b {
+        Block::Paragraph(_) => BlockKind::Paragraph,
+        Block::Heading(level, _) => BlockKind::Heading(*level),
+        Block::List { start, .. } => BlockKind::List {
+            ordered: start.is_some(),
+        },
+        Block::Code { .. } => BlockKind::Code,
+        Block::Quote(_) => BlockKind::Quote,
+        Block::Rule => BlockKind::Rule,
+        Block::Table { .. } => BlockKind::Table,
+    }
+}
+
 /// A heading's space above and below from its level (1 to 6) and its font size.
 pub type HeadingMargins = Arc<dyn Fn(u8, Pixels) -> (Pixels, Pixels) + Send + Sync + 'static>;
 
@@ -82,6 +115,16 @@ pub struct TextViewStyle {
     pub heading_line_height: Option<f32>,
     /// A table's corners (the theme's `radius_md` unless given).
     pub table_radius: Option<Pixels>,
+    /// The space round a table cell's text (half a rem unless given).
+    pub table_cell_padding: Option<Pixels>,
+    /// A table's header row's weight (semibold unless given).
+    pub table_header_weight: Option<FontWeight>,
+    /// The space between two blocks by their kinds, over every rule above: the web's margins
+    /// depend on the pair (a heading has less below it before a paragraph than before a list).
+    /// `None` for a pair keeps the view's own rule. It applies between siblings: a list's items
+    /// keep [`list_item_gap`](Self::list_item_gap), and the first block anywhere has no space
+    /// above it.
+    pub block_gap: Option<BlockGap>,
     /// Inline code: its family (the theme's mono family unless given), its size as a share of
     /// the text's (the text's unless given), its padding, corners, fill and colour.
     pub inline_code: InlineCodeStyle,
@@ -99,7 +142,12 @@ pub struct InlineCodeStyle {
     pub padding: Option<Pixels>,
     /// Space above and below its ink, inside its fill (half the side padding unless given).
     /// Negative draws the fill inside the font's ascent and descent, towards its cap height.
+    /// The fill isn't held to the line: past it, it reaches into the lines' leading, as an
+    /// inline box's background does on the web.
     pub padding_y: Option<Pixels>,
+    /// A border round the fill, outside the padding (none unless both are given).
+    pub border_width: Option<Pixels>,
+    pub border_color: Option<Hsla>,
     pub radius: Option<Pixels>,
     pub background: Option<Hsla>,
     pub color: Option<Hsla>,
@@ -121,6 +169,10 @@ pub struct TextViewColors {
     pub table_line: Option<Hsla>,
     /// A table's header row's fill (none unless given).
     pub table_header: Option<Hsla>,
+    /// A table's header row's text (the text's colour unless given).
+    pub table_header_text: Option<Hsla>,
+    /// Every other body row's fill, from the second (none unless given).
+    pub table_stripe: Option<Hsla>,
     /// The selection (the theme's ring at 30%).
     pub selection: Option<Hsla>,
     /// An image's description and other quiet text (the theme's muted foreground).
@@ -142,6 +194,9 @@ impl Default for TextViewStyle {
             heading_margins: None,
             heading_line_height: None,
             table_radius: None,
+            table_cell_padding: None,
+            table_header_weight: None,
+            block_gap: None,
             inline_code: InlineCodeStyle::default(),
             colors: TextViewColors::default(),
         }
@@ -399,12 +454,17 @@ fn lay(
                 Block::Heading(level, _) => Some(cx.heading_margins(*level)),
                 _ => None,
             };
-            y += match (margins(&blocks[i - 1]), margins(b)) {
+            let host = cx
+                .style
+                .block_gap
+                .as_ref()
+                .and_then(|f| f(kind(&blocks[i - 1]), kind(b)));
+            y += host.unwrap_or_else(|| match (margins(&blocks[i - 1]), margins(b)) {
                 (Some((_, below)), Some((above, _))) => below.max(above),
                 (Some((_, below)), None) => below,
                 (None, Some((above, _))) => above,
                 (None, None) => cx.gap,
-            };
+            });
         }
         let sep = if out.leaves.is_empty() { "" } else { "\n\n" };
         match b {
@@ -521,7 +581,7 @@ fn lay(
             }
             Block::Table { align, rows } => {
                 let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0).max(1);
-                let pad = cx.rem * 0.5;
+                let pad = cx.style.table_cell_padding.unwrap_or(cx.rem * 0.5);
                 let col_w = width / cols as f32;
                 let top = y;
                 let radius = cx
@@ -531,19 +591,31 @@ fn lay(
                 for (ri, row) in rows.iter().enumerate() {
                     let row_top = y;
                     let mut row_bottom = y;
-                    let header_ix =
-                        (ri == 0 && cx.style.colors.table_header.is_some()).then(|| {
-                            out.decos.push(Deco::Box {
-                                bounds: Bounds::default(),
-                                fill: transparent_black(),
-                                border: transparent_black(),
-                                border_width: px(0.),
-                                radius: Corners::all(px(0.)),
-                            });
-                            out.decos.len() - 1
+                    // The header's fill, or a striped body row's.
+                    let row_fill = match ri {
+                        0 => cx.style.colors.table_header,
+                        _ if ri % 2 == 0 => cx.style.colors.table_stripe,
+                        _ => None,
+                    };
+                    let header_ix = row_fill.is_some().then(|| {
+                        out.decos.push(Deco::Box {
+                            bounds: Bounds::default(),
+                            fill: transparent_black(),
+                            border: transparent_black(),
+                            border_width: px(0.),
+                            radius: Corners::all(px(0.)),
                         });
+                        out.decos.len() - 1
+                    });
                     let s = if ri == 0 {
-                        cx.with_size(cx.base.size, true)
+                        let mut s = cx.with_size(cx.base.size, true);
+                        if let Some(w) = cx.style.table_header_weight {
+                            s.font.weight = w;
+                        }
+                        if let Some(c) = cx.style.colors.table_header_text {
+                            s.color = c;
+                        }
+                        s
                     } else {
                         cx.base.clone()
                     };
@@ -576,17 +648,21 @@ fn lay(
                         row_bottom = row_bottom.max(row_top + pad * 2. + h);
                     }
                     y = row_bottom;
-                    if let (Some(ix), Some(fill_)) = (header_ix, cx.style.colors.table_header) {
-                        // The header's fill, inside the table's border and its top corners.
+                    if let (Some(ix), Some(fill_)) = (header_ix, row_fill) {
+                        // Inside the table's border, rounded where it meets its corners.
+                        let first = ri == 0;
+                        let last = ri + 1 == rows.len();
+                        let round = |on: bool| if on { radius } else { px(0.) };
                         out.decos[ix] = Deco::Box {
                             bounds: Bounds::new(point(x, row_top), size(width, y - row_top)),
                             fill: fill_,
                             border: transparent_black(),
                             border_width: px(0.),
                             radius: Corners {
-                                top_left: radius,
-                                top_right: radius,
-                                ..Corners::default()
+                                top_left: round(first),
+                                top_right: round(first),
+                                bottom_left: round(last),
+                                bottom_right: round(last),
                             },
                         };
                     }
@@ -680,6 +756,14 @@ fn layout_for(
             size: style.inline_code.size.map(|r| size * r),
             padding: style.inline_code.padding.unwrap_or(px(0.)),
             padding_y: style.inline_code.padding_y,
+            border_width: match (
+                style.inline_code.border_width,
+                style.inline_code.border_color,
+            ) {
+                (Some(w), Some(_)) => w,
+                _ => px(0.),
+            },
+            border_color: style.inline_code.border_color.unwrap_or_default(),
             radius: style.inline_code.radius.unwrap_or(px(0.)),
             color: style.inline_code.color,
         },
