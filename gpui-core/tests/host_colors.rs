@@ -164,3 +164,53 @@ impl Render for Plain {
         div().w(px(200.)).child(Slider::new(&self.slider).w_full())
     }
 }
+
+struct Rings {
+    field: Entity<InputState>,
+    slider: Entity<SliderState>,
+}
+
+impl Render for Rings {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(300.))
+            .child(Input::new(&self.field).focus_ring_color(RED))
+            .child(Slider::new(&self.slider).focus_ring_color(GREEN).w_full())
+    }
+}
+
+#[test]
+fn focus_rings_take_the_given_colour() {
+    let mut cx = app();
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let field = cx.new(|cx| InputState::new(window, cx));
+        let slider = cx.new(|_| SliderState::new());
+        gpui_core::Root::new(cx.new(|_| Rings { field, slider }), window, cx)
+    });
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    let shadows = |vcx: &mut VisualTestContext| {
+        vcx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+            window
+                .rendered_scene()
+                .shadows
+                .iter()
+                .map(|s| s.color)
+                .collect::<Vec<Hsla>>()
+        })
+    };
+    let near = |a: Hsla, b: Hsla| (a.h - b.h).abs() < 0.02 && (a.l - b.l).abs() < 0.05;
+    // Tab to the field, then to the slider: the keyboard puts the focus there, so rings show.
+    vcx.simulate_keystrokes("tab");
+    assert!(
+        shadows(vcx).iter().any(|c| near(*c, RED)),
+        "the field's ring"
+    );
+    vcx.simulate_keystrokes("tab");
+    assert!(
+        shadows(vcx).iter().any(|c| near(*c, GREEN)),
+        "the slider's ring"
+    );
+}
