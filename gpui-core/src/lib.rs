@@ -33,6 +33,7 @@
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+mod a11y;
 pub mod icon;
 mod press;
 mod root;
