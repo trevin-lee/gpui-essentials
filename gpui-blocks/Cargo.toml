@@ -19,9 +19,12 @@ gpui-kit = { workspace = true }
 # The document model, input, selection, undo and drawing: gpui-kit-markdown-editor, through a fork
 # that adds callouts, toggles, block motion and the hooks this crate draws its menus with. Pinned
 # to a commit until those changes are published.
-markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "0ce34f876112b5d5ac03a3e0c46e60a5f1f8af6c" }
+markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "cceb34a48779efbcdd602c95d310274777be8a54" }
 # The parser's syntax tree, for widget blocks: the version gpui-kit parses with.
 markdown = "1.0.0"
+# The JSON form of a document (`json`).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 # Only for the shots feature, which only the example uses: GPUI with its test support (offscreen rendering) on, and GPUI's
 # version of the image crate to save the picture.
 gpui-pre = { workspace = true, features = ["test-support"], optional = true }
