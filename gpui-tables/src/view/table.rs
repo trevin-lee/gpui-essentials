@@ -153,7 +153,11 @@ pub(crate) struct Shown {
     pub today: i64,
     /// A board's columns, when the view is a board.
     pub board: Option<Vec<super::board::BoardColumn>>,
-    /// The properties a board's cards show under the title (places in `properties`).
+    /// A list's groups (or its one group of every row, when it doesn't group), when the view
+    /// is a list: what a drag moves rows between, as a board's columns.
+    pub list: Option<Vec<super::board::BoardColumn>>,
+    /// The properties a board's cards and a list's lines show beside the title (places in
+    /// `properties`).
     pub card_properties: Vec<usize>,
 }
 
@@ -186,6 +190,10 @@ pub struct TableView {
     text_target: Option<TextTarget>,
     /// A row asked for with `rowCreated`, focused when the host hands it back.
     pending_row: Option<String>,
+    /// A row whose focus should land in this group (by key) when the rows are worked out
+    /// again: a list's row dropped into another group, which a multi-select row may share
+    /// with others.
+    pub(crate) focus_group: Option<(String, String)>,
     /// The board's state, when the view is a board.
     pub(crate) board: super::board::Board,
 }
@@ -226,11 +234,13 @@ impl TableView {
             pending_text: None,
             text_target: None,
             pending_row: None,
+            focus_group: None,
             board: super::board::Board::default(),
         }
     }
 
-    /// Shows the view `view_id`: a board for a view of type `board`, a table for any other.
+    /// Shows the view `view_id`: a board for a view of type `board`, a list for `list`, a
+    /// table for any other.
     pub fn with_view(mut self, view_id: impl Into<String>) -> Self {
         self.view_id = Some(view_id.into());
         self
@@ -256,8 +266,8 @@ impl TableView {
         self.invalidate(cx);
     }
 
-    /// Shows another of the database's views: a board for a view of type `board`, a table for
-    /// any other. It's the same entity and host either way.
+    /// Shows another of the database's views: a board for a view of type `board`, a list for
+    /// `list`, a table for any other. It's the same entity and host either way.
     pub fn set_view(&mut self, view_id: impl Into<String>, cx: &mut Context<Self>) {
         self.view_id = Some(view_id.into());
         self.cell = None;
@@ -265,6 +275,7 @@ impl TableView {
         self.scroll_x = px(0.);
         self.list.scroll_to_item(0, ScrollStrategy::Top);
         self.board = super::board::Board::default();
+        self.focus_group = None;
         self.invalidate(cx);
     }
 
@@ -470,24 +481,10 @@ impl TableView {
         let mut items = Vec::with_capacity(result.rows.len() + 1);
         let mut collapsed = Vec::new();
         let groups = result.groups.unwrap_or_default();
-        let board = (view.kind == ViewType::Board).then(|| {
-            if view.group_by.is_some() && !groups.is_empty() {
-                groups
-                    .iter()
-                    .map(|g| super::board::BoardColumn {
-                        folded: view.collapsed_groups.contains(&g.key.to_string()),
-                        key: Some(g.key.clone()),
-                        rows: g.rows.clone(),
-                    })
-                    .collect()
-            } else {
-                vec![super::board::BoardColumn {
-                    key: None,
-                    rows: result.rows.clone(),
-                    folded: false,
-                }]
-            }
-        });
+        let board = (view.kind == ViewType::Board)
+            .then(|| super::board::lanes_of(&view, &groups, &result.rows));
+        let list = (view.kind == ViewType::List)
+            .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let mut card_properties: Vec<usize> = Vec::new();
         for id in &view.card_properties {
             if let Some(i) = fields.properties.iter().position(|p| p.id == *id)
@@ -529,16 +526,26 @@ impl TableView {
             issues: result.issues,
             today,
             board,
+            list,
             card_properties,
         };
         // The focus follows its row (or a pending new row), or stays on the same kind of line.
         let wanted = self.pending_row.clone().or(previous_row);
         if let Some(id) = wanted {
-            let found = self
-                .shown
-                .items
-                .iter()
-                .position(|i| matches!(i, Item::Row { row, .. } if self.rows[*row].id == id));
+            let is_row = |i: &Item| matches!(i, Item::Row { row, .. } if self.rows[*row].id == id);
+            // A row dropped into a group is focused there, though it may be in others too.
+            let in_group = self
+                .focus_group
+                .take()
+                .filter(|(row, _)| *row == id)
+                .and_then(|(_, key)| {
+                    self.shown.items.iter().position(|i| {
+                        is_row(i)
+                            && matches!(i, Item::Row { group: Some(g), .. }
+                                if self.shown.groups.get(*g).is_some_and(|g| g.key.to_string() == key))
+                    })
+                });
+            let found = in_group.or_else(|| self.shown.items.iter().position(is_row));
             if let Some(item) = found {
                 let column = if self.pending_row.as_deref() == Some(id.as_str()) {
                     self.pending_row = None;

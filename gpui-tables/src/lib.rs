@@ -8,8 +8,8 @@
 //!
 //! - [`model`], [`engine`] and [`order`] have no GPUI in them: with `default-features = false`
 //!   they're all that builds, for a server or the non-UI part of an app.
-//! - [`view`] (the default `gpui` feature) is the table and board views, drawn with GPUI and
-//!   gpui-core. Lists come next; the README says what they'll be.
+//! - [`view`] (the default `gpui` feature) is the table, board and list views, drawn with GPUI
+//!   and gpui-core.
 //!
 //! The README is the design note, with the JSON and an example.
 

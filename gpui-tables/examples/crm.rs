@@ -1,5 +1,5 @@
 //! The CRM in the fixtures (People, Companies and Interactions, all made up) in a window, with
-//! its table and board views and a log of every event they emit.
+//! its table, board and list views and a log of every event they emit.
 //!
 //! ```sh
 //! cargo run --release -p gpui-tables --example crm
@@ -16,7 +16,9 @@
 //! `date` (the day grid), `scrolled` (scrolled sideways, the title column in place), `light`
 //! and `worst` (worst-case text, every cell ending in an ellipsis); and boards: `board` (People's
 //! Pipeline by stage), `board-drag` (a card of Interactions by kind dragged to another column),
-//! `board-light` (Companies by industry, in the light theme) and `board-worst`.
+//! `board-light` (Companies by industry, in the light theme) and `board-worst`; and lists:
+//! `list` (Interactions, most recent first), `list-grouped` (People by stage) and `list-light`
+//! (the Companies directory, in the light theme).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -704,6 +706,17 @@ mod shots {
             .unwrap_or_default()
     }
 
+    /// The database's view of this name.
+    fn named_view(t: &Entity<TableView>, name: &str, cx: &App) -> String {
+        t.read(cx)
+            .database()
+            .database
+            .as_ref()
+            .and_then(|f| f.views.iter().find(|v| v.name == name))
+            .map(|v| v.id.clone())
+            .unwrap_or_default()
+    }
+
     /// Picks the first card of the board's second column up with the mouse and carries it over
     /// the third column, under its first card, without letting go.
     async fn drag_a_card(window: AnyWindowHandle, crm: &Entity<Crm>, cx: &mut AsyncApp) {
@@ -829,6 +842,21 @@ mod shots {
                     "board-drag" => {
                         let t = pick(2, cx);
                         let id = board_view(&t, cx);
+                        t.update(cx, |t, cx| t.set_view(id, cx));
+                    }
+                    "list" => {
+                        let t = pick(2, cx);
+                        let id = named_view(&t, "Recent", cx);
+                        t.update(cx, |t, cx| t.set_view(id, cx));
+                    }
+                    "list-grouped" => {
+                        let t = pick(0, cx);
+                        let id = named_view(&t, "By stage", cx);
+                        t.update(cx, |t, cx| t.set_view(id, cx));
+                    }
+                    "list-light" => {
+                        let t = pick(1, cx);
+                        let id = named_view(&t, "Directory", cx);
                         t.update(cx, |t, cx| t.set_view(id, cx));
                     }
                     "scrolled" => {
