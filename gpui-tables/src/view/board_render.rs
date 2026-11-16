@@ -730,8 +730,8 @@ impl Render for CardGhost {
             .bg(t.colors.card)
             .border_1()
             .border_color(t.colors.line_strong)
+            // Opaque, so the card it's carried over doesn't show through it.
             .shadow(vec![shadow])
-            .opacity(0.95)
             .font_family(t.fonts.body.clone())
             .text_size(t.px(t.sizes.text))
             .text_color(t.colors.text)
