@@ -37,7 +37,7 @@ input methods (on iOS, a tap raises the keyboard); the slider and an icon button
 gpui-core's too, all drawn in the card's colours. The date picker is still GPUI Kit's. Everything
 else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
 keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there.
-Markdown goes through GPUI Kit's text view, so it can be selected and copied; a code block has
+Markdown goes through gpui-core's text view, so it can be selected and copied; a code block has
 a Copy button.
 
 | Charts | A form |
@@ -175,11 +175,21 @@ light card in a dark app (or the other way round) needs no change to gpui-core's
 | Its focus ring | `focus_ring`, also the ring around a button, tab, chip or choice focused from the keyboard |
 | The slider's track, fill and thumb | `line_strong`, `accent`, `background` with an `accent` edge |
 | An icon button's tooltip | `popover`, with `text` and a `line_strong` edge |
+| Markdown's text and links | `text` |
+| Its list markers and an image's alt text | `text_muted` |
+| Its rules, quote bars and table lines | `line` |
+| Its selection | `accent` at 30% |
+| Its inline code | `sunk` behind the `mono` font |
+| A code block | `sunk`, with a `line` edge and the `mono` font |
 
 gpui-core sets itself up when the first text field is made, so there's no `gpui_core::init` to
 call. Its `Theme` still gives the slider's keyboard focus ring and a tooltip's font; it's dark
-until a host sets it. GPUI Kit draws the date picker and Markdown in its own theme, so set GPUI
-Kit's `Theme` to the same light or dark as the cards.
+until a host sets it. GPUI Kit draws the date picker in its own theme, so set GPUI Kit's `Theme`
+to the same light or dark as the cards.
+
+Markdown is laid out as the web lays it out: bullets and numbers in a 1.4em column, items 0.25em
+apart, 1.4em above a heading and 0.35em below it, and inline code at 0.875em in a box 4px either
+side with 4px corners.
 
 ### Hooks and events
 

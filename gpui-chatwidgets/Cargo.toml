@@ -26,8 +26,8 @@ url = "2"
 # of Zed's GPUI (gpui-pre 0.3.12), and a host using this crate must link the same one.
 gpui-kit = { workspace = true, optional = true }
 # Everything pressable (buttons, tabs, chips, table cells) through its Press, the text fields,
-# the slider and tooltips: gpui-core, on the same GPUI. GPUI Kit still draws the date picker
-# and Markdown.
+# the slider, tooltips and Markdown: gpui-core, on the same GPUI. GPUI Kit still draws the date
+# picker.
 gpui-core = { path = "../gpui-core", optional = true }
 # The date picker's dates; the version GPUI Kit's own date picker uses.
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"], optional = true }
