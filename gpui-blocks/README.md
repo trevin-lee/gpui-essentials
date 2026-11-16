@@ -13,7 +13,7 @@ it works in GPUI Kit apps but not with Zed's own `gpui` crate.
 
 - **Blocks:** paragraphs, headings (three in the slash menu, all six with `#`), nested bullet,
   numbered and to-do lists, quotes, callouts, toggles, code with syntax highlighting, dividers,
-  tables you can edit, and pictures.
+  tables you can edit, pictures, and a table of contents that follows the headings.
 - **Slash menu:** type `/` at the start of a line or after a space. Narrow the list by typing,
   pick with ↑ ↓ and Enter, and close it with Esc.
 - **Side menu:** hover a block for its handles. "+" adds a line below with the menu open, and the

@@ -61,6 +61,7 @@ stored text is read as a space.
 | `table` | `align`: per column, `"left"`, `"center"`, `"right"` or `null` | `row`s, the first one the header |
 | `row` | | `cell`s |
 | `cell` | `text` | |
+| `toc` | | |
 | `page` | `doc`: the document's id; `title`: its title when the link was written | |
 | `widget` | `name`, `meta` (the rest of the info string), `body` | |
 | `markdown` | `markdown`: the block as Markdown | |

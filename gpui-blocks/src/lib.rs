@@ -41,6 +41,7 @@ pub mod docs;
 mod editor;
 pub mod json;
 pub mod slash;
+pub mod toc;
 pub mod widget;
 
 pub use editor::{Editor, EditorEvent, Options, extensions};

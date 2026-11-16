@@ -22,6 +22,7 @@ use std::sync::Arc;
 use crate::actions::*;
 use crate::docs::{self, DocHooks, Docs, MentionPlugin, PagePlugin};
 use crate::slash::{self, SlashAction, SlashItem};
+use crate::toc::{Heading, TocHooks, TocPlugin};
 use crate::widget::{Widget, WidgetPlugin};
 
 /// The key context of the whole view.
@@ -76,14 +77,16 @@ pub(crate) fn bind_keys(cx: &mut App) {
 /// The Markdown extensions the editor parses and draws with: the toggles' and callouts'
 /// containers, document links (see [`crate::docs`]) and the widgets.
 pub fn extensions(widgets: &[Arc<dyn Widget>]) -> gpui_kit::base::text::MarkdownExtensions {
-    extensions_with(widgets, DocHooks::default())
+    extensions_with(widgets, DocHooks::default(), TocHooks::default())
 }
 
 fn extensions_with(
     widgets: &[Arc<dyn Widget>],
     hooks: DocHooks,
+    toc: TocHooks,
 ) -> gpui_kit::base::text::MarkdownExtensions {
     let ext = with_default_surfaces(Default::default())
+        .plugin(TocPlugin(toc))
         .plugin(PagePlugin(hooks.clone()))
         .plugin(MentionPlugin(hooks));
     widgets
@@ -261,6 +264,8 @@ pub struct Editor {
     open_on_next_change: bool,
     /// The top-level block the side menu is beside.
     hovered: Option<BlockId>,
+    /// The headings a table of contents lists, kept up to date after each change.
+    headings: Arc<std::sync::Mutex<Vec<Heading>>>,
     /// The blocks' ids in [`Editor::document`].
     ids: crate::json::Ids,
     /// A selection handle being dragged by touch: the selection's other end, which stays, and
@@ -299,9 +304,17 @@ impl Editor {
             })),
         };
         let images = options.images.clone();
+        let headings: Arc<std::sync::Mutex<Vec<Heading>>> = Arc::default();
+        let this = cx.entity().downgrade();
+        let toc = TocHooks {
+            headings: headings.clone(),
+            on_click: Some(Arc::new(move |block, window: &mut Window, cx: &mut App| {
+                let _ = this.update(cx, |this, cx| this.go_to(block, window, cx));
+            })),
+        };
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
-                .with_markdown_extensions(extensions_with(&widgets, hooks))
+                .with_markdown_extensions(extensions_with(&widgets, hooks, toc))
                 .with_source(body);
             // Pictures load only through the app's loader.
             state = match images {
@@ -320,6 +333,7 @@ impl Editor {
                     }
                     let typed = matches!(origin, EditOrigin::Typing | EditOrigin::Backspace);
                     let open = std::mem::take(&mut this.open_on_next_change) || typed;
+                    this.update_headings(cx);
                     this.refresh_slash(open, cx);
                     cx.emit(EditorEvent::Changed);
                 }
@@ -334,7 +348,7 @@ impl Editor {
                 _ => {}
             }
         });
-        Self {
+        let editor = Self {
             state,
             scroll,
             menu_scroll: ScrollHandle::new(),
@@ -346,10 +360,13 @@ impl Editor {
             open_on_next_change: false,
             hovered: None,
             ids: Default::default(),
+            headings,
             touch_drag: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
-        }
+        };
+        editor.update_headings(cx);
+        editor
     }
 
     /// The editor underneath, for what this view doesn't wrap. Its API is
@@ -378,6 +395,7 @@ impl Editor {
             .state
             .update(cx, |state, cx| state.set_source(body, cx));
         self.ids.clear();
+        self.update_headings(cx);
         self.slash = None;
         self.dismissed = None;
         self.hovered = None;
@@ -465,6 +483,40 @@ impl Editor {
             let policy = state.image_policy();
             state.set_image_policy(policy, cx);
         });
+    }
+
+    /// Keeps the table of contents' headings up to date.
+    fn update_headings(&self, cx: &App) {
+        let state = self.state.read(cx);
+        let headings: Vec<Heading> = state
+            .model()
+            .document()
+            .leaves()
+            .filter_map(|b| match b.kind() {
+                BlockKind::Heading { level } => Some(Heading {
+                    level,
+                    text: b.text().unwrap_or_default().replace('\u{FFFC}', "").into(),
+                    block: b.id(),
+                }),
+                _ => None,
+            })
+            .collect();
+        if let Ok(mut list) = self.headings.lock() {
+            *list = headings;
+        }
+    }
+
+    /// Puts the caret at the start of `block` and scrolls to it.
+    fn go_to(&mut self, block: BlockId, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            if state
+                .set_selection(BlockSelection::caret(BlockPosition::new(block, 0)), cx)
+                .is_ok()
+            {
+                state.reveal_caret(cx);
+            }
+        });
+        self.focus(window, cx);
     }
 
     /// Gives the editor the keyboard.
@@ -1725,6 +1777,49 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|a| a == "https://example.test/p.png")
+        );
+    }
+
+    #[gpui_kit::test]
+    fn the_table_of_contents_follows_the_headings(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "[TOC]\n\n# One\n\n## Two\n\nText");
+        assert!(cx.debug_bounds("blocks-toc").is_some());
+        assert!(cx.debug_bounds("blocks-toc-1").is_some());
+        assert!(cx.debug_bounds("blocks-toc-2").is_none());
+        // A heading typed at the end is listed too.
+        let last = editor.update(cx, |e, cx| {
+            e.state().read(cx).model().document().leaves().count() - 1
+        });
+        caret_at_end(&editor, cx, last);
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("## Three");
+        draw(cx);
+        assert!(
+            cx.debug_bounds("blocks-toc-2").is_some(),
+            "{}",
+            markdown(&editor, cx)
+        );
+        // A click on Two puts the caret at its start.
+        let two = cx.debug_bounds("blocks-toc-1").unwrap().center();
+        cx.simulate_click(two, gpui_kit::Modifiers::none());
+        draw(cx);
+        let at = editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            let caret = state.model().caret().unwrap();
+            (
+                state
+                    .model()
+                    .document()
+                    .block(caret.block)
+                    .and_then(|b| b.text())
+                    .map(str::to_string),
+                caret.offset,
+            )
+        });
+        assert_eq!(at, (Some("Two".to_string()), 0));
+        assert_eq!(
+            markdown(&editor, cx),
+            "[TOC]\n\n# One\n\n## Two\n\nText\n\n## Three"
         );
     }
 

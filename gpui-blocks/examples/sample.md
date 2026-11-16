@@ -2,6 +2,8 @@
 
 Type `/` at the start of a line or after a space for blocks, or start a line with `# `, `- `, `1. `, `[ ] ` or `> `. Hover a block for its handle: drag it to move it, or press **+** to add one below. The card near the end is a widget, a block the example app draws itself.
 
+[TOC]
+
 ## This week
 
 The plan is in [Roadmap](doc:roadmap), and last week has a page of its own:

@@ -193,6 +193,10 @@ pub fn default_items() -> Vec<SlashItem> {
             "—",
             Markdown("---".into()),
         ),
+        SlashItem::new("Table of contents", Markdown(crate::toc::MARKDOWN.into()))
+            .hint("The page's headings, as links")
+            .aliases(["toc", "contents", "outline"])
+            .icon("☰"),
         SlashItem::new("Table", Command(C::InsertTable { rows: 3, cols: 3 }))
             .hint("Rows and columns")
             .aliases(["grid", "columns"])
