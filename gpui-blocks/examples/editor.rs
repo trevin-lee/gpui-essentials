@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -674,6 +674,36 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                     // Typed, as the menu opens only for a `/` that's typed.
                     window.dispatch_keystroke(Keystroke::parse("/").unwrap(), cx);
                 });
+                settle(window, cx).await;
+            }
+            // A word selected by a long press, with the touch selection handles at its ends.
+            "touch" => {
+                settle(window, cx).await;
+                let at = root.read_with(cx, |root, cx| {
+                    let state = root.editor.read(cx).state().read(cx);
+                    let leaf = state.model().document().leaves().nth(1)?.id();
+                    let pos = gpui_blocks::markdown_editor::BlockPosition::new(leaf, 53);
+                    state.position_bounds(pos).map(|b| b.center())
+                });
+                if let Some(at) = at {
+                    let touch = |phase| {
+                        PlatformInput::Touch(TouchEvent {
+                            id: TouchId(1),
+                            phase,
+                            position: at,
+                            predicted_position: None,
+                            force: None,
+                        })
+                    };
+                    let _ = cx.update_window(window, |_, window, cx| {
+                        root.update(cx, |root, cx| root.editor.update(cx, |e, cx| e.focus(window, cx)));
+                        window.dispatch_event(touch(TouchPhase::Started), cx);
+                    });
+                    wait(cx, 900).await;
+                    let _ = cx.update_window(window, |_, window, cx| {
+                        window.dispatch_event(touch(TouchPhase::Ended), cx);
+                    });
+                }
                 settle(window, cx).await;
             }
             // The side menu beside the to-do list.
