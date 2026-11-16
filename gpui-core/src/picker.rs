@@ -11,10 +11,15 @@ use gpui::{
 use crate::icon::{Icon, IconName};
 use crate::input::{Input, InputState};
 use crate::menu::{
-    Entry, MenuSelect, MoveHighlight, OnHighlight, OnSelect, PopupMenuColors, PopupMenuItem, rows,
-    secondary, shift, step,
+    Entry, MenuSelect, MoveHighlight, OnHighlight, OnSelect, PopupMenuColors, PopupMenuItem,
+    RowStyle, rows, secondary, shift, step,
 };
 use crate::theme::ActiveTheme as _;
+
+/// The Create entry's id: not one a host would use.
+const CREATE: &str = "\u{0}gpui-core-picker-create";
+
+type OnCreate = Rc<dyn Fn(&str, &mut Window, &mut App)>;
 
 actions!(
     gpui_core_picker,
@@ -94,7 +99,8 @@ pub struct Picker {
     on_select: Option<OnSelect>,
     on_highlight: Option<OnHighlight>,
     highlight: Option<SharedString>,
-    touch: bool,
+    row: RowStyle,
+    on_create: Option<OnCreate>,
     colors: PopupMenuColors,
 }
 
@@ -108,7 +114,8 @@ impl Picker {
             on_select: None,
             on_highlight: None,
             highlight: None,
-            touch: false,
+            row: RowStyle::default(),
+            on_create: None,
             colors: PopupMenuColors::default(),
         }
     }
@@ -157,7 +164,27 @@ impl Picker {
 
     /// Entries 44 points tall, for touch.
     pub fn touch(mut self, touch: bool) -> Self {
-        self.touch = touch;
+        self.row.touch = touch;
+        self
+    }
+
+    /// A row's height (32 CSS pixels unless given; at least 44 points with
+    /// [`touch`](Self::touch)).
+    pub fn row_height(mut self, height: impl Into<gpui::AbsoluteLength>) -> Self {
+        self.row.height = Some(height.into());
+        self
+    }
+
+    /// The entries' text size (the theme's small size unless given).
+    pub fn text_size(mut self, size: impl Into<gpui::AbsoluteLength>) -> Self {
+        self.row.text_size = Some(size.into());
+        self
+    }
+
+    /// Offers a "Create “text”" entry after the matches while what's typed isn't an entry's
+    /// label already (case aside); picking it runs `f` with the text, trimmed.
+    pub fn on_create(mut self, f: impl Fn(&str, &mut Window, &mut App) + 'static) -> Self {
+        self.on_create = Some(Rc::new(f));
         self
     }
 
@@ -204,11 +231,33 @@ impl RenderOnce for Picker {
         let query = state.read(cx).query.clone();
         let text = query.read(cx).value();
 
-        let shown: Vec<PopupMenuItem> = self
+        let typed = text.trim().to_string();
+        let exact = self
+            .items
+            .iter()
+            .any(|i| i.label.to_lowercase() == typed.to_lowercase());
+        let mut shown: Vec<PopupMenuItem> = self
             .items
             .into_iter()
             .filter(|i| matches(&i.label, &text))
             .collect();
+        if self.on_create.is_some() && !typed.is_empty() && !exact {
+            shown
+                .push(PopupMenuItem::new(CREATE, format!("Create “{typed}”")).icon(IconName::Plus));
+        }
+        // A pick, or the Create entry's.
+        let on_select: Option<OnSelect> = match (self.on_select.clone(), self.on_create.clone()) {
+            (None, None) => None,
+            (select, create) => Some(Rc::new(move |pick: &MenuSelect, window, cx| {
+                if pick.id.as_ref() == CREATE {
+                    if let Some(f) = &create {
+                        f(&typed, window, cx);
+                    }
+                } else if let Some(f) = &select {
+                    f(pick, window, cx);
+                }
+            })),
+        };
         let pickable: Rc<Vec<bool>> = Rc::new(shown.iter().map(|i| !i.disabled).collect());
         // Where it opens: on the host's entry, else the current option (the checked one), else
         // the first match.
@@ -274,7 +323,7 @@ impl RenderOnce for Picker {
         let (prev, next) = (mover(-1), mover(1));
         let choose = Rc::new({
             let state = state.clone();
-            let on_select = self.on_select.clone();
+            let on_select = on_select.clone();
             let pickable = pickable.clone();
             let ids = ids.clone();
             move |modifiers: Modifiers, window: &mut Window, cx: &mut App| {
@@ -300,10 +349,10 @@ impl RenderOnce for Picker {
             &self.id,
             shown.into_iter().map(Entry::Item).collect(),
             highlighted,
-            self.touch,
+            self.row,
             self.colors,
             Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
-            self.on_select.clone(),
+            on_select,
             cx,
         );
 
