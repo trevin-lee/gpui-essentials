@@ -30,8 +30,14 @@
 //!                 .item(PopupMenuItem::new("copy", "Copy").icon(IconName::Copy).shortcut("⌘C"))
 //!                 .separator()
 //!                 .item(PopupMenuItem::new("wrap", "Wrap lines").checked(self.wrap))
+//!                 .item(PopupMenuItem::new("move", "Move to").submenu(
+//!                     PopupMenu::new("move-menu")
+//!                         .item(PopupMenuItem::new("inbox", "Inbox"))
+//!                         .item(PopupMenuItem::new("archive", "Archive")),
+//!                 ))
 //!                 .on_select(move |pick, window, cx| {
-//!                     // `pick.id` is the entry's: "copy" or "wrap"; `pick.modifiers` what's held.
+//!                     // `pick.id` is the entry's: "copy", "wrap", or a submenu's "inbox" or
+//!                     // "archive"; `pick.modifiers` what's held.
 //!                     close(&(), window, cx)
 //!                 }),
 //!         )
@@ -40,15 +46,18 @@
 //! ```
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, FocusHandle, Hsla, InteractiveElement as _,
-    IntoElement, KeyBinding, Modifiers, ParentElement as _, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, actions, div,
-    prelude::FluentBuilder as _, rems,
+    AnyElement, App, Bounds, ClickEvent, ContentMask, Element, ElementId, FocusHandle,
+    GlobalElementId, Hsla, InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding,
+    LayoutId, Modifiers, ParentElement as _, Pixels, Point, Rems, RenderOnce, Role, SharedString,
+    Stateful, StatefulInteractiveElement as _, Styled as _, Window, actions, div, point,
+    prelude::FluentBuilder as _, px, rems,
 };
 
 use crate::icon::{Icon, IconName};
+use crate::popover::ClaimArea;
 use crate::press::Press;
 use crate::size::{Disableable as _, Selectable as _};
 use crate::theme::{ActiveTheme as _, Theme};
@@ -62,11 +71,20 @@ actions!(
         Last,
         Choose,
         ChooseShift,
-        ChooseSecondary
+        ChooseSecondary,
+        OpenSubmenu,
+        CloseSubmenu
     ]
 );
 
 const CONTEXT: &str = "GpuiCoreMenu";
+/// A submenu's context: the menu's, and `submenu`.
+const SUBMENU_CONTEXT: &str = "GpuiCoreMenu submenu";
+const IN_SUBMENU: &str = "GpuiCoreMenu && submenu";
+
+/// How long the pointer rests on an entry before its submenu opens (or the open one closes, on
+/// an entry without one): long enough to cross other entries on the way into a submenu.
+pub const SUBMENU_DELAY: Duration = Duration::from_millis(200);
 
 pub(crate) fn init(cx: &mut App) {
     let c = Some(CONTEXT);
@@ -87,6 +105,10 @@ pub(crate) fn init(cx: &mut App) {
             ChooseSecondary,
             c,
         ),
+        KeyBinding::new("right", OpenSubmenu, c),
+        // Only in a submenu, so in a popover's own menu Escape still closes the popover.
+        KeyBinding::new("left", CloseSubmenu, Some(IN_SUBMENU)),
+        KeyBinding::new("escape", CloseSubmenu, Some(IN_SUBMENU)),
     ]);
 }
 
@@ -122,6 +144,9 @@ pub struct PopupMenuItem {
     shortcut: Option<SharedString>,
     chip: Option<AnyElement>,
     label_element: Option<AnyElement>,
+    submenu: Option<Box<PopupMenu>>,
+    /// Whether it opens a submenu (kept by `text_copy`, which leaves the submenu out).
+    opens: bool,
 }
 
 impl PopupMenuItem {
@@ -136,6 +161,8 @@ impl PopupMenuItem {
             shortcut: None,
             chip: None,
             label_element: None,
+            submenu: None,
+            opens: false,
         }
     }
 
@@ -175,6 +202,8 @@ impl PopupMenuItem {
             shortcut: self.shortcut.clone(),
             chip: None,
             label_element: None,
+            submenu: None,
+            opens: self.opens,
         }
     }
 
@@ -188,6 +217,16 @@ impl PopupMenuItem {
     /// Something the host draws before the label: a colour's swatch, an avatar.
     pub fn chip(mut self, chip: impl IntoElement) -> Self {
         self.chip = Some(chip.into_any_element());
+        self
+    }
+
+    /// Opens `menu` beside it rather than being picked: drawn with a chevron, it opens on a
+    /// press, Enter, Space or Right, or when the pointer rests on it ([`SUBMENU_DELAY`]); Left
+    /// or Escape closes it again. Its entries are drawn in this menu's row style and colours,
+    /// and its picks go to its own [`PopupMenu::on_select`], or else to this menu's.
+    pub fn submenu(mut self, menu: PopupMenu) -> Self {
+        self.submenu = Some(Box::new(menu));
+        self.opens = true;
         self
     }
 }
@@ -254,7 +293,13 @@ pub struct PopupMenu {
     row: RowStyle,
     take_focus: bool,
     colors: PopupMenuColors,
+    /// Set when it's drawn as another menu's submenu: how it closes.
+    nested: Option<CloseFn>,
+    /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
+    start_blank: bool,
 }
+
+type CloseFn = Rc<dyn Fn(&mut Window, &mut App)>;
 
 impl PopupMenu {
     pub fn new(id: impl Into<ElementId>) -> Self {
@@ -267,6 +312,8 @@ impl PopupMenu {
             row: RowStyle::default(),
             take_focus: true,
             colors: PopupMenuColors::default(),
+            nested: None,
+            start_blank: false,
         }
     }
 
@@ -364,6 +411,12 @@ struct MenuState {
     focused_once: bool,
     /// Whether it has set its first highlight.
     opened: bool,
+    /// The entry whose submenu is open.
+    open_sub: Option<usize>,
+    /// Whether the pointer opened it (it then opens with nothing highlighted).
+    sub_by_pointer: bool,
+    /// Counts the pointer's moves, so a rest that's been moved on from does nothing.
+    rest: u64,
 }
 
 /// The next entry from `from` in `step`'s direction that can be picked, wrapping.
@@ -397,6 +450,9 @@ impl RenderOnce for PopupMenu {
             highlighted: None,
             focused_once: false,
             opened: false,
+            open_sub: None,
+            sub_by_pointer: false,
+            rest: 0,
         });
         let (focus, focused_once) = {
             let s = state.read(cx);
@@ -431,7 +487,13 @@ impl RenderOnce for PopupMenu {
                         .position(|id| id.as_ref() == Some(want))
                         .filter(|i| pickable[*i])
                 });
-                s.highlighted = given.or_else(|| step(&pickable, None, 1));
+                s.highlighted = given.or_else(|| {
+                    if self.start_blank {
+                        None
+                    } else {
+                        step(&pickable, None, 1)
+                    }
+                });
             }
             s.highlighted
         });
@@ -456,18 +518,126 @@ impl RenderOnce for PopupMenu {
             }
         });
 
+        let is_sub: Rc<Vec<bool>> = Rc::new(
+            self.entries
+                .iter()
+                .map(|e| matches!(e, Entry::Item(i) if i.submenu.is_some()))
+                .collect(),
+        );
+        // Closes the open submenu, giving the keyboard back to this menu.
+        let close: CloseFn = Rc::new({
+            let state = state.clone();
+            let focus = focus.clone();
+            move |window: &mut Window, cx: &mut App| {
+                let closed = state.update(cx, |s, cx| {
+                    s.rest += 1;
+                    let closed = s.open_sub.take().is_some();
+                    if closed {
+                        cx.notify();
+                    }
+                    closed
+                });
+                if closed {
+                    window.focus(&focus, cx);
+                }
+            }
+        });
+        // Opens entry `i`'s submenu (it takes the keyboard when it's first drawn).
+        let open: OpenFn = Rc::new({
+            let state = state.clone();
+            let is_sub = is_sub.clone();
+            let set = set.clone();
+            move |i, by_pointer, _: &mut Window, cx: &mut App| {
+                if is_sub.get(i) != Some(&true) {
+                    return;
+                }
+                set(Some(i), cx);
+                state.update(cx, |s, cx| {
+                    s.rest += 1;
+                    if s.open_sub != Some(i) {
+                        s.open_sub = Some(i);
+                        s.sub_by_pointer = by_pointer;
+                        cx.notify();
+                    }
+                });
+            }
+        });
+        let subs = is_sub.iter().any(|s| *s).then(|| {
+            let (open_sub, by_pointer) = {
+                let s = state.read(cx);
+                (s.open_sub, s.sub_by_pointer)
+            };
+            // The pointer resting on entry `i`: after a moment, its submenu opens, or the open
+            // one closes if it has none.
+            let rest: RestFn = Rc::new({
+                let state = state.clone();
+                let is_sub = is_sub.clone();
+                let (open, close) = (open.clone(), close.clone());
+                move |i, window: &mut Window, cx: &mut App| {
+                    let (now, open_sub) = state.update(cx, |s, _| {
+                        s.rest += 1;
+                        (s.rest, s.open_sub)
+                    });
+                    let wanted = (is_sub.get(i) == Some(&true)).then_some(i);
+                    if wanted == open_sub {
+                        return;
+                    }
+                    let (state, open, close) = (state.clone(), open.clone(), close.clone());
+                    window
+                        .spawn(cx, async move |cx| {
+                            cx.background_executor().timer(SUBMENU_DELAY).await;
+                            cx.update(|window, cx| {
+                                if state.read(cx).rest != now {
+                                    return;
+                                }
+                                match wanted {
+                                    Some(i) => open(i, true, window, cx),
+                                    None => close(window, cx),
+                                }
+                            })
+                            .ok();
+                        })
+                        .detach();
+                }
+            });
+            // The pointer reaching the open submenu: what it was opened from stays highlighted,
+            // and a rest on the way there is forgotten.
+            let entered: Rc<dyn Fn(&mut App)> = Rc::new({
+                let state = state.clone();
+                move |cx: &mut App| {
+                    state.update(cx, |s, cx| {
+                        s.rest += 1;
+                        if s.open_sub.is_some() && s.highlighted != s.open_sub {
+                            s.highlighted = s.open_sub;
+                            cx.notify();
+                        }
+                    })
+                }
+            });
+            Subs {
+                open_sub,
+                by_pointer,
+                open: open.clone(),
+                rest,
+                entered,
+                close: close.clone(),
+            }
+        });
+
         let mover = |delta: isize| {
             let state = state.clone();
             let pickable = pickable.clone();
             let set = set.clone();
-            move |_: &mut Window, cx: &mut App| {
+            let close = close.clone();
+            move |window: &mut Window, cx: &mut App| {
                 let from = state.read(cx).highlighted;
                 let to = match delta {
                     isize::MIN => step(&pickable, None, 1),
                     isize::MAX => step(&pickable, None, -1),
                     d => step(&pickable, from, d),
                 };
-                set(to, cx)
+                set(to, cx);
+                close(window, cx);
             }
         };
         let (prev, next, first, last) = (mover(-1), mover(1), mover(isize::MIN), mover(isize::MAX));
@@ -476,8 +646,16 @@ impl RenderOnce for PopupMenu {
             let ids = ids.clone();
             let pickable = pickable.clone();
             let on_select = on_select.clone();
+            let is_sub = is_sub.clone();
+            let open = open.clone();
             move |modifiers: Modifiers, window: &mut Window, cx: &mut App| {
                 let at = state.read(cx).highlighted;
+                if let Some(i) = at
+                    && is_sub.get(i) == Some(&true)
+                {
+                    open(i, false, window, cx);
+                    return;
+                }
                 if let (Some(i), Some(f)) = (at, &on_select)
                     && pickable.get(i) == Some(&true)
                     && let Some(Some(id)) = ids.get(i)
@@ -492,8 +670,16 @@ impl RenderOnce for PopupMenu {
             }
         });
         let (choose_shift, choose_secondary) = (choose.clone(), choose.clone());
+        let open_highlighted = {
+            let state = state.clone();
+            let is_sub = is_sub.clone();
+            move |window: &mut Window, cx: &mut App| match state.read(cx).highlighted {
+                Some(i) if is_sub.get(i) == Some(&true) => open(i, false, window, cx),
+                _ => cx.propagate(),
+            }
+        };
 
-        let rows = rows(
+        let rows = rows_with(
             &self.id,
             self.entries,
             0,
@@ -502,13 +688,19 @@ impl RenderOnce for PopupMenu {
             self.colors,
             Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
             on_select,
+            subs,
             cx,
         );
 
+        let nested = self.nested;
         div()
             .id(self.id)
             .role(Role::Menu)
-            .key_context(CONTEXT)
+            .key_context(if nested.is_some() {
+                SUBMENU_CONTEXT
+            } else {
+                CONTEXT
+            })
             .track_focus(&focus)
             .flex()
             .flex_col()
@@ -520,8 +712,27 @@ impl RenderOnce for PopupMenu {
             .on_action(move |_: &Choose, w, cx| choose(Modifiers::none(), w, cx))
             .on_action(move |_: &ChooseShift, w, cx| choose_shift(shift(), w, cx))
             .on_action(move |_: &ChooseSecondary, w, cx| choose_secondary(secondary(cx), w, cx))
+            .on_action(move |_: &OpenSubmenu, w, cx| open_highlighted(w, cx))
+            .when_some(nested, |d, close| {
+                d.on_action(move |_: &CloseSubmenu, w, cx| close(w, cx))
+            })
             .children(rows)
     }
+}
+
+/// Opens an entry's submenu; `true` when the pointer opened it.
+type OpenFn = Rc<dyn Fn(usize, bool, &mut Window, &mut App)>;
+/// The pointer resting on an entry.
+type RestFn = Rc<dyn Fn(usize, &mut Window, &mut App)>;
+
+/// A menu's submenus, for drawing its rows: which is open, and what opens and closes them.
+pub(crate) struct Subs {
+    open_sub: Option<usize>,
+    by_pointer: bool,
+    open: OpenFn,
+    rest: RestFn,
+    entered: Rc<dyn Fn(&mut App)>,
+    close: CloseFn,
 }
 
 /// A menu's entries drawn as rows: `highlighted` filled, the pointer highlighting what it's
@@ -539,6 +750,34 @@ pub(crate) fn rows(
     on_select: Option<OnSelect>,
     cx: &App,
 ) -> Vec<AnyElement> {
+    rows_with(
+        menu_id,
+        entries,
+        first,
+        highlighted,
+        row_style,
+        colors,
+        set_highlight,
+        on_select,
+        None,
+        cx,
+    )
+}
+
+/// [`rows`], with what opens and closes the menu's submenus.
+#[allow(clippy::too_many_arguments)]
+fn rows_with(
+    menu_id: &ElementId,
+    entries: Vec<Entry>,
+    first: usize,
+    highlighted: Option<usize>,
+    row_style: RowStyle,
+    colors: PopupMenuColors,
+    set_highlight: SetHighlight,
+    on_select: Option<OnSelect>,
+    subs: Option<Subs>,
+    cx: &App,
+) -> Vec<AnyElement> {
     let theme: Theme = cx.theme().clone();
     let highlight = colors.highlight.unwrap_or(theme.accent);
     let highlight_text = colors.highlight_text.unwrap_or(theme.accent_foreground);
@@ -548,6 +787,7 @@ pub(crate) fn rows(
     let touch_h: Option<gpui::Pixels> = row_style.touch.then_some(theme.touch_target);
     let text_size: gpui::AbsoluteLength = row_style.text_size.unwrap_or(theme.text.sm.into());
     let menu_id = std::sync::Arc::new(menu_id.clone());
+    let on_select_for_subs = on_select.clone();
     entries
         .into_iter()
         .enumerate()
@@ -581,7 +821,11 @@ pub(crate) fn rows(
                 }
                 Entry::Item(item) => item,
             };
+            let mut item = item;
             let on = highlighted == Some(i);
+            let submenu = item.submenu.take();
+            let opens = item.opens;
+            let open_now = subs.as_ref().is_some_and(|s| s.open_sub == Some(i));
             let id = item.id.clone();
             let role = match item.checked {
                 Some(_) => Role::MenuItemCheckBox,
@@ -591,6 +835,11 @@ pub(crate) fn rows(
             // A disabled entry can't be highlighted, so Enter can't pick it.
             let disabled = item.disabled;
             let on_select = on_select.clone();
+            let rest = subs.as_ref().map(|s| s.rest.clone());
+            let open = subs
+                .as_ref()
+                .filter(|_| submenu.is_some())
+                .map(|s| s.open.clone());
             let mut row = Press::new(ElementId::NamedChild(menu_id.clone(), id.clone()))
                 .role(role)
                 .tab_stop(false)
@@ -614,12 +863,20 @@ pub(crate) fn rows(
                 .text_size(text_size)
                 .when(on, |r| r.bg(highlight).text_color(highlight_text))
                 .when(item.disabled, |r| r.text_color(muted).opacity(0.6))
-                .on_hover(move |hovered, _, cx| {
+                .when(opens, |r| r.aria_expanded(open_now))
+                .on_hover(move |hovered, window, cx| {
                     if *hovered && !disabled {
                         set_highlight(i, cx);
+                        if let Some(rest) = &rest {
+                            rest(i, window, cx);
+                        }
                     }
                 })
                 .on_click(move |e: &ClickEvent, window, cx| {
+                    if let Some(open) = &open {
+                        open(i, true, window, cx);
+                        return;
+                    }
                     if let Some(f) = &on_select {
                         let pick = MenuSelect {
                             id: id.clone(),
@@ -633,53 +890,242 @@ pub(crate) fn rows(
                 row = row.selected(checked);
             }
             let id_for_check = item.id.clone();
+            let id_for_panel = item.id.clone();
+            let on_select_for_sub = on_select_for_subs.clone();
             let check = || Icon::new(IconName::Check).when_some(colors.check, |i, c| i.color(c));
             let checked = item.checked == Some(true);
-            row.when(row_style.check_leading, |r| {
-                // The column: the check, or the room for it.
-                r.child(
+            let row = row
+                .when(row_style.check_leading, |r| {
+                    // The column: the check, or the room for it.
+                    r.child(
+                        div()
+                            .flex_none()
+                            .w(css(16.))
+                            .flex()
+                            .justify_center()
+                            .debug_selector({
+                                let id = id_for_check.clone();
+                                move || format!("menu-check-{id}")
+                            })
+                            .when(checked, |d| d.child(check())),
+                    )
+                })
+                .when_some(item.chip, |r, chip| r.child(chip))
+                .when_some(item.icon, |r, icon| {
+                    r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
+                })
+                .child(
                     div()
-                        .flex_none()
-                        .w(css(16.))
-                        .flex()
-                        .justify_center()
-                        .debug_selector({
-                            let id = id_for_check.clone();
-                            move || format!("menu-check-{id}")
-                        })
-                        .when(checked, |d| d.child(check())),
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        // Room either side for ink past a glyph's advance.
+                        .px(css(3.))
+                        .mx(css(-3.))
+                        .map(|d| match item.label_element {
+                            Some(el) => d.flex().items_center().child(el),
+                            None => d.child(item.label),
+                        }),
                 )
-            })
-            .when_some(item.chip, |r, chip| r.child(chip))
-            .when_some(item.icon, |r, icon| {
-                r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    // Room either side for ink past a glyph's advance.
-                    .px(css(3.))
-                    .mx(css(-3.))
-                    .map(|d| match item.label_element {
-                        Some(el) => d.flex().items_center().child(el),
-                        None => d.child(item.label),
-                    }),
-            )
-            .when_some(item.shortcut, |r, s| {
-                r.child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(if on { highlight_text } else { muted })
-                        .child(s),
-                )
-            })
-            .when(checked && !row_style.check_leading, |r| r.child(check()))
-            .into_any_element()
+                .when_some(item.shortcut, |r, s| {
+                    r.child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(if on { highlight_text } else { muted })
+                            .child(s),
+                    )
+                })
+                .when(checked && !row_style.check_leading, |r| r.child(check()))
+                .when(opens, |r| {
+                    r.child(Icon::new(IconName::ChevronRight).color(if on {
+                        highlight_text
+                    } else {
+                        muted
+                    }))
+                });
+            let panel = submenu
+                .filter(|_| open_now)
+                .zip(subs.as_ref())
+                .map(|(menu, subs)| {
+                    let mut menu = *menu;
+                    menu.nested = Some(subs.close.clone());
+                    menu.start_blank = subs.by_pointer;
+                    menu.row = row_style;
+                    menu.colors = colors;
+                    if menu.on_select.is_none() {
+                        menu.on_select = on_select_for_sub.clone();
+                    }
+                    let entered = subs.entered.clone();
+                    let id = id_for_panel.clone();
+                    let key = ElementId::NamedChild(
+                        menu_id.clone(),
+                        format!("{}-submenu", id_for_panel).into(),
+                    );
+                    (
+                        key.clone(),
+                        div()
+                            .id(key)
+                            .debug_selector(move || format!("menu-submenu-{id}"))
+                            .occlude()
+                            .flex()
+                            .flex_col()
+                            .min_w(css(160.))
+                            .overflow_y_scroll()
+                            .p(css(4.))
+                            .rounded(theme.radius_md())
+                            .border_1()
+                            .border_color(theme.border)
+                            .bg(theme.popover)
+                            .text_color(theme.popover_foreground)
+                            .shadow_md()
+                            .on_hover(move |hovered, _, cx| {
+                                if *hovered {
+                                    entered(cx);
+                                }
+                            })
+                            .child(menu),
+                    )
+                });
+            match panel {
+                Some((key, panel)) => SubmenuElement {
+                    key,
+                    row: row.into_any_element(),
+                    panel: Some(panel),
+                }
+                .into_any_element(),
+                None => row.into_any_element(),
+            }
         })
         .collect()
+}
+
+/// How far a submenu keeps from the window's edges, and how far it sits out from its entry (the
+/// menu's padding and border), in CSS pixels.
+const EDGE: f32 = 8.;
+const INSET: f32 = 5.;
+
+/// Where a submenu of `size` goes beside its entry `row`: to the right with its first entry
+/// level with `row`, or to the left where the right has no room; moved in to keep `edge` from
+/// the window's sides.
+pub(crate) fn place_beside(
+    row: Bounds<Pixels>,
+    size: gpui::Size<Pixels>,
+    view: Bounds<Pixels>,
+    edge: Pixels,
+    inset: Pixels,
+) -> Point<Pixels> {
+    let right = row.right() + inset;
+    let x = if right + size.width <= view.right() - edge {
+        right
+    } else {
+        let left = row.left() - inset - size.width;
+        // Where neither side has room, the side with more.
+        if left >= view.left() + edge || row.left() - view.left() > view.right() - row.right() {
+            left
+        } else {
+            right
+        }
+    };
+    let x = x
+        .min(view.right() - edge - size.width)
+        .max(view.left() + edge);
+    let y = (row.top() - inset)
+        .min(view.bottom() - edge - size.height)
+        .max(view.top() + edge);
+    point(x.round(), y.round())
+}
+
+/// An entry drawn in place, with its open submenu over everything beside it.
+struct SubmenuElement {
+    /// The panel's id, which its claim on presses is kept under.
+    key: ElementId,
+    row: AnyElement,
+    panel: Option<Stateful<gpui::Div>>,
+}
+
+impl IntoElement for SubmenuElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for SubmenuElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.row.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.row.prepaint(window, cx);
+        let Some(panel) = self.panel.take() else {
+            return;
+        };
+        let view = Bounds::new(Point::default(), window.viewport_size());
+        let rem = window.rem_size();
+        let (edge, inset) = (rem * (EDGE / 15.), rem * (INSET / 15.));
+        let panel = panel
+            .max_h((view.size.height - edge * 2.).max(px(0.)))
+            .max_w((view.size.width - edge * 2.).max(px(0.)))
+            .into_any_element();
+        // A press on it isn't one outside the popover the menu is in.
+        let mut panel = ClaimArea::new(self.key.clone(), panel).into_any_element();
+        // Laid out on its own, now that its entry has been placed this frame.
+        let size = panel.layout_as_root(
+            gpui::size(
+                gpui::AvailableSpace::MaxContent,
+                gpui::AvailableSpace::MaxContent,
+            ),
+            window,
+            cx,
+        );
+        let origin = place_beside(bounds, size, view, edge, inset);
+        window.defer_draw(
+            panel,
+            origin,
+            crate::popover::PRIORITY,
+            None::<ContentMask<Pixels>>,
+        );
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.row.paint(window, cx);
+    }
 }
