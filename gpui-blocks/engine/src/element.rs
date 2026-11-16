@@ -1,5 +1,5 @@
 // Changed in Trevin Lee's fork (2026): block motion, the dragged copy, toggle chevron clicks,
-// touch input.
+// touch input; paragraphs and headings drawn on gpui-core's paragraph layer.
 //! `BlockEditor` view (design §7).
 //!
 //! `render` takes the cached projection and renders it with gpui-kit's own
@@ -162,6 +162,19 @@ impl RenderOnce for BlockEditor {
             let state = self.state.read(cx);
             (state.cull.clone(), state.model.revision())
         };
+        // Blocks the engine draws itself (see `draw.rs`): their leaves, and how their text is set.
+        let own_leaves: super::draw::OwnLeaves = Rc::default();
+        let rem = window.rem_size();
+        let body_size = typography.font_size.to_pixels(rem);
+        let body_line = super::draw::device_line(typography.line_height_in_pixels(rem), window);
+        let text_colors = super::draw::Colors {
+            muted: text_style.muted_foreground(),
+            link: text_style.link(),
+            code_background: text_style.code_background(),
+            mono: theme.tokens.typography.mono.clone(),
+        };
+        let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
+        let own_extensions = self.state.read(cx).model.doc.ext.clone();
         let mut children: Vec<AnyElement> = Vec::new();
         {
             let mut cull_state = cull.borrow_mut();
@@ -322,7 +335,65 @@ impl RenderOnce for BlockEditor {
                             cx,
                         )
                     }
-                    _ => node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx),
+                    _ => {
+                        let block_id = snapshot.blocks[unit.block].id;
+                        let prev = unit_ix.checked_sub(1).map(|ix| {
+                            let u = &units[ix];
+                            match &snapshot.blocks[u.block].nodes[u.node] {
+                                BlockNode::Heading { .. } => super::draw::Prev::Heading,
+                                BlockNode::HorizontalRule { .. } => super::draw::Prev::Rule,
+                                _ => super::draw::Prev::Other,
+                            }
+                        });
+                        let own = {
+                            let state = self.state.read(cx);
+                            let doc = &state.model.doc;
+                            match (doc.kind(block_id), doc.inline(block_id)) {
+                                (Some(super::kind::BlockKindData::Paragraph), Some(inline))
+                                    if super::draw::draws(inline) =>
+                                {
+                                    Some((None, inline.clone()))
+                                }
+                                (
+                                    Some(super::kind::BlockKindData::Heading { level }),
+                                    Some(inline),
+                                ) if super::draw::draws(inline) => {
+                                    Some((Some(*level), inline.clone()))
+                                }
+                                _ => None,
+                            }
+                        };
+                        match own {
+                            Some((level, inline)) => super::draw::top_level_text(
+                                super::draw::TopLevel {
+                                    key: block_id.as_u64(),
+                                    level,
+                                    inline: &inline,
+                                    first: node_ix == 0,
+                                    last: is_last_node,
+                                    prev,
+                                    bands: backgrounds
+                                        .get(&block_id.as_u64())
+                                        .cloned()
+                                        .unwrap_or_default(),
+                                    base: &typography,
+                                    body_size,
+                                    body_line,
+                                    paragraph_gap,
+                                    colors: &text_colors,
+                                },
+                                &super::draw::LeafContext {
+                                    extensions: &own_extensions,
+                                    leaves: &own_leaves,
+                                },
+                                window,
+                                cx,
+                            ),
+                            None => {
+                                node.render(node_ix, flow.last(is_last_node), &node_cx, window, cx)
+                            }
+                        }
+                    }
                 };
                 // Per-block accessibility node around the rendered block.
                 let element = match block_role(node) {
@@ -501,6 +572,7 @@ impl RenderOnce for BlockEditor {
                 typography,
                 caret_was_visible,
                 backgrounds: Some(backgrounds),
+                own_leaves,
                 snapshot,
                 style,
             })
@@ -519,6 +591,8 @@ struct EditorRoot {
     padding: Edges<DefiniteLength>,
     typography: TextStyle,
     caret_was_visible: bool,
+    /// The leaves the engine drew itself this frame.
+    own_leaves: super::draw::OwnLeaves,
 }
 
 impl IntoElement for EditorRoot {
@@ -613,8 +687,10 @@ impl Element for EditorRoot {
         if let Some(backgrounds) = self.backgrounds.take() {
             let (_, geometries) = collect_leaf_geometry(backgrounds, || child.prepaint(window, cx));
             // Swap in the complete frame; handlers read it until the next one.
+            let own = std::mem::take(&mut *self.own_leaves.borrow_mut());
             let mut frame = super::frame::into_frame(
                 geometries,
+                own,
                 self.snapshot.leaves.clone(),
                 &self.snapshot.tables,
             );

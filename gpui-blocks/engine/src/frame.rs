@@ -1,4 +1,5 @@
-// Changed in Trevin Lee's fork (2026): it records the rem size and each unit's bounds.
+// Changed in Trevin Lee's fork (2026): it records the rem size and each unit's bounds; a leaf's
+// geometry is GPUI Kit's or the engine's own.
 //! Per-frame geometry, collected through gpui-kit's editor host API.
 //!
 //! During the editor's prepaint every keyed text leaf reports a
@@ -17,10 +18,16 @@ use super::{id::BlockId, position::BlockPosition, projection::LeafInfo};
 
 /// Builds the frame from what `collect_leaf_geometry` returned.
 pub(crate) fn into_frame(
-    mut geometries: HashMap<u64, LeafGeometry>,
+    geometries: HashMap<u64, LeafGeometry>,
+    own: HashMap<u64, super::draw::OwnLeaf>,
     leaves: Rc<Vec<LeafInfo>>,
     tables: &[(BlockId, Vec<BlockId>)],
 ) -> FrameLayout {
+    let mut geometries: HashMap<u64, Geometry> = geometries
+        .into_iter()
+        .map(|(k, g)| (k, Geometry::Kit(g)))
+        .collect();
+    geometries.extend(own.into_iter().map(|(k, g)| (k, Geometry::Own(g))));
     let mut frame = FrameLayout::default();
     for (table, cells) in tables {
         let bounds = cells
@@ -44,9 +51,66 @@ pub(crate) fn into_frame(
     frame
 }
 
+/// A leaf's geometry: GPUI Kit's, for a block it drew, or the engine's own.
+pub(crate) enum Geometry {
+    Kit(LeafGeometry),
+    Own(super::draw::OwnLeaf),
+}
+
+impl Geometry {
+    fn len(&self) -> usize {
+        match self {
+            Self::Kit(g) => g.len(),
+            Self::Own(g) => g.len(),
+        }
+    }
+
+    fn bounds(&self) -> Bounds<Pixels> {
+        match self {
+            Self::Kit(g) => g.bounds(),
+            Self::Own(g) => g.bounds(),
+        }
+    }
+
+    fn line_height(&self) -> Pixels {
+        match self {
+            Self::Kit(g) => g.line_height(),
+            Self::Own(g) => g.line_height(),
+        }
+    }
+
+    fn caret_height(&self) -> Pixels {
+        match self {
+            Self::Kit(g) => g.caret_height(),
+            Self::Own(g) => g.caret_height(),
+        }
+    }
+
+    fn position_for_index(&self, index: usize) -> Point<Pixels> {
+        match self {
+            Self::Kit(g) => g.position_for_index(index),
+            Self::Own(g) => g.position_for_index(index),
+        }
+    }
+
+    fn index_for_position(&self, at: Point<Pixels>) -> usize {
+        match self {
+            Self::Kit(g) => g.index_for_position(at),
+            Self::Own(g) => g.index_for_position(at),
+        }
+    }
+
+    fn atom_at(&self, at: Point<Pixels>) -> Option<Range<usize>> {
+        match self {
+            Self::Kit(g) => g.atom_at(at),
+            Self::Own(g) => g.atom_at(at),
+        }
+    }
+}
+
 pub(crate) struct LeafGeom {
     pub(crate) info: LeafInfo,
-    geometry: LeafGeometry,
+    geometry: Geometry,
     /// A table cell's column alignment. gpui-kit paints centred and
     /// right-aligned cell text shifted inside the text element, but
     /// `LeafGeometry` positions are unshifted; `row_shift` puts it back.

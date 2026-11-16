@@ -49,6 +49,7 @@ mod command;
 mod cull;
 mod direct;
 mod document;
+mod draw;
 mod editor;
 mod element;
 pub mod extension;
