@@ -1,0 +1,391 @@
+//! What the table's controls do to a view, without drawing anything: its columns' layout, and the
+//! changed view that resizing, moving, hiding, sorting, filtering and folding make. Each change
+//! returns the whole view, for a `viewChanged`.
+
+use serde_json::Value as Json;
+
+use super::format;
+use crate::engine::GroupKey;
+use crate::model::{
+    Column, Condition, DatabaseFields, Direction, Filter, FilterOp, Limits, Person, Property,
+    PropertyType, Sort, Value, Values, View,
+};
+use crate::order;
+
+/// A column as the table draws it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColumnLayout {
+    pub property_id: String,
+    /// In points.
+    pub width: f32,
+    /// The property's place in the database's `properties`.
+    pub property: usize,
+}
+
+/// Every property's column in the view's order, the view's own columns first (by their
+/// `order`) and then the properties it has none for (in the properties' order), as `Column`s.
+pub fn all_columns(db: &DatabaseFields, view: &View) -> Vec<Column> {
+    let mut out: Vec<Column> = Vec::new();
+    for c in view.columns_in_order() {
+        if db.property(&c.property_id).is_some()
+            && !out.iter().any(|o| o.property_id == c.property_id)
+        {
+            out.push(c.clone());
+        }
+    }
+    for p in db.properties_in_order() {
+        if !out.iter().any(|o| o.property_id == p.id) {
+            out.push(Column {
+                property_id: p.id.clone(),
+                width: None,
+                hidden: false,
+                order: String::new(),
+            });
+        }
+    }
+    out
+}
+
+/// The columns the table shows, the title's first (it can't be hidden or moved), each at its
+/// width (or the default) within the theme's least and most.
+pub fn layout(
+    db: &DatabaseFields,
+    view: &View,
+    default_width: f32,
+    title_width: f32,
+    min: f32,
+    max: f32,
+) -> Vec<ColumnLayout> {
+    let title = db.title_property().map(|p| p.id.as_str());
+    let mut out: Vec<ColumnLayout> = all_columns(db, view)
+        .into_iter()
+        .filter_map(|c| {
+            let is_title = Some(c.property_id.as_str()) == title;
+            if c.hidden && !is_title {
+                return None;
+            }
+            let property = db.properties.iter().position(|p| p.id == c.property_id)?;
+            let fallback = if is_title { title_width } else { default_width };
+            let width = c
+                .width
+                .map(|w| w as f32)
+                .filter(|w| w.is_finite())
+                .unwrap_or(fallback)
+                .clamp(min, max.max(min));
+            Some(ColumnLayout {
+                property_id: c.property_id,
+                width,
+                property,
+            })
+        })
+        .collect();
+    if let Some(i) = out
+        .iter()
+        .position(|c| Some(c.property_id.as_str()) == title)
+    {
+        let t = out.remove(i);
+        out.insert(0, t);
+    }
+    out
+}
+
+/// Gives every column an order key in the list's order: keeps the keys that are already valid
+/// and rising, makes one between its neighbours for `moved`, and renumbers the whole list when
+/// that can't be done (keys missing, malformed or out of order).
+fn place(cols: &mut [Column], moved: Option<usize>) {
+    let ok = cols
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| Some(*i) != moved)
+        .map(|(_, c)| c.order.as_str())
+        .collect::<Vec<_>>();
+    let rising = ok.iter().all(|k| order::is_valid(k)) && ok.windows(2).all(|w| w[0] < w[1]);
+    if rising && let Some(m) = moved {
+        let before = m.checked_sub(1).map(|i| cols[i].order.clone());
+        let after = cols.get(m + 1).map(|c| c.order.clone());
+        if let Ok(k) = order::between(before.as_deref(), after.as_deref()) {
+            cols[m].order = k;
+            return;
+        }
+    } else if rising {
+        return;
+    }
+    let keys = order::spread(cols.len());
+    for (c, k) in cols.iter_mut().zip(keys) {
+        c.order = k;
+    }
+}
+
+/// The view with every property's column written out (the ones it lacked at the default
+/// width), keys placed.
+fn materialized(db: &DatabaseFields, view: &View) -> (View, Vec<Column>) {
+    let cols = all_columns(db, view);
+    (view.clone(), cols)
+}
+
+fn with_columns(mut view: View, mut cols: Vec<Column>, moved: Option<usize>) -> View {
+    place(&mut cols, moved);
+    view.columns = cols;
+    view
+}
+
+/// The view with `property_id`'s column at `width` points (rounded to a whole point).
+pub fn resize(db: &DatabaseFields, view: &View, property_id: &str, width: f32) -> View {
+    let (view, mut cols) = materialized(db, view);
+    if let Some(c) = cols.iter_mut().find(|c| c.property_id == property_id) {
+        c.width = Some(f64::from(width.round()));
+    }
+    with_columns(view, cols, None)
+}
+
+/// The view with `property_id`'s column hidden or shown. The title's can't be hidden.
+pub fn set_hidden(db: &DatabaseFields, view: &View, property_id: &str, hidden: bool) -> View {
+    if hidden && db.title_property().is_some_and(|p| p.id == property_id) {
+        return view.clone();
+    }
+    let (view, mut cols) = materialized(db, view);
+    if let Some(c) = cols.iter_mut().find(|c| c.property_id == property_id) {
+        c.hidden = hidden;
+    }
+    with_columns(view, cols, None)
+}
+
+/// The view with `property_id`'s column moved to be the `to`th of the shown columns (counting
+/// the title's, which stays first). Hidden columns keep their places among the others.
+pub fn move_column(db: &DatabaseFields, view: &View, property_id: &str, to: usize) -> View {
+    let title = db.title_property().map(|p| p.id.clone());
+    if title.as_deref() == Some(property_id) {
+        return view.clone();
+    }
+    let (view, mut cols) = materialized(db, view);
+    let Some(from) = cols.iter().position(|c| c.property_id == property_id) else {
+        return view;
+    };
+    // The shown columns as the table lays them out: the title's first.
+    let mut shown: Vec<String> = cols
+        .iter()
+        .filter(|c| !c.hidden || Some(&c.property_id) == title.as_ref())
+        .map(|c| c.property_id.clone())
+        .collect();
+    if let Some(t) = &title
+        && let Some(i) = shown.iter().position(|p| p == t)
+    {
+        let t = shown.remove(i);
+        shown.insert(0, t);
+    }
+    let Some(now) = shown.iter().position(|p| p == property_id) else {
+        return view;
+    };
+    let to = to.clamp(usize::from(title.is_some()), shown.len().saturating_sub(1));
+    if to == now {
+        return view;
+    }
+    shown.remove(now);
+    shown.insert(to, property_id.to_owned());
+    // Put it just before the column that now follows it (or after the one before it, at the
+    // end), among all the columns.
+    let moving = cols.remove(from);
+    let at = match shown.get(to + 1) {
+        Some(next) => cols
+            .iter()
+            .position(|c| &c.property_id == next)
+            .unwrap_or(cols.len()),
+        None => {
+            let prev = &shown[to - 1];
+            cols.iter()
+                .position(|c| &c.property_id == prev)
+                .map_or(cols.len(), |i| i + 1)
+        }
+    };
+    cols.insert(at, moving);
+    with_columns(view, cols, Some(at))
+}
+
+/// The view sorted by `property_id`: by it alone, or (with `add`, a shift-click) added to the
+/// sorts it has, replacing that property's sort if it had one. Sorts past the limit are dropped.
+pub fn sort(
+    view: &View,
+    property_id: &str,
+    direction: Direction,
+    add: bool,
+    limits: &Limits,
+) -> View {
+    let mut view = view.clone();
+    let sort = Sort {
+        property_id: property_id.to_owned(),
+        direction,
+    };
+    if add {
+        match view.sort.iter_mut().find(|s| s.property_id == property_id) {
+            Some(s) => *s = sort,
+            None => view.sort.push(sort),
+        }
+        view.sort.truncate(limits.sorts.max(1));
+    } else {
+        view.sort = vec![sort];
+    }
+    view
+}
+
+/// The view without its sort by `property_id`.
+pub fn unsort(view: &View, property_id: &str) -> View {
+    let mut view = view.clone();
+    view.sort.retain(|s| s.property_id != property_id);
+    view
+}
+
+/// The conditions at the top of a view's filter: the filter itself when it's one condition, or
+/// the conditions directly in its `and`.
+pub fn top_conditions(view: &View) -> Vec<&Condition> {
+    match &view.filter {
+        Some(Filter::Condition(c)) => vec![c],
+        Some(Filter::And { and }) => and
+            .iter()
+            .filter_map(|f| match f {
+                Filter::Condition(c) => Some(c),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether the view's filter tests `property_id` anywhere.
+pub fn filters_by(view: &View, property_id: &str) -> bool {
+    view.filter.as_ref().is_some_and(|f| {
+        f.walk()
+            .any(|(n, _)| matches!(n, Filter::Condition(c) if c.property_id == property_id))
+    })
+}
+
+/// The view with `condition` in its filter: in place of the conditions at the top that test
+/// the same property, and-ed with the rest.
+pub fn filter(view: &View, condition: Condition) -> View {
+    let mut view = clear_filter(view, &condition.property_id);
+    let new = Filter::Condition(condition);
+    view.filter = Some(match view.filter.take() {
+        None => new,
+        Some(Filter::And { mut and }) => {
+            and.push(new);
+            Filter::And { and }
+        }
+        Some(other) => Filter::And {
+            and: vec![other, new],
+        },
+    });
+    view
+}
+
+/// The view without the conditions at the top of its filter that test `property_id` (ones
+/// deeper in an `or` are the filter's own business and stay).
+pub fn clear_filter(view: &View, property_id: &str) -> View {
+    let mut view = view.clone();
+    view.filter = match view.filter.take() {
+        Some(Filter::Condition(c)) if c.property_id == property_id => None,
+        Some(Filter::And { and }) => {
+            let mut and: Vec<Filter> = and
+                .into_iter()
+                .filter(|f| !matches!(f, Filter::Condition(c) if c.property_id == property_id))
+                .collect();
+            match and.len() {
+                0 => None,
+                1 => and.pop(),
+                _ => Some(Filter::And { and }),
+            }
+        }
+        other => other,
+    };
+    view
+}
+
+/// The view with the group `key` folded or unfolded.
+pub fn toggle_group(view: &View, key: &GroupKey, limits: &Limits) -> View {
+    let mut view = view.clone();
+    let key = key.to_string();
+    if let Some(i) = view.collapsed_groups.iter().position(|k| *k == key) {
+        view.collapsed_groups.remove(i);
+    } else if view.collapsed_groups.len() < limits.collapsed_groups {
+        view.collapsed_groups.push(key);
+    }
+    view
+}
+
+fn person_of(j: &Json) -> Option<Person> {
+    match j {
+        Json::String(s) if s == "owner" => Some(Person::Owner),
+        Json::String(s) => s.strip_prefix("agent:").map(Person::agent),
+        other => Person::from_json(other).filter(|p| p.kind().is_some()),
+    }
+}
+
+/// The values a new row gets so it stays where it was made: the group's value, and what the
+/// conditions at the top of the filter ask for (an option, a checked box, a person, a related
+/// row, a text it must be).
+pub fn prefill(db: &DatabaseFields, view: &View, group: Option<&GroupKey>, today: i64) -> Values {
+    let mut values = Values::new();
+    for c in top_conditions(view) {
+        let Some(p) = db.property(&c.property_id) else {
+            continue;
+        };
+        let v = match (&p.kind, &c.op) {
+            (PropertyType::Select, FilterOp::Is) => c
+                .value
+                .as_str()
+                .filter(|id| p.option(id).is_some())
+                .map(Value::text),
+            (PropertyType::MultiSelect, FilterOp::Contains) => c
+                .value
+                .as_str()
+                .filter(|id| p.option(id).is_some())
+                .map(|id| Value::ids([id])),
+            (PropertyType::Relation, FilterOp::Contains) => {
+                c.value.as_str().map(|id| Value::ids([id]))
+            }
+            (PropertyType::Checkbox, FilterOp::IsChecked) => Some(Value::Bool(true)),
+            (PropertyType::Checkbox, FilterOp::IsNotChecked) => Some(Value::Bool(false)),
+            (PropertyType::Checkbox, FilterOp::Is) => c.value.as_bool().map(Value::Bool),
+            (PropertyType::Person, FilterOp::Contains) => {
+                person_of(&c.value).map(|p| Value::People(vec![p]))
+            }
+            (
+                PropertyType::Text | PropertyType::Url | PropertyType::Email | PropertyType::Phone,
+                FilterOp::Is,
+            ) => c.value.as_str().filter(|s| !s.is_empty()).map(Value::text),
+            _ => None,
+        };
+        if let Some(v) = v {
+            values.insert(p.id.clone(), v);
+        }
+    }
+    if let (Some(key), Some(p)) = (group, view.group_by.as_deref().and_then(|g| db.property(g))) {
+        if let Some(v) = group_value(p, key, today) {
+            values.insert(p.id.clone(), v);
+        } else if matches!(key, GroupKey::Empty) {
+            values.remove(&p.id);
+        }
+    }
+    values
+}
+
+/// The value that puts a row in group `key` of property `p`.
+pub fn group_value(p: &Property, key: &GroupKey, today: i64) -> Option<Value> {
+    match (&p.kind, key) {
+        (PropertyType::Select, GroupKey::Option(id)) => Some(Value::text(id.clone())),
+        (PropertyType::MultiSelect, GroupKey::Option(id)) => Some(Value::ids([id.clone()])),
+        (PropertyType::Checkbox, GroupKey::Checked(b)) => Some(Value::Bool(*b)),
+        (PropertyType::Person, GroupKey::Person(person)) => {
+            Some(Value::People(vec![person.clone()]))
+        }
+        (PropertyType::Date, GroupKey::Date(g)) => {
+            format::group_day(g, today).map(Value::date_on_day)
+        }
+        _ => None,
+    }
+}
+
+/// The order key for a row added at the end of the manual order: after the last valid key
+/// among `orders`, or the first key when there's none.
+pub fn append_order<'a>(orders: impl IntoIterator<Item = &'a str>) -> String {
+    let last = orders.into_iter().filter(|k| order::is_valid(k)).max();
+    order::between(last, None).unwrap_or_else(|_| order::first())
+}
