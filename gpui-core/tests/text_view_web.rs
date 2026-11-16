@@ -52,6 +52,8 @@ struct Drawn {
     quads: Vec<(gpui::Bounds<f32>, Hsla, f32, f32)>,
     /// Bordered quads: their border's colour and width.
     borders: Vec<(Hsla, f32)>,
+    /// Each filled quad and the clip it's drawn in.
+    clipped: Vec<(gpui::Bounds<f32>, gpui::Bounds<f32>, Hsla)>,
 }
 
 fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
@@ -67,7 +69,7 @@ fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
     });
     vcx.run_until_parked();
     let doc = vcx.debug_bounds("doc").unwrap();
-    let (glyphs, quads, borders) = vcx.update(|window, cx| {
+    let (glyphs, quads, borders, clipped) = vcx.update(|window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
         let k = window.scale_factor();
@@ -101,7 +103,24 @@ fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
             .filter(|q| q.border_widths.left.0 > 0.)
             .map(|q| (q.border_color, q.border_widths.left.0 / k))
             .collect();
-        (glyphs, quads, borders)
+        let px_ = |b: gpui::Bounds<gpui::ScaledPixels>| {
+            gpui::Bounds::new(
+                gpui::point(b.origin.x.0 / k, b.origin.y.0 / k),
+                gpui::size(b.size.width.0 / k, b.size.height.0 / k),
+            )
+        };
+        let clipped = scene
+            .quads
+            .iter()
+            .filter_map(|q| {
+                Some((
+                    px_(q.bounds),
+                    px_(q.content_mask.bounds),
+                    q.background.as_solid()?,
+                ))
+            })
+            .collect();
+        (glyphs, quads, borders, clipped)
     });
     Drawn {
         left: f32::from(doc.origin.x),
@@ -109,6 +128,7 @@ fn draw(style: TextViewStyle, source: &'static str) -> Drawn {
         glyphs,
         quads,
         borders,
+        clipped,
     }
 }
 
@@ -385,4 +405,48 @@ fn a_tables_header_text_cell_padding_and_stripes_are_the_hosts() {
     assert!(header_ink(Some(gpui::FontWeight::NORMAL)) < header_ink(None));
     // Four rows, each 2 × 4px taller.
     assert!(((h(12.) - h(8.)) - 32.).abs() < 0.6, "{} {}", h(8.), h(12.));
+}
+
+#[test]
+fn a_code_box_taller_than_its_line_isnt_cut_on_the_first_and_last_lines() {
+    let d = draw(
+        TextViewStyle {
+            inline_code: InlineCodeStyle {
+                background: Some(BLUE),
+                padding: Some(px(4.)),
+                padding_y: Some(px(4.)),
+                border_width: Some(px(1.)),
+                border_color: Some(RED),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        "One line with `code` in it",
+    );
+    let (b, mask, _) = d
+        .clipped
+        .iter()
+        .find(|q| near(q.2, BLUE))
+        .expect("the code's fill");
+    assert!(
+        mask.top() <= b.top() + 0.01 && mask.bottom() >= b.bottom() - 0.01,
+        "the box {b:?} inside its clip {mask:?}"
+    );
+}
+
+#[test]
+fn a_tables_text_size_is_the_hosts() {
+    let table = "| A | B |\n|---|---|\n| 1 | 2 |";
+    let h = |size: Option<f32>| {
+        draw(
+            TextViewStyle {
+                table_text_size: size.map(px),
+                ..Default::default()
+            },
+            table,
+        )
+        .height
+    };
+    assert!(h(Some(10.)) < h(None), "{} {}", h(Some(10.)), h(None));
+    assert!(h(Some(30.)) > h(None));
 }
