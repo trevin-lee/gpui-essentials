@@ -38,6 +38,8 @@ default = ["syntect"]
 syntect = ["gpui-kit/syntect"]
 
 [dependencies]
+# The paragraph layer the engine draws its own blocks with (see docs/drawing.md).
+gpui-core = { path = "../../gpui-core" }
 gpui-kit = { workspace = true }
 markdown = "1.0.0"
 unicode-segmentation = "1.12.0"
