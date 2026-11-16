@@ -39,14 +39,18 @@ pub mod icon;
 mod press;
 mod root;
 mod size;
+mod switch;
 pub mod theme;
+mod tooltip;
 
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use icon::{Icon, IconName, Icons};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
+pub use switch::Switch;
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
+pub use tooltip::Tooltip;
 
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, WindowOptions};
 
