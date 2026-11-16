@@ -37,6 +37,7 @@ mod a11y;
 mod button;
 pub mod icon;
 pub mod input;
+mod popover;
 mod press;
 mod root;
 mod size;
@@ -49,6 +50,7 @@ mod tooltip;
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
+pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
@@ -76,6 +78,7 @@ pub fn init(cx: &mut App) {
     }
     root::init(cx);
     input::init(cx);
+    popover::init(cx);
     text::init(cx);
 }
 

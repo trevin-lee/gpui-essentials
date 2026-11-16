@@ -52,6 +52,7 @@ struct Gallery {
     level: Entity<SliderState>,
     name: Entity<InputState>,
     note: Entity<InputState>,
+    more: bool,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -237,6 +238,33 @@ impl Render for Gallery {
                     .child(Switch::new("small").checked(true).small())
                     .child(Switch::new("disabled").checked(true).disabled(true)),
             )
+            .child(heading("A popover (Escape or a click outside closes it)", &theme))
+            .child(
+                div().flex().child(
+                    Popover::new("more")
+                        .open(self.more)
+                        .on_dismiss(cx.listener(|g, _, _, cx| {
+                            g.more = false;
+                            cx.notify();
+                        }))
+                        .trigger(
+                            Button::new("more-button")
+                                .icon(IconName::Ellipsis)
+                                .label("More")
+                                .outline()
+                                .on_click(cx.listener(|g, _, _, cx| {
+                                    g.more = !g.more;
+                                    cx.notify();
+                                })),
+                        )
+                        .p(rems(0.75))
+                        .gap(rems(0.25))
+                        .text_size(theme.text.sm)
+                        .child("Popovers hang from what opens them,")
+                        .child("flip above where there's no room below,")
+                        .child("and hand the focus back when they close."),
+                ),
+            )
             .child(heading("A slider (arrows and drag)", &theme))
             .child(
                 div()
@@ -342,6 +370,7 @@ fn main() {
                 show: args.shot.is_none(),
                 ..Default::default()
             };
+            let shot = args.shot.is_some();
             let (window, _) = gpui_core::open_window(options, cx, |window, cx| {
                 let name = cx.new(|cx| InputState::new(window, cx).placeholder("Your name"));
                 let note = cx.new(|cx| {
@@ -362,6 +391,7 @@ fn main() {
                     view: 1,
                     name,
                     note,
+                    more: shot,
                 })
             })
             .expect("the window");
