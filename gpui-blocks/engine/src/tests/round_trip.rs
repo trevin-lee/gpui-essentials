@@ -4,9 +4,9 @@
 use markdown::mdast::Node;
 
 use super::*;
+use crate::{CustomNode, Extension};
 use crate::{inline::InlineText, transaction::TransactionBuilder};
 use gpui_kit::base::text::editor_host::TextMark;
-use gpui_kit::base::text::{MarkdownNode, MarkdownParseContext, MarkdownPlugin};
 
 fn round_trip(source: &str) -> String {
     model(source).source()
@@ -64,7 +64,7 @@ fn literal_asterisk_escaped() {
 
 #[test]
 fn custom_node_round_trips() {
-    let extensions = MarkdownExtensions::default().plugin(MathPlugin);
+    let extensions = crate::Extensions::bare().with(MathPlugin);
     let m = BlockEditorModel::from_markdown("$x$", extensions).unwrap();
     let leaf = m.document().leaves().next().unwrap().id();
     assert_eq!(m.doc().inline(leaf).unwrap().atoms().len(), 1);
@@ -425,14 +425,14 @@ fn code_owned_line_endings_are_not_exterior_draft_trivia() {
 
 struct MathPlugin;
 
-impl MarkdownPlugin for MathPlugin {
+impl Extension for MathPlugin {
     fn name(&self) -> &str {
         "math"
     }
 
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+    fn parse(&self, node: &Node) -> Option<CustomNode> {
         match node {
-            Node::InlineMath(math) => Some(MarkdownNode::new("math", ()).text(math.value.clone())),
+            Node::InlineMath(math) => Some(CustomNode::new("math", ()).text(math.value.clone())),
             _ => None,
         }
     }
@@ -587,7 +587,7 @@ fn code_content_is_not_unescaped() {
 fn a_blocks_markdown_and_payload_can_be_read() {
     let m = BlockEditorModel::from_markdown(
         "> [!WARNING]\n> Mind the **gap**\n\n3. three\n\n4. four\n\n```rust title=x\nfn main() {}\n```\n\n| a | b |\n| :--- | ---: |\n| 1 | 2 |",
-        crate::surfaces::with_default_surfaces(Default::default()),
+        crate::Extensions::default(),
     )
     .unwrap();
     let doc = m.document();

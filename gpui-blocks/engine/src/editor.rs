@@ -22,7 +22,7 @@ use super::{
     transaction::{EditOrigin, Transaction, TransactionBuilder},
     undo::BlockUndoManager,
 };
-use gpui_kit::base::text::{MarkdownExtensions, editor_host::TextMark};
+use gpui_kit::base::text::editor_host::TextMark;
 
 /// Headless editor facade (spike name). Phase 3 wraps this in the
 /// `BlockEditorState` entity.
@@ -42,9 +42,8 @@ impl BlockEditorModel {
     /// Parse Markdown into a model.
     pub fn from_markdown(
         source: &str,
-        extensions: impl Into<MarkdownExtensions>,
+        extensions: super::extension::Extensions,
     ) -> Result<Self, SharedString> {
-        let extensions = super::import::preserve_source_extensions(extensions.into());
         let doc = parse_document(source, Arc::new(extensions))?;
         let selection = BlockSelection::caret(doc.first_caret());
         Ok(Self {
@@ -63,7 +62,7 @@ impl BlockEditorModel {
     /// `UnknownBlock`), history cleared.
     pub fn set_source(&mut self, source: &str) -> Result<(), SharedString> {
         let revision = self.doc.revision;
-        self.doc = parse_document(source, self.doc.extensions.clone())?;
+        self.doc = parse_document(source, self.doc.ext.clone())?;
         self.doc.revision = revision + 1;
         self.selection = BlockSelection::caret(self.doc.first_caret());
         self.stored_marks = None;

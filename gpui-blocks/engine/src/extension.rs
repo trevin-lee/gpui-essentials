@@ -85,7 +85,7 @@ impl CustomNode {
         self.data.downcast_ref::<T>()
     }
 
-    fn into_markdown_node(self) -> MarkdownNode {
+    pub(crate) fn into_markdown_node(self) -> MarkdownNode {
         let (text, label, markdown) =
             (self.text.clone(), self.label.clone(), self.markdown.clone());
         let name = self.name.clone();
@@ -143,12 +143,18 @@ pub trait Extension: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct Extensions {
     list: Vec<Arc<dyn Extension>>,
+    /// Whether toggles and GitHub's five callouts have their containers. Without them a callout
+    /// marker is read as the text of a block quote.
+    containers: bool,
 }
 
 impl Default for Extensions {
     /// No extensions, and the default containers for toggles and GitHub's five callouts.
     fn default() -> Self {
-        Self { list: Vec::new() }
+        Self {
+            list: Vec::new(),
+            containers: true,
+        }
     }
 }
 
@@ -161,6 +167,23 @@ impl fmt::Debug for Extensions {
 }
 
 impl Extensions {
+    /// No extensions and no containers: callout markers stay the text of block quotes.
+    pub fn bare() -> Self {
+        Self {
+            list: Vec::new(),
+            containers: false,
+        }
+    }
+
+    /// Whether `name`, as written in a marker (`NOTE`), is a callout these extensions draw.
+    pub fn is_callout(&self, name: &str) -> bool {
+        self.containers
+            && crate::import::is_callout_name(name)
+            && crate::surfaces::ALERT_NAMES
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(name))
+    }
+
     /// Adds an extension. One registered earlier is asked first.
     pub fn with(mut self, extension: impl Extension) -> Self {
         self.list.push(Arc::new(extension));
@@ -226,10 +249,16 @@ impl MarkdownPlugin for Bridge {
 
 impl From<&Extensions> for MarkdownExtensions {
     fn from(extensions: &Extensions) -> Self {
-        extensions.list.iter().fold(
-            crate::surfaces::with_default_surfaces(MarkdownExtensions::default()),
-            |ext, e| ext.plugin(Bridge(e.clone())),
-        )
+        let base = crate::import::source_renderers(MarkdownExtensions::default());
+        let base = if extensions.containers {
+            crate::surfaces::with_default_surfaces(base)
+        } else {
+            base
+        };
+        extensions
+            .list
+            .iter()
+            .fold(base, |ext, e| ext.plugin(Bridge(e.clone())))
     }
 }
 
