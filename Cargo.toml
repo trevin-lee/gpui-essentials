@@ -1,7 +1,7 @@
-# Four GPUI crates in one workspace, so they build and test against one GPUI.
+# The GPUI crates in one workspace, so they build and test against one GPUI.
 [workspace]
 resolver = "3"
-members = ["gpui-blocks", "gpui-calendar", "gpui-chatwidgets", "gpui-flow"]
+members = ["gpui-blocks", "gpui-calendar", "gpui-chatwidgets", "gpui-core", "gpui-flow"]
 
 [workspace.package]
 edition = "2024"
@@ -18,6 +18,9 @@ gpui-kit = "=0.9.1"
 gpui-pre = "=0.3.12"
 gpui-pre-macos = "=0.3.12"
 gpui-pre-apple = "=0.3.12"
+# The same GPUI under its own name, for crates that use it directly (gpui-core): GPUI's macros
+# write `gpui::` paths.
+gpui = { package = "gpui-pre", version = "=0.3.12" }
 
 # For this repository's own builds (the examples and their measurements). Cargo ignores a
 # dependency's profiles, so apps using these crates build with their own.
