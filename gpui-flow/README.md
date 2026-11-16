@@ -56,6 +56,17 @@ Run the example with `cargo run --release --example flow` from this folder.
   and stop (escape included), arrow-key moves, resize start, move and end, delete (once, and
   a host check can refuse it), and the selection and viewport whatever changed them,
   transitions included. Changes made through the flow's methods aren't reported back.
+- **A view over the canvas.** A host can lay a native view of its own over the canvas, such
+  as a PencilKit canvas for drawing on a mind map with a pencil, and keep it lined up.
+  `with_transform_listener` hands over the canvas's `CanvasTransform` (the pane's bounds in the
+  window, and the pan and zoom) on the first frame and on every frame it changes, including
+  each step of an animated zoom and the pane moving in the window. It's called while that
+  frame is drawn, so the view moves in the same frame as the canvas. `canvas_transform()`
+  reads it at any time. `set_pointer_mode` says who takes the pointer:
+  - `Edit`, the usual;
+  - `Navigate`: a drag anywhere only pans, and scrolling and pinching zoom, so fingers move
+    the canvas while the pen draws;
+  - `Off`: the canvas takes no presses, scrolling or pinches at all.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in
