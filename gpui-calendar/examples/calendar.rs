@@ -10,7 +10,7 @@
 //!
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
-//! `compact-agenda`, `compact-swipe`, `compact-hold`. Pictures and the bench draw a window that's never shown
+//! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`. Pictures and the bench draw a window that's never shown
 //! and never takes the keyboard.
 
 use std::path::PathBuf;
@@ -570,7 +570,7 @@ impl Root {
         let mut week_start = Weekday::Mon;
         let mut now_at = now;
         match args.scene.as_str() {
-            "day" => view = CalendarView::Day,
+            "day" | "compact-zones" => view = CalendarView::Day,
             // A phone: the day, the week and the agenda at an iPhone's width.
             "compact" | "compact-swipe" | "compact-hold" => view = CalendarView::Day,
             "compact-week" => {}
@@ -654,6 +654,10 @@ impl Root {
             // The phone scenes are drawn as the phone takes them: by touch.
             if touch || scene.starts_with("compact") {
                 c.options.touch = true;
+            }
+            // A colleague in Bangalore: a second column of hours, half an hour off ours.
+            if scene.ends_with("zones") {
+                c.options.secondary_zone = Some(chrono_tz::Asia::Kolkata);
             }
             if scene.starts_with("dst") {
                 c.scroll_to_minute(-1.);

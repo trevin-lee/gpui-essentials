@@ -152,10 +152,23 @@ fn problems(texts: &[drawn::Text], canvas: Bounds<Pixels>) -> Vec<String> {
 
 /// Draws these views at each width and collects what overflows.
 fn check_widths(views: &[CalendarView], widths: &[f32], height: f32) {
+    check_widths_with(views, widths, height, |_| {});
+}
+
+/// The same, with some options of the test's own.
+fn check_widths_with(
+    views: &[CalendarView],
+    widths: &[f32],
+    height: f32,
+    options: impl Fn(&mut CalendarOptions),
+) {
     let mut cx = context();
     let (calendar, vcx) = cx.add_window_view(|_, cx| {
         let mut c = Calendar::new(cx)
-            .with_options(|o| o.time_zone = TZ)
+            .with_options(|o| {
+                o.time_zone = TZ;
+                options(o);
+            })
             .with_header(false)
             .with_now(at(day(2), 10, 40))
             .with_date(day(2))
@@ -274,14 +287,17 @@ fn check_header(touch: bool) {
     assert!(found.is_empty(), "{}", found.join("\n"));
 }
 
-/// A swipe carries the days (their names, their events) and leaves the gutter's hours where
-/// they are.
+/// A swipe carries the days (their names, their events) and leaves the gutter's hours, and
+/// the second zone's, where they are.
 #[test]
 fn a_swipe_leaves_the_hours_in_place() {
     let mut cx = context();
     let (calendar, vcx) = cx.add_window_view(|_, cx| {
         let mut c = Calendar::new(cx)
-            .with_options(|o| o.time_zone = TZ)
+            .with_options(|o| {
+                o.time_zone = TZ;
+                o.secondary_zone = Some(chrono_tz::Asia::Kolkata);
+            })
             .with_header(false)
             .with_now(at(day(2), 10, 40))
             .with_date(day(2))
@@ -315,8 +331,27 @@ fn a_swipe_leaves_the_hours_in_place() {
     let carried = frame(-120.);
     assert_eq!(find(&still, "1 PM"), find(&carried, "1 PM"));
     assert_eq!(find(&still, "PST"), find(&carried, "PST"));
+    // The second zone's column stays with them.
+    assert_eq!(find(&still, "IST"), find(&carried, "IST"));
+    assert_eq!(find(&still, "2:30a"), find(&carried, "2:30a"));
     let moved = find(&still, "Wednesday") - find(&carried, "Wednesday");
     assert!((moved - px(120.)).abs() < px(0.5), "{moved:?}");
     // The next day comes in beside it, its name right of the gutter.
     assert!(carried.iter().any(|t| t.text == "Thursday"));
+}
+
+/// A second zone's column fits too, on a half-hour zone, in 12- and 24-hour time.
+#[test]
+fn a_second_zone_fits_at_every_width() {
+    let views = [CalendarView::Day, CalendarView::Days(3), CalendarView::Week];
+    let widths = [320., 390., 520., 720., 1280., 2200.];
+    for hour12 in [true, false] {
+        check_widths_with(&views, &widths, 820., |o| {
+            o.secondary_zone = Some(chrono_tz::Asia::Kolkata);
+            o.hour12 = hour12;
+        });
+    }
+    check_widths_with(&views, &widths, 820., |o| {
+        o.secondary_zone = Some(chrono_tz::Australia::Lord_Howe)
+    });
 }

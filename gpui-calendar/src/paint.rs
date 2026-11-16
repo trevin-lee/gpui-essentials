@@ -24,6 +24,9 @@ pub(crate) const MIN_CHIP_HEIGHT: f32 = 20.;
 const GUTTER: f32 = 56.;
 /// The gutter when the calendar is narrow, as on a phone.
 const GUTTER_NARROW: f32 = 46.;
+/// The second zone's column, left of the hours, when there is one.
+const SECOND: f32 = 56.;
+const SECOND_NARROW: f32 = 50.;
 /// Below this width (in CSS pixels) the calendar lays itself out for a phone: a narrower
 /// gutter, shorter labels, and the compact header.
 pub(crate) const NARROW: f32 = 600.;
@@ -147,6 +150,8 @@ pub(crate) struct Geo {
     /// The gutter's right edge, which a swipe doesn't move: the hours and the zone are drawn
     /// left of it, and the days right of it.
     pub gutter: Pixels,
+    /// How wide the second zone's column is, at the gutter's left; none without one.
+    pub second: Pixels,
     pub col_w: Pixels,
     pub head_bottom: Pixels,
     pub all_day_bottom: Pixels,
@@ -363,7 +368,12 @@ fn geometry(
     match scene.kind {
         Kind::Grid => {
             let narrow = bounds.size.width < u(NARROW);
-            let gutter = u(if narrow { GUTTER_NARROW } else { GUTTER });
+            let second = if scene.options.secondary_zone.is_some() {
+                u(if narrow { SECOND_NARROW } else { SECOND })
+            } else {
+                px(0.)
+            };
+            let gutter = u(if narrow { GUTTER_NARROW } else { GUTTER }) + second;
             let head_bottom = bounds.top() + u(HEAD);
             let lanes = scene.all_day_lanes().min(scene.all_day_rows()).max(1);
             let all_day_bottom = head_bottom + u(LANE * lanes as f32 + 8.);
@@ -377,6 +387,7 @@ fn geometry(
                 days: scene.days,
                 left: bounds.left() + gutter + swipe,
                 gutter: bounds.left() + gutter,
+                second,
                 col_w,
                 head_bottom,
                 all_day_bottom,
@@ -413,6 +424,7 @@ fn geometry(
                 days: scene.days,
                 left: bounds.left(),
                 gutter: bounds.left(),
+                second: px(0.),
                 col_w: bounds.size.width / 7.,
                 head_bottom,
                 all_day_bottom: head_bottom,
@@ -433,6 +445,7 @@ fn geometry(
             days: scene.days,
             left: bounds.left(),
             gutter: bounds.left(),
+            second: px(0.),
             col_w: bounds.size.width,
             head_bottom: bounds.top(),
             all_day_bottom: bounds.top(),
@@ -916,7 +929,7 @@ impl Ink<'_> {
         width
     }
 
-    /// One line of text ending at `right`.
+    /// One line of text ending at `right`, cut with an ellipsis where it would pass `left`.
     #[allow(clippy::too_many_arguments)]
     fn text_right(
         &mut self,
@@ -925,10 +938,10 @@ impl Ink<'_> {
         leading: f32,
         weight: FontWeight,
         color: Hsla,
-        right: Pixels,
+        (left, right): (Pixels, Pixels),
         top: Pixels,
     ) -> Pixels {
-        let Some(shaped) = self.shape(text, size, weight, color, None) else {
+        let Some(shaped) = self.shape(text, size, weight, color, Some(right - left)) else {
             return px(0.);
         };
         let width = shaped.width;
@@ -1828,15 +1841,44 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
         Bounds::from_corners(b.origin, point(edge, b.bottom())),
         c.background,
     );
+    // The second zone's column: its abbreviation, a quiet line between, and its hours below.
+    let second_right = b.left() + geo.second - ink.u(6.);
+    let second_hours = scene.options.secondary_zone.map(|zone| {
+        // The hours as they are on today, if it's on screen, or the first day.
+        let date = scene
+            .today_col()
+            .map_or(scene.first, |i| scene.first + Duration::days(i as i64));
+        let label = time::zone_label(date, zone);
+        let room = (b.left() + ink.u(2.), second_right);
+        let label = zone_fit(ink, label, room);
+        ink.text_right(
+            &label,
+            SMALL,
+            SMALL_LEADING,
+            FontWeight::NORMAL,
+            c.muted_text.opacity(0.75),
+            room,
+            b.top() + (ink.u(HEAD) - ink.u(SMALL_LEADING)) / 2.,
+        );
+        ink.vline(
+            b.left() + geo.second,
+            geo.grid_top,
+            b.bottom(),
+            c.faint_line,
+        );
+        time::secondary_hours(date, scene.options.time_zone, zone, scene.options.hour12)
+    });
     // The zone, by the days' names.
+    let primary = (b.left() + geo.second + ink.u(2.), edge - ink.u(8.));
     let label = time::zone_label(scene.first, scene.options.time_zone);
+    let label = zone_fit(ink, label, primary);
     ink.text_right(
         &label,
         SMALL,
         SMALL_LEADING,
         FontWeight::NORMAL,
         c.muted_text,
-        edge - ink.u(8.),
+        primary,
         b.top() + (ink.u(HEAD) - ink.u(SMALL_LEADING)) / 2.,
     );
     // "All day", where the gutter has room for it.
@@ -1847,7 +1889,7 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
             SMALL_LEADING,
             FontWeight::NORMAL,
             c.muted_text,
-            edge - ink.u(8.),
+            (b.left(), edge - ink.u(8.)),
             geo.head_bottom + ink.u(7.),
         );
     }
@@ -1880,9 +1922,20 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                     SMALL_LEADING,
                     FontWeight::NORMAL,
                     c.muted_text,
-                    edge - ink.u(8.),
+                    primary,
                     top,
                 );
+                if let Some(hours) = &second_hours {
+                    ink.text_right(
+                        &hours[h as usize],
+                        SMALL,
+                        SMALL_LEADING,
+                        FontWeight::NORMAL,
+                        c.muted_text.opacity(0.75),
+                        (b.left() + ink.u(2.), second_right),
+                        top,
+                    );
+                }
             }
             // The time now.
             if now_shown && now_y >= geo.grid_top && now_y <= b.bottom() {
@@ -1907,6 +1960,17 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 );
             }
         });
+}
+
+/// A zone's label as it fits its column: "GMT+10:30" becomes "+10:30" where it's too wide.
+fn zone_fit(ink: &mut Ink, label: String, (left, right): (Pixels, Pixels)) -> String {
+    if ink.measure(&label, SMALL, FontWeight::NORMAL) > right - left
+        && let Some(offset) = label.strip_prefix("GMT")
+    {
+        offset.to_string()
+    } else {
+        label
+    }
 }
 
 /// One span, in the pieces its days' fits let show.
