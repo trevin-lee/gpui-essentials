@@ -24,6 +24,14 @@ pub enum SlashAction {
     /// Ask for a picture from this computer, then insert it (see
     /// [`Options::image_link`](crate::Options::image_link) for the link it writes).
     Image,
+    /// Ask the app for a new document inside this one
+    /// ([`EditorEvent::NewPageRequested`](crate::EditorEvent::NewPageRequested)). The app makes it
+    /// and calls [`Editor::insert_page`](crate::Editor::insert_page).
+    NewPage,
+    /// Ask the app which document to link to
+    /// ([`EditorEvent::DocLinkRequested`](crate::EditorEvent::DocLinkRequested)). The app shows
+    /// a picker and calls [`Editor::insert_mention`](crate::Editor::insert_mention).
+    LinkToPage,
 }
 
 /// One entry of the menu. Make one with [`SlashItem::new`] and its builder methods.
@@ -193,6 +201,26 @@ pub fn default_items() -> Vec<SlashItem> {
             .hint("A picture from this computer")
             .aliases(["picture", "photo", "img"])
             .icon("▣"),
+    ]
+}
+
+/// The group the items for other documents are listed under.
+pub const DOCS: &str = "Pages";
+
+/// The items for other documents, which [`Options::docs`](crate::Options::docs) adds: Page and
+/// Link to page.
+pub fn doc_items() -> Vec<SlashItem> {
+    vec![
+        SlashItem::new("Page", SlashAction::NewPage)
+            .hint("A new page inside this one")
+            .aliases(["subpage", "sub-page", "doc", "document"])
+            .icon("📄")
+            .group(DOCS),
+        SlashItem::new("Link to page", SlashAction::LinkToPage)
+            .hint("A link to another page")
+            .aliases(["mention", "@", "reference", "link"])
+            .icon("↗")
+            .group(DOCS),
     ]
 }
 
