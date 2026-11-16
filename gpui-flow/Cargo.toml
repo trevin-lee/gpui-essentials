@@ -37,7 +37,10 @@ shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 name = "flow"
 
 [dev-dependencies]
-gpui = { workspace = true, features = ["test-support"] }
+# bench-support: the overflow test reads the drawn scene.
+gpui = { workspace = true, features = ["test-support", "bench-support"] }
+# The overflow test lays text out with Core Text, as on screen.
+gpui-pre-apple = { workspace = true, features = ["font-kit"] }
 # The example's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
 # Its shaders compiled when the window opens, so tests and the example build without Xcode's
