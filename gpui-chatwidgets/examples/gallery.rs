@@ -114,8 +114,8 @@ impl AssetSource for Assets {
     }
 }
 
-/// GPUI Kit's theme (its date picker and Markdown) in the same mode as the cards. gpui-core's
-/// text fields, slider and tooltips take their colours from the card.
+/// GPUI Kit's theme (its date picker) in the same mode as the cards. gpui-core's text fields,
+/// slider, tooltips and Markdown take their colours from the card.
 fn apply_theme(dark: bool, cx: &mut App) {
     Theme::change(
         if dark {
