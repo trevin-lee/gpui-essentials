@@ -396,6 +396,7 @@ fn inline_code_takes_its_padding_and_its_own_size_on_the_rows_baseline() {
         padding: px(6.),
         radius: px(4.),
         color: None,
+        ..Default::default()
     };
     let coded = layout(&p, &s, 400.);
     assert_eq!(coded.rows().len(), 1);

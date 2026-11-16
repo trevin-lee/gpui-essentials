@@ -294,7 +294,7 @@ impl Render for Gallery {
                 div().w(rems(36.)).child(
                     TextView::markdown(
                         "md",
-                        "### A heading\n\nA paragraph with **bold**, *italic*, `code` and [a link](https://example.test), long enough to wrap in this column. يرجى إرسال خطة الدراسة\n\n- One\n- [x] Done\n\n> A quote\n\n```\nlet code = \"block\";\n```\n\n| Left | Centre | Right |\n|---|:-:|--:|\n| a | b | c |",
+                        "### A heading\n\nA paragraph with **bold**, *italic*, `code` and [a link](https://example.test), long enough to wrap in this column. يرجى إرسال خطة الدراسة\n\n- One\n- [x] Done\n\n1. First\n2. Second\n\n> A quote\n\n```\nlet code = \"block\";\n```\n\n| Left | Centre | Right |\n|---|:-:|--:|\n| a | b | c |",
                     )
                     .style(TextViewStyle {
                         inline_code: gpui_core::text::InlineCodeStyle {
@@ -304,6 +304,10 @@ impl Render for Gallery {
                             ..Default::default()
                         },
                         heading_margin_bottom: Some(px(4.)),
+                        colors: gpui_core::text::TextViewColors {
+                            table_header: Some(theme.muted),
+                            ..Default::default()
+                        },
                         ..Default::default()
                     })
                     .selectable(true),
