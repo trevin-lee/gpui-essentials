@@ -16,7 +16,7 @@ mod table;
 
 use std::rc::Rc;
 
-use gpui_kit::base::Button as Press;
+use gpui_core::Press;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -25,6 +25,18 @@ use crate::theme::{CardTheme, ToneColors};
 use crate::view::CardView;
 
 pub(crate) use form::field_key;
+
+/// Something to press: a row centring what's in it, its text one line tall, as every press in
+/// a card is laid out (styles given after it refine these). It takes the focus with Tab,
+/// presses with a click, a tap, Enter or Space, and shows the host's focus ring (gpui-core's
+/// theme) when the keyboard put the focus there.
+pub(crate) fn pressable(id: ElementId) -> Press {
+    Press::new(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .line_height(relative(1.))
+}
 
 /// What every drawing function has to hand: the card's view, the theme, the window and the
 /// view's context (for listeners).

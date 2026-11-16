@@ -2,12 +2,12 @@
 
 use std::time::Duration;
 
-use gpui_kit::base::Button as Press;
+use gpui_core::Disableable as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::Draw;
 use super::content::Glyph;
+use super::{Draw, pressable};
 use crate::openui::{
     Align, Component, Direction, Flex, Justify, Modal, Section, Size, StepItem, Surface,
 };
@@ -209,7 +209,7 @@ impl Draw<'_, '_> {
                 this.ui.tabs.insert(key.clone(), i);
                 cx.notify();
             });
-            let trigger = Press::new(self.id(&format!("{path}.tab{i}")))
+            let trigger = pressable(self.id(&format!("{path}.tab{i}")))
                 .role(Role::Tab)
                 .accessibility_label(s.title.clone())
                 .flex_1()
@@ -288,7 +288,7 @@ impl Draw<'_, '_> {
                     )
                     .into_any_element()
             };
-            let trigger = Press::new(self.id(&format!("{item_key}.trigger")))
+            let trigger = pressable(self.id(&format!("{item_key}.trigger")))
                 .accessibility_label(s.title.clone())
                 .w_full()
                 .min_w_0()
@@ -530,7 +530,7 @@ impl Draw<'_, '_> {
                 s.moves += 1;
                 cx.notify();
             });
-            let press = Press::new(d.id(&format!("{path}.{name}")))
+            let press = pressable(d.id(&format!("{path}.{name}")))
                 .accessibility_label(name.to_string())
                 .disabled(!enabled)
                 .flex_none()
@@ -631,7 +631,7 @@ impl Draw<'_, '_> {
         let close_outside = self
             .cx
             .listener(move |this, _: &ClickEvent, _, cx| this.close_modal(&key, &open, cx));
-        let close_button = Press::new(self.id(&format!("{path}.close")))
+        let close_button = pressable(self.id(&format!("{path}.close")))
             .accessibility_label("Close")
             .flex_none()
             .size(self.px(28.))

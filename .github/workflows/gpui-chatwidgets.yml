@@ -1,11 +1,12 @@
 name: gpui-chatwidgets
 
-# Runs when gpui-chatwidgets, or something every crate shares, changes.
+# Runs when gpui-chatwidgets, gpui-core (its presses), or something every crate shares, changes.
 on:
   push:
     branches: [main]
     paths:
       - "gpui-chatwidgets/**"
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - "gpui-chatwidgets/**"
+      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -87,5 +89,5 @@ jobs:
           restore-keys: ${{ runner.os }}-gpui-chatwidgets-parser-
       - run: cargo clippy -p gpui-chatwidgets --locked --no-default-features --all-targets -- -D warnings
       - run: cargo test -p gpui-chatwidgets --locked --no-default-features
-      # Nothing of GPUI may be in the parser-only build.
-      - run: "! cargo tree -p gpui-chatwidgets --no-default-features -e normal --locked | grep -E 'gpui-(kit|pre)'"
+      # Nothing of GPUI, GPUI Kit or gpui-core may be in the parser-only build.
+      - run: "! cargo tree -p gpui-chatwidgets --no-default-features -e normal --locked | grep -E 'gpui-(kit|pre|core)'"

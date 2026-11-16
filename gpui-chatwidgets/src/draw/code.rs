@@ -1,12 +1,11 @@
 //! Code blocks: the code in a monospace font on a dark ground, lightly highlighted, scrolling
 //! sideways when a line is long, with a Copy button.
 
-use gpui_kit::base::Button as Press;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::Draw;
 use super::content::Glyph;
+use super::{Draw, pressable};
 use crate::theme::CodeColors;
 
 const KEYWORDS: &[&str] = &[
@@ -201,7 +200,7 @@ impl Draw<'_, '_> {
         let copy_it = self
             .cx
             .listener(move |this, _, _, cx| this.copy(&key, &source, cx));
-        let copy = Press::new(self.id(&format!("{path}.copy")))
+        let copy = pressable(self.id(&format!("{path}.copy")))
             .accessibility_label("Copy")
             .flex_none()
             .h(self.px(26.))
