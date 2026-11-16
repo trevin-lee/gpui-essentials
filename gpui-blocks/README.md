@@ -220,6 +220,21 @@ comments, search. Text inside blocks stays inline Markdown.
 documents one links to (`links()`, `pages()`). [docs/json.md](docs/json.md) describes every block
 type, for reading the JSON without this crate.
 
+## Importing notes
+
+`gpui_blocks::import::note(path, text, &targets)` reads one Markdown file exported from Notion
+or kept in an Obsidian vault, and gives its title and its document as JSON. Your app gives every
+note a document id first, then answers `Targets` with them, so each link to another note
+becomes a mention of that note's document:
+
+- Notion's page ids are taken off file names, and its URL-encoded links between pages, its
+  `<aside>` callouts and the title heading every page opens with are handled.
+- Obsidian's `[[links]]`, `![[embeds]]` (a note embedded on its own line becomes a sub-page),
+  callouts of any kind (a foldable one becomes a toggle) and `==highlights==` are handled.
+- Pictures and other files load from where your app put them, or are left as their
+  description. A link out of the import, or to a note that wasn't imported, is left as its
+  text. Code is left alone.
+
 ## The Markdown it writes
 
 CommonMark, with GitHub's tables and task lists:
