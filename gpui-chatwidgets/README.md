@@ -32,10 +32,13 @@ RadioGroup, SwitchGroup, Chips, OptionCards), Label, Button, Buttons and IconBut
 Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconText, ImageText and
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
 
-Text fields, the date picker and the slider are GPUI Kit's. Everything else is drawn with GPUI's
-own elements, everything pressable through gpui-core's `Press` (in this workspace) so the
-keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there. Markdown goes through GPUI Kit's text view, so it can be selected
-and copied; a code block has a Copy button.
+Text fields and text areas are gpui-core's `Input` (in this workspace), drawn in the card's
+colours, with the platform's input methods (on iOS, a tap raises the keyboard); the slider and
+an icon button's tooltip are gpui-core's too. The date picker is still GPUI Kit's. Everything
+else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
+keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there.
+Markdown goes through GPUI Kit's text view, so it can be selected and copied; a code block has
+a Copy button.
 
 | Charts | A form |
 |---|---|
@@ -48,6 +51,7 @@ It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
 ```toml
 [dependencies]
 gpui-kit = "=0.9.1"
+gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<the same commit>" }
 gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
@@ -134,6 +138,10 @@ impl Render for Chat {
 fn main() {
     gpui_kit::application().run(|cx| {
         gpui_kit::init(cx);
+        // gpui-core's keys for the text fields, and its theme for their caret, selection and
+        // placeholder, the slider and tooltips: set it to match your app (light or dark).
+        gpui_core::init(cx);
+        gpui_core::Theme::set(gpui_core::Theme::dark(), cx);
         gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
             let host: Rc<dyn CardHost> = Rc::new(Host);
             let program = r#"root = Stack([TextContent("Ready to send?"), Button("Send it")])"#;
@@ -158,9 +166,12 @@ series), the font families, text sizes, corner radii and spacing. `CardTheme::da
 pixels and are drawn as `rems(size / rem_base)`, so a host that zooms by changing the window's
 rem zooms its cards too. `frame` draws the card in a rounded, bordered box, as a chat bubble.
 
-GPUI Kit's text fields, date picker and slider take their colours from GPUI Kit's own theme,
-which is also the host's. The ring around a button, tab, chip or choice focused from the
-keyboard is the theme's `colors.focus_ring`.
+Text fields are drawn in the card's colours: their edge (`line_strong`, the accent while they
+have the focus, `danger.emphasis` when refused), a `sunk` fill on a dark card, their text, font
+and size, and the ring of the focus (`colors.focus_ring`), which is also the ring around a
+button, tab, chip or choice focused from the keyboard. gpui-core draws their caret, selection
+and placeholder in its own theme, as it draws the slider and tooltips (and GPUI Kit its date
+picker), so set gpui-core's `Theme` (and GPUI Kit's) to the same light or dark as the cards.
 
 ### Hooks and events
 
@@ -206,9 +217,10 @@ a pan is scroll events locked to the way it started, with momentum after a flick
   table first.
 - **Nothing needs hover.** GPUI drops hover styles after a touch, and they only ever shade what
   can also be tapped. An icon button's name, a tooltip on the Mac, shows on a long press.
-- **Text fields** focus on a tap and raise the keyboard: they're GPUI Kit's, and GPUI's iOS
-  backend shows the keyboard for whichever field has the focus. The slider follows a finger's
-  drag (GPUI Kit claims it).
+- **Text fields** focus on a tap and raise the keyboard: they're gpui-core's, whose input
+  handler GPUI's iOS backend shows the keyboard for, with the platform's input methods. An
+  email, link or number field asks for no capitals, corrections or suggestions. The slider
+  follows a finger's drag and is 44 points tall on touch.
 
 The 44-point targets and the sideways-only scrolling come from the theme, which defaults by
 platform:
@@ -230,10 +242,9 @@ Known gaps:
   later takes the strip between them.
 - A select's options and an editable table's cells touch each other, so they take taps only
   where they're drawn: a larger area would take the edge of the one above or below.
-- GPUI Kit's own controls (the date picker and its calendar, the slider's thumb) have GPUI
-  Kit's sizes, not `min_hit`.
+- GPUI Kit's date picker and its calendar have GPUI Kit's sizes, not `min_hit`.
 - GPUI's text input has no keyboard type yet, so an email or number field shows the ordinary
-  keyboard. Keeping a focused field above the keyboard is the host's: GPUI reports the
+  keyboard (without capitals or corrections). Keeping a focused field above the keyboard is the host's: GPUI reports the
   keyboard's height in the window's insets.
 - The gallery example is a desktop app: on iOS it builds but doesn't run.
 

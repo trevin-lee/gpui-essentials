@@ -181,6 +181,66 @@ fn choices_write_the_store(cx: &mut TestAppContext) {
     );
 }
 
+#[gpui_kit::test]
+fn text_fields_and_the_slider_write_the_store_from_the_keyboard_and_the_pointer(
+    cx: &mut TestAppContext,
+) {
+    let host = TestHost::new(Images::Refuse);
+    let (card, cx) = open(cx, &sample("form-inputs"), &host, Some(736.));
+    let field =
+        |card: &Entity<gpui_chatwidgets::CardView>, cx: &mut VisualTestContext, name: &str| {
+            card.read_with(cx, |c, _| c.store().field(Some("prefs"), name))
+        };
+    // A click puts the focus in a field, and Tab moves it through the fields in order.
+    let at = cx
+        .debug_bounds("field:t:r.c0/f0.field")
+        .expect("the website field")
+        .center();
+    cx.simulate_click(at, Modifiers::none());
+    draw(cx);
+    cx.simulate_input("https://a.example");
+    key(cx, "tab");
+    cx.simulate_input("42");
+    key(cx, "tab");
+    cx.simulate_input("s3cret");
+    key(cx, "tab");
+    // Enter in a text area is a new line, not a press.
+    cx.simulate_input("Hi");
+    key(cx, "enter");
+    cx.simulate_input("there");
+    draw(cx);
+    assert_eq!(field(&card, cx, "site"), Some(json!("https://a.example")));
+    assert_eq!(field(&card, cx, "age"), Some(json!("42")));
+    assert_eq!(field(&card, cx, "code"), Some(json!("s3cret")));
+    assert_eq!(field(&card, cx, "notes"), Some(json!("Hi\nthere")));
+    assert!(host.sent.borrow().is_empty(), "nothing was sent");
+
+    // The slider: a press on its track moves it there, an arrow key steps it, and a drag
+    // follows the pointer to where it's let go.
+    let track = cx.debug_bounds("t:slider:r.c0/f6").expect("the slider");
+    let (left, right) = (
+        point(track.left() + px(1.), track.center().y),
+        point(track.right() - px(1.), track.center().y),
+    );
+    assert_eq!(
+        field(&card, cx, "budget"),
+        None,
+        "untouched, it's its default"
+    );
+    cx.simulate_click(left, Modifiers::none());
+    draw(cx);
+    assert_eq!(field(&card, cx, "budget"), Some(json!([0])));
+    key(cx, "right");
+    assert_eq!(field(&card, cx, "budget"), Some(json!([50])));
+    cx.simulate_mouse_down(left, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_move(right, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_up(right, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(field(&card, cx, "budget"), Some(json!([500])));
+}
+
 /// Draws frames as the display would, until nothing more is asked, and says how many there were.
 fn run_frames(cx: &mut VisualTestContext) -> usize {
     for frames in 0..200 {
