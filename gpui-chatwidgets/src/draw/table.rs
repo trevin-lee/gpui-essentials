@@ -3,9 +3,9 @@
 
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_core::Disableable as _;
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
 
 use super::{Draw, pressable};
 use crate::openui::{Cell, ColumnKind, Component, EditableTable, Table};

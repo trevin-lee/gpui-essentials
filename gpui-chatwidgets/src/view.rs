@@ -8,11 +8,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_core::{InputEvent, InputState, SliderEvent, SliderState};
-use gpui_kit::component::date_picker::{DatePickerEvent, DatePickerState};
-use gpui_kit::{
+use gpui::{
     AppContext as _, Autocapitalize, Context, Entity, EventEmitter, Image, SharedString,
     Subscription, TextInputAction, TextInputConfiguration, Window,
+};
+use gpui_core::{
+    DatePickerEvent, DatePickerState, InputEvent, InputState, SliderEvent, SliderState,
 };
 use serde_json::{Value as Json, json};
 
@@ -448,6 +449,19 @@ impl CardView {
                 e.state.update(cx, |s, cx| s.set_value(v, cx));
             }
         }
+        let want: Vec<(String, DateEnds)> = self
+            .dates
+            .iter()
+            .map(|(k, e)| (k.clone(), date_ends(self.read(&e.binding))))
+            .collect();
+        for (key, (start, end)) in want {
+            if let Some(e) = self.dates.get(&key) {
+                let now = e.state.read(cx).value();
+                if (now.start(), now.end()) != (start, end) {
+                    e.state.update(cx, |s, cx| s.set_value(start, end, cx));
+                }
+            }
+        }
     }
 
     /// Before drawing: an entity for every text field, slider and date picker the card has,
@@ -595,12 +609,19 @@ impl CardView {
                     return;
                 }
                 let range = *range;
+                // Showing what the store already has (a card restored with its store, or a
+                // value the program wrote), without telling anyone.
+                let (start, end) = date_ends(self.read(&binding));
                 let state = cx.new(|cx| {
-                    if range {
+                    let mut s = if range {
                         DatePickerState::range(window, cx)
                     } else {
                         DatePickerState::new(window, cx)
+                    };
+                    if start.is_some() {
+                        s.set_value(start, end, cx);
                     }
+                    s
                 });
                 let k = key.clone();
                 let sub = cx.subscribe(
@@ -610,8 +631,8 @@ impl CardView {
                         let Some(b) = this.dates.get(&k).map(|e| e.binding.clone()) else {
                             return;
                         };
-                        let day = |d: Option<chrono::NaiveDateTime>| {
-                            d.map(|d| d.date().format("%Y-%m-%d").to_string())
+                        let day = |d: Option<chrono::NaiveDate>| {
+                            d.map(|d| d.format("%Y-%m-%d").to_string())
                         };
                         let value = if range {
                             match (day(dt.start()), day(dt.end())) {
@@ -834,7 +855,7 @@ impl CardView {
     /// Copies a code block's text (the one thing the card writes anywhere: the clipboard, when
     /// the user presses Copy).
     pub(crate) fn copy(&mut self, path: &str, text: &str, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.to_string()));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
         self.ui.copied = Some(path.to_string());
         cx.notify();
     }
@@ -873,6 +894,27 @@ pub(crate) fn slider_range(min: f64, max: f64) -> (f32, f32) {
     let lo = if min.is_finite() { min as f32 } else { 0. };
     let hi = if max.is_finite() { max as f32 } else { 100. };
     if hi > lo { (lo, hi) } else { (lo, lo + 1.) }
+}
+
+/// A date picker's two ends (the second only in a range).
+type DateEnds = (Option<chrono::NaiveDate>, Option<chrono::NaiveDate>);
+
+/// What a date field's stored value says the picker shows: "YYYY-MM-DD", or a range's
+/// `{from, to}` of them. Anything else is no date.
+fn date_ends(v: Option<Json>) -> DateEnds {
+    let day = |v: Option<&Json>| {
+        v.and_then(Json::as_str)
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+    };
+    match &v {
+        Some(Json::String(_)) => (day(v.as_ref()), None),
+        // A range's end only with its start, as the picker keeps them.
+        Some(Json::Object(o)) => match day(o.get("from")) {
+            Some(from) => (Some(from), day(o.get("to"))),
+            None => (None, None),
+        },
+        _ => (None, None),
+    }
 }
 
 fn slider_value(b: &Binding, v: Option<Json>) -> f32 {

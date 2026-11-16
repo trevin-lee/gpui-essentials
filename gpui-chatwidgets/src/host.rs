@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::{App, Image, SharedString, WeakEntity};
+use gpui::{App, Image, SharedString, WeakEntity};
 
 use crate::CardTheme;
 use crate::openui::{ImageSrc, Link, Store};

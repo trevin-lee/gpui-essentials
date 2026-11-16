@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use ::gpui::TestDispatcher;
 use common::*;
+use gpui::*;
 use gpui_chatwidgets::CardTheme;
-use gpui_kit::*;
-// The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+// The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
 
 const PROGRAM: &str = r#"root = Form("f", Buttons([]), [FormControl("Name", Input("name", "Your name")), FormControl("Budget", Slider("budget", "continuous", 0, 100, 1, [50]))])"#;

@@ -42,17 +42,17 @@ struct ReadmeDoctests;
 /// source, as its [`CardHost::icon`]. The name is only ever looked up in the set, never used as
 /// a path itself.
 #[cfg(feature = "gpui")]
-pub fn lucide_icon(name: &str) -> Option<gpui_kit::SharedString> {
+pub fn lucide_icon(name: &str) -> Option<gpui::SharedString> {
     gpui_core::IconName::named(name).map(|i| i.path())
 }
 
 #[cfg(feature = "gpui")]
-impl gpui_kit::Render for CardView {
+impl gpui::Render for CardView {
     fn render(
         &mut self,
-        window: &mut gpui_kit::Window,
-        cx: &mut gpui_kit::Context<Self>,
-    ) -> impl gpui_kit::IntoElement {
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
         let theme = self.host.theme(cx);
         self.prepare(window, cx);
         draw::card(self, &theme, window, cx)

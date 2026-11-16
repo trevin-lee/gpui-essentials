@@ -2,9 +2,9 @@
 
 use std::time::Duration;
 
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 use gpui_core::Disableable as _;
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
 
 use super::content::Glyph;
 use super::{Draw, pressable};
@@ -721,7 +721,7 @@ impl Draw<'_, '_> {
 mod tests {
     use super::*;
     use crate::view::Slide;
-    // The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+    // The built-in #[test], not GPUI's, which gpui::* brings in.
     use std::prelude::v1::test;
 
     fn step(s: &mut Slide, phase: TouchPhase, x: f32, y: f32) -> bool {

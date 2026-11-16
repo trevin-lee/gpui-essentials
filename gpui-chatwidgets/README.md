@@ -1,7 +1,7 @@
 # gpui-chatwidgets
 
-Draws AI agents' OpenUI cards natively in [GPUI](https://www.gpui.rs) apps built with
-[GPUI Kit](https://github.com/longbridge/gpui-kit) 0.9.
+Draws AI agents' OpenUI cards natively in [GPUI](https://www.gpui.rs) apps, with
+[gpui-core](../gpui-core)'s components.
 
 [OpenUI](https://openui.com) is a small language an agent writes to answer with UI instead of
 text: cards, tables, charts, forms and buttons. This crate reads an agent's program and draws it
@@ -34,8 +34,8 @@ ImageTextLarge, and the metric indicators. A component the model doesn't know dr
 
 Text fields and text areas are gpui-core's `Input` (in this workspace), with the platform's
 input methods (on iOS, a tap raises the keyboard); the slider and an icon button's tooltip are
-gpui-core's too, all drawn in the card's colours. The date picker is still GPUI Kit's. Everything
-else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
+gpui-core's too, all drawn in the card's colours, and so is the date picker (one date or a range),
+drawn in gpui-core's theme. Everything else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
 keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there.
 Markdown goes through gpui-core's text view, so it can be selected and copied; a code block has
 a Copy button.
@@ -46,18 +46,23 @@ a Copy button.
 
 ## Use it
 
-It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
+It needs Rust 1.100 or newer, as the workspace does.
 
 ```toml
 [dependencies]
-gpui-kit = "=0.9.1"
+gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<the same commit>" }
 gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
+# The app's window. Without `font-kit`, GPUI draws no text on macOS.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
 ```
 
-Pin a commit: until it's on crates.io, any commit can change the API. The crate pins
-`gpui-kit = "=0.9.1"` (which pins `gpui-pre` 0.3.12), so your app must use the same, or two GPUIs
-would be linked.
+Pin a commit: until it's on crates.io, any commit can change the API. The crate pins GPUI
+exactly (`gpui-pre` 0.3.12), so your app must use the same, or two GPUIs would be linked.
+
+The crate drew with GPUI Kit until its date picker moved to gpui-core. An app built on GPUI Kit
+0.9.1 links the same GPUI and hosts cards as before; only the date picker's colours now come
+from gpui-core's `Theme` (see [Theme](#theme)).
 
 The parser turns on `serde_json`'s `preserve_order` feature, so a program's properties keep
 the order they were written in. Cargo unifies features across a build, so every crate in your
@@ -95,14 +100,16 @@ message id), so several cards in one window don't collide.
 use std::rc::Rc;
 
 use gpui_chatwidgets::openui::{ImageSrc, Link};
+use gpui::*;
 use gpui_chatwidgets::{CardHost, CardTheme, CardView, ImageLoad, ImageReply};
-use gpui_kit::*;
+use gpui_core::Theme;
 
 struct Host;
 
 impl CardHost for Host {
     fn theme(&self, _: &App) -> CardTheme {
-        // Sizes are CSS pixels drawn as rems; GPUI Kit's Root makes the rem its theme's font size.
+        // Sizes are CSS pixels drawn as rems; gpui-core's Root makes the rem its theme's font
+        // size (16 below).
         CardTheme { rem_base: 16., ..CardTheme::dark() }
     }
 
@@ -136,9 +143,12 @@ impl Render for Chat {
 }
 
 fn main() {
-    gpui_kit::application().run(|cx| {
-        gpui_kit::init(cx);
-        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+    // An app that serves gpui-core's Lucide icons draws the cards' icons and the date picker's.
+    gpui_platform::application().with_assets(gpui_core::Icons).run(|cx| {
+        gpui_core::init(cx);
+        // The date picker's colours, and the window's rem: the same light or dark as the cards.
+        Theme::set(Theme { font_size: px(16.), ..Theme::dark() }, cx);
+        gpui_core::open_window(WindowOptions::default(), cx, |window, cx| {
             let host: Rc<dyn CardHost> = Rc::new(Host);
             let program = r#"root = Stack([TextContent("Ready to send?"), Button("Send it")])"#;
             let card = cx.new(|cx| CardView::new(program, "message-1", host, window, cx));
@@ -182,10 +192,22 @@ light card in a dark app (or the other way round) needs no change to gpui-core's
 | Its inline code | `sunk` behind the `mono` font |
 | A code block | `sunk`, with a `line` edge and the `mono` font |
 
-gpui-core sets itself up when the first text field is made, so there's no `gpui_core::init` to
-call. Its `Theme` still gives the slider's keyboard focus ring and a tooltip's font; it's dark
-until a host sets it. GPUI Kit draws the date picker in its own theme, so set GPUI Kit's `Theme`
-to the same light or dark as the cards.
+gpui-core sets itself up when its first Root, text field or date picker is made, so a host
+needn't call `gpui_core::init`. Its `Theme` still gives the slider's keyboard focus ring, a
+tooltip's font and the date picker's colours; it's dark until a host sets it. The date picker
+takes no colours of its own, so set gpui-core's `Theme` to the same light or dark as the cards:
+
+| | From gpui-core's `Theme` |
+|---|---|
+| The date field's edge and fill | `input` (its fill at 30% on a dark theme), `ring` while it has the focus |
+| Its placeholder and calendar icon | `muted_foreground` |
+| The month | `popover` and `popover_foreground`, with a `border` edge |
+| A picked day, the days between a range's ends | `primary` with `primary_foreground`, `accent` |
+
+A date field stores "YYYY-MM-DD", and a range `{"from": …, "to": …}` (`to` is null until the
+second day is picked). The picker shows what's stored when it's made and after a press resets
+the field. From the keyboard, Tab reaches it, Enter or Space opens the month, the arrows move
+a day or a week, Page Up and Page Down a month, Enter or Space picks and Escape closes.
 
 Markdown is laid out as the web lays it out: bullets and numbers in a 1.4em column, items 0.25em
 apart, 1.4em above a heading and 0.35em below it, and inline code at 0.875em in a box 4px either
@@ -210,7 +232,7 @@ may update the card from inside one.
 ## iOS
 
 The renderer builds for iOS (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) with no change to
-your dependencies: GPUI Kit pulls in no platform there, and your app hands GPUI its iOS platform
+your dependencies: the crate pulls in no platform there, and your app hands GPUI its iOS platform
 itself (`Application::with_platform(gpui_pre_ios::current_platform(false))`, from `gpui-pre-ios`
 0.3.12, the same GPUI snapshot). CI builds it for the simulator. `tests/touch.rs` drives cards
 with real touch events on macOS, with the touch settings forced, through the same recognizer.
@@ -260,7 +282,7 @@ Known gaps:
   later takes the strip between them.
 - A select's options and an editable table's cells touch each other, so they take taps only
   where they're drawn: a larger area would take the edge of the one above or below.
-- GPUI Kit's date picker and its calendar have GPUI Kit's sizes, not `min_hit`.
+- The date picker's field and days have gpui-core's sizes (36 CSS pixels), not `min_hit`.
 - GPUI's text input has no keyboard type yet, so an email or number field shows the ordinary
   keyboard (without capitals or corrections). Keeping a focused field above the keyboard is the host's: GPUI reports the
   keyboard's height in the window's insets.
@@ -339,5 +361,5 @@ card hands its host. With `--shots` it draws these pictures from a window that's
 
 ## License
 
-Apache-2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE), which credits OpenUI (MIT), GPUI Kit
-(Apache-2.0) and Inter (OFL), bundled with the example.
+Apache-2.0. See [LICENSE](../LICENSE) and [NOTICE](../NOTICE), which credits OpenUI (MIT) and Inter
+(OFL), bundled with the example.

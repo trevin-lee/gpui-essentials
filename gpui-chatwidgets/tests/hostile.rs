@@ -7,8 +7,8 @@
 mod common;
 
 use common::*;
-use gpui_kit::*;
-// The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+use gpui::*;
+// The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
 
 /// A small, fixed-seed generator: the same programs every run.
@@ -115,7 +115,7 @@ fn mutate(rng: &mut Lcg, programs: &[(String, String)]) -> String {
     }
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn random_and_cut_programs_draw_and_press_without_panicking(cx: &mut TestAppContext) {
     let programs = goldens();
     let mut rng = Lcg(0x5eed);
@@ -144,7 +144,7 @@ fn random_and_cut_programs_draw_and_press_without_panicking(cx: &mut TestAppCont
     }
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn past_the_limits_a_note_says_what_was_left_out(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let rows: Vec<String> = (0..450).map(|i| format!("\"row {i}\"")).collect();
@@ -167,7 +167,7 @@ fn past_the_limits_a_note_says_what_was_left_out(cx: &mut TestAppContext) {
     assert!(card_height < px(20_000.), "{card_height:?}");
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn deep_and_huge_cards_fail_cleanly(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let deep = format!(
