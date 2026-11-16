@@ -17,12 +17,24 @@ name = "gpui_core"
 # every crate using it. Pinned exactly in the workspace: one GPUI for everything that links it.
 gpui = { workspace = true }
 
+# Only for the shots feature: the macOS platform with its test support (offscreen rendering)
+# on, and GPUI's version of the image crate to save the picture.
+gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
 [features]
 # GPUI's test support (a headless window, simulated input), for hosts' tests.
 test-support = ["gpui/test-support"]
+# Pictures of the gallery example's window rendered offscreen (`--shot`).
+shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
+
+[[example]]
+name = "gallery"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# The gallery's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
 
 # The overflow test lays text out with Core Text, as on screen, and reads the drawn scene.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
@@ -30,3 +42,4 @@ gpui = { workspace = true, features = ["test-support", "bench-support"] }
 # runtime_shaders: no Metal toolchain needed to build (Xcode 26 ships it separately); tests
 # never draw with Metal.
 gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }
+gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }

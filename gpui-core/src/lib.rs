@@ -34,16 +34,18 @@
 struct ReadmeDoctests;
 
 mod a11y;
+mod button;
 pub mod icon;
 mod press;
 mod root;
 mod size;
 pub mod theme;
 
+pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use icon::{Icon, IconName, Icons};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
-pub use size::{Disableable, Selectable, Sizable, Size};
+pub use size::{ControlSize, Disableable, Selectable, Sizable};
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
 
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, WindowOptions};
