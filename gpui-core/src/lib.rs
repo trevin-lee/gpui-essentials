@@ -36,6 +36,8 @@ struct ReadmeDoctests;
 mod a11y;
 mod button;
 mod date_picker;
+#[cfg(feature = "highlight")]
+pub mod highlight;
 pub mod icon;
 pub mod input;
 mod menu;

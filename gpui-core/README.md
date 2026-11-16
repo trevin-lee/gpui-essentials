@@ -36,6 +36,14 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A
   single-choice host closes its popover on a pick; a several-choice one keeps it open.
+- **Syntax highlighting** (the `highlight` feature, off by default for the grammars' size).
+  `Highlighter::new()` knows Rust, Swift, Go, TypeScript/TSX, JavaScript/JSX, Python, JSON,
+  TOML, YAML, Bash, SQL, Markdown, HTML, CSS, C and C++ by the names code fences use (case
+  aside, first word, with aliases such as `rs`, `py`, `yml`, `c++`), and hosts can `register`
+  more tree-sitter grammars. `highlight(lang, code, &SyntaxTheme)` gives ranges and styles;
+  `into_fn(theme)` makes the `HighlightFn` (`text::HighlightFn`, there without the feature too)
+  that hosts hand their code views. Colours are the theme's `syntax_*` tokens, each at least
+  4.5:1 on the page, a card and `muted`.
 - **Rules.** Nothing redraws while nothing changes, text stays in its box at any width,
   everything works from the keyboard with a focus ring, nothing works by hover alone, and links
   and actions are events for the host.
