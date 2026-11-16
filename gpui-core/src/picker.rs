@@ -109,6 +109,11 @@ pub struct Picker {
     colors: PopupMenuColors,
     /// The search field's caret, selection and placeholder colours.
     field: (Option<gpui::Hsla>, Option<gpui::Hsla>, Option<gpui::Hsla>),
+    /// The text the field starts with.
+    query: Option<SharedString>,
+    max_chars: Option<usize>,
+    /// Whether the field shows a magnifying glass (while it filters, unless given).
+    search_icon: Option<bool>,
 }
 
 impl Picker {
@@ -127,6 +132,9 @@ impl Picker {
             filter: true,
             colors: PopupMenuColors::default(),
             field: (None, None, None),
+            query: None,
+            max_chars: None,
+            search_icon: None,
         }
     }
 
@@ -215,8 +223,6 @@ impl Picker {
         self
     }
 
-    /// Offers a "Create “text”" entry after the matches while what's typed isn't an entry's
-    /// label already (case aside); picking it runs `f` with the text, trimmed.
     /// Whether typing filters the entries (on by default). Off, the field names something while
     /// the list stays whole and its highlight where the keys put it: a new property's name over
     /// its types, Enter picking the type with the name in [`MenuSelect::query`].
@@ -232,6 +238,29 @@ impl Picker {
         self
     }
 
+    /// The text the field starts with, its caret at the end: what was typed before, when a
+    /// host comes back to this step. Taken when the picker first shows; after that the text is
+    /// the person's.
+    pub fn query(mut self, text: impl Into<SharedString>) -> Self {
+        self.query = Some(text.into());
+        self
+    }
+
+    /// The most characters the field takes, as [`InputState::max_chars`].
+    pub fn max_chars(mut self, max: usize) -> Self {
+        self.max_chars = Some(max);
+        self
+    }
+
+    /// Whether the field shows a magnifying glass: by default while it filters (not on a
+    /// naming field, [`filter(false)`](Self::filter)).
+    pub fn search_icon(mut self, show: bool) -> Self {
+        self.search_icon = Some(show);
+        self
+    }
+
+    /// Offers a "Create “text”" entry after the matches while what's typed isn't an entry's
+    /// label already (case aside); picking it runs `f` with the text, trimmed.
     pub fn on_create(mut self, f: impl Fn(&str, &mut Window, &mut App) + 'static) -> Self {
         self.on_create = Some(Rc::new(f));
         self
@@ -268,8 +297,15 @@ impl RenderOnce for Picker {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         crate::init_soon(cx);
         let placeholder = self.placeholder.clone();
+        let start = self.query.clone();
         let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {
-            let query = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+            let query = cx.new(|cx| {
+                let q = InputState::new(window, cx).placeholder(placeholder);
+                match start {
+                    Some(text) => q.default_value(text.to_string()),
+                    None => q,
+                }
+            });
             // The field takes the keyboard when the picker first shows.
             let q = query.clone();
             window.defer(cx, move |window, cx| {
@@ -284,6 +320,9 @@ impl RenderOnce for Picker {
             }
         });
         let query = state.read(cx).query.clone();
+        // The host's limit, as it is this frame (setting it draws nothing).
+        let max_chars = self.max_chars;
+        query.update(cx, |q, _| q.set_max_chars(max_chars));
         let text = query.read(cx).value();
 
         let typed = text.trim().to_string();
@@ -519,7 +558,17 @@ impl RenderOnce for Picker {
                     .mb(rems(4. / 15.))
                     .border_b_1()
                     .border_color(self.colors.separator.unwrap_or(theme.border))
-                    .child(Icon::new(IconName::Search).color(muted))
+                    // On touch the field is a full target, as the rows are.
+                    .when(self.row.touch, |d| d.min_h(theme.touch_target))
+                    .debug_selector(|| "picker-field".into())
+                    .when(self.search_icon.unwrap_or(filter), |d| {
+                        d.child(
+                            div()
+                                .flex_none()
+                                .debug_selector(|| "picker-glass".into())
+                                .child(Icon::new(IconName::Search).color(muted)),
+                        )
+                    })
                     .child(div().flex_1().min_w_0().child({
                         let (caret, selection, placeholder) = self.field;
                         Input::new(&query)
