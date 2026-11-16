@@ -32,6 +32,10 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
   picked (the pointer moves it too), Enter or a press picks, and Escape closes the popover.
   `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
+- **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
+  typing filters the entries (every word, case aside) and highlights the first match, Up and
+  Down move through the matches while the field keeps the keyboard, Enter picks. A
+  single-choice host closes its popover on a pick; a several-choice one keeps it open.
 - **Rules.** Nothing redraws while nothing changes, text stays in its box at any width,
   everything works from the keyboard with a focus ring, nothing works by hover alone, and links
   and actions are events for the host.

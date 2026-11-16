@@ -57,6 +57,8 @@ struct Gallery {
     note: Entity<InputState>,
     more: bool,
     sort_open: bool,
+    tag_open: bool,
+    tag: SharedString,
     sort: SharedString,
 }
 
@@ -308,6 +310,39 @@ impl Render for Gallery {
                                     cx.notify();
                                 })),
                         ),
+                )
+                .child(div().w(rems(1.)))
+                .child(
+                    Popover::new("tag")
+                        .open(self.tag_open)
+                        .on_dismiss(cx.listener(|g, _, _, cx| {
+                            g.tag_open = false;
+                            cx.notify();
+                        }))
+                        .trigger(
+                            Button::new("tag-button")
+                                .icon(IconName::Tag)
+                                .label(self.tag.clone())
+                                .outline()
+                                .on_click(cx.listener(|g, _, _, cx| {
+                                    g.tag_open = !g.tag_open;
+                                    cx.notify();
+                                })),
+                        )
+                        .w(rems(14.))
+                        .p(rems(0.25))
+                        .child(
+                            Picker::new("tag-picker")
+                                .placeholder("Find a tag")
+                                .items(["Work", "Home", "Errands", "Reading", "Travel"].map(|t| {
+                                    PopupMenuItem::new(t, t).checked(self.tag.as_ref() == t)
+                                }))
+                                .on_select(cx.listener(|g, id: &SharedString, _, cx| {
+                                    g.tag = id.clone();
+                                    g.tag_open = false;
+                                    cx.notify();
+                                })),
+                        ),
                 ),
             )
             .child(heading("A slider (arrows and drag)", &theme))
@@ -455,6 +490,8 @@ fn main() {
                     note,
                     more: false,
                     sort_open: shot,
+                    tag_open: false,
+                    tag: "Work".into(),
                     sort: "name".into(),
                 })
             })
