@@ -11,12 +11,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled as _,
-    TestAppContext, TestDispatcher, Window, div, px, size,
+    AnyElement, App, AppContext as _, Context, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, TestDispatcher, Window, div, px, size,
 };
 use gpui_core::{
     Button, ButtonGroup, ButtonVariant, ButtonVariants as _, ControlSize, IconName, Root,
-    Sizable as _, Theme,
+    Sizable as _, Theme, Tooltip,
 };
 
 const WORD: &str = "Pneumonoultramicroscopicsilicovolcanoconiosis-Antidisestablishmentarianism";
@@ -37,7 +37,7 @@ fn texts() -> Vec<String> {
     ]
 }
 
-type Make = Rc<dyn Fn() -> AnyElement>;
+type Make = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 
 /// Every component that shows text, in every variant and size, with each worst text.
 fn components() -> Vec<(String, Make)> {
@@ -63,7 +63,7 @@ fn components() -> Vec<(String, Make)> {
                 let label = text.clone();
                 out.push((
                     format!("Button {v:?} {s:?} text {t}"),
-                    Rc::new(move || {
+                    Rc::new(move |_, _| {
                         Button::new("b")
                             .label(label.clone())
                             .icon(IconName::Star)
@@ -74,10 +74,19 @@ fn components() -> Vec<(String, Make)> {
                 ));
             }
         }
+        let tip = text.clone();
+        out.push((
+            format!("Tooltip text {t}"),
+            Rc::new(move |window, cx| {
+                Tooltip::new(tip.clone())
+                    .build(window, cx)
+                    .into_any_element()
+            }),
+        ));
         let label = text.clone();
         out.push((
             format!("ButtonGroup text {t}"),
-            Rc::new(move || {
+            Rc::new(move |_, _| {
                 ButtonGroup::new("g")
                     .outline()
                     .small()
@@ -95,11 +104,12 @@ struct Gallery {
 }
 
 impl Render for Gallery {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let items: Vec<AnyElement> = self.items.iter().map(|make| make(window, cx)).collect();
         div().flex().flex_col().gap(px(4.)).children(
-            self.items
-                .iter()
-                .map(|make| div().flex().w(px(self.width)).flex_none().child(make())),
+            items
+                .into_iter()
+                .map(|item| div().flex().w(px(self.width)).flex_none().child(item)),
         )
     }
 }
@@ -191,6 +201,11 @@ fn every_component_keeps_its_text_in_its_box() {
     for zoom in [0.5, 1., 2.] {
         for width in [40., 80., 160., 320., 640., 1600.] {
             for (name, make) in components() {
+                // A tooltip floats over the window, not in a box, and a window is never
+                // narrower than 160 points: below that its padding alone is wider than it.
+                if name.starts_with("Tooltip") && width < 160. {
+                    continue;
+                }
                 let mut cx = app_with_text();
                 let bad = overflows(&mut cx, width, zoom, vec![make]);
                 if let Some(first) = bad.first() {

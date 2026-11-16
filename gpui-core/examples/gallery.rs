@@ -48,6 +48,7 @@ fn args() -> Args {
 struct Gallery {
     pressed: SharedString,
     view: usize,
+    on: bool,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -200,6 +201,39 @@ impl Render for Gallery {
                         .outline(),
                 ),
             )
+            .child(heading("Switches, and a tooltip on the first", &theme))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(rems(1.))
+                    .child(
+                        div()
+                            .id("switch-tip")
+                            .tooltip(|window, cx| {
+                                Tooltip::new("Turns the agent's tools on and off").build(window, cx)
+                            })
+                            .child(
+                                Switch::new("tools")
+                                    .checked(self.on)
+                                    .accessibility_label("Tools")
+                                    .on_click({
+                                        let me = me.clone();
+                                        move |on, _, cx| {
+                                            let on = *on;
+                                            me.update(cx, |g, cx| {
+                                                g.on = on;
+                                                cx.notify();
+                                            })
+                                            .ok();
+                                        }
+                                    }),
+                            ),
+                    )
+                    .child(Switch::new("off").checked(false))
+                    .child(Switch::new("small").checked(true).small())
+                    .child(Switch::new("disabled").checked(true).disabled(true)),
+            )
             .child(heading("Press, with a host's own look", &theme))
             .child(
                 Press::new("press")
@@ -267,6 +301,7 @@ fn main() {
             let (window, _) = gpui_core::open_window(options, cx, |_, cx| {
                 cx.new(|_| Gallery {
                     pressed: "nothing yet".into(),
+                    on: true,
                     view: 1,
                 })
             })
