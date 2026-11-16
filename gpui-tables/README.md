@@ -165,9 +165,10 @@ every event (the pictures here are its `--shot`s, rendered offscreen).
   its end. Pressing the header folds it: a `viewChanged` with the group in `collapsedGroups`.
 - **Cells.** Each type draws as the [table above](#properties-and-values) says: options as
   chips in their colours, numbers in their format and to the right, dates and times in the
-  viewer's zone, people and related rows by name, created and edited times muted. Every one
-  ends in an ellipsis rather than leave its cell. The title has an Open button (on hover with a
-  pointer, always on touch); pressing it, or Enter on the title, is an `openRow`.
+  viewer's zone, people (created-by and edited-by too) and related rows by name, created and
+  edited times muted. Every one ends in an ellipsis rather than leave its cell. The title has an
+  Open button (on hover with a pointer, always on touch); pressing it, or Enter on the title, is
+  an `openRow`.
 - **Columns.** Drag a column's edge to resize it and its header to move it; both are a
   `viewChanged` with the whole view, its columns written out with fresh order keys. The header's
   menu sorts (shift adds a sort to the others), filters by the column (an option, checked or
@@ -177,7 +178,9 @@ every event (the pictures here are its `--shot`s, rendered offscreen).
 - **Editing.** A press focuses a cell and a second press edits it (Enter and F2 do too). A
   checkbox toggles at once. Selects, multi-selects, people and relations open a picker; a
   relation's change comes with its `relationChanged`. A date opens a day grid. Delete and
-  Backspace empty a cell.
+  Backspace empty a cell. Created and edited times and people are read-only: their column's
+  menu sorts, filters (by a person, for created-by and edited-by) and groups by them, but a
+  press only focuses the cell.
 - **Typed values** (titles, text, numbers, URLs, emails, phones, and the filters of those
   types) go through `TableHost::edit_text`: the host shows a field over the cell's bounds and
   answers with `reply.commit(text)` or `reply.cancel()`. gpui-core has no text input yet, and
@@ -219,7 +222,7 @@ Everything is a doc in the host's tree, the same shape for pages, databases and 
 | `parentDocId` | The page it's under, or null. A row's is its database. |
 | `parentObjectId` | For an inline database, the block in its parent page that embeds it. |
 | `cover`, `favorite`, `agents` | The host's; carried, never read. |
-| `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`. |
+| `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`. A row's `createdBy` and `editedBy` properties show them. An older doc may have no `updatedBy`. |
 | `created`, `updated` | Milliseconds since the Unix epoch. |
 | `rev`, `seq` | The host's revision and sequence numbers; carried, never read. |
 | `deleted` | A tombstone. Views leave deleted rows out. |
@@ -230,8 +233,9 @@ Everything is a doc in the host's tree, the same shape for pages, databases and 
 - **An inline database** is a database doc whose `parentDocId` is the page that shows it and whose
   `parentObjectId` is the block that embeds it.
 - **A row** is a page doc whose `parentDocId` is the database. Opening a row opens that page.
-- A row's **created time** and **edited time** are its doc's `created` and `updated`; its creator
-  and last editor are `author` and `updatedBy`. None of these are stored in `values`.
+- A row's **created time** and **edited time** are its doc's `created` and `updated`; its
+  **created by** and **edited by** are `author` and `updatedBy` (or `author`, for an older doc
+  without `updatedBy`). None of these are stored in `values`.
 
 In Rust these are one type, `Doc`, with the fields above typed and a `database:
 Option<DatabaseFields>` and `values: Option<Values>`. Every type keeps the JSON fields it doesn't
@@ -258,12 +262,22 @@ by, so renaming a property changes no row. The value's JSON depends on the type:
 | `relation` | `databaseId`, `twoWay`, `backPropertyId` | `[row doc id]` | the related rows' titles | |
 | `createdTime` | | the doc's `created` | time | as dates |
 | `editedTime` | | the doc's `updated` | time | as dates |
+| `createdBy` | | the doc's `author` | the host's names | the row with its person |
+| `editedBy` | | the doc's `updatedBy`, else its `author` | the host's names | the row with its person |
 
 - **Option colours** are names (`default`, `gray`, `brown`, `orange`, `yellow`, `green`, `blue`,
   `purple`, `pink`, `red`); the host's theme says what each looks like.
 - **Dates** are milliseconds since the epoch. Without `includeTime`, `start` and `end` are
   midnight UTC of the dates meant, and read as those dates in every time zone. With it they're
   instants, shown in the viewer's zone. A range's `end` is inclusive.
+- **Created and edited times and people are derived.** Their values are read from the row doc
+  (the table above), never stored in `values`, and they're read-only: the table draws them and
+  filters, sorts and groups by them, but never edits them, and a new row gets no value for
+  them (the host fills in the doc's own fields). Their `config` is empty: `{"id": "<uuid>",
+  "name": "Added by", "type": "createdBy", "config": {}, "order": "a9"}`. A created-by or
+  edited-by value is one person, of the shape a `person` value's items have; a doc without an
+  `author` has none (an empty cell), and one without `updatedBy`, written before the host kept
+  it, shows its `author` as its editor.
 - **There's no contacts type.** People are rows in a People database, reached from other
   databases through a `relation` property. The `person` type is only ever the owner or one of
   their agents.
@@ -333,6 +347,7 @@ value}`. For example, people to follow up with:
 | select | `is`, `isNot` | an option id |
 | multiSelect | `contains`, `doesNotContain` | an option id |
 | person | `contains`, `doesNotContain` | a person, or `"owner"` or `"agent:<id>"` |
+| createdBy, editedBy | `is`, `isNot`, `contains`, `doesNotContain` (with one person, `is` is `contains`) | a person, or `"owner"` or `"agent:<id>"` |
 | relation | `contains`, `doesNotContain` | a row id |
 | date, createdTime, editedTime | `is`, `isNot`, `before`, `after`, `onOrBefore`, `onOrAfter` | a day: `"2026-11-15"`, milliseconds, or a date value |
 | date, createdTime, editedTime | `within` | `today`, `pastWeek`, `pastMonth`, `pastYear`, `nextWeek`, `nextMonth`, `nextYear` |
@@ -482,8 +497,8 @@ the same files. Its README gives the format and every message.
 The checks also catch ids used twice, a database with no title property or two, a value of the
 wrong shape for its type, a select or multi-select value naming an option the property hasn't, a
 person of a kind the property doesn't allow, a date range ending before it starts, and a value
-stored for a created or edited time. A filter depth of 4 is three levels of nested groups and
-their conditions, as Notion allows.
+stored for a derived property (a created or edited time, created by or edited by). A filter
+depth of 4 is three levels of nested groups and their conditions, as Notion allows.
 
 ## The host's part
 
@@ -568,9 +583,8 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
 - **Templates.** A template is a page with content, which belongs to the docs app and its editor;
   the crate would only pass a template id through `rowCreated`. Prefilled values for a new row in a
   view are in v1.
-- **Also later:** the gallery view, created-by and edited-by properties (the docs carry `author`
-  and `updatedBy` already), files, a status type, unique ids, sums and counts under a column, and
-  linked views of a database on another page.
+- **Also later:** the gallery view, files, a status type, unique ids, sums and counts under a
+  column, and linked views of a database on another page.
 
 ## Tests
 
@@ -597,7 +611,8 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
 - `tests/view.rs`: the table view driven by mouse, keyboard and finger: sorting (and adding a
   sort with shift), filtering, grouping and folding, resizing and moving columns, hiding and
   showing them, an edit of every editable type (typed ones through the host's field), keyboard
-  navigation, opening rows, new rows in groups and filters, 44-point targets on touch, a finger
+  navigation, opening rows, new rows in groups and filters, created-by and edited-by cells
+  (named by the host, never edited, filtered and grouped by), 44-point targets on touch, a finger
   resizing a column, swipes both ways with the title in place, and no frames while idle.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu at 360, 700 and
   1400 wide, columns at their widths and their narrowest, laid out with Core Text; no glyph

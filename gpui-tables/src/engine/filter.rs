@@ -9,6 +9,9 @@
 //! - **Select:** `is` and `isNot` an option id.
 //! - **Multi-select, person, relation:** `contains` and `doesNotContain` an option id, a person,
 //!   or a row id.
+//! - **Created by, edited by:** `is`, `isNot`, `contains` and `doesNotContain` a person (with
+//!   one person each, `is` is `contains`). Edited by reads the doc's `author` when it has no
+//!   `updatedBy`.
 //! - **Date, created time, edited time:** `is`, `isNot`, `before`, `after`, `onOrBefore`,
 //!   `onOrAfter` a day, and `within` a span around today, all in whole days in the viewer's zone.
 //!   A range matches when any of its days does.
@@ -78,6 +81,8 @@ enum FieldRef {
     Title,
     Created,
     Updated,
+    CreatedBy,
+    EditedBy,
     Stored(String),
 }
 
@@ -204,6 +209,8 @@ impl Compiler<'_> {
             Field::Title => FieldRef::Title,
             Field::Created => FieldRef::Created,
             Field::Updated => FieldRef::Updated,
+            Field::CreatedBy => FieldRef::CreatedBy,
+            Field::EditedBy => FieldRef::EditedBy,
             Field::Stored(p) => FieldRef::Stored(p.id.clone()),
         };
         let known = matches!(p.kind, PropertyType::Select | PropertyType::MultiSelect)
@@ -264,7 +271,7 @@ fn pred(
         PropertyType::MultiSelect | PropertyType::Relation => {
             Pred::Has(id()?, *op == O::DoesNotContain)
         }
-        PropertyType::Person => {
+        PropertyType::Person | PropertyType::CreatedBy | PropertyType::EditedBy => {
             let person = match value {
                 Json::String(s) if s == "owner" => Person::Owner,
                 Json::String(s) => match s.strip_prefix("agent:") {
@@ -276,7 +283,7 @@ fn pred(
                     _ => return Err(()),
                 },
             };
-            Pred::HasPerson(person, *op == O::DoesNotContain)
+            Pred::HasPerson(person, matches!(op, O::IsNot | O::DoesNotContain))
         }
         PropertyType::Checkbox => Pred::Checked(value.as_bool().ok_or(())?),
         k if k.is_date() => {
@@ -346,6 +353,8 @@ fn test(t: &Test, row: &Doc, offset_ms: i64) -> bool {
         FieldRef::Title => Cell::Text(&row.title),
         FieldRef::Created => Cell::Time(row.created),
         FieldRef::Updated => Cell::Time(row.updated),
+        FieldRef::CreatedBy => row.created_by().map_or(Cell::Missing, Cell::Person),
+        FieldRef::EditedBy => row.edited_by().map_or(Cell::Missing, Cell::Person),
         FieldRef::Stored(id) => row.value(id).map_or(Cell::Missing, Cell::Value),
     };
     match &t.pred {
@@ -384,6 +393,7 @@ fn test(t: &Test, row: &Doc, offset_ms: i64) -> bool {
         Pred::HasPerson(p, negate) => {
             let hit = match cell {
                 Cell::Value(Value::People(people)) => people.contains(p),
+                Cell::Person(person) => person == p,
                 _ => false,
             };
             hit != *negate
@@ -410,7 +420,7 @@ fn test(t: &Test, row: &Doc, offset_ms: i64) -> bool {
 fn is_empty(t: &Test, cell: Cell) -> bool {
     match cell {
         Cell::Missing => true,
-        Cell::Time(_) => false,
+        Cell::Time(_) | Cell::Person(_) => false,
         Cell::Text(s) => s.is_empty(),
         Cell::Value(v) => match (&t.kind, v, &t.known) {
             (PropertyType::Select, Value::Text(id), Some(known)) => !known.contains(id),

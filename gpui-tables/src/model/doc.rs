@@ -182,10 +182,11 @@ pub struct Doc {
     /// The host's, carried as written.
     #[serde(default)]
     pub agents: Json,
-    /// Who created it: a row's created-by.
+    /// Who created it: a row's created-by ([`Doc::created_by`]).
     #[serde(default)]
     pub author: Option<Person>,
-    /// Who changed it last: a row's edited-by.
+    /// Who changed it last: a row's edited-by ([`Doc::edited_by`], which falls back to
+    /// `author`).
     #[serde(default)]
     pub updated_by: Option<Person>,
     /// Milliseconds since the Unix epoch: a row's created time.
@@ -262,5 +263,16 @@ impl Doc {
     /// A row's value for a property id, if it has one.
     pub fn value(&self, property_id: &str) -> Option<&Value> {
         self.values.as_ref()?.get(property_id)
+    }
+
+    /// Who created it: a `createdBy` property's value.
+    pub fn created_by(&self) -> Option<&Person> {
+        self.author.as_ref()
+    }
+
+    /// Who changed it last: an `editedBy` property's value. A doc written before `updatedBy`
+    /// was kept has only its `author`, and reads as that.
+    pub fn edited_by(&self) -> Option<&Person> {
+        self.updated_by.as_ref().or(self.author.as_ref())
     }
 }

@@ -125,6 +125,11 @@ impl FilterOp {
                             | O::Within
                     )
             }
+            // One person each: `is` and `contains` mean the same, as do `isNot` and
+            // `doesNotContain`. Empty when the doc has no author.
+            T::CreatedBy | T::EditedBy => {
+                empty || matches!(self, O::Is | O::IsNot | O::Contains | O::DoesNotContain)
+            }
             T::Checkbox => matches!(self, O::Is | O::IsChecked | O::IsNotChecked),
             T::Other(_) => false,
         }

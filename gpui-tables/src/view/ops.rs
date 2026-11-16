@@ -320,7 +320,8 @@ fn person_of(j: &Json) -> Option<Person> {
 
 /// The values a new row gets so it stays where it was made: the group's value, and what the
 /// conditions at the top of the filter ask for (an option, a checked box, a person, a related
-/// row, a text it must be).
+/// row, a text it must be). The derived properties (created and edited times and people) get
+/// nothing: the host fills the doc's own fields.
 pub fn prefill(db: &DatabaseFields, view: &View, group: Option<&GroupKey>, today: i64) -> Values {
     let mut values = Values::new();
     for c in top_conditions(view) {

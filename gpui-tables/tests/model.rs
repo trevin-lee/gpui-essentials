@@ -254,6 +254,62 @@ fn unknown_fields_and_kinds_survive_a_round_trip() {
 }
 
 #[test]
+fn created_by_and_edited_by_come_from_the_doc_and_round_trip() {
+    let db_json = json!({
+        "id": "5e0c9a1d-0000-4000-8000-000000000002", "kind": "database", "title": "Reading list",
+        "order": "a0", "folderId": null, "parentDocId": null, "parentObjectId": null,
+        "cover": null, "favorite": false, "agents": [], "author": {"kind": "owner"},
+        "updatedBy": {"kind": "owner"}, "created": 1_793_000_000_000_i64,
+        "updated": 1_793_000_000_000_i64, "rev": 1, "seq": 1, "deleted": false,
+        "database": {"properties": [
+            {"id": "name", "name": "Name", "type": "title", "config": {}, "order": "a0"},
+            {"id": "by", "name": "Added by", "type": "createdBy", "config": {}, "order": "a1"},
+            {"id": "editor", "name": "Edited by", "type": "editedBy", "config": {}, "order": "a2"}
+        ], "views": []}
+    });
+    let db: Doc = serde_json::from_value(db_json.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&db).unwrap(), db_json);
+    let fields = db.database.as_ref().unwrap();
+    let (by, editor) = (
+        fields.property("by").unwrap(),
+        fields.property("editor").unwrap(),
+    );
+    assert_eq!(by.kind, PropertyType::CreatedBy);
+    assert_eq!(editor.kind, PropertyType::EditedBy);
+    for p in [by, editor] {
+        assert!(p.kind.is_derived() && p.kind.can_group());
+        assert!(!p.kind.is_date());
+        assert_eq!(p.config, PropertyConfig::default());
+    }
+    assert_eq!(PropertyType::parse("createdBy").as_str(), "createdBy");
+    assert_eq!(PropertyType::parse("editedBy").as_str(), "editedBy");
+    assert!(Limits::default().check_doc(&db, None).is_empty());
+
+    // The values are the doc's author and last editor, never anything in `values`.
+    let rows_json = json!([
+        {"id": "r1", "kind": "page", "title": "Tidewater Almanac", "order": "a0",
+         "parentDocId": db.id, "author": {"kind": "owner"},
+         "updatedBy": {"kind": "agent", "agentId": "inbox-triage"}, "values": {}},
+        {"id": "r2", "kind": "page", "title": "Notes on Lanterns", "order": "a1",
+         "parentDocId": db.id, "author": {"kind": "agent", "agentId": "career-planning"},
+         "values": {}},
+        {"id": "r3", "kind": "page", "title": "Untold Harbors", "order": "a2",
+         "parentDocId": db.id, "values": {}}
+    ]);
+    let rows: Vec<Doc> = serde_json::from_value(rows_json).unwrap();
+    assert_eq!(rows[0].created_by(), Some(&Person::Owner));
+    assert_eq!(rows[0].edited_by(), Some(&Person::agent("inbox-triage")));
+    // An older doc without updatedBy: its editor is its author.
+    assert_eq!(rows[1].edited_by(), Some(&Person::agent("career-planning")));
+    assert_eq!(rows[1].edited_by(), rows[1].created_by());
+    assert_eq!((rows[2].created_by(), rows[2].edited_by()), (None, None));
+    for r in &rows {
+        assert!(Limits::default().check_row(fields, r).is_empty());
+        assert_eq!(serde_json::to_value(r).unwrap()["values"], json!({}));
+    }
+}
+
+#[test]
 fn a_minimal_doc_reads_with_defaults() {
     let doc: Doc = serde_json::from_value(json!({"id": "x", "kind": "page"})).unwrap();
     assert_eq!(doc.title, "");
@@ -496,6 +552,8 @@ fn values_over_the_limits_or_of_the_wrong_shape_are_reported() {
         });
     let num = Property::new("n", "Size", PropertyType::Number, "a4");
     let created = Property::new("c", "Added", PropertyType::CreatedTime, "a5");
+    let by = Property::new("b", "Added by", PropertyType::CreatedBy, "a7");
+    let editor = Property::new("e", "Edited by", PropertyType::EditedBy, "a8");
 
     let k = |p: &Property, v: Value| {
         limits
@@ -560,6 +618,9 @@ fn values_over_the_limits_or_of_the_wrong_shape_are_reported() {
     );
     assert_eq!(k(&num, Value::Null), []);
     assert_eq!(k(&created, Value::Number(1.0)), [ProblemKind::Derived]);
+    assert_eq!(k(&by, vec![Person::Owner].into()), [ProblemKind::Derived]);
+    assert_eq!(k(&editor, Value::text("owner")), [ProblemKind::Derived]);
+    assert_eq!(k(&by, Value::Null), []);
     let backwards = Value::Date(DateValue {
         start: 10,
         end: Some(5),

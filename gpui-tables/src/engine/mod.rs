@@ -186,6 +186,10 @@ pub(crate) enum Field<'p> {
     Title,
     Created,
     Updated,
+    /// The doc's `author`.
+    CreatedBy,
+    /// The doc's `updatedBy`, else its `author`.
+    EditedBy,
     Stored(&'p Property),
 }
 
@@ -195,6 +199,8 @@ impl<'p> Field<'p> {
             PropertyType::Title => Self::Title,
             PropertyType::CreatedTime => Self::Created,
             PropertyType::EditedTime => Self::Updated,
+            PropertyType::CreatedBy => Self::CreatedBy,
+            PropertyType::EditedBy => Self::EditedBy,
             _ => Self::Stored(p),
         }
     }
@@ -205,6 +211,8 @@ impl<'p> Field<'p> {
 pub(crate) enum Cell<'r> {
     Text(&'r str),
     Time(i64),
+    /// A derived person: who created or last changed the row.
+    Person(&'r Person),
     Value(&'r Value),
     Missing,
 }
@@ -215,6 +223,8 @@ impl<'r> Cell<'r> {
             Field::Title => Cell::Text(&row.title),
             Field::Created => Cell::Time(row.created),
             Field::Updated => Cell::Time(row.updated),
+            Field::CreatedBy => row.created_by().map_or(Cell::Missing, Cell::Person),
+            Field::EditedBy => row.edited_by().map_or(Cell::Missing, Cell::Person),
             Field::Stored(p) => row.value(&p.id).map_or(Cell::Missing, Cell::Value),
         }
     }

@@ -6,6 +6,8 @@
 //! - **Checkbox:** unchecked, then checked.
 //! - **Person:** the empty group, then the owner, then agents by name; a row is in each of its
 //!   people's groups. Only people some row has get a group (the empty one is always there).
+//! - **Created by, edited by:** the same, each row in the one group of its doc's author (or
+//!   last editor), or the empty group when the doc has none.
 //! - **Date, created time, edited time:** buckets relative to today (Notion's default), or
 //!   calendar days, weeks, months or years, oldest first, then the empty group last. Only
 //!   buckets some row falls in get a group. A range goes by its first day.
@@ -240,23 +242,26 @@ pub fn group(
             }
             Some(groups)
         }
-        PropertyType::Person => {
+        PropertyType::Person | PropertyType::CreatedBy | PropertyType::EditedBy => {
             let mut empty = Group::new(GroupKey::Empty);
             // By key, so each person gets one group; ordered after.
             let mut by_person: HashMap<String, Group> = HashMap::new();
             for &i in indexes {
                 let mut any = false;
-                if let Cell::Value(Value::People(people)) = Cell::read(&rows[i], field) {
-                    for person in people {
-                        let Some(key) = person.key() else { continue };
-                        let g = by_person
-                            .entry(key)
-                            .or_insert_with(|| Group::new(GroupKey::Person(person.clone())));
-                        if g.rows.last() != Some(&i) {
-                            g.rows.push(i);
-                        }
-                        any = true;
+                let people: &[Person] = match Cell::read(&rows[i], field) {
+                    Cell::Value(Value::People(people)) => people,
+                    Cell::Person(person) => std::slice::from_ref(person),
+                    _ => &[],
+                };
+                for person in people {
+                    let Some(key) = person.key() else { continue };
+                    let g = by_person
+                        .entry(key)
+                        .or_insert_with(|| Group::new(GroupKey::Person(person.clone())));
+                    if g.rows.last() != Some(&i) {
+                        g.rows.push(i);
                     }
+                    any = true;
                 }
                 if !any {
                     empty.rows.push(i);
