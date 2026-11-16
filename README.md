@@ -18,8 +18,8 @@ its tests.
 ## Use them
 
 They need Rust 1.100 or newer and draw through Zed's GPUI, published as `gpui-pre` 0.3.12 and
-pinned exactly. gpui-calendar, gpui-flow and gpui-tables are built on gpui-core alone;
-gpui-blocks and gpui-chatwidgets still use [GPUI Kit](https://github.com/longbridge/gpui-kit)
+pinned exactly. gpui-calendar, gpui-chatwidgets, gpui-flow and gpui-tables are built on
+gpui-core alone; gpui-blocks still uses [GPUI Kit](https://github.com/longbridge/gpui-kit)
 `=0.9.1` (which pins the same GPUI) for what gpui-core doesn't have yet. Your app must use the
 same versions, or two GPUIs would be linked. Take any of them from this repository by name,
 pinned to one commit, the same commit for all of them:
