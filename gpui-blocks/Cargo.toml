@@ -19,7 +19,7 @@ gpui-kit = { workspace = true }
 # The document model, input, selection, undo and drawing: gpui-kit-markdown-editor, through a fork
 # that adds callouts, toggles, block motion and the hooks this crate draws its menus with. Pinned
 # to a commit until those changes are published.
-markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "0a264ff218ddcd98d4a39d630bd2f235c2944141" }
+markdown_editor = { package = "gpui-kit-markdown-editor", git = "https://github.com/trevin-lee/gpui-kit-markdown-editor", rev = "3ce76cf22da6e4d17e51cc8d1e32a5cbc2e5ce8d" }
 # The parser's syntax tree, for widget blocks: the version gpui-kit parses with.
 markdown = "1.0.0"
 # The JSON form of a document (`json`).
