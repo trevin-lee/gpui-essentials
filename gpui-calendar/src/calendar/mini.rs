@@ -61,16 +61,24 @@ impl Calendar {
     }
 
     /// The mini month's state, made the first time and remade when the week's first day
-    /// changes; shown on the calendar's date, with that date marked.
+    /// changes; shown on the calendar's date, with that date marked, and today marked by the
+    /// calendar's clock in its display zone (not the Mac's local date). It's brought up to date
+    /// on every draw, so the minute tick turns the day over, as does a change of zone or of
+    /// the pretended now; the picker redraws only when the day changes.
     fn mini_state(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<DatePickerState> {
         let week_start = self.options.week_start;
+        let today = self.today();
         let remake = self.mini_shown.is_none_or(|(_, start)| start != week_start);
         if remake || self.mini.is_none() {
-            let state = cx.new(|cx| DatePickerState::new(window, cx).week_start(week_start));
+            let state = cx.new(|cx| {
+                DatePickerState::new(window, cx)
+                    .week_start(week_start)
+                    .today(today)
+            });
             self._mini_sub = Some(cx.subscribe(&state, |c, _, event, cx| {
                 let DatePickerEvent::Change(value) = event;
                 if let Some(date) = value.start() {
@@ -82,6 +90,7 @@ impl Calendar {
             self.mini_shown = None;
         }
         let state = self.mini.clone().expect("made above");
+        state.update(cx, |s, cx| s.set_today(Some(today), cx));
         // In step with the calendar's period, without anyone being told.
         if self.mini_shown != Some((self.anchor, week_start)) {
             let anchor = self.anchor;
@@ -183,5 +192,63 @@ impl Calendar {
                 .into_any_element()
         };
         (None, Some(open))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, TimeZone, Utc};
+    use gpui::{TestAppContext, px, size};
+
+    use crate::*;
+
+    fn mini_today(c: &Calendar, cx: &gpui::App) -> Option<NaiveDate> {
+        c.mini.as_ref().map(|s| s.read(cx).today_date())
+    }
+
+    #[gpui::test]
+    fn the_mini_month_marks_today_by_the_calendars_clock_and_zone(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        // 07:30 on Thursday 19 November in UTC: still Wednesday the 18th in Los Angeles, and
+        // already the evening of the 19th in Auckland, whatever the Mac's own zone is.
+        let now = Utc.with_ymd_and_hms(2026, 11, 19, 7, 30, 0).unwrap();
+        let (c, vcx) = cx.add_window_view(|_, cx| {
+            Calendar::new(cx)
+                .with_options(|o| {
+                    o.time_zone = chrono_tz::America::Los_Angeles;
+                    o.mini_month = true;
+                })
+                .with_now(now)
+        });
+        let draw = |vcx: &mut gpui::VisualTestContext| {
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+        };
+        vcx.simulate_resize(size(px(1280.), px(820.)));
+        draw(vcx);
+        draw(vcx);
+        let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap();
+        assert_eq!(c.read_with(vcx, mini_today), Some(day(18)));
+
+        // Another zone: the next day.
+        c.update(vcx, |c, cx| {
+            c.set_options(|o| o.time_zone = chrono_tz::Pacific::Auckland, cx)
+        });
+        draw(vcx);
+        assert_eq!(c.read_with(vcx, mini_today), Some(day(19)));
+
+        // The clock past midnight there: the day turns over.
+        c.update(vcx, |c, cx| {
+            c.set_now(Some(Utc.with_ymd_and_hms(2026, 11, 19, 11, 30, 0).unwrap()));
+            cx.notify();
+        });
+        draw(vcx);
+        assert_eq!(c.read_with(vcx, mini_today), Some(day(20)));
     }
 }
