@@ -368,6 +368,8 @@ impl Element for TextLeaf {
 }
 
 /// The paragraph layer's style for the editor's text at `font_size` and `line_height`.
+// The struct update below is for `CodeStyle` fields gpui-core adds after these.
+#[allow(clippy::needless_update)]
 pub(crate) fn paragraph_style(
     base: &gpui::TextStyle,
     font_size: Pixels,
@@ -389,6 +391,8 @@ pub(crate) fn paragraph_style(
             padding: font_size * 0.25,
             radius: px(4.),
             color: None,
+            // Fields gpui-core adds keep their defaults.
+            ..Default::default()
         },
     }
 }
