@@ -506,3 +506,165 @@ fn a_query_fits_at_every_width() {
     }
     assert!(found.is_empty(), "{}", found.join("\n"));
 }
+
+/// The event panel fits at every width, on the Mac beside the event and never over it, and on
+/// touch as a sheet: long titles, places, notes, links and guest names stay inside it.
+#[test]
+fn the_event_panel_fits_at_every_width() {
+    for touch in [false, true] {
+        let mut cx = context();
+        let (calendar, vcx) = cx.add_window_view(|_, cx| {
+            let mut events = worst_week();
+            let a = events.iter_mut().find(|e| e.id == "a").unwrap();
+            a.notes = Some(
+                "A long description that goes on about the agenda, the people, the room, the \
+                 prototype link and what has to be decided before the end of the week."
+                    .repeat(3)
+                    .into(),
+            );
+            a.attendees = (0..12)
+                .map(|i| {
+                    Attendee::new(
+                        format!("Someone with a very long name indeed, number {i}"),
+                        Response::Accepted,
+                    )
+                    .me(i == 1)
+                })
+                .collect();
+            let mut c = Calendar::new(cx)
+                .with_options(|o| {
+                    o.time_zone = TZ;
+                    o.touch = touch;
+                    o.event_panel = true;
+                })
+                .with_calendars(vec![
+                    CalendarSource::new("", "Work with an extremely long calendar name", 0x5b8def),
+                    CalendarSource::new("home", "Home", 0x4cc38a),
+                ])
+                .with_now(at(day(2), 10, 40))
+                .with_date(day(2))
+                .with_events(events);
+            c.scroll_to_minute(8. * 60.);
+            c
+        });
+        let mut found = Vec::new();
+        for (w, h) in [
+            (320., 700.),
+            (390., 844.),
+            (720., 600.),
+            (1280., 800.),
+            (2200., 900.),
+        ] {
+            vcx.simulate_resize(size(px(w), px(h)));
+            for view in [CalendarView::Day, CalendarView::Week] {
+                calendar.update(vcx, |c, cx| {
+                    c.close_panel(cx);
+                    c.set_view(view, cx);
+                    c.scroll_to_minute(8. * 60.);
+                });
+                for _ in 0..2 {
+                    vcx.run_until_parked();
+                    vcx.update(|window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                }
+                let event = calendar.read_with(vcx, |c, _| c.event_bounds("a"));
+                calendar.update(vcx, |c, cx| c.open_panel("a".into(), cx));
+                for _ in 0..2 {
+                    vcx.run_until_parked();
+                    vcx.update(|window, cx| {
+                        window.refresh();
+                        window.draw(cx).clear(cx);
+                    });
+                }
+                let window = Bounds::new(point(px(0.), px(0.)), size(px(w), px(h)));
+                // Narrow, the Mac shows the panel as a sheet too.
+                let narrow = w < 600.;
+                let outer = if touch || narrow {
+                    "calendar-sheet"
+                } else {
+                    "calendar-popover"
+                };
+                let b = vcx
+                    .debug_bounds(outer)
+                    .unwrap_or_else(|| panic!("no {outer} at {w}x{h} {view:?} touch {touch}"));
+                let inside = |r: Bounds<Pixels>, of: Bounds<Pixels>| {
+                    r.left() >= of.left() - px(0.5)
+                        && r.right() <= of.right() + px(0.5)
+                        && r.top() >= of.top() - px(0.5)
+                        && r.bottom() <= of.bottom() + px(0.5)
+                };
+                if !inside(b, window) {
+                    found.push(format!("{w}x{h} {view:?} touch {touch}: {b:?}"));
+                }
+                // A sheet covers the calendar on purpose; a popover never covers the event.
+                if !(touch || narrow)
+                    && let Some(event) = event
+                {
+                    let both = b.intersect(&event);
+                    if both.size.width > px(0.) && both.size.height > px(0.) {
+                        found.push(format!("{w}x{h} {view:?}: panel {b:?} covers {event:?}"));
+                    }
+                }
+                for sel in ["panel-title", "panel-link-0", "panel-guest-0", "panel-rsvp"] {
+                    if let Some(r) = vcx.debug_bounds(sel)
+                        && (r.left() < b.left() - px(0.5) || r.right() > b.right() + px(0.5))
+                    {
+                        found.push(format!(
+                            "{w}x{h} {view:?} touch {touch}: {sel} {r:?} in {b:?}"
+                        ));
+                    }
+                }
+                if touch
+                    && let Some(r) = vcx.debug_bounds("panel-link-0")
+                    && r.size.height < px(44.)
+                {
+                    found.push(format!("{w}x{h}: a link row is {:?} tall", r.size.height));
+                }
+                // Each row's icon sits on the middle of its first line: a line of text, or a
+                // pressable row (the calendar, a link) as tall as a target.
+                let rem = vcx.update(|window, _| f32::from(window.rem_size()));
+                let text_line = 20. * rem / 15.;
+                let row = if touch { 44. } else { 28. };
+                for (key, first_h) in [
+                    ("when", text_line),
+                    ("calendar", row),
+                    ("place", text_line),
+                    ("notes", text_line),
+                    ("links", row),
+                    ("guests", text_line),
+                ] {
+                    let sel = |what: &str| -> &'static str {
+                        Box::leak(format!("panel-{what}-{key}").into_boxed_str())
+                    };
+                    if let (Some(icon), Some(first)) = (
+                        vcx.debug_bounds(sel("icon")),
+                        vcx.debug_bounds(sel("first")),
+                    ) {
+                        let middle = first.top() + px(first_h / 2.);
+                        if (icon.center().y - middle).abs() > px(2.) {
+                            found.push(format!(
+                                "{w}x{h} {view:?} touch {touch}: the {key} icon is at {:?}, its line's middle at {middle:?}",
+                                icon.center().y
+                            ));
+                        }
+                    }
+                }
+                if let (Some(close), Some(title)) = (
+                    vcx.debug_bounds("panel-close"),
+                    vcx.debug_bounds("panel-title"),
+                ) {
+                    let middle = title.top() + px(22. * rem / 15. / 2.);
+                    if (close.center().y - middle).abs() > px(2.) {
+                        found.push(format!(
+                            "{w}x{h} {view:?} touch {touch}: × at {:?}, the title's first line at {middle:?}",
+                            close.center().y
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(found.is_empty(), "{}", found.join("\n"));
+    }
+}

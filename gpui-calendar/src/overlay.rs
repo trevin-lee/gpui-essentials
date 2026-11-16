@@ -21,6 +21,8 @@ pub(crate) struct Popover {
     anchor: Bounds<Pixels>,
     /// About how tall it draws, in CSS pixels: what decides whether it fits below or above.
     height: f32,
+    /// Tries beside the anchor (right, then left) before below and above.
+    beside: bool,
     open: bool,
     on_dismiss: Option<Dismiss>,
     children: Vec<AnyElement>,
@@ -32,6 +34,7 @@ impl Popover {
             id: id.into(),
             anchor: Bounds::default(),
             height: 160.,
+            beside: false,
             open: true,
             on_dismiss: None,
             children: Vec::new(),
@@ -46,6 +49,13 @@ impl Popover {
 
     pub fn open(mut self, open: bool) -> Self {
         self.open = open;
+        self
+    }
+
+    /// Beside the anchor first, as a panel about an event is; below and above only where
+    /// neither side has room.
+    pub fn beside(mut self) -> Self {
+        self.beside = true;
         self
     }
 
@@ -101,14 +111,38 @@ impl RenderOnce for Popover {
         let tall = rem * (self.height / 15.);
         let wide = rem * (MAX_WIDTH / 15.);
         let a = self.anchor;
-        let (corner, own, offset) = if view.height - a.bottom() - gap - edge >= tall {
-            (Anchor::BottomLeft, Anchor::TopLeft, point(px(0.), gap))
-        } else if a.top() - gap - edge >= tall {
-            (Anchor::TopLeft, Anchor::BottomLeft, point(px(0.), -gap))
-        } else if view.width - a.right() - gap - edge >= wide {
-            (Anchor::TopRight, Anchor::TopLeft, point(gap, px(0.)))
+        let below = (Anchor::BottomLeft, Anchor::TopLeft, point(px(0.), gap));
+        let above = (Anchor::TopLeft, Anchor::BottomLeft, point(px(0.), -gap));
+        // Beside, it moves up as far as it must to end inside the window, never above its top.
+        let lift = (view.height - edge - tall - a.top())
+            .min(px(0.))
+            .max(edge - a.top());
+        let right = (Anchor::TopRight, Anchor::TopLeft, point(gap, lift));
+        let left = (Anchor::TopLeft, Anchor::TopRight, point(-gap, lift));
+        let fits_below = view.height - a.bottom() - gap - edge >= tall;
+        let fits_above = a.top() - gap - edge >= tall;
+        let fits_right = view.width - a.right() - gap - edge >= wide;
+        let fits_left = a.left() - gap - edge >= wide;
+        let (corner, own, offset) = if self.beside {
+            if fits_right {
+                right
+            } else if fits_left {
+                left
+            } else if fits_below {
+                below
+            } else if fits_above {
+                above
+            } else {
+                right
+            }
+        } else if fits_below {
+            below
+        } else if fits_above {
+            above
+        } else if fits_right {
+            right
         } else {
-            (Anchor::TopLeft, Anchor::TopRight, point(-gap, px(0.)))
+            left
         };
         deferred(
             anchored()

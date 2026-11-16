@@ -11,8 +11,8 @@
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
 //! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
-//! `compact-recurring`, `find`, `compact-find`. Pictures and the bench draw a window that's
-//! never shown and never takes the keyboard.
+//! `compact-recurring`, `find`, `compact-find`, `panel`, `compact-panel`. Pictures and the
+//! bench draw a window that's never shown and never takes the keyboard.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -304,7 +304,22 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         .location("Zoom")
         .read_only(true),
     );
-    out.iter_mut().find(|e| e.id == "design").unwrap().location = Some("Room 4".into());
+    {
+        // The design review, as Google Calendar would hand it over: notes and guests.
+        let design = out.iter_mut().find(|e| e.id == "design").unwrap();
+        design.location = Some("Room 4".into());
+        design.notes = Some(
+            "Walk through the new onboarding flow and the empty states. Bring the prototype \
+             link; decide on the copy for step two."
+                .into(),
+        );
+        design.attendees = vec![
+            Attendee::new("Priya Raman", Response::Accepted).organizer(true),
+            Attendee::new("Trevin Lee", Response::NeedsAction).me(true),
+            Attendee::new("Maya Chen", Response::Tentative),
+            Attendee::new("Jordan Alvarez-Whitfield", Response::Declined),
+        ];
+    }
     // Links to docs and agents, as the app's Docs section would attach them.
     let mut link = |id: &str, links: Vec<EventLink>| {
         out.iter_mut().find(|e| e.id == id).unwrap().links = links;
@@ -571,7 +586,7 @@ impl Root {
         let mut week_start = Weekday::Mon;
         let mut now_at = now;
         match args.scene.as_str() {
-            "day" | "compact-zones" => view = CalendarView::Day,
+            "day" | "compact-zones" | "compact-panel" => view = CalendarView::Day,
             "compact-find" => view = CalendarView::AGENDA,
             // A phone: the day, the week and the agenda at an iPhone's width.
             "compact" | "compact-swipe" | "compact-hold" | "compact-recurring" => {
@@ -666,6 +681,8 @@ impl Root {
             if scene == "compact-find" {
                 c.set_query("cs 162", cx);
             }
+            // Opening an event shows its panel.
+            c.options.event_panel = true;
             // A colleague in Bangalore: a second column of hours, half an hour off ours.
             if scene.ends_with("zones") {
                 c.options.secondary_zone = Some(chrono_tz::Asia::Kolkata);
@@ -778,6 +795,39 @@ impl Root {
             CalendarEvent::Delete { event, .. } => {
                 let said = format!("Deleted {}", title(&event.id, cx));
                 calendar.update(cx, |c, cx| c.remove_event(&event.id, cx));
+                said
+            }
+            CalendarEvent::Edit(event) => {
+                format!("Edit {} in the app's editor", title(&event.id, cx))
+            }
+            CalendarEvent::ChangeCalendar {
+                event,
+                calendar: to,
+                ..
+            } => {
+                let said = format!("{} → the {to} calendar", title(&event.id, cx));
+                let to = to.clone();
+                calendar.update(cx, |c, cx| {
+                    if let Some(mut e) = c.event(&event.id).cloned() {
+                        e.calendar = to;
+                        c.upsert_event(e, cx);
+                    }
+                });
+                said
+            }
+            CalendarEvent::Rsvp {
+                event, response, ..
+            } => {
+                let said = format!("Answered {} for {}", response.label(), title(&event.id, cx));
+                let response = *response;
+                calendar.update(cx, |c, cx| {
+                    if let Some(mut e) = c.event(&event.id).cloned() {
+                        for a in e.attendees.iter_mut().filter(|a| a.me) {
+                            a.response = response;
+                        }
+                        c.upsert_event(e, cx);
+                    }
+                });
                 said
             }
         }
@@ -1220,6 +1270,21 @@ mod shots {
                 "find" => {
                     let _ = cx.update_window(window, |_, window, cx| {
                         calendar.update(cx, |c, cx| c.type_query(window, cx))
+                    });
+                }
+                // The design review's panel: beside it on the Mac, a sheet on a phone.
+                "panel" | "compact-panel" => {
+                    let _ = cx.update_window(window, |_, _, cx| {
+                        calendar.update(cx, |c, cx| {
+                            if scene == "compact-panel" {
+                                c.go_to(monday, cx);
+                            }
+                            c.select(Some(Selection::Event("design".into())), cx);
+                        })
+                    });
+                    settle(window, cx).await;
+                    let _ = cx.update_window(window, |_, _, cx| {
+                        calendar.update(cx, |c, cx| c.open_panel("design".into(), cx))
                     });
                 }
                 "agenda" | "compact-agenda" => {

@@ -915,3 +915,155 @@ fn command_f_asks_the_host_and_typing_stays_keys_until_asked(cx: &mut TestAppCon
     assert_eq!(c.read_with(cx, |c, _| c.query().to_string()), "");
     assert!(has(&seen, &CalendarEvent::QueryChange("".into())));
 }
+
+fn panel_on(c: Calendar) -> Calendar {
+    let c = c.with_options(|o| o.event_panel = true);
+    let mut events = events();
+    let a = events.iter_mut().find(|e| e.id == "a").unwrap();
+    a.notes = Some("Bring the numbers.".into());
+    a.attendees = vec![
+        Attendee::new("Priya", Response::Accepted).organizer(true),
+        Attendee::new("Me", Response::NeedsAction).me(true),
+    ];
+    c.with_events(events)
+}
+
+fn double_click(cx: &mut VisualTestContext, p: Point<Pixels>) {
+    cx.simulate_event(MouseDownEvent {
+        position: p,
+        modifiers: Modifiers::none(),
+        button: MouseButton::Left,
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_mouse_up(p, MouseButton::Left, Modifiers::none());
+    draw(cx);
+}
+
+#[gpui::test]
+fn opening_an_event_shows_its_panel_when_the_host_asks(cx: &mut TestAppContext) {
+    // Off (the default): Open, and no panel.
+    let (c, seen, cx) = open(cx);
+    double_click(cx, spot(&c, cx, day(2), 11, 30));
+    assert!(has(&seen, &CalendarEvent::Open("a".into())));
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    assert!(cx.debug_bounds("panel").is_none());
+}
+
+#[gpui::test]
+fn the_panel_sends_its_actions_to_the_host(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, panel_on);
+    let at = spot(&c, cx, day(2), 11, 30);
+    double_click(cx, at);
+    assert!(has(&seen, &CalendarEvent::Open("a".into())));
+    assert_eq!(
+        c.read_with(cx, |c, _| c.panel_event().cloned()),
+        Some("a".into())
+    );
+    let panel = cx.debug_bounds("panel").expect("the panel");
+    let chip = c.read_with(cx, |c, _| c.event_bounds("a")).unwrap();
+    let both = panel.intersect(&chip);
+    assert!(
+        both.size.width <= px(0.) || both.size.height <= px(0.),
+        "over the event"
+    );
+    // The answer to the invitation: Yes is the group's first third.
+    let rsvp = cx.debug_bounds("panel-rsvp").expect("Going?");
+    cx.simulate_click(
+        point(rsvp.left() + rsvp.size.width / 6., rsvp.center().y),
+        Modifiers::none(),
+    );
+    draw(cx);
+    assert!(has(
+        &seen,
+        &CalendarEvent::Rsvp {
+            event: reference("a"),
+            response: Response::Accepted,
+            scope: EditScope::This,
+        }
+    ));
+    // A one-off answer leaves the panel open; a link in it opens the link.
+    assert_eq!(
+        c.read_with(cx, |c, _| c.panel_event().cloned()),
+        Some("a".into())
+    );
+    let link = cx.debug_bounds("panel-link-0").expect("the link");
+    cx.simulate_click(link.center(), Modifiers::none());
+    draw(cx);
+    assert!(seen.borrow().iter().any(|e| matches!(
+        e,
+        CalendarEvent::OpenLink { event, .. } if event.id == "a"
+    )));
+    // Escape closes it.
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    // Delete from the panel: not repeating, so straight to the host.
+    double_click(cx, at);
+    let delete = cx.debug_bounds("panel-delete").expect("Delete");
+    cx.simulate_click(delete.center(), Modifiers::none());
+    draw(cx);
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: reference("a"),
+            scope: EditScope::This
+        }
+    ));
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+}
+
+#[gpui::test]
+fn a_read_only_events_panel_has_no_edits(cx: &mut TestAppContext) {
+    let (c, _, cx) = open_with(cx, panel_on);
+    double_click(cx, spot(&c, cx, day(3), 9, 30));
+    assert_eq!(
+        c.read_with(cx, |c, _| c.panel_event().cloned()),
+        Some("ro".into())
+    );
+    assert!(cx.debug_bounds("panel").is_some());
+    assert!(cx.debug_bounds("panel-actions").is_none());
+}
+
+#[gpui::test]
+fn moving_a_repeating_event_to_another_calendar_asks_first(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, panel_on);
+    c.update(cx, |c, cx| c.open_panel("gym@4".into(), cx));
+    draw(cx);
+    // "Change" opens the list of the other calendars that can take it: Work only.
+    assert!(cx.debug_bounds("panel-calendar-0").is_none());
+    let change = cx.debug_bounds("panel-change").expect("Change");
+    cx.simulate_click(change.center(), Modifiers::none());
+    draw(cx);
+    assert!(cx.debug_bounds("panel-calendar-1").is_none());
+    let work = cx.debug_bounds("panel-calendar-0").expect("Work");
+    cx.simulate_click(work.center(), Modifiers::none());
+    draw(cx);
+    // A repeating event: the panel gives way to the question.
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    assert!(c.read_with(cx, |c, _| c.is_asking()));
+    cx.simulate_keystrokes("down down enter");
+    assert!(has(
+        &seen,
+        &CalendarEvent::ChangeCalendar {
+            event: gym4(),
+            calendar: "work".into(),
+            scope: EditScope::All,
+        }
+    ));
+}
+
+#[gpui::test]
+fn find_looks_in_the_notes_too(cx: &mut TestAppContext) {
+    let (c, _, cx) = open_with(cx, panel_on);
+    c.update(cx, |c, cx| c.set_query("NUMBERS", cx));
+    draw(cx);
+    let found: Vec<String> = c.read_with(cx, |c, _| {
+        c.found().iter().map(|e| e.id.to_string()).collect()
+    });
+    assert_eq!(found, vec!["a".to_string()]);
+    // And the panel shows the notes it found them in.
+    c.update(cx, |c, cx| c.open_panel("a".into(), cx));
+    draw(cx);
+    assert!(cx.debug_bounds("panel").is_some());
+}

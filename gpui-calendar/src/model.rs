@@ -188,6 +188,72 @@ pub struct Event {
     pub read_only: bool,
     /// Links to docs and agents, shown on the event in the order given.
     pub links: Vec<EventLink>,
+    /// The description, shown in the event panel.
+    pub notes: Option<SharedString>,
+    /// Who's invited and how they answered, shown in the event panel. Empty when the host
+    /// doesn't know or the event has no guests.
+    pub attendees: Vec<Attendee>,
+}
+
+/// Someone invited to an event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Attendee {
+    pub name: SharedString,
+    pub email: Option<SharedString>,
+    pub response: Response,
+    /// The one who sent the invitation.
+    pub organizer: bool,
+    /// The person using the calendar: the panel offers them Yes, Maybe and No.
+    pub me: bool,
+}
+
+impl Attendee {
+    pub fn new(name: impl Into<SharedString>, response: Response) -> Self {
+        Self {
+            name: name.into(),
+            email: None,
+            response,
+            organizer: false,
+            me: false,
+        }
+    }
+
+    pub fn email(mut self, email: impl Into<SharedString>) -> Self {
+        self.email = Some(email.into());
+        self
+    }
+
+    pub fn organizer(mut self, organizer: bool) -> Self {
+        self.organizer = organizer;
+        self
+    }
+
+    pub fn me(mut self, me: bool) -> Self {
+        self.me = me;
+        self
+    }
+}
+
+/// How someone answered an invitation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Response {
+    Accepted,
+    Tentative,
+    Declined,
+    /// Not answered yet.
+    #[default]
+    NeedsAction,
+}
+
+impl Response {
+    pub fn label(self) -> &'static str {
+        match self {
+            Response::Accepted => "Going",
+            Response::Tentative => "Maybe",
+            Response::Declined => "Not going",
+            Response::NeedsAction => "Hasn't answered",
+        }
+    }
 }
 
 impl Event {
@@ -222,11 +288,23 @@ impl Event {
             location: None,
             read_only: false,
             links: Vec::new(),
+            notes: None,
+            attendees: Vec::new(),
         }
     }
 
     pub fn calendar(mut self, calendar: impl Into<CalendarId>) -> Self {
         self.calendar = calendar.into();
+        self
+    }
+
+    pub fn notes(mut self, notes: impl Into<SharedString>) -> Self {
+        self.notes = Some(notes.into());
+        self
+    }
+
+    pub fn attendee(mut self, attendee: Attendee) -> Self {
+        self.attendees.push(attendee);
         self
     }
 
@@ -331,6 +409,10 @@ pub struct CalendarOptions {
     pub default_calendar: Option<CalendarId>,
     /// Draws events that have ended a little quieter.
     pub dim_past: bool,
+    /// Opening an event (a double click, Enter, or a tap on the selected one on touch) shows
+    /// its details in a panel: a popover on the Mac, a sheet on touch. `CalendarEvent::Open` is
+    /// sent either way. Off by default, for hosts with a panel of their own.
+    pub event_panel: bool,
     /// The most rows of all-day events the time grid shows before it says "+N".
     pub all_day_rows: usize,
     /// Taken by touch, as on a phone or a tablet. A long press picks an event up or makes one,
@@ -354,6 +436,7 @@ impl Default for CalendarOptions {
             scroll_time: NaiveTime::from_hms_opt(8, 0, 0).expect("8:00"),
             default_calendar: None,
             dim_past: true,
+            event_panel: false,
             all_day_rows: 3,
             touch: cfg!(any(target_os = "ios", target_os = "android")),
         }
