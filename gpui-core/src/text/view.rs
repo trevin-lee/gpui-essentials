@@ -4,13 +4,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AbsoluteLength, App, AvailableSpace, Bounds, ClipboardItem, CursorStyle, DefiniteLength,
-    DispatchPhase, Element, ElementId, Fill, FocusHandle, FontWeight, GlobalElementId,
-    HitboxBehavior, Hsla, InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding,
-    LayoutId, Length, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Point, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, Style, StyleRefinement, Styled as _, Window, actions, div,
-    fill, point, px, quad, relative, rems, size, transparent_black,
+    AbsoluteLength, App, AvailableSpace, Bounds, ClipboardItem, Corners, CursorStyle,
+    DefiniteLength, DispatchPhase, Element, ElementId, Fill, FocusHandle, FontWeight,
+    GlobalElementId, HitboxBehavior, Hsla, InspectorElementId, InteractiveElement as _,
+    IntoElement, KeyBinding, LayoutId, Length, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Rems, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement as _, Style, StyleRefinement, Styled as _, Window,
+    actions, div, fill, point, px, quad, relative, rems, size, transparent_black,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -45,6 +45,9 @@ pub(crate) fn init(cx: &mut App) {
 
 type HeadingSize = Arc<dyn Fn(u8, Pixels) -> Pixels + Send + Sync + 'static>;
 
+/// A heading's space above and below from its level (1 to 6) and its font size.
+pub type HeadingMargins = Arc<dyn Fn(u8, Pixels) -> (Pixels, Pixels) + Send + Sync + 'static>;
+
 /// How a TextView lays its blocks out, beyond the theme.
 #[derive(Clone)]
 pub struct TextViewStyle {
@@ -63,9 +66,22 @@ pub struct TextViewStyle {
     pub list_indent: Option<Pixels>,
     /// The space between a list's items (0.4 of the paragraph gap unless given).
     pub list_item_gap: Option<Pixels>,
+    /// The space between an item's bullet or number and its text. Markers end that far before
+    /// the text, as the web's do (0.3 of the indent unless given).
+    pub list_marker_gap: Option<Pixels>,
     /// The space above a heading and below it (the paragraph gap unless given).
     pub heading_margin_top: Option<Pixels>,
     pub heading_margin_bottom: Option<Pixels>,
+    /// The space above and below a heading by its level and font size, over the two above: for
+    /// margins in ems, as the web's `1.1em` above an h1. Between two headings the larger of the
+    /// first's bottom and the second's top applies, and the first block in the view or in a
+    /// list item, quote or cell never has space above it.
+    pub heading_margins: Option<HeadingMargins>,
+    /// A heading's line height as a multiple of its size (the text's line height, scaled to the
+    /// heading's size, unless given).
+    pub heading_line_height: Option<f32>,
+    /// A table's corners (the theme's `radius_md` unless given).
+    pub table_radius: Option<Pixels>,
     /// Inline code: its family (the theme's mono family unless given), its size as a share of
     /// the text's (the text's unless given), its padding, corners, fill and colour.
     pub inline_code: InlineCodeStyle,
@@ -81,6 +97,9 @@ pub struct InlineCodeStyle {
     pub size: Option<f32>,
     /// Space either side of it, inside its fill.
     pub padding: Option<Pixels>,
+    /// Space above and below its ink, inside its fill (half the side padding unless given).
+    /// Negative draws the fill inside the font's ascent and descent, towards its cap height.
+    pub padding_y: Option<Pixels>,
     pub radius: Option<Pixels>,
     pub background: Option<Hsla>,
     pub color: Option<Hsla>,
@@ -100,6 +119,8 @@ pub struct TextViewColors {
     pub quote_bar: Option<Hsla>,
     /// A table's lines (the theme's border).
     pub table_line: Option<Hsla>,
+    /// A table's header row's fill (none unless given).
+    pub table_header: Option<Hsla>,
     /// The selection (the theme's ring at 30%).
     pub selection: Option<Hsla>,
     /// An image's description and other quiet text (the theme's muted foreground).
@@ -115,8 +136,12 @@ impl Default for TextViewStyle {
             code_block: StyleRefinement::default(),
             list_indent: None,
             list_item_gap: None,
+            list_marker_gap: None,
             heading_margin_top: None,
             heading_margin_bottom: None,
+            heading_margins: None,
+            heading_line_height: None,
+            table_radius: None,
             inline_code: InlineCodeStyle::default(),
             colors: TextViewColors::default(),
         }
@@ -226,7 +251,7 @@ enum Deco {
         fill: Hsla,
         border: Hsla,
         border_width: Pixels,
-        radius: Pixels,
+        radius: Corners<Pixels>,
     },
     Text {
         origin: Point<Pixels>,
@@ -275,6 +300,27 @@ impl Ctx<'_> {
                     _ => 1.,
                 }
             }
+        }
+    }
+
+    /// A heading's text style.
+    fn heading(&self, level: u8) -> ParagraphStyle {
+        let size = self.heading_size(level);
+        let mut s = self.with_size(size, true);
+        if let Some(r) = self.style.heading_line_height {
+            s.line_height = size * r;
+        }
+        s
+    }
+
+    /// The space above a heading and below it.
+    fn heading_margins(&self, level: u8) -> (Pixels, Pixels) {
+        match &self.style.heading_margins {
+            Some(f) => f(level, self.heading_size(level)),
+            None => (
+                self.style.heading_margin_top.unwrap_or(self.gap),
+                self.style.heading_margin_bottom.unwrap_or(self.gap),
+            ),
         }
     }
 
@@ -349,20 +395,22 @@ fn lay(
     let width = width.max(px(8.));
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 {
-            let heading = |b: &Block| matches!(b, Block::Heading(..));
-            y += if heading(&blocks[i - 1]) {
-                cx.style.heading_margin_bottom.unwrap_or(cx.gap)
-            } else if heading(b) {
-                cx.style.heading_margin_top.unwrap_or(cx.gap)
-            } else {
-                cx.gap
+            let margins = |b: &Block| match b {
+                Block::Heading(level, _) => Some(cx.heading_margins(*level)),
+                _ => None,
+            };
+            y += match (margins(&blocks[i - 1]), margins(b)) {
+                (Some((_, below)), Some((above, _))) => below.max(above),
+                (Some((_, below)), None) => below,
+                (None, Some((above, _))) => above,
+                (None, None) => cx.gap,
             };
         }
         let sep = if out.leaves.is_empty() { "" } else { "\n\n" };
         match b {
             Block::Paragraph(p) => y = leaf(p, &cx.base, x, width, y, sep, out, window),
             Block::Heading(level, p) => {
-                let s = cx.with_size(cx.heading_size(*level), true);
+                let s = cx.heading(*level);
                 y = leaf(p, &s, x, width, y, sep, out, window);
             }
             Block::Code { text, .. } => {
@@ -375,7 +423,7 @@ fn lay(
                     fill: fill_,
                     border,
                     border_width: bw,
-                    radius,
+                    radius: Corners::all(radius),
                 });
                 y = leaf(
                     &Paragraph::plain(text.clone()),
@@ -393,7 +441,7 @@ fn lay(
                     fill: fill_,
                     border,
                     border_width: bw,
-                    radius,
+                    radius: Corners::all(radius),
                 };
             }
             Block::Quote(inner) => {
@@ -407,7 +455,7 @@ fn lay(
                     fill: cx.style.colors.quote_bar.unwrap_or(cx.theme.border),
                     border: transparent_black(),
                     border_width: px(0.),
-                    radius: px(1.5),
+                    radius: Corners::all(px(1.5)),
                 });
                 y = lay(inner, x + indent, width - indent, y, cx, out, window);
                 out.decos[deco_ix] = Deco::Box {
@@ -415,7 +463,7 @@ fn lay(
                     fill: cx.style.colors.quote_bar.unwrap_or(cx.theme.border),
                     border: transparent_black(),
                     border_width: px(0.),
-                    radius: px(1.5),
+                    radius: Corners::all(px(1.5)),
                 };
             }
             Block::List { start, items } => {
@@ -424,6 +472,7 @@ fn lay(
                     .list_indent
                     .unwrap_or(cx.rem * if start.is_some() { 1.6 } else { 1.2 })
                     .min(width * 0.25);
+                let gap = cx.style.list_marker_gap.unwrap_or(indent * 0.3);
                 for (n, item) in items.iter().enumerate() {
                     if n > 0 {
                         y += cx.style.list_item_gap.unwrap_or(cx.gap * 0.4);
@@ -440,9 +489,14 @@ fn lay(
                         .colors
                         .list_marker
                         .unwrap_or(cx.theme.muted_foreground);
+                    let len = marker.len();
                     let m = ParagraphLayout::new(&Paragraph::plain(marker), &ms, indent, window);
+                    // Its end sits the gap before the text; a marker too wide for that starts
+                    // at the list's edge.
+                    let marker_w = m.position_for(len).x;
+                    let mx = (indent - gap - marker_w).max(px(0.));
                     out.decos.push(Deco::Text {
-                        origin: point(x, y),
+                        origin: point(x + mx, y),
                         layout: m,
                     });
                     let before = out.leaves.len();
@@ -461,7 +515,7 @@ fn lay(
                     fill: cx.style.colors.rule.unwrap_or(cx.theme.border),
                     border: transparent_black(),
                     border_width: px(0.),
-                    radius: px(0.),
+                    radius: Corners::all(px(0.)),
                 });
                 y += cx.base.line_height;
             }
@@ -470,9 +524,24 @@ fn lay(
                 let pad = cx.rem * 0.5;
                 let col_w = width / cols as f32;
                 let top = y;
+                let radius = cx
+                    .style
+                    .table_radius
+                    .unwrap_or(cx.theme.radius_md().to_pixels(cx.rem));
                 for (ri, row) in rows.iter().enumerate() {
                     let row_top = y;
                     let mut row_bottom = y;
+                    let header_ix =
+                        (ri == 0 && cx.style.colors.table_header.is_some()).then(|| {
+                            out.decos.push(Deco::Box {
+                                bounds: Bounds::default(),
+                                fill: transparent_black(),
+                                border: transparent_black(),
+                                border_width: px(0.),
+                                radius: Corners::all(px(0.)),
+                            });
+                            out.decos.len() - 1
+                        });
                     let s = if ri == 0 {
                         cx.with_size(cx.base.size, true)
                     } else {
@@ -507,20 +576,37 @@ fn lay(
                         row_bottom = row_bottom.max(row_top + pad * 2. + h);
                     }
                     y = row_bottom;
-                    out.decos.push(Deco::Box {
-                        bounds: Bounds::new(point(x, y), size(width, px(1.))),
-                        fill: cx.style.colors.table_line.unwrap_or(cx.theme.border),
-                        border: transparent_black(),
-                        border_width: px(0.),
-                        radius: px(0.),
-                    });
+                    if let (Some(ix), Some(fill_)) = (header_ix, cx.style.colors.table_header) {
+                        // The header's fill, inside the table's border and its top corners.
+                        out.decos[ix] = Deco::Box {
+                            bounds: Bounds::new(point(x, row_top), size(width, y - row_top)),
+                            fill: fill_,
+                            border: transparent_black(),
+                            border_width: px(0.),
+                            radius: Corners {
+                                top_left: radius,
+                                top_right: radius,
+                                ..Corners::default()
+                            },
+                        };
+                    }
+                    // Lines between rows; the table's border is the last one's.
+                    if ri + 1 < rows.len() {
+                        out.decos.push(Deco::Box {
+                            bounds: Bounds::new(point(x, y), size(width, px(1.))),
+                            fill: cx.style.colors.table_line.unwrap_or(cx.theme.border),
+                            border: transparent_black(),
+                            border_width: px(0.),
+                            radius: Corners::all(px(0.)),
+                        });
+                    }
                 }
                 out.decos.push(Deco::Box {
                     bounds: Bounds::new(point(x, top), size(width, y - top)),
                     fill: transparent_black(),
                     border: cx.style.colors.table_line.unwrap_or(cx.theme.border),
                     border_width: px(1.),
-                    radius: cx.theme.radius_md().to_pixels(cx.rem),
+                    radius: Corners::all(radius),
                 });
             }
         }
@@ -593,6 +679,7 @@ fn layout_for(
         code: CodeStyle {
             size: style.inline_code.size.map(|r| size * r),
             padding: style.inline_code.padding.unwrap_or(px(0.)),
+            padding_y: style.inline_code.padding_y,
             radius: style.inline_code.radius.unwrap_or(px(0.)),
             color: style.inline_code.color,
         },
