@@ -1586,3 +1586,138 @@ fn a_screen_reader_hears_how_many_didnt_fit_and_when(cx: &mut TestAppContext) {
         Some(hidden)
     );
 }
+
+#[gpui::test]
+fn an_all_day_event_dragged_into_the_hours_takes_the_default_length_there(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let b = c
+        .read_with(cx, |c, _| c.event_bounds("trip"))
+        .expect("drawn");
+    let grab = point(b.left() + px(20.), b.center().y);
+    let to = spot(&c, cx, day(2), 14, 5);
+    press(cx, grab);
+    move_to(cx, point(grab.x + px(10.), grab.y));
+    move_to(cx, to);
+    // The ghost is in the hours, an hour long from the snapped drop.
+    let want = EventTime::timed(at(day(2), 14, 0), at(day(2), 15, 0));
+    assert_eq!(
+        c.read_with(cx, |c, _| c.drag_proposal()),
+        Some((Some("trip".into()), want))
+    );
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: reference("trip"),
+            time: want,
+            scope: EditScope::This,
+        }
+    ));
+    unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn a_timed_event_dragged_into_the_all_day_row_becomes_that_day(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let a = c.read_with(cx, |c, _| c.event_bounds("a")).expect("drawn");
+    let row = c
+        .read_with(cx, |c, _| c.event_bounds("trip"))
+        .expect("drawn")
+        .center()
+        .y;
+    let grab = point(a.center().x, a.top() + px(6.));
+    let thursday = spot(&c, cx, day(3), 12, 0).x;
+    press(cx, grab);
+    move_to(cx, point(grab.x, grab.y - px(10.)));
+    move_to(cx, point(thursday, row));
+    let all_day = EventTime::all_day(day(3), day(4));
+    assert_eq!(
+        c.read_with(cx, |c, _| c.drag_proposal()),
+        Some((Some("a".into()), all_day))
+    );
+    // And back down into the hours, before letting go: timed again, as long as it was.
+    let back = spot(&c, cx, day(3), 15, 0);
+    move_to(cx, back);
+    assert_eq!(
+        c.read_with(cx, |c, _| c.drag_proposal()),
+        Some((
+            Some("a".into()),
+            EventTime::timed(at(day(3), 15, 0), at(day(3), 16, 0))
+        ))
+    );
+    move_to(cx, point(thursday, row));
+    cx.simulate_mouse_up(point(thursday, row), MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: reference("a"),
+            time: all_day,
+            scope: EditScope::This,
+        }
+    ));
+    unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn a_multi_day_event_moves_across_the_week_by_days(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let b = c
+        .read_with(cx, |c, _| c.event_bounds("trip"))
+        .expect("drawn");
+    let grab = point(b.left() + px(20.), b.center().y);
+    let two_days = spot(&c, cx, day(2), 12, 0).x - spot(&c, cx, day(0), 12, 0).x;
+    drag(cx, grab, point(grab.x + two_days, grab.y));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: reference("trip"),
+            time: EventTime::all_day(day(2), day(4)),
+            scope: EditScope::This,
+        }
+    ));
+    // Held by its second day, it keeps its length and where it was held.
+    let b = c
+        .read_with(cx, |c, _| c.event_bounds("trip"))
+        .expect("drawn");
+    let second = point(b.right() - px(20.), b.center().y);
+    let one_day = spot(&c, cx, day(1), 12, 0).x - spot(&c, cx, day(0), 12, 0).x;
+    drag(cx, second, point(second.x + one_day * 3., second.y));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: reference("trip"),
+            time: EventTime::all_day(day(3), day(5)),
+            scope: EditScope::This,
+        }
+    ));
+    unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn a_repeating_event_dragged_between_the_rows_is_asked_about(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    c.update(cx, |c, _| c.scroll_to_minute(12. * 60.));
+    draw(cx);
+    let gym = c
+        .read_with(cx, |c, _| c.event_bounds("gym@1"))
+        .expect("drawn");
+    let row = c
+        .read_with(cx, |c, _| c.event_bounds("trip"))
+        .expect("drawn")
+        .center()
+        .y;
+    let grab = point(gym.center().x, gym.top() + px(6.));
+    drag(cx, grab, point(grab.x, row));
+    assert!(c.read_with(cx, |c, _| c.is_asking()));
+    c.update(cx, |c, cx| c.answer(EditScope::All, cx));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: reference("gym@1"),
+            time: EventTime::all_day(day(1), day(2)),
+            scope: EditScope::All,
+        }
+    ));
+}
