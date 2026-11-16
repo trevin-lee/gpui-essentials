@@ -232,8 +232,10 @@ moves once a minute.
 
 ## Status
 
-Early, and used for one app so far. It's tested on macOS. GPUI also runs on Linux and Windows,
-but this crate hasn't been tried there.
+Early, and used for one app so far. It's tested on macOS, and CI builds it for the iOS
+simulator (`aarch64-apple-ios-sim`): on iOS, GPUI Kit leaves the platform to the app, which links
+`gpui-pre-ios` itself. GPUI also runs on Linux and Windows, but this crate hasn't been tried
+there.
 
 Not done yet:
 - Recurrence editing (expanding recurring events, and asking "this event or all of them", is
