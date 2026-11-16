@@ -48,22 +48,21 @@ pub fn toggle_container(open: bool, window: &mut Window, cx: &mut App) -> Div {
 
 /// A callout's container: a tinted box with a bar in the alert's colour.
 pub fn callout_container(name: &str, cx: &mut App) -> Div {
-    // GPUI Kit's colours until gpui-core's theme has callout tokens.
-    use gpui_kit::component::ActiveTheme as _;
-    let theme = cx.theme();
-    let accent: Hsla = match name {
-        "tip" => theme.success,
-        "important" => theme.primary,
-        "warning" => theme.warning,
-        "caution" => theme.danger,
-        _ => theme.info,
+    // The theme's callout colours: the bar's and the tint behind.
+    let theme = gpui_core::Theme::global(cx);
+    let (accent, tint): (Hsla, Hsla) = match name {
+        "tip" => (theme.callout_tip, theme.callout_tip_background),
+        "important" => (theme.callout_important, theme.callout_important_background),
+        "warning" => (theme.callout_warning, theme.callout_warning_background),
+        "caution" => (theme.callout_caution, theme.callout_caution_background),
+        _ => (theme.callout_note, theme.callout_note_background),
     };
     div()
         .w_full()
         .rounded(px(6.))
         .border_l(px(3.))
         .border_color(accent)
-        .bg(accent.opacity(0.08))
+        .bg(tint)
         .px(rems(0.875))
         .py(rems(0.5))
 }
