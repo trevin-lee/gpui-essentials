@@ -137,6 +137,20 @@ fn worst_nodes() -> Vec<Node> {
             .text_align(LabelAlign::Right),
     ]
     .into_iter()
+    // Frames, titled with the worst text, colored and not.
+    .chain([
+        Node::new("frame", xy(0., 1100.))
+            .kind("frame")
+            .label(text.clone())
+            .icon("folder")
+            .emoji("📁")
+            .size(300., 140.),
+        Node::new("small frame", xy(400., 1100.))
+            .kind("frame")
+            .label(WORD)
+            .color("purple")
+            .size(130., 80.),
+    ])
     // Every whiteboard shape, at its own size and at a small fixed one.
     .chain(NodeShape::ALL.iter().enumerate().flat_map(|(i, shape)| {
         let at = xy(900. + (i % 3) as f32 * 260., (i / 3) as f32 * 260.);

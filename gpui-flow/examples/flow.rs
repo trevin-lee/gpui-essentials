@@ -268,12 +268,19 @@ fn whiteboard() -> (Vec<Node>, Vec<Edge>) {
             .shape(NodeShape::Diamond)
             .label("Valid?")
             .color("yellow"),
-        Node::new("db", at(740., 100.))
+        Node::new("storage", at(700., 40.))
+            .kind("frame")
+            .label("Storage")
+            .icon("hard-drive")
+            .size(260., 420.),
+        Node::new("db", at(40., 60.))
+            .parent("storage")
             .shape(NodeShape::Cylinder)
             .label("Users")
             .icon("database")
             .color("teal"),
-        Node::new("mail", at(720., 300.))
+        Node::new("mail", at(20., 260.))
+            .parent("storage")
             .shape(NodeShape::Document)
             .label("Welcome email")
             .icon("mail")

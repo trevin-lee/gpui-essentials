@@ -125,6 +125,19 @@ Run the example with `cargo run --release --example flow` from this folder.
     `bottom` and `left`, on its visible edge. They're drawn only while it's selected, and a
     finger takes them only then. The mouse can drag a connection from them at any time.
   - The example draws a whiteboard with `--whiteboard`.
+- **Frames.** The built-in `frame` kind is an area under a title that holds other nodes
+  (their `parent`) and moves them together.
+  - **Pressing.** It's taken by its title and a band along its border. A press or a finger
+    inside it is the pane's: it pans, or draws a selection rectangle round what's inside.
+  - **Drawing order.** Frames are drawn a level below other nodes, so a node they're over
+    can still be pressed.
+  - **Membership.** A node dropped wholly inside a frame joins it, and one dragged wholly
+    out leaves. A frame dropped over loose nodes takes in those wholly inside it. Each change
+    sends `FlowEvent::NodeParentChange`, and positions stay where they are in the flow.
+  - **⌘G** frames the selection (`Flow::frame_selection`), and **⇧⌘G** takes the selected
+    frames away and keeps what was in them (`Flow::unframe`).
+  - Frames take a palette colour, an icon and an emoji like any node, and resize by their
+    corners while selected.
 - **Nodes are ordinary elements.** A renderer per kind returns any GPUI element. GPUI has no
   transform for elements, so a node can't be scaled the way a CSS-transformed one is: the flow
   sets the rem under each node to 16 points times the zoom, and nodes size themselves in

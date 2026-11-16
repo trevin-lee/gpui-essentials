@@ -12,8 +12,8 @@ use gpui::*;
 use crate::geometry::{distance_to_polyline, edge_path};
 use crate::graph;
 use crate::node::{
-    EdgeLine, Measured, NodeContext, NodeInput as _, NodeRenderer, Reach, Shared, TouchTarget,
-    Zoomed, built_in, measure_node, touch_target, units,
+    EdgeLine, FRAME_BORDER, FRAME_TITLE, Measured, NodeContext, NodeInput as _, NodeRenderer,
+    Reach, Shared, TouchTarget, Zoomed, built_in, measure_node, touch_target, units,
 };
 use crate::paint::{self, FlowBackground, Icon};
 use crate::theme::FlowColors;
@@ -42,6 +42,10 @@ actions!(
         MoveDown,
         /// Asks the host to open the selected node's link.
         OpenLink,
+        /// Puts the selected nodes in a frame.
+        FrameSelection,
+        /// Takes the selected frames away, leaving what was in them.
+        Unframe,
         /// In a tree layout, adds a child to the selected node.
         AddChild,
         /// In a tree layout, adds a sibling after the selected node.
@@ -78,6 +82,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", MoveUp, c),
         KeyBinding::new("down", MoveDown, c),
         KeyBinding::new("cmd-enter", OpenLink, c),
+        KeyBinding::new("cmd-g", FrameSelection, c),
+        KeyBinding::new("cmd-shift-g", Unframe, c),
         KeyBinding::new("tab", AddChild, c),
         KeyBinding::new("enter", AddSibling, c),
         KeyBinding::new("shift-left", MoveLeftFar, c),
@@ -332,9 +338,15 @@ pub enum FlowEvent {
         node: NodeId,
         link: SharedString,
     },
-    /// A node was added with tab or enter in a tree layout, and selected: where the host starts
-    /// editing its text.
+    /// A node was added by the flow and selected: with tab or enter in a tree layout (where
+    /// the host starts editing its text), or a frame made with ⌘G.
     NodeAdd {
+        node: NodeId,
+        parent: Option<NodeId>,
+    },
+    /// A node joined a frame (`parent`) or left one (none): dropped in or dragged out, taken
+    /// in by a frame dropped over it, or framed or unframed with ⌘G and ⇧⌘G.
+    NodeParentChange {
         node: NodeId,
         parent: Option<NodeId>,
     },
@@ -1335,7 +1347,8 @@ impl Flow {
     /// 1000 while it's selected, and always above its parent's.
     fn node_z(&self, node: &Node) -> i64 {
         let own = |n: &Node| {
-            n.z_index as i64
+            // A frame is a level below what isn't, so what it's over can still be pressed.
+            n.z_index as i64 - i64::from(is_frame(n))
                 + if self.options.elevate_nodes_on_select && n.selected {
                     1000
                 } else {
@@ -1957,6 +1970,12 @@ impl Flow {
         if let Some(took) = self.press_on_content(event, window, cx) {
             return took;
         }
+        // Inside a frame, the press is the pane's.
+        let at = self.screen_to_flow(event.position);
+        if self.node(id).is_some_and(|n| !self.takes_press(n, at)) {
+            self.pane_mouse_down(event, window, cx);
+            return true;
+        }
         if self.drag.is_some() || self.child_took_focus(window, cx) {
             return true;
         }
@@ -2203,6 +2222,14 @@ impl Flow {
                 Some(id) => TouchTarget::Node(id),
                 None => TouchTarget::Pane,
             },
+            // Inside a frame, a finger is the pane's.
+            TouchTarget::Node(id)
+                if self
+                    .node(id)
+                    .is_some_and(|n| !self.takes_press(n, self.viewport.to_flow(pane))) =>
+            {
+                TouchTarget::Pane
+            }
             other => other.clone(),
         };
         // Only moving about: the pane takes every finger, and pans.
@@ -2403,6 +2430,210 @@ impl Flow {
         self.context_menu(target, event.position, cx);
     }
 
+    /// Whether a press at the flow point `at` is the node's own. A frame takes only its title
+    /// and a band along its border; a press inside it is the pane's, so what's under and in it
+    /// can be selected and the canvas panned from there.
+    fn takes_press(&self, node: &Node, at: XY) -> bool {
+        if !is_frame(node) {
+            return true;
+        }
+        let Some(r) = self.node_rect(&node.id) else {
+            return true;
+        };
+        let inner = Rect::new(
+            r.x + FRAME_BORDER,
+            r.y + FRAME_TITLE,
+            r.w - FRAME_BORDER * 2.,
+            r.h - FRAME_TITLE - FRAME_BORDER,
+        );
+        !(inner.w > 0. && inner.h > 0. && inner.contains(at))
+    }
+
+    /// Whether `a` is `b`, or inside it however deep.
+    fn is_under(&self, a: &NodeId, b: &NodeId) -> bool {
+        a == b
+            || self
+                .node(a)
+                .is_some_and(|n| self.ancestors(n).iter().any(|p| &p.id == b))
+    }
+
+    /// Moves a node into `parent` (out of any, for none), where it is in the flow, and tells
+    /// the host.
+    fn set_parent(&mut self, id: &NodeId, parent: Option<NodeId>, cx: &mut Context<Self>) {
+        let (Some(at), Some(i)) = (self.absolute_position(id), self.index_of(id)) else {
+            return;
+        };
+        if self.nodes[i].parent == parent {
+            return;
+        }
+        let base = parent
+            .as_ref()
+            .and_then(|p| self.absolute_position(p))
+            .unwrap_or_default();
+        let node = &mut self.nodes[i];
+        node.parent = parent.clone();
+        node.position = at - base;
+        if parent.is_none() && node.extent == Some(Extent::Parent) {
+            node.extent = None;
+        }
+        cx.emit(FlowEvent::NodeParentChange {
+            node: id.clone(),
+            parent,
+        });
+    }
+
+    /// After a drag in a free layout: a node dropped wholly inside a frame joins it, one
+    /// dragged wholly out of its frame leaves it, and a frame dropped over loose nodes takes in
+    /// those wholly inside it.
+    fn adopt(&mut self, dragged: &[NodeId], cx: &mut Context<Self>) {
+        for id in dragged {
+            let Some(node) = self.node(id) else {
+                continue;
+            };
+            // Bound to its parent, it stays there.
+            if node.extent == Some(Extent::Parent) {
+                continue;
+            }
+            let Some(rect) = self.node_rect(id) else {
+                continue;
+            };
+            // The innermost frame wholly holding it: the topmost drawn.
+            let home = self
+                .draw_order()
+                .into_iter()
+                .rev()
+                .map(|(_, i)| &self.nodes[i])
+                .filter(|f| is_frame(f) && !self.is_under(&f.id, id))
+                .find(|f| self.node_rect(&f.id).is_some_and(|r| r.encloses(&rect)))
+                .map(|f| f.id.clone());
+            let current = node.parent.clone();
+            let in_frame = current
+                .as_ref()
+                .and_then(|p| self.node(p))
+                .is_some_and(is_frame);
+            match (home, current) {
+                (Some(frame), current) if current.as_ref() != Some(&frame) => {
+                    self.set_parent(id, Some(frame), cx)
+                }
+                (None, Some(_)) if in_frame => self.set_parent(id, None, cx),
+                _ => {}
+            }
+            // A frame takes in the loose nodes beside it that it now wholly covers.
+            let Some(frame) = self.node(id).filter(|n| is_frame(n)) else {
+                continue;
+            };
+            let (level, Some(area)) = (frame.parent.clone(), self.node_rect(id)) else {
+                continue;
+            };
+            let taken: Vec<NodeId> = self
+                .nodes
+                .iter()
+                .filter(|n| n.parent == level && &n.id != id && !self.is_under(id, &n.id))
+                .filter(|n| self.shown(n))
+                .filter(|n| self.node_rect(&n.id).is_some_and(|r| area.encloses(&r)))
+                .map(|n| n.id.clone())
+                .collect();
+            for n in taken {
+                self.set_parent(&n, Some(id.clone()), cx);
+            }
+        }
+    }
+
+    /// Puts the selected nodes in a new frame titled `title`, just large enough to hold them,
+    /// and selects it. Says what the frame's id is, or none with nothing selected.
+    pub fn frame_selection(
+        &mut self,
+        title: impl Into<String>,
+        cx: &mut Context<Self>,
+    ) -> Option<NodeId> {
+        let tops: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .filter(|n| n.selected && self.shown(n))
+            .filter(|n| !self.ancestors(n).iter().any(|a| a.selected))
+            .map(|n| n.id.clone())
+            .collect();
+        let bounds = tops
+            .iter()
+            .filter_map(|id| self.node_rect(id))
+            .reduce(|a, b| a.union(&b))?;
+        // Inside the parent they share, if they share one.
+        let parent = self.node(&tops[0]).and_then(|n| n.parent.clone());
+        let parent = tops
+            .iter()
+            .all(|id| self.node(id).is_some_and(|n| n.parent == parent))
+            .then_some(parent)
+            .flatten();
+        let pad = 24.;
+        let area = Rect::new(
+            bounds.x - pad,
+            bounds.y - pad - FRAME_TITLE,
+            bounds.w + pad * 2.,
+            bounds.h + pad * 2. + FRAME_TITLE,
+        );
+        let base = parent
+            .as_ref()
+            .and_then(|p| self.absolute_position(p))
+            .unwrap_or_default();
+        let mut n = 1;
+        while self.node(&format!("frame-{n}")).is_some() {
+            n += 1;
+        }
+        let id: NodeId = format!("frame-{n}").into();
+        let mut frame = Node::new(id.clone(), xy(area.x, area.y) - base)
+            .kind("frame")
+            .label(title)
+            .size(area.w, area.h);
+        frame.parent = parent.clone();
+        self.nodes.push(frame);
+        self.reindex();
+        for top in &tops {
+            self.set_parent(top, Some(id.clone()), cx);
+        }
+        for node in &mut self.nodes {
+            node.selected = node.id == id;
+        }
+        self.edges.iter_mut().for_each(|e| e.selected = false);
+        cx.emit(FlowEvent::NodeAdd {
+            node: id.clone(),
+            parent,
+        });
+        self.selection_changed(cx);
+        cx.notify();
+        Some(id)
+    }
+
+    /// Takes a frame away, leaving what was in it where it is, in the frame's own parent. Says
+    /// whether `id` was a frame.
+    pub fn unframe(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(frame) = self.node(id).filter(|n| is_frame(n)).cloned() else {
+            return false;
+        };
+        let inside: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .filter(|n| n.parent.as_ref() == Some(&frame.id))
+            .map(|n| n.id.clone())
+            .collect();
+        for n in &inside {
+            self.set_parent(n, frame.parent.clone(), cx);
+        }
+        let (gone, edges): (Vec<Edge>, Vec<Edge>) = std::mem::take(&mut self.edges)
+            .into_iter()
+            .partition(|e| e.source == frame.id || e.target == frame.id);
+        self.edges = edges;
+        self.nodes.retain(|n| n.id != frame.id);
+        self.reindex();
+        self.forget_removed();
+        cx.emit(FlowEvent::Delete {
+            nodes: vec![frame],
+            edges: gone,
+        });
+        self.selection_changed(cx);
+        cx.notify();
+        true
+    }
+
     /// Whether nodes are drawn as plain boxes at the current zoom.
     fn simplified(&self) -> bool {
         self.viewport.zoom < self.options.simplify_below_zoom
@@ -2418,7 +2649,9 @@ impl Flow {
             .into_iter()
             .rev()
             .map(|(_, i)| &self.nodes[i])
-            .find(|n| self.node_rect(&n.id).is_some_and(|r| r.contains(at)))
+            .find(|n| {
+                self.node_rect(&n.id).is_some_and(|r| r.contains(at)) && self.takes_press(n, at)
+            })
             .map(|n| n.id.clone())
     }
 
@@ -2896,6 +3129,8 @@ impl Flow {
                             for id in &ids {
                                 self.reparent(id, &parent, cx);
                             }
+                        } else if self.tree_layout().is_none() {
+                            self.adopt(&ids, cx);
                         }
                         cx.emit(FlowEvent::NodeDragStop(ids));
                     }
@@ -4024,6 +4259,25 @@ impl Render for Flow {
             .on_action(cx.listener(|flow, _: &ZoomOut, _, cx| flow.zoom_out(cx)))
             .on_action(cx.listener(|flow, _: &ZoomReset, _, cx| flow.zoom_to(1., cx)))
             .on_action(cx.listener(|flow, _: &FitView, _, cx| flow.fit_view(cx)))
+            .on_action(cx.listener(|flow, _: &FrameSelection, _, cx| {
+                if flow.frame_selection("Frame", cx).is_none() {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &Unframe, _, cx| {
+                let frames: Vec<NodeId> = flow
+                    .nodes
+                    .iter()
+                    .filter(|n| n.selected && is_frame(n))
+                    .map(|n| n.id.clone())
+                    .collect();
+                if frames.is_empty() {
+                    cx.propagate();
+                }
+                for id in frames {
+                    flow.unframe(&id, cx);
+                }
+            }))
             .on_action(cx.listener(|flow, _: &OpenLink, _, cx| {
                 let opened = flow
                     .only_selected()
@@ -4106,4 +4360,9 @@ fn distance(a: Point<Pixels>, b: Point<Pixels>) -> f32 {
 /// animations step the same however fast the machine draws.
 fn now(cx: &App) -> Instant {
     cx.background_executor().now()
+}
+
+/// Whether a node is a frame: the built-in kind that holds other nodes.
+fn is_frame(node: &Node) -> bool {
+    node.kind == "frame"
 }
