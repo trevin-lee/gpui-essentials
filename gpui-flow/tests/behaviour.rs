@@ -3,16 +3,16 @@
 mod common;
 
 use common::*;
-use gpui_flow::*;
-use gpui_kit::{
+use gpui::{
     IntoElement as _, Modifiers, MouseButton, ParentElement as _, Styled as _, TestAppContext, div,
 };
+use gpui_flow::*;
 
 fn count(events: &Events, f: impl Fn(&FlowEvent) -> bool) -> usize {
     events.borrow().iter().filter(|e| f(e)).count()
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn another_button_doesnt_end_or_replace_a_drag(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     let at = center(&flow, cx, "b");
@@ -37,7 +37,7 @@ fn another_button_doesnt_end_or_replace_a_drag(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.viewport()), Viewport::default());
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_node_stays_under_the_pointer_when_the_view_zooms_mid_drag(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, with_three);
     let at = center(&flow, cx, "b");
@@ -61,7 +61,7 @@ fn a_node_stays_under_the_pointer_when_the_view_zooms_mid_drag(cx: &mut TestAppC
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_zoom_mid_pan_isnt_undone_by_the_next_move(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, with_three);
     let at = screen(&flow, cx, xy(600., 60.));
@@ -77,7 +77,7 @@ fn a_zoom_mid_pan_isnt_undone_by_the_next_move(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.viewport().zoom), zoomed);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn snapping_puts_a_child_on_the_flows_grid_and_keeps_a_groups_spacing(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -112,7 +112,7 @@ fn snapping_puts_a_child_on_the_flows_grid_and_keeps_a_groups_spacing(cx: &mut T
     assert_eq!(position(&flow, cx, "y").x, 627.);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn clearing_a_selection_the_flow_started_with_is_reported(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, |f| {
         let (mut nodes, edges) = three();
@@ -129,7 +129,7 @@ fn clearing_a_selection_the_flow_started_with_is_reported(cx: &mut TestAppContex
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn escape_puts_back_a_drag_and_says_it_stopped(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     let at = center(&flow, cx, "b");
@@ -149,7 +149,7 @@ fn escape_puts_back_a_drag_and_says_it_stopped(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn escape_puts_back_a_resize(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -206,7 +206,7 @@ impl Selected for Node {
     }
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn delete_reports_once_and_keeps_what_may_not_go(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -256,7 +256,7 @@ fn delete_reports_once_and_keeps_what_may_not_go(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_hosts_delete_check_can_keep_everything(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, |f| {
         with_three(f).with_delete_check(|nodes, _, _| !nodes.iter().any(|n| n.id == "b"))
@@ -268,7 +268,7 @@ fn the_hosts_delete_check_can_keep_everything(cx: &mut TestAppContext) {
     assert_eq!(count(&events, |e| matches!(e, FlowEvent::Delete { .. })), 0);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_connection_radius_is_in_flow_units(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         with_three(f).with_viewport(Viewport::new(0., 0., 2.))
@@ -287,7 +287,7 @@ fn the_connection_radius_is_in_flow_units(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 2);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_selection_rectangle_takes_the_edges_of_what_it_takes(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, with_three);
     // Round a alone.
@@ -303,7 +303,7 @@ fn a_selection_rectangle_takes_the_edges_of_what_it_takes(cx: &mut TestAppContex
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_shift_drag_from_a_node_selects_rather_than_moves(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         with_three(f).with_options(|o| o.selection_mode = SelectionMode::Partial)
@@ -321,7 +321,7 @@ fn a_shift_drag_from_a_node_selects_rather_than_moves(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_child_is_above_its_parent_whatever_their_z(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -356,7 +356,7 @@ fn a_child_is_above_its_parent_whatever_their_z(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_selected_parent_that_cant_move_doesnt_hold_its_child(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -376,7 +376,7 @@ fn a_selected_parent_that_cant_move_doesnt_hold_its_child(cx: &mut TestAppContex
     assert_eq!(position(&flow, cx, "a"), xy(25., 30.));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_node_added_off_screen_is_measured_so_its_edges_draw(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, with_three);
     flow.update(cx, |f, cx| {
@@ -406,7 +406,7 @@ fn a_node_added_off_screen_is_measured_so_its_edges_draw(cx: &mut TestAppContext
     assert_eq!(p.x, 3200.);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn nodes_too_small_to_read_are_still_pressed_and_dragged(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| with_three(f).with_options(|o| o.min_zoom = 0.1));
     flow.update(cx, |f, cx| f.set_viewport(Viewport::new(0., 0., 0.2), cx));
@@ -421,7 +421,7 @@ fn nodes_too_small_to_read_are_still_pressed_and_dragged(cx: &mut TestAppContext
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_child_saved_outside_its_parent_is_put_inside(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -436,7 +436,7 @@ fn a_child_saved_outside_its_parent_is_put_inside(cx: &mut TestAppContext) {
     assert_eq!(position(&flow, cx, "c"), xy(60., 80.));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn set_center_zooms_to_the_largest_unless_told(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, with_three);
     flow.update(cx, |f, cx| f.set_center(xy(0., 0.), None, cx));
@@ -445,7 +445,7 @@ fn set_center_zooms_to_the_largest_unless_told(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.viewport().zoom), 1.);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_connection_dropped_on_the_pane_says_where(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     let from = handle(&flow, cx, "a", HandleKind::Source);
@@ -476,7 +476,7 @@ fn a_connection_dropped_on_the_pane_says_where(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 2);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn loose_connections_dont_join_a_handle_to_its_own_id(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         with_three(f).with_options(|o| o.connection_mode = ConnectionMode::Loose)
@@ -488,7 +488,7 @@ fn loose_connections_dont_join_a_handle_to_its_own_id(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 1);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_arrow_keys_report_their_moves_and_shift_goes_further(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     flow.update(cx, |f, cx| {
@@ -510,7 +510,7 @@ fn the_arrow_keys_report_their_moves_and_shift_goes_further(cx: &mut TestAppCont
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_transition_reports_the_viewport_as_it_goes(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, |f| {
         with_three(f).with_options(|o| o.transition = std::time::Duration::from_millis(400))

@@ -8,7 +8,7 @@
 //! arrowheads and animation, a [`FlowBackground`], controls, a minimap and panels.
 //!
 //! ```ignore
-//! gpui_flow::init(cx); // once, after gpui_kit::init
+//! gpui_flow::init(cx); // once, after gpui_core::init
 //! let flow = cx.new(|cx| {
 //!     Flow::new(cx)
 //!         .with_nodes(vec![
@@ -53,7 +53,7 @@ pub use paint::{BackgroundVariant, FlowBackground};
 pub use theme::FlowColors;
 pub use types::*;
 
-/// Sets the flow up: its key bindings. Call once, after `gpui_kit::init`.
-pub fn init(cx: &mut gpui_kit::App) {
+/// Sets the flow up: its key bindings. Call once, after `gpui_core::init`.
+pub fn init(cx: &mut gpui::App) {
     bind_keys(cx);
 }

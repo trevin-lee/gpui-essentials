@@ -1,8 +1,8 @@
-//! The flow's colors. By default they come from the GPUI Kit theme, so the flow looks like the
+//! The flow's colors. By default they come from the gpui-core theme, so the flow looks like the
 //! app around it; a flow can be given its own.
 
-use gpui_kit::component::Theme;
-use gpui_kit::{App, Hsla, rgb};
+use gpui::{App, Hsla, rgb};
+use gpui_core::Theme;
 
 /// Every color the flow draws with.
 #[derive(Clone, Copy, Debug)]
@@ -40,7 +40,7 @@ pub struct FlowColors {
 }
 
 impl FlowColors {
-    /// The flow's colors for the current GPUI Kit theme.
+    /// The flow's colors for the current gpui-core theme.
     pub fn from_theme(cx: &App) -> Self {
         let c = &Theme::global(cx).colors;
         let selected: Hsla = rgb(0x4f8ff7).into();
@@ -58,7 +58,7 @@ impl FlowColors {
             edge_label_background: c.background,
             handle: c.foreground,
             handle_border: c.background,
-            invalid: c.danger,
+            invalid: c.destructive,
             selection_fill: selected.opacity(0.08),
             panel: c.popover,
             panel_border: c.border,

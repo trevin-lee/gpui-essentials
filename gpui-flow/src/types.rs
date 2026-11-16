@@ -5,7 +5,7 @@
 
 use std::ops::{Add, Mul, Sub};
 
-use gpui_kit::SharedString;
+use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 

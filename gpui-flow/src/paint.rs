@@ -1,7 +1,7 @@
 //! What the flow paints itself rather than building from elements: the pane's pattern, edges
 //! with their arrowheads and labels, the minimap, and the controls' icons.
 
-use gpui_kit::*;
+use gpui::*;
 
 use crate::geometry::clip_segment;
 use crate::node::{MinimapMap, Shared};

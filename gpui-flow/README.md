@@ -6,14 +6,17 @@ It's young: the API can change between commits, so pin one.
 
 ## Use it
 
-It needs Rust 1.100 or newer, as GPUI Kit 0.9 does, and it pins `gpui-kit = "=0.9.1"` (which
-pins `gpui-pre` 0.3.12), so your app must use the same, or two GPUIs would be linked.
+It needs Rust 1.100 or newer. It uses GPUI as `gpui-pre = "=0.3.12"` and takes its colours
+from gpui-core's theme, so your app must use the same GPUI, or two would be linked:
 
 ```toml
 [dependencies]
-gpui-kit = "=0.9.1"
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 gpui-flow = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
+
+Call `gpui_core::init(cx)` and then `gpui_flow::init(cx)` once at startup.
 
 Run the example with `cargo run --release --example flow` from this folder.
 

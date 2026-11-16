@@ -2698,9 +2698,10 @@ dependencies = [
 name = "gpui-flow"
 version = "0.1.0"
 dependencies = [
- "gpui-kit",
+ "gpui-core",
  "gpui-pre",
  "gpui-pre-macos",
+ "gpui-pre-platform",
  "image",
  "serde",
  "serde_json",
