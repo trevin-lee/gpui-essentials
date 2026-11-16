@@ -82,6 +82,14 @@ their look.
   over the number, "+3 more" becomes "+3", and the month's rows drop their times for the
   title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
   to "L…". `short_title()` gives the short title for a header of your own.
+- **Find:** `set_query(text)` filters the events by text: those whose title, place or link
+  labels contain every word, ignoring case and accents ("cafe zurich" finds "Café Zürich").
+  The time grid dims the rest, rings what it found and marks the found words; the month and
+  the agenda show only what it found. `found()` lists them, and `query()` gives the query back.
+  ⌘F (Ctrl-F elsewhere) sends `CalendarEvent::Find` for your app to focus its own search field.
+  The calendar takes no typing for find unless your app asks with `type_query`: then typing goes
+  into the query (Enter keeps it, Escape clears it), a pill at the bottom says what it's finding
+  and how many it found, and each change is sent as `CalendarEvent::QueryChange`.
 - **Theming:** each calendar's colour, the week's first day, 12- or 24-hour time, and colours
   from gpui-core's theme. It scales with the window's rem, so it follows an app's zoom.
 
@@ -248,10 +256,11 @@ never takes the keyboard. The scenes are `week`, `day`, `month`, `overlap`, `dra
 720 pixels wide) and, at an iPhone's 390 by 844 and taken by touch, `compact` (with an event
 selected, showing its handle), `compact-week`, `compact-agenda`, `compact-swipe` (a finger
 halfway through a swipe to the next day), `compact-hold` (a long press on empty time, drawn
-down), `compact-zones` (the day with a second zone) and `compact-recurring` (the recurring
-question as a sheet); at the Mac's size, `zones` is the week with India's hours beside Los
-Angeles', and `recurring` asks the recurring question in a popover. `tests/touch.rs` drives
-the calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
+down), `compact-zones` (the day with a second zone), `compact-recurring` (the recurring
+question as a sheet) and `compact-find` (the list found by "CS 162"); at the Mac's size, `zones`
+is the week with India's hours beside Los Angeles', `recurring` asks the recurring question in a
+popover, and `find` finds "lunch" while the calendar takes typing. `tests/touch.rs` drives the
+calendar with real touch events on the Mac: taps, long presses, drags, swipes and pans.
 
 The example draws in Inter, which it loads from `examples/fonts` (three fixed weights, under the
 SIL Open Font License; see `examples/fonts/OFL.txt`). The crate itself takes its font from
@@ -274,6 +283,8 @@ gpui-core's theme.
 | ![The week with India's hours beside Los Angeles'](docs/zones.png) | ![Wednesday at 390 pixels wide with a second column of hours](docs/compact-zones.png) |
 | **A repeating event moved: which ones?** | **The same question on a phone** |
 | ![Tuesday's standup dragged half an hour later, a popover asking which occurrences](docs/recurring.png) | ![A sheet asking which occurrences, with Cancel](docs/compact-recurring.png) |
+| **Finding "lunch", taking typing** | **Finding "CS 162" on a phone's list** |
+| ![The week with the lunches ringed and marked, the rest dimmed, and a Find pill](docs/find.png) | ![The list showing only CS 162's events](docs/compact-find.png) |
 
 ## Performance
 

@@ -18,6 +18,7 @@
 //! for as an event of its own.
 
 mod calendar;
+mod find;
 pub mod layout;
 mod model;
 #[cfg(test)]

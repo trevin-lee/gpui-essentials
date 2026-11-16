@@ -845,3 +845,73 @@ fn the_agenda_opens_links_and_moves_nothing(cx: &mut TestAppContext) {
     );
     unchanged(&c, cx);
 }
+
+#[gpui::test]
+fn a_query_dims_the_grid_and_filters_the_month_and_agenda(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    // "PLAN" finds Planning, and nothing else this week; "plan" (the doc link) too.
+    c.update(cx, |c, cx| c.set_query("PLAN", cx));
+    draw(cx);
+    let found: Vec<String> = c.read_with(cx, |c, _| {
+        c.found().iter().map(|e| e.id.to_string()).collect()
+    });
+    assert_eq!(found, vec!["a".to_string()]);
+    assert_eq!(c.read_with(cx, |c, _| c.query().to_string()), "PLAN");
+    // The grid still draws the rest, dimmed.
+    assert!(c.read_with(cx, |c, _| c.event_bounds("ro")).is_some());
+    // The month and the agenda show only what it found.
+    for keys in ["m", "a"] {
+        cx.simulate_keystrokes(keys);
+        draw(cx);
+        draw(cx);
+        assert!(
+            c.read_with(cx, |c, _| c.event_bounds("a")).is_some(),
+            "{keys}"
+        );
+        assert!(
+            c.read_with(cx, |c, _| c.event_bounds("ro")).is_none(),
+            "{keys}"
+        );
+    }
+    // Clearing it brings everything back.
+    c.update(cx, |c, cx| c.set_query("  ", cx));
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.event_bounds("ro")).is_some());
+    // The calendar never sent a query of its own.
+    assert!(
+        !seen
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::QueryChange(_)))
+    );
+}
+
+#[gpui::test]
+fn command_f_asks_the_host_and_typing_stays_keys_until_asked(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    cx.simulate_keystrokes("cmd-f");
+    assert!(has(&seen, &CalendarEvent::Find));
+    // Unasked, letters are still the calendar's keys: m is the month.
+    cx.simulate_keystrokes("m");
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Month);
+    assert_eq!(c.read_with(cx, |c, _| c.query().to_string()), "");
+    cx.simulate_keystrokes("w");
+    // Asked, they go into the query: "m", "t" and "d" don't switch views.
+    cx.update(|window, cx| c.update(cx, |c, cx| c.type_query(window, cx)));
+    cx.simulate_keystrokes("t m d");
+    assert_eq!(c.read_with(cx, |c, _| c.query().to_string()), "tmd");
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Week);
+    cx.simulate_keystrokes("backspace backspace backspace p l a n");
+    assert!(has(&seen, &CalendarEvent::QueryChange("plan".into())));
+    // Enter keeps it and gives the keys back.
+    cx.simulate_keystrokes("enter");
+    assert!(!c.read_with(cx, |c, _| c.is_typing_query()));
+    assert_eq!(c.read_with(cx, |c, _| c.query().to_string()), "plan");
+    cx.simulate_keystrokes("m");
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Month);
+    // Escape while typing clears it.
+    cx.update(|window, cx| c.update(cx, |c, cx| c.type_query(window, cx)));
+    cx.simulate_keystrokes("escape");
+    assert_eq!(c.read_with(cx, |c, _| c.query().to_string()), "");
+    assert!(has(&seen, &CalendarEvent::QueryChange("".into())));
+}

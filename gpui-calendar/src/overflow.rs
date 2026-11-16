@@ -450,3 +450,59 @@ fn the_recurring_question_fits_at_every_width() {
         assert!(found.is_empty(), "{}", found.join("\n"));
     }
 }
+
+/// With a query, found words are marked inside chips and the rest dim: nothing runs over, and
+/// the pill the calendar shows while it takes typing fits at every width.
+#[test]
+fn a_query_fits_at_every_width() {
+    let views = [
+        CalendarView::Day,
+        CalendarView::Week,
+        CalendarView::Month,
+        CalendarView::AGENDA,
+    ];
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        let mut c = Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_events(worst_week());
+        c.scroll_to_minute(8. * 60.);
+        c
+    });
+    vcx.update(|window, cx| {
+        calendar.update(cx, |c, cx| {
+            c.set_query("planning research notes 2", cx);
+            c.type_query(window, cx);
+        })
+    });
+    let mut found = Vec::new();
+    for w in [320., 390., 720., 1280., 2200.] {
+        vcx.simulate_resize(size(px(w), px(820.)));
+        for &view in &views {
+            calendar.update(vcx, |c, cx| c.set_view(view, cx));
+            for _ in 0..2 {
+                vcx.run_until_parked();
+                drawn::record();
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    window.draw(cx).clear(cx);
+                });
+            }
+            let texts = drawn::take();
+            let canvas = calendar
+                .read_with(vcx, |c, _| c.shared.geo.get())
+                .expect("drawn")
+                .bounds;
+            for p in problems(&texts, canvas) {
+                found.push(format!("{w}px, {view:?}: {p}"));
+            }
+            let pill = vcx.debug_bounds("calendar-query").expect("the pill");
+            if pill.left() < px(0.) || pill.right() > px(w) {
+                found.push(format!("{w}px, {view:?}: the pill {pill:?}"));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}
