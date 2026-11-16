@@ -1068,8 +1068,13 @@ impl Flow {
     }
 
     /// Whether a node is drawn: not hidden, and not folded under a collapsed node in a tree.
-    fn shown(&self, node: &Node) -> bool {
+    pub(crate) fn shown(&self, node: &Node) -> bool {
         !node.hidden && !self.folded.contains(&node.id)
+    }
+
+    /// The colors the flow draws with: its own, or the theme's.
+    pub(crate) fn colors(&self, cx: &App) -> FlowColors {
+        self.colors.unwrap_or_else(|| FlowColors::from_theme(cx))
     }
 
     fn tree_layout(&self) -> Option<tree::TreeLayout> {

@@ -32,6 +32,7 @@
 //! A flow saves and loads as React Flow's own JSON ([`FlowObject`]), keeping the fields it
 //! doesn't read.
 
+pub mod export;
 mod flow;
 pub mod geometry;
 pub mod graph;
