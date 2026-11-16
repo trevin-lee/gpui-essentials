@@ -12,11 +12,11 @@ It's being built for a personal CRM in a Notion-like docs app: People, Companies
 databases related to each other, an agent or two logging calls and follow-ups, and every person
 and company a page of notes.
 
-**Status: the model, the engine, and the table and board views.** The JSON model, the engine
-that filters, sorts and groups, fractional-index ordering and the limits on what a database may
-hold need no GPUI. The [table view](#table-view) and the [board view](#board-view) draw on GPUI
-and gpui-core, behind the default `gpui` feature. Lists come next. This README is the design for
-all of it.
+**Status: the model, the engine, and the table, board and list views.** The JSON model, the
+engine that filters, sorts and groups, fractional-index ordering and the limits on what a
+database may hold need no GPUI. The [table view](#table-view), the [board view](#board-view) and
+the [list view](#list-view) draw on GPUI and gpui-core, behind the default `gpui` feature. This
+README is the design for all of it.
 
 ![The People database as a table: names, companies, roles, stages and tags, sorted by name](docs/table-people.png)
 
@@ -25,6 +25,7 @@ all of it.
 - [Use it](#use-it)
 - [Table view](#table-view)
 - [Board view](#board-view)
+- [List view](#list-view)
 - [Databases and rows are docs](#databases-and-rows-are-docs)
 - [Properties and values](#properties-and-values)
 - [Views](#views)
@@ -143,7 +144,7 @@ let table = cx.new(|cx| TableView::new(Rc::new(Host), database, rows, cx).with_v
 ```
 
 `cargo run --release -p gpui-tables --example crm` opens the CRM in the fixtures with a log of
-every event, and its views (tables and boards) as tabs (the pictures here are its `--shot`s,
+every event, and its views (tables, boards and lists) as tabs (the pictures here are its `--shot`s,
 rendered offscreen).
 
 | | |
@@ -274,6 +275,54 @@ Not in this first board: dragging several cards at once, a + in the column heade
 the top, moving whole columns (the options' order is the property's), and showing the view's
 sorts and filters on the board itself.
 
+## List view
+
+A view of type `list` draws as a list: again the same `TableView` entity, `TableHost` and
+`TableEvent`s, chosen by the view's type each time it draws.
+
+![Interactions, most recent first: each line an interaction's icon and summary, then its kind, the people in it, when it was and whether it's done](docs/list.png)
+
+![People by stage: a header for each stage with its count, the people under it with their company, tags, last contact and owner, and a New line ending each group](docs/list-grouped.png)
+
+![The Companies directory in the light theme, each company with its industry, size, annual value and people](docs/list-light.png)
+
+- **Lines.** One per row: the doc's icon if it has one (its `icon` field, as `Doc::icon` reads
+  it), the title, then the view's `cardProperties` to the right, each drawn as the table draws its
+  cell: chips for selects and multi-selects, dates in the viewer's zone, people and related rows
+  by name, a checkbox with its property's name. Empty values are left out. The title has the room
+  it needs first (up to three fifths of the line); the values that fit after it are shown in
+  order, the first that doesn't fit is cut short with an ellipsis when there's room left, and the
+  rest drop off, so nothing leaves its line at any width. Pressing a line is an `openRow`.
+- **Groups.** A grouped view shows each group under a header with its chip (or name) and count,
+  and a New line at its end. Pressing a header folds it: a `viewChanged` with its key in
+  `collapsedGroups`, as in the table. Sort, filter and grouping come from the view through the
+  engine, as for the table and board.
+- **Dragging** reorders rows, by the board's rules and the board's code (`TableView::move_card`
+  and the drop behind it, with the list's groups in place of the board's columns): a row dragged
+  within its group is a `rowsMoved` with a key between its new neighbours'; into another group,
+  that and a `rowValueChanged` setting the group's value, in one batch, with multi-select and
+  person values swapping the group they left for the one they joined. A sorted view takes no
+  reordering by hand (a drop in another group is the `rowValueChanged` alone, and the header of
+  the group it would join is marked rather than a place in it), and keys that can't be put
+  between renumber the manual order. Over a line's upper half the row lands above it, over its
+  lower half below; over a header, at its group's top; over a New line, at its group's end. With a
+  mouse it's GPUI's drag and drop; with a finger, a long press picks the row up while a plain pan
+  scrolls. Escape puts it back. `TableView::list_groups` gives the groups `move_card` takes.
+- **New rows.** The New line of each group (or of the list) is a `rowCreated` with the group's
+  value, what the filter asks for and an order key after every row's. When the host hands it
+  back, the new row's line is focused.
+- **Keys.** Up and Down (and Tab and shift-Tab) move between lines, Page Up and Page Down by a
+  screenful; Enter opens a row, folds or unfolds a group, or makes a row from New. Escape lets
+  go.
+- **Touch.** With `TableTheme::with_touch(true)` lines, headers and New lines are 44 points tall
+  and take presses through `Press::min_hit`.
+- **Scale.** Every line is the same height, so only those on screen are drawn (`uniform_list`),
+  however many rows and groups. `TableView::line_bounds` says where a row's line is.
+- **Nothing redraws while nothing changes,** and the list keeps no timers.
+
+Not in this first list: dragging several rows at once, a row's Open button and inline editing
+(a press opens the row), and showing the view's sorts and filters above it.
+
 ## Databases and rows are docs
 
 Everything is a doc in the host's tree, the same shape for pages, databases and rows:
@@ -288,6 +337,7 @@ Everything is a doc in the host's tree, the same shape for pages, databases and 
 | `parentDocId` | The page it's under, or null. A row's is its database. |
 | `parentObjectId` | For an inline database, the block in its parent page that embeds it. |
 | `cover`, `favorite`, `agents` | The host's; carried, never read. |
+| `icon` | Optional: an emoji the host shows with the doc. A list draws a row's before its title (`Doc::icon`); carried in `extra`. |
 | `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`. A row's `createdBy` and `editedBy` properties show them. An older doc may have no `updatedBy`. |
 | `created`, `updated` | Milliseconds since the Unix epoch. |
 | `rev`, `seq` | The host's revision and sequence numbers; carried, never read. |
@@ -365,12 +415,13 @@ every person (and agent) sees the same ones.
   `day`, `week`, `month`, `year`; relative when absent), an addition to the first proposal.
 - **`columns`** is a table's `[{propertyId, width, hidden, order}]`. Properties without a column
   show after the others at the default width; `width` null means the default.
-- **`cardProperties`** are the properties a board card or list line shows under the title.
+- **`cardProperties`** are the properties a board card shows under the title, or a list line
+  beside it.
 - **`collapsedGroups`** are the groups folded shut, by key: `empty`, `option:<id>`, `checked`,
   `unchecked`, `owner`, `agent:<id>`, `relative:today`, `day:2026-11-15`, `week:2026-11-09`
   (the week's first day), `month:2026-11`, `year:2026`.
 
-How each type behaves (the table and board are drawn; lists and galleries come next):
+How each type behaves (the table, board and list are drawn; galleries come later):
 
 - **Table.** A row per row and a column per property. Columns resize by dragging their edge and
   reorder by dragging their header; both are a `viewChanged`. The header's menu sorts, filters,
@@ -384,7 +435,7 @@ How each type behaves (the table and board are drawn; lists and galleries come n
   manual order (when the view has no sort). A card shows its title and `cardProperties`. Each
   column has a New to add a row with that column's value. See [Board view](#board-view).
 - **List.** One line per row: the title, then `cardProperties` to the right. Grouping folds as in
-  a table.
+  a table, and rows drag to reorder and between groups as cards do. See [List view](#list-view).
 - **Gallery.** Cards in a grid. In the JSON from the start, drawn in a later version.
 
 A new row made in a filtered or grouped view gets the values that keep it in that view (the
@@ -631,10 +682,20 @@ nothing draws while nothing changes.
   | A frame while dragging a card across the columns | 2.7 ms |
 
   The test fails past 50, 12 and 12 ms in a release build.
+- **The list view** draws only the lines on screen (one `uniform_list`). Measured the same way,
+  the same 10,000 rows as a list grouped by stage, each line showing four values:
+
+  | | median |
+  |---|---|
+  | The first draw | 1.6 ms |
+  | A frame while scrolling down a page | 1.7 ms |
+  | A frame while dragging a row down the list | 1.7 ms |
+
+  The test fails past 50, 12 and 12 ms in a release build.
 - **No text overflows its cell** at any width: cells, headers, group headers, menus and cards
-  end in an ellipsis. A headless Core Text test, as gpui-chatwidgets has, checks every cell type
-  (and a board's cards, with every property on them) with the worst text at 360, 700 and 1400
-  wide.
+  end in an ellipsis, and a list's values drop off. A headless Core Text test, as
+  gpui-chatwidgets has, checks every cell type (and a board's cards and a list's lines, with
+  every property on them) with the worst text at 360, 700 and 1400 wide.
 
 ## iOS and touch
 
@@ -696,11 +757,19 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   and across (the value and the key in one batch), sorted boards, multi-select swaps, keys that
   renumber, folding, new cards, opening, keyboard navigation, a long press carrying a card while
   pans scroll the board and a column, 44-point targets on touch, and no frames while idle.
+- `tests/list.rs`: the list view driven by mouse, keyboard and finger: its lines and values,
+  one entity drawing a table, a board or a list, opening rows, keyboard navigation, groups that
+  fold, drags within a group (order keys) and across (the value and the key in one batch), drops
+  on headers and New lines, sorted lists refusing reorder, multi-select swaps, new rows with
+  their group's and filter's values, a long press carrying a row while a pan scrolls, 44-point
+  targets on touch, and no frames while idle.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu at 360, 700 and
-  1400 wide, columns at their widths and their narrowest, and on a board's cards, columns and
-  folded columns (scrolled, and with a finger's sizes), laid out with Core Text; no glyph leaves
-  its place.
-- `tests/view_performance.rs`: the table and the board with 10,000 rows, timed, as above.
+  1400 wide, columns at their widths and their narrowest, on a board's cards, columns and
+  folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
+  (grouped or not, focused, with a finger's sizes, and icons of the worst kind), laid out with
+  Core Text; no glyph leaves its place.
+- `tests/view_performance.rs`: the table, the board and the list with 10,000 rows, timed, as
+  above.
 - Unit tests for fractional indexes and calendar arithmetic.
 
 ## License

@@ -231,6 +231,28 @@
             "ae658f33-fe3b-490b-93f4-48b3a5aa3c81"
           ],
           "collapsedGroups": []
+        },
+        {
+          "id": "877acaad-4e4c-4ad3-89ca-c6ab132e6cab",
+          "name": "Recent",
+          "type": "list",
+          "order": "a3",
+          "sort": [
+            {
+              "propertyId": "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+              "direction": "descending"
+            }
+          ],
+          "filter": null,
+          "groupBy": null,
+          "columns": [],
+          "cardProperties": [
+            "7f26144b-9828-4fcd-99a5-4a7bb1fee08f",
+            "451abd81-f1d6-4ed6-97f5-e837d70820fe",
+            "119a72d1-74c9-4f6a-8c01-1cdd9474031b",
+            "b774eb52-48db-40af-b215-8370d269a9a5"
+          ],
+          "collapsedGroups": []
         }
       ]
     }
@@ -239,6 +261,7 @@
     "id": "c215a82a-06ec-41ad-aa05-75438b0d590b",
     "kind": "page",
     "title": "Intro call about kiln sensors",
+    "icon": "📞",
     "order": "a0",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -282,6 +305,7 @@
     "id": "a49636a2-fa7f-4eab-8c4f-9b0687322e25",
     "kind": "page",
     "title": "Coffee near the office",
+    "icon": "☕",
     "order": "a1",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -324,6 +348,7 @@
     "id": "d86f40f6-b239-43c7-974c-77a2dd02de92",
     "kind": "page",
     "title": "Referral for the platform role",
+    "icon": "✉️",
     "order": "a2",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -371,6 +396,7 @@
     "id": "e883a1d4-5de0-4997-84b5-a81842d87208",
     "kind": "page",
     "title": "Studio visit",
+    "icon": "🤝",
     "order": "a3",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -413,6 +439,7 @@
     "id": "3908f227-c59d-4916-9b0e-e76f2ac34446",
     "kind": "page",
     "title": "Pilot scoping",
+    "icon": "🤝",
     "order": "a4",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -460,6 +487,7 @@
     "id": "80b0c08b-c770-4420-8aa4-248c8857f9a4",
     "kind": "page",
     "title": "Quick thanks",
+    "icon": "💬",
     "order": "a5",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -503,6 +531,7 @@
     "id": "9cfc8652-3919-4242-a2ed-dbbd5464ecc2",
     "kind": "page",
     "title": "Catch-up on the new studio",
+    "icon": "📞",
     "order": "a6",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
@@ -546,6 +575,7 @@
     "id": "c2216b02-fc24-4d0b-89d4-88b1cfbf3360",
     "kind": "page",
     "title": "Portfolio review",
+    "icon": "☕",
     "order": "a7",
     "folderId": null,
     "parentDocId": "8d116ece-1738-47d9-bd9c-172411e20b8f",

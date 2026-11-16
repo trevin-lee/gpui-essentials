@@ -52,7 +52,7 @@ fn docs_read_as_databases_and_rows() {
     assert!(db.values.is_none());
     let fields = db.database.as_ref().unwrap();
     assert_eq!(fields.properties.len(), 15);
-    assert_eq!(fields.views.len(), 3);
+    assert_eq!(fields.views.len(), 4);
     assert_eq!(fields.title_property().unwrap().name, "Name");
     assert_eq!(
         fields
@@ -60,7 +60,12 @@ fn docs_read_as_databases_and_rows() {
             .iter()
             .map(|v| v.kind.clone())
             .collect::<Vec<_>>(),
-        [ViewType::Table, ViewType::Board, ViewType::List]
+        [
+            ViewType::Table,
+            ViewType::Board,
+            ViewType::List,
+            ViewType::List
+        ]
     );
     assert_eq!(db.author, Some(Person::Owner));
     assert_eq!(db.rev, Some(14));

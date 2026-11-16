@@ -1,6 +1,7 @@
-//! The table view with 10,000 rows of every type: its first draw, scrolling, and working the
-//! rows out again after a sort, timed with Core Text laying the text out as on screen. Each
-//! step fails past a bound, in a release build, or forty times that in a debug one.
+//! The table, board and list views with 10,000 rows of every type: their first draws,
+//! scrolling, dragging, and working the rows out again after a sort, timed with Core Text
+//! laying the text out as on screen. Each step fails past a bound, in a release build, or
+//! forty times that in a debug one.
 //! `cargo test --release --test view_performance -- --nocapture` prints the numbers the README
 //! quotes.
 
@@ -323,4 +324,83 @@ fn ten_thousand_cards_draw_and_scroll_without_dropping_frames() {
     report("first draw of a board of 10,000 cards", firsts, 50);
     report("a frame while scrolling the board", scrolls, 12);
     report("a frame while dragging a card", drags, 12);
+}
+
+#[test]
+fn ten_thousand_lines_draw_and_scroll_without_dropping_frames() {
+    let (mut db, rows) = (database(), rows());
+    // A list of the same rows, grouped by stage, each line showing four values.
+    let mut list = View::new("l", "List", ViewType::List, "a2");
+    list.group_by = Some("stage".into());
+    list.card_properties = vec!["stage".into(), "tags".into(), "when".into(), "done".into()];
+    db.database.as_mut().unwrap().views = vec![list];
+    let mut firsts = Vec::new();
+    let mut scrolls = Vec::new();
+    let mut drags = Vec::new();
+    for run in 0..3 {
+        let mut app = TestAppContext::build_with_text_system(
+            TestDispatcher::new(run),
+            None,
+            Arc::new(gpui_apple::AppleTextSystem::new()),
+        );
+        setup(&mut app);
+        let host = TestHost::new();
+        host.apply.set(false);
+        let h: Rc<dyn TableHost> = host.clone();
+        let (db, rows) = (db.clone(), rows.clone());
+        let made: Rc<std::cell::RefCell<Option<Entity<TableView>>>> = Rc::default();
+        let (_, cx) = app.add_window_view({
+            let made = made.clone();
+            move |window, cx| {
+                let t = cx.new(|cx| TableView::new(h, db, rows, cx));
+                *made.borrow_mut() = Some(t.clone());
+                gpui_core::Root::new(t, window, cx)
+            }
+        });
+        let table = made.borrow().clone().unwrap();
+        cx.simulate_resize(size(px(1400.), px(900.)));
+        table.update(cx, |t, cx| t.set_rows(t.rows().to_vec(), cx));
+        firsts.push(frame(cx));
+        draw(cx);
+        let groups = table.update(cx, |t, _| t.list_groups().to_vec());
+        assert_eq!(groups.len(), 7, "no stage, then six options");
+        assert_eq!(groups.iter().map(|g| g.rows.len()).sum::<usize>(), ROWS);
+        // Down the list a page at a time.
+        for _ in 0..20 {
+            cx.simulate_event(ScrollEvent {
+                position: point(px(600.), px(400.)),
+                delta: ScrollDelta::Pixels(point(px(0.), px(-800.))),
+                ..Default::default()
+            });
+            scrolls.push(frame(cx));
+        }
+        // A row dragged down the list, a frame for each move.
+        let from = table
+            .update(cx, |t, _| {
+                let shown: Vec<usize> = t
+                    .list_groups()
+                    .iter()
+                    .flat_map(|g| g.rows.iter().copied())
+                    .collect();
+                let ids: Vec<String> = shown.iter().map(|&r| t.rows()[r].id.clone()).collect();
+                ids.iter().find_map(|id| {
+                    t.line_bounds(id)
+                        .filter(|b| b.top() > px(100.) && b.bottom() < px(300.))
+                })
+            })
+            .expect("a line on screen")
+            .center();
+        cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+        frame(cx);
+        for i in 1..=10 {
+            let at = from + point(px(4. * i as f32), px(40. * i as f32));
+            cx.simulate_mouse_move(at, MouseButton::Left, Modifiers::none());
+            drags.push(frame(cx));
+        }
+        assert!(table.read_with(cx, |t, _| t.is_dragging_card()));
+        cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
+    }
+    report("first draw of a list of 10,000 rows", firsts, 50);
+    report("a frame while scrolling the list", scrolls, 12);
+    report("a frame while dragging a row", drags, 12);
 }

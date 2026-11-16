@@ -5,6 +5,10 @@
 //! A view of type `board` draws through the same [`TableView`] entity as a table: the host
 //! keeps one entity and one [`TableHost`](super::TableHost) whatever the view's type, and
 //! [`TableView::set_view`] switches between them.
+//!
+//! A list moves its rows by the same rules: its groups are [`BoardColumn`]s too, and the drag
+//! state, [`TableView::move_card`], the drop and the finger's long press here serve both. Only
+//! where a pointer is (which column and slot, or which line) is each view's own.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -18,12 +22,12 @@ use gpui::{
 use super::host::person_label;
 use super::ops;
 use super::table::TableView;
-use crate::engine::{self, GroupKey};
-use crate::model::{Doc, Edit, PropertyType, Value, new_id};
+use crate::engine::{self, Group, GroupKey};
+use crate::model::{Doc, Edit, PropertyType, Value, View, new_id};
 use crate::order;
 
-/// A column of a board: one of the view's groups (or, for a board whose `groupBy` is missing
-/// or can't group, every row in one column).
+/// A column of a board, or a group of a list: one of the view's groups (or, for a view whose
+/// `groupBy` is missing or can't group, every row in one).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoardColumn {
     /// The group's key; None for the one column of a board that doesn't group.
@@ -139,13 +143,37 @@ pub(crate) struct BoardMetrics {
     pub new: Pixels,
 }
 
-/// A card's picture while it's dragged: its title and the words of its values.
+/// A card's (or a list's line's) picture while it's dragged: its title and the words of its
+/// values.
 pub struct CardGhost {
     pub(crate) title: String,
     pub(crate) lines: Vec<String>,
     pub(crate) theme: super::TableTheme,
     pub(crate) width: Pixels,
     pub(crate) height: Pixels,
+    /// A list's line: the values beside the title rather than under it.
+    pub(crate) inline: bool,
+}
+
+/// What a board's columns or a list's groups are: the view's groups, each folded or not, or
+/// one of every row when the view doesn't group (or groups by a property that can't).
+pub(crate) fn lanes_of(view: &View, groups: &[Group], rows: &[usize]) -> Vec<BoardColumn> {
+    if view.group_by.is_some() && !groups.is_empty() {
+        groups
+            .iter()
+            .map(|g| BoardColumn {
+                folded: view.collapsed_groups.contains(&g.key.to_string()),
+                key: Some(g.key.clone()),
+                rows: g.rows.clone(),
+            })
+            .collect()
+    } else {
+        vec![BoardColumn {
+            key: None,
+            rows: rows.to_vec(),
+            folded: false,
+        }]
+    }
 }
 
 impl TableView {
@@ -557,11 +585,16 @@ impl TableView {
         cx.notify();
     }
 
-    /// Whether a card can go from column `from` to column `to`: within a column only when the
-    /// view has no sort (the sort places it), and across only when the group property can take
-    /// the other column's value.
+    /// What rows move between: a board's columns or a list's groups.
+    pub(crate) fn move_lanes(&self) -> Option<&Vec<BoardColumn>> {
+        self.shown.board.as_ref().or(self.shown.list.as_ref())
+    }
+
+    /// Whether a card (or a list's row) can go from column (or group) `from` to `to`: within
+    /// one only when the view has no sort (the sort places it), and across only when the group
+    /// property can take the other's value.
     pub(crate) fn can_move(&self, row: usize, from: usize, to: usize) -> bool {
-        let Some(cols) = &self.shown.board else {
+        let Some(cols) = self.move_lanes() else {
             return false;
         };
         let (Some(f), Some(t)) = (cols.get(from), cols.get(to)) else {
@@ -605,6 +638,9 @@ impl TableView {
     /// cards itself, as Notion's does), and a `rowValueChanged` setting the group property, when
     /// the column changes. Keys that can't be put between (an older scheme's, two the same)
     /// renumber the whole manual order.
+    ///
+    /// In a list it moves a row between its groups, by their places in
+    /// [`TableView::list_groups`] (0 and 0 for a list that doesn't group), by the same rules.
     pub fn move_card(
         &mut self,
         row_id: &str,
@@ -621,7 +657,8 @@ impl TableView {
         if !self.can_move(row, from, to) {
             return;
         }
-        let Some(cols) = self.shown.board.as_ref() else {
+        let list = self.shown.board.is_none();
+        let Some(cols) = self.move_lanes() else {
             return;
         };
         let sorted = self.shown.view.as_ref().is_some_and(|v| !v.sort.is_empty());
@@ -664,8 +701,14 @@ impl TableView {
                     value,
                 });
             }
+        }
+        let key = cols[to].key_string();
+        if list {
+            // The focus goes with the row, to the group it went to.
+            self.focus_line(row_id, &key);
+        } else if from != to {
             self.board.focus = Some(BoardFocus {
-                column: cols[to].key_string(),
+                column: key,
                 spot: SpotId::Card(row_id.to_owned()),
             });
         }
@@ -706,8 +749,8 @@ impl TableView {
 
     // --- Dragging ---------------------------------------------------------------------------
 
-    /// Picks a card up: by the mouse (GPUI's drag has begun) or a finger (a long press).
-    /// Returns the picture to draw under the pointer.
+    /// Picks a card (or a list's row) up: by the mouse (GPUI's drag has begun) or a finger (a
+    /// long press). Returns the picture to draw under the pointer.
     pub(crate) fn begin_card_drag(
         &mut self,
         row_id: &str,
@@ -718,17 +761,24 @@ impl TableView {
         cx: &mut Context<Self>,
     ) -> Entity<CardGhost> {
         self.ensure();
-        let m = self.board_metrics();
         let (title, lines) = match self.rows.iter().find(|r| r.id == row_id) {
             Some(r) => (self.card_title(r), self.card_lines(r)),
             None => (String::new(), Vec::new()),
+        };
+        let inline = self.shown.list.is_some();
+        let (width, height) = if inline {
+            self.line_size()
+        } else {
+            let m = self.board_metrics();
+            (m.column_width - m.inset * 2., m.card)
         };
         let ghost = cx.new(|_| CardGhost {
             title,
             lines,
             theme: self.theme.clone(),
-            width: m.column_width - m.inset * 2.,
-            height: m.card,
+            width,
+            height,
+            inline,
         });
         self.popover = None;
         self.board.drag = Some(CardDrag {
@@ -816,8 +866,13 @@ impl TableView {
     }
 
     /// Where a card dragged to `at` would land: a column it can go to and a slot among the cards
-    /// drawn there. Near the board's edges, or a column's top or bottom, it scrolls them.
+    /// drawn there. Near the board's edges, or a column's top or bottom, it scrolls them. (A
+    /// list's row: the group and slot of the line under it.)
     pub(crate) fn drag_card_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.shown.list.is_some() {
+            self.drag_row_to(at, cx);
+            return;
+        }
         let Some(drag) = &self.board.drag else {
             return;
         };
@@ -907,7 +962,8 @@ impl TableView {
         }
     }
 
-    /// Lets go of a dragged card where it is: a move, if it's over somewhere it can go.
+    /// Lets go of a dragged card (or list's row) where it is: a move, if it's over somewhere it
+    /// can go.
     pub(crate) fn drop_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(drag) = self.board.drag.take() else {
             return;
@@ -916,7 +972,8 @@ impl TableView {
         let Some((to, slot)) = drag.target else {
             return;
         };
-        let Some(cols) = &self.shown.board else {
+        let list = self.shown.board.is_none();
+        let Some(cols) = self.move_lanes() else {
             return;
         };
         let Some(from) = cols.iter().position(|c| c.key_string() == drag.from) else {
@@ -932,13 +989,17 @@ impl TableView {
         };
         let key = cols[to].key_string();
         self.move_card(&drag.row_id, from, to, index, window, cx);
-        self.board.focus = Some(BoardFocus {
-            column: key,
-            spot: SpotId::Card(drag.row_id),
-        });
+        if list {
+            self.focus_line(&drag.row_id, &key);
+        } else {
+            self.board.focus = Some(BoardFocus {
+                column: key,
+                spot: SpotId::Card(drag.row_id),
+            });
+        }
     }
 
-    /// Escape: puts a dragged card back, else lets go of the focus.
+    /// Escape: puts a dragged card (or list's row) back, else lets go of the focus.
     pub(crate) fn board_cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(d) = self.board.drag.take() {
             if !d.touch {
@@ -946,6 +1007,7 @@ impl TableView {
             }
         } else {
             self.board.focus = None;
+            self.cell = None;
         }
         cx.notify();
     }

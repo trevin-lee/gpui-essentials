@@ -24,9 +24,13 @@ impl Render for TableView {
         self.theme = self.host.theme(cx);
         self.rem = window.rem_size();
         self.ensure();
-        // A board view draws as a board, any other as a table: one entity and one host.
+        // A board view draws as a board, a list view as a list, any other as a table: one
+        // entity and one host.
         if self.shown.board.is_some() {
             return self.render_board(window, cx);
+        }
+        if self.shown.list.is_some() {
+            return self.render_list(window, cx);
         }
         self.clamp_scroll();
         let t = self.theme.clone();
