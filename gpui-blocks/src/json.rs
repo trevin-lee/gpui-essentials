@@ -36,7 +36,10 @@ use markdown_editor::{BlockEditorModel, BlockId, BlockKind, BlockRef, ColumnAlig
 use serde::{Deserialize, Serialize};
 
 use crate::docs;
+
+mod merge;
 use crate::widget::{Widget, fenced_with_info};
+pub use merge::{ApplyError, Conflict, Op, Side, apply, diff, merge};
 
 /// The value of `format`.
 pub const FORMAT: &str = "gpui-blocks";
