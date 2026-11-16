@@ -17,23 +17,29 @@ name = "gpui_flow"
 
 
 [dependencies]
-# The app's pins, exactly: GPUI comes as GPUI Kit, which pins gpui-pre 0.3.12.
-gpui-kit = { workspace = true }
+# GPUI under its own name, pinned exactly in the workspace (gpui-pre 0.3.12), and gpui-core for
+# the theme the flow takes its colours from.
+gpui = { workspace = true }
+gpui-core = { path = "../gpui-core" }
 # Nodes and edges save and load as JSON, and a node's data is any JSON value.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Only for the shots feature: the same GPUI with its test support (offscreen rendering) on, and
-# GPUI's version of the image crate to save the picture.
-gpui-pre = { workspace = true, features = ["test-support"], optional = true }
+# Only for the shots feature: the macOS platform with its test support (offscreen rendering)
+# on, and GPUI's version of the image crate to save the picture.
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 [features]
 # Pictures of the example's window rendered offscreen (`--shot`), as the editor's.
-shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
+shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 
 [[example]]
 name = "flow"
 
 [dev-dependencies]
-gpui-kit = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+# The example's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+# Its shaders compiled when the window opens, so tests and the example build without Xcode's
+# separate Metal Toolchain. Only here: what apps ship stays on precompiled shaders.
+gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }

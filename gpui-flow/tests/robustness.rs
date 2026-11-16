@@ -8,13 +8,13 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use common::*;
-use gpui_flow::*;
-use gpui_kit::{
+use gpui::{
     AppContext as _, IntoElement as _, Modifiers, MouseButton, ParentElement as _, TestAppContext,
     div,
 };
+use gpui_flow::*;
 
-#[gpui_kit::test]
+#[gpui::test]
 fn an_animated_edge_between_far_apart_nodes_draws_quickly(cx: &mut TestAppContext) {
     // A billion units apart: the dashes were once walked along the whole line, and past
     // about 4e7 an f32 running total stops growing, so the loop never ended.
@@ -42,7 +42,7 @@ fn an_animated_edge_between_far_apart_nodes_draws_quickly(cx: &mut TestAppContex
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn zoom_limits_the_wrong_way_round_or_not_numbers_dont_panic(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         with_three(f)
@@ -69,7 +69,7 @@ fn zoom_limits_the_wrong_way_round_or_not_numbers_dont_panic(cx: &mut TestAppCon
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_zero_snap_grid_leaves_positions_numbers(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         with_three(f).with_options(|o| {
@@ -83,7 +83,7 @@ fn a_zero_snap_grid_leaves_positions_numbers(cx: &mut TestAppContext) {
     assert_eq!(position(&flow, cx, "b"), xy(133., 270.));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn positions_and_sizes_that_arent_numbers_are_put_right(cx: &mut TestAppContext) {
     // 1e39 overflows an f32 to infinity as JSON loads.
     let object: FlowObject = serde_json::from_str(
@@ -107,7 +107,7 @@ fn positions_and_sizes_that_arent_numbers_are_put_right(cx: &mut TestAppContext)
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_node_renderer_reads_the_flow_it_is_given(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         with_three(f).with_node_kind("counted", |node, ctx, flow, _, _| {
@@ -131,9 +131,9 @@ fn a_node_renderer_reads_the_flow_it_is_given(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.node_rect("b").unwrap().w), 120.);
 }
 
-use gpui_kit::Styled as _;
+use gpui::Styled as _;
 
-#[gpui_kit::test]
+#[gpui::test]
 fn two_nodes_with_one_id_settle(cx: &mut TestAppContext) {
     // Both copies once wrote their different sizes over one measurement, and each frame asked
     // for another.
@@ -152,7 +152,7 @@ fn two_nodes_with_one_id_settle(cx: &mut TestAppContext) {
     assert_eq!(notified.get(), 0);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_huge_z_index_doesnt_overflow(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -166,7 +166,7 @@ fn a_huge_z_index_doesnt_overflow(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.selected_nodes()), ["a"]);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_node_that_is_its_own_parent_stays_where_it_is_and_moves(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -188,7 +188,7 @@ fn a_node_that_is_its_own_parent_stays_where_it_is_and_moves(cx: &mut TestAppCon
     assert_eq!(position(&flow, cx, "self"), xy(7., 3.));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn removing_the_target_mid_connection_makes_no_edge(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     let from = handle(&flow, cx, "a", HandleKind::Source);
@@ -212,7 +212,7 @@ fn removing_the_target_mid_connection_makes_no_edge(cx: &mut TestAppContext) {
     )));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn an_animated_edge_off_screen_doesnt_keep_redrawing(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, |f| {
         f.with_nodes(vec![
@@ -239,10 +239,10 @@ fn an_animated_edge_off_screen_doesnt_keep_redrawing(cx: &mut TestAppContext) {
     assert!(notified.get() >= 10, "{}", notified.get());
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_node_index_is_fresh_after_building(cx: &mut TestAppContext) {
     cx.update(|cx| {
-        gpui_kit::init(cx);
+        gpui_core::init(cx);
         gpui_flow::init(cx);
     });
     let flow = cx.new(|cx| {

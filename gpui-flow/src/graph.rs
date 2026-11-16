@@ -54,7 +54,7 @@ pub fn unique_edge_id(connection: &Connection, edges: &[Edge]) -> EdgeId {
 }
 
 /// A handle id, with an empty one counted as none, as React Flow counts it.
-fn handle(h: &Option<gpui_kit::SharedString>) -> Option<&str> {
+fn handle(h: &Option<gpui::SharedString>) -> Option<&str> {
     h.as_deref().filter(|h| !h.is_empty())
 }
 

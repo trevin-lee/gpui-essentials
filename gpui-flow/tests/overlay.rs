@@ -8,8 +8,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use common::*;
+use gpui::{Modifiers, MouseButton, TestAppContext, px, size};
 use gpui_flow::*;
-use gpui_kit::{Modifiers, MouseButton, TestAppContext, px, size};
 
 type Seen = Rc<RefCell<Vec<CanvasTransform>>>;
 
@@ -18,7 +18,7 @@ fn listening(seen: &Seen) -> impl FnOnce(Flow) -> Flow + 'static {
     move |flow| with_three(flow).with_transform_listener(move |t, _, _| seen.borrow_mut().push(t))
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_listener_hears_each_change_of_the_transform_and_nothing_else(cx: &mut TestAppContext) {
     let seen: Seen = Rc::default();
     let (flow, _, cx) = open(cx, listening(&seen));
@@ -63,7 +63,7 @@ fn the_listener_hears_each_change_of_the_transform_and_nothing_else(cx: &mut Tes
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn each_step_of_an_animated_zoom_is_heard(cx: &mut TestAppContext) {
     let seen: Seen = Rc::default();
     let listen = listening(&seen);
@@ -82,7 +82,7 @@ fn each_step_of_an_animated_zoom_is_heard(cx: &mut TestAppContext) {
     assert_eq!(*zooms.last().unwrap(), 2.);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn navigating_only_moves_about(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     flow.update(cx, |f, cx| f.set_pointer_mode(PointerMode::Navigate, cx));
@@ -111,7 +111,7 @@ fn navigating_only_moves_about(cx: &mut TestAppContext) {
         FlowEvent::NodeClick(_) | FlowEvent::EdgeClick(_) | FlowEvent::NodeDragStart(_)
     )));
     let c = center(&flow, cx, "c");
-    cx.simulate_event(gpui_kit::MouseDownEvent {
+    cx.simulate_event(gpui::MouseDownEvent {
         button: MouseButton::Left,
         position: c,
         modifiers: Modifiers::none(),
@@ -123,7 +123,7 @@ fn navigating_only_moves_about(cx: &mut TestAppContext) {
     assert_eq!(flow.read_with(cx, |f, _| f.viewport().zoom), 2.);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn off_leaves_every_press_and_scroll_alone(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     flow.update(cx, |f, cx| f.set_pointer_mode(PointerMode::Off, cx));
@@ -132,7 +132,7 @@ fn off_leaves_every_press_and_scroll_alone(cx: &mut TestAppContext) {
     let pane = screen(&flow, cx, xy(600., 60.));
     drag(cx, pane, offset(pane, 40., 30.), Modifiers::none());
     scroll(cx, pane, 0., 100., Modifiers::none());
-    cx.simulate_event(gpui_kit::PinchEvent {
+    cx.simulate_event(gpui::PinchEvent {
         position: pane,
         delta: 0.5,
         ..Default::default()
@@ -152,7 +152,7 @@ fn off_leaves_every_press_and_scroll_alone(cx: &mut TestAppContext) {
     );
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn changing_the_mode_mid_drag_puts_the_drag_back(cx: &mut TestAppContext) {
     let (flow, events, cx) = open(cx, with_three);
     let at = center(&flow, cx, "b");

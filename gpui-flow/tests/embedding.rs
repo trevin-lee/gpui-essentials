@@ -7,12 +7,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use common::*;
-use gpui_flow::*;
-use gpui_kit::{
+use gpui::{
     FocusHandle, InteractiveElement as _, IntoElement as _, KeyBinding, Modifiers, MouseButton,
     ParentElement as _, StatefulInteractiveElement as _, Styled as _, TestAppContext, actions, div,
     px,
 };
+use gpui_flow::*;
 
 actions!(host, [HostEscape]);
 
@@ -65,9 +65,9 @@ fn with_inputs(field: FocusHandle, clicks: Rc<Cell<usize>>) -> impl FnOnce(Flow)
 fn form(
     cx: &mut TestAppContext,
 ) -> (
-    gpui_kit::Entity<Flow>,
+    gpui::Entity<Flow>,
     Events,
-    &mut gpui_kit::VisualTestContext,
+    &mut gpui::VisualTestContext,
     FocusHandle,
     Rc<Cell<usize>>,
 ) {
@@ -84,15 +84,15 @@ fn form(
 
 /// The middle of row `i` (field, button, list) of the form.
 fn row(
-    flow: &gpui_kit::Entity<Flow>,
-    cx: &gpui_kit::VisualTestContext,
+    flow: &gpui::Entity<Flow>,
+    cx: &gpui::VisualTestContext,
     i: usize,
-) -> gpui_kit::Point<gpui_kit::Pixels> {
+) -> gpui::Point<gpui::Pixels> {
     let b = flow.read_with(cx, |f, _| f.node_rect("b").unwrap());
     screen(flow, cx, xy(b.x + 100., b.y + 20. + 30. * i as f32))
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn pressing_a_field_in_a_node_leaves_the_focus_with_it(cx: &mut TestAppContext) {
     let (flow, _, cx, field, _) = form(cx);
     let at = row(&flow, cx, 0);
@@ -105,7 +105,7 @@ fn pressing_a_field_in_a_node_leaves_the_focus_with_it(cx: &mut TestAppContext) 
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn the_flows_keys_dont_reach_into_a_focused_field(cx: &mut TestAppContext) {
     let (flow, _, cx, field, _) = form(cx);
     cx.simulate_click(row(&flow, cx, 0), Modifiers::none());
@@ -131,7 +131,7 @@ fn the_flows_keys_dont_reach_into_a_focused_field(cx: &mut TestAppContext) {
     assert!(flow.read_with(cx, |f, _| f.nodes().is_empty()));
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn a_nodrag_button_neither_selects_nor_drags_its_node(cx: &mut TestAppContext) {
     let (flow, _, cx, _, clicks) = form(cx);
     let at = row(&flow, cx, 1);
@@ -145,7 +145,7 @@ fn a_nodrag_button_neither_selects_nor_drags_its_node(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn scrolling_a_nowheel_list_in_a_node_doesnt_zoom(cx: &mut TestAppContext) {
     let (flow, _, cx, _, _) = form(cx);
     scroll(cx, row(&flow, cx, 2), 0., 100., Modifiers::none());
@@ -162,7 +162,7 @@ fn scrolling_a_nowheel_list_in_a_node_doesnt_zoom(cx: &mut TestAppContext) {
     assert!(flow.read_with(cx, |f, _| f.viewport().zoom) > 1.);
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn keys_the_flow_has_nothing_to_do_for_go_on_to_the_host(cx: &mut TestAppContext) {
     let (flow, _, cx) = open(cx, with_three);
     let escaped = Rc::new(Cell::new(0));

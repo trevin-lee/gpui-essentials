@@ -11,8 +11,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
 
 use crate::flow::Flow;
 use crate::theme::FlowColors;
