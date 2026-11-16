@@ -33,9 +33,8 @@ Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconT
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
 
 Text fields and text areas are gpui-core's `Input` (in this workspace), with the platform's
-input methods (on iOS, a tap raises the keyboard); the slider and an icon button's tooltip are
-gpui-core's too, all drawn in the card's colours, and so is the date picker (one date or a range),
-drawn in gpui-core's theme. Everything else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
+input methods (on iOS, a tap raises the keyboard); the slider, an icon button's tooltip and the
+date picker (one date or a range) are gpui-core's too, all drawn in the card's colours. Everything else is drawn with GPUI's own elements, everything pressable through gpui-core's `Press` so the
 keyboard reaches it (Tab to move, Enter or Space to press) and shows a focus ring there.
 Markdown goes through gpui-core's text view, so it can be selected and copied; a code block has
 a Copy button.
@@ -61,8 +60,8 @@ Pin a commit: until it's on crates.io, any commit can change the API. The crate 
 exactly (`gpui-pre` 0.3.12), so your app must use the same, or two GPUIs would be linked.
 
 The crate drew with GPUI Kit until its date picker moved to gpui-core. An app built on GPUI Kit
-0.9.1 links the same GPUI and hosts cards as before; only the date picker's colours now come
-from gpui-core's `Theme` (see [Theme](#theme)).
+0.9.1 links the same GPUI and hosts cards as before; the date picker takes the card's colours,
+and only its sizes and corners come from gpui-core's `Theme` (see [Theme](#theme)).
 
 The parser turns on `serde_json`'s `preserve_order` feature, so a program's properties keep
 the order they were written in. Cargo unifies features across a build, so every crate in your
@@ -146,7 +145,7 @@ fn main() {
     // An app that serves gpui-core's Lucide icons draws the cards' icons and the date picker's.
     gpui_platform::application().with_assets(gpui_core::Icons).run(|cx| {
         gpui_core::init(cx);
-        // The date picker's colours, and the window's rem: the same light or dark as the cards.
+        // The window's rem (the cards draw in their own colours, whatever the theme's).
         Theme::set(Theme { font_size: px(16.), ..Theme::dark() }, cx);
         gpui_core::open_window(WindowOptions::default(), cx, |window, cx| {
             let host: Rc<dyn CardHost> = Rc::new(Host);
@@ -172,8 +171,9 @@ series), the font families, text sizes, corner radii and spacing. `CardTheme::da
 pixels and are drawn as `rems(size / rem_base)`, so a host that zooms by changing the window's
 rem zooms its cards too. `frame` draws the card in a rounded, bordered box, as a chat bubble.
 
-The text fields, the slider and tooltips are gpui-core's, drawn in the card's colours, so a
-light card in a dark app (or the other way round) needs no change to gpui-core's global `Theme`:
+The text fields, the slider, tooltips and the date picker are gpui-core's, drawn in the card's
+colours, so a light card in a dark app (or the other way round) needs no change to gpui-core's
+global `Theme`:
 
 | | From `CardTheme.colors` |
 |---|---|
@@ -184,34 +184,43 @@ light card in a dark app (or the other way round) needs no change to gpui-core's
 | Its placeholder | `text_muted` |
 | Its focus ring | `focus_ring`, also the ring around a button, tab, chip or choice focused from the keyboard |
 | The slider's track, fill and thumb | `line_strong`, `accent`, `background` with an `accent` edge |
-| An icon button's tooltip | `popover`, with `text` and a `line_strong` edge |
+| The slider's keyboard focus ring | `focus_ring` |
+| An icon button's tooltip | `popover`, with `text`, a `line_strong` edge and the `body` font |
+| A date field's edge, fill, text and focus ring | as a text field's: `line_strong`, `sunk` on a dark card (none on a light one), `text`, `focus_ring` (also its edge while focused from the keyboard) |
+| Its placeholder and calendar icon | `text_muted` |
+| Its month | `popover`, with `text` and a `line_strong` edge |
+| A picked day, a range's ends | `accent` with `on_accent` |
+| The days between a range's ends | `accent` at 4% (the web's `--openui-highlight`) |
+| A day under the pointer, today, the keyboard's day | `highlight`, `accent`, a `focus_ring` edge |
+| Days outside the month, the weekdays | `text_muted` |
 | Markdown's text and links | `text` |
 | Its list markers and an image's alt text | `text_muted` |
 | Its rules, quote bars and table lines | `line` |
 | Its selection | `accent` at 30% |
-| Its inline code | `sunk` behind the `mono` font |
+| Its inline code | `sunk` behind the `body` font, as the web's |
 | A code block | `sunk`, with a `line` edge and the `mono` font |
 
 gpui-core sets itself up when its first Root, text field or date picker is made, so a host
-needn't call `gpui_core::init`. Its `Theme` still gives the slider's keyboard focus ring, a
-tooltip's font and the date picker's colours; it's dark until a host sets it. The date picker
-takes no colours of its own, so set gpui-core's `Theme` to the same light or dark as the cards:
-
-| | From gpui-core's `Theme` |
-|---|---|
-| The date field's edge and fill | `input` (its fill at 30% on a dark theme), `ring` while it has the focus |
-| Its placeholder and calendar icon | `muted_foreground` |
-| The month | `popover` and `popover_foreground`, with a `border` edge |
-| A picked day, the days between a range's ends | `primary` with `primary_foreground`, `accent` |
+needn't call `gpui_core::init`. Its `Theme` (dark until a host sets it) no longer colours
+anything in a card; it still gives the date picker its text size and corners.
 
 A date field stores "YYYY-MM-DD", and a range `{"from": …, "to": …}` (`to` is null until the
 second day is picked). The picker shows what's stored when it's made and after a press resets
 the field. From the keyboard, Tab reaches it, Enter or Space opens the month, the arrows move
 a day or a week, Page Up and Page Down a month, Enter or Space picks and Escape closes.
 
-Markdown is laid out as the web lays it out: bullets and numbers in a 1.4em column, items 0.25em
-apart, 1.4em above a heading and 0.35em below it, and inline code at 0.875em in a box 4px either
-side with 4px corners.
+Markdown is laid out as OpenUI's web renderer lays it out (`markDownRenderer.css` over
+Tailwind's reset, measured in Chromium), in CSS pixels whatever the text's size:
+
+| | The web's | Here |
+|---|---|---|
+| Paragraphs | 18px apart (`p:has(+p)`) | the same between any two blocks but headings |
+| Headings, every level | heading-xs: 600 16px/1.25 | semibold at `text.md`, 1.25 tall |
+| Above a heading | nothing (the reset's margin, which OpenUI keeps) | nothing |
+| Below a heading | 8px before a paragraph, 18px before anything else | 8px |
+| Lists | markers outside a 20px padding, a space (0.27em) before the text, items 8px apart | the same |
+| Inline code | the body's font and size on `sunk`, padding 2px 4px, a 1px border, 4px corners | the body's font, the fill to the border's outer edge (5px either side, 3px past the font's ascent and descent), 4px corners |
+| A table | radius-2xl (14px) corners, a 1px line, no header fill | `radii.xl` corners, a `line` edge, no header fill |
 
 ### Hooks and events
 
