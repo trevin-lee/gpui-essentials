@@ -2,8 +2,7 @@
 
 The block editor [gpui-blocks](../README.md) is built on: Trevin Lee's fork of
 [wabzqem/gpui-kit-markdown-editor](https://github.com/wabzqem/gpui-kit-markdown-editor), developed
-at [trevin-lee/gpui-kit-markdown-editor](https://github.com/trevin-lee/gpui-kit-markdown-editor)
-and brought here with its history. It isn't published (`publish = false`): its API is
+in a fork of that repository and brought here with its history. It isn't published (`publish = false`): its API is
 gpui-blocks' internals and changes with it. Use gpui-blocks.
 
 The rest of this README is the upstream crate's, with this fork's changes listed below.
@@ -51,7 +50,7 @@ in their first line, as the Apache License asks.
 ```toml
 [dependencies]
 gpui-kit = "0.9.1"
-gpui-kit-markdown-editor = { git = "https://github.com/trevin-lee/gpui-kit-markdown-editor" }
+gpui-blocks-engine = { git = "https://github.com/trevin-lee/gpui-essentials" }
 ```
 
 The library is imported as `markdown_editor`. The editor uses GPUI through
