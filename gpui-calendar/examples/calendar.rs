@@ -10,7 +10,8 @@
 //!
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
-//! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`. Pictures and the bench draw a window that's never shown
+//! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
+//! `compact-recurring`. Pictures and the bench draw a window that's never shown
 //! and never takes the keyboard.
 
 use std::path::PathBuf;
@@ -572,7 +573,9 @@ impl Root {
         match args.scene.as_str() {
             "day" | "compact-zones" => view = CalendarView::Day,
             // A phone: the day, the week and the agenda at an iPhone's width.
-            "compact" | "compact-swipe" | "compact-hold" => view = CalendarView::Day,
+            "compact" | "compact-swipe" | "compact-hold" | "compact-recurring" => {
+                view = CalendarView::Day
+            }
             "compact-week" => {}
             // Tuesday morning, the day with the most links.
             "agenda" | "compact-agenda" => {
@@ -731,9 +734,9 @@ impl Root {
                 });
                 said
             }
-            // A real host would ask whether a change to an occurrence of a recurring event is
-            // for that one or the whole series; this one changes the occurrence.
-            CalendarEvent::Move { event, time } | CalendarEvent::Resize { event, time } => {
+            // The calendar asked "this event, this and following, or all?" for a recurring
+            // event; this host only changes the occurrence it was given, whatever the answer.
+            CalendarEvent::Move { event, time, .. } | CalendarEvent::Resize { event, time, .. } => {
                 let said = format!("{} → {}", title(&event.id, cx), words(time));
                 calendar.update(cx, |c, cx| {
                     if let Some(mut e) = c.event(&event.id).cloned() {
@@ -754,7 +757,7 @@ impl Root {
                     title(&event.id, cx)
                 )
             }
-            CalendarEvent::Delete(event) => {
+            CalendarEvent::Delete { event, .. } => {
                 let said = format!("Deleted {}", title(&event.id, cx));
                 calendar.update(cx, |c, cx| c.remove_event(&event.id, cx));
                 said
@@ -1167,6 +1170,33 @@ mod shots {
                         finger(window, cx, TouchPhase::Moved, at);
                         draw(window, cx);
                     }
+                }
+                // Tuesday's standup, one of a series, dragged half an hour later: the question.
+                "recurring" => {
+                    let from = point_at(cx, 1, 9, 5);
+                    press(window, cx, from);
+                    settle(window, cx).await;
+                    let to = point_at(cx, 1, 9, 35);
+                    drag_to(window, cx, point(from.x, from.y + px(8.)));
+                    drag_to(window, cx, to);
+                    // A frame with the ghost in it, as a display would draw while dragging.
+                    settle(window, cx).await;
+                    release(window, cx, to);
+                }
+                // The same on a phone: a long press on Wednesday's standup, then a sheet.
+                "compact-recurring" => {
+                    let from = point_at(cx, 2, 9, 5);
+                    finger(window, cx, TouchPhase::Started, from);
+                    wait(cx, 700).await;
+                    draw(window, cx);
+                    let to = point_at(cx, 2, 9, 50);
+                    for i in 1..=8 {
+                        wait(cx, 16).await;
+                        let at = from + (to - from) * (i as f32 / 8.);
+                        finger(window, cx, TouchPhase::Moved, at);
+                        draw(window, cx);
+                    }
+                    finger(window, cx, TouchPhase::Ended, to);
                 }
                 "agenda" | "compact-agenda" => {
                     let _ = cx.update_window(window, |_, _, cx| {

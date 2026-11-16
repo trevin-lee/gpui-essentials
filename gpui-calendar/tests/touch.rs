@@ -30,6 +30,9 @@ fn events() -> Vec<Event> {
         Event::timed("a", "Planning", at(day(2), 11, 0), at(day(2), 12, 0)).calendar("work"),
         // A quarter of an hour: shorter than a finger.
         Event::timed("short", "Call", at(day(4), 10, 0), at(day(4), 10, 15)).calendar("work"),
+        Event::timed("run@1", "Run", at(day(5), 8, 0), at(day(5), 9, 0))
+            .calendar("work")
+            .series("run"),
         Event::timed("ro", "All-hands", at(day(3), 9, 0), at(day(3), 10, 0))
             .calendar("work")
             .read_only(true),
@@ -211,6 +214,7 @@ fn a_long_press_picks_an_event_up_and_the_finger_moves_it(cx: &mut TestAppContex
         &CalendarEvent::Move {
             event: reference("a"),
             time: EventTime::timed(at(day(3), 12, 30), at(day(3), 13, 30)),
+            scope: EditScope::This,
         }
     ));
     // A read-only event isn't picked up.
@@ -238,6 +242,7 @@ fn the_selected_event_follows_a_finger_and_a_tap_on_it_opens_it(cx: &mut TestApp
         &CalendarEvent::Move {
             event: reference("a"),
             time: EventTime::timed(at(day(2), 13, 0), at(day(2), 14, 0)),
+            scope: EditScope::This,
         }
     ));
     // A tap on it, still selected, opens it.
@@ -261,7 +266,7 @@ fn the_selected_events_handle_takes_a_finger_beside_its_edge(cx: &mut TestAppCon
     );
     assert!(seen.borrow().iter().any(|e| matches!(
         e,
-        CalendarEvent::Resize { event, time: EventTime::Timed { end, .. } }
+        CalendarEvent::Resize { event, time: EventTime::Timed { end, .. }, .. }
             if event.id == "a" && *end == at(day(2), 13, 0)
     )));
     unchanged(&c, cx);
@@ -333,4 +338,44 @@ fn the_header_on_touch_has_44_point_controls_and_no_arrows(cx: &mut TestAppConte
     // The swipe changes the period, so the arrows aren't drawn: Today and four views.
     let title = cx.debug_bounds("calendar-title").expect("a title");
     assert!(title.right() <= controls.left() + px(0.5));
+}
+
+#[gpui::test]
+fn on_touch_the_recurring_question_is_a_sheet_with_44_point_answers(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    long_press(
+        cx,
+        spot(&c, cx, day(5), 8, 15),
+        spot(&c, cx, day(5), 10, 15),
+    );
+    assert!(c.read_with(cx, |c, _| c.is_asking()));
+    assert!(cx.debug_bounds("calendar-sheet").is_some());
+    for i in 0..3 {
+        let row = cx
+            .debug_bounds(Box::leak(format!("scope-{i}").into_boxed_str()))
+            .expect("an answer");
+        assert!(row.size.height >= px(44.), "{:?}", row.size);
+    }
+    let all = cx.debug_bounds("scope-2").unwrap().center();
+    tap(cx, all);
+    assert!(seen.borrow().iter().any(|e| matches!(
+        e,
+        CalendarEvent::Move { event, scope: EditScope::All, .. } if event.id == "run@1"
+    )));
+    // Again, and a tap on the dimmed calendar above the sheet drops it.
+    long_press(
+        cx,
+        spot(&c, cx, day(5), 8, 15),
+        spot(&c, cx, day(5), 10, 15),
+    );
+    assert!(c.read_with(cx, |c, _| c.is_asking()));
+    let sheet = cx.debug_bounds("calendar-sheet").unwrap();
+    tap(cx, point(sheet.center().x, sheet.top() - px(40.)));
+    assert!(!c.read_with(cx, |c, _| c.is_asking()));
+    let moves = seen
+        .borrow()
+        .iter()
+        .filter(|e| matches!(e, CalendarEvent::Move { .. }))
+        .count();
+    assert_eq!(moves, 1);
 }
