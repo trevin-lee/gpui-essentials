@@ -11,7 +11,8 @@ use super::{
     position::BlockPosition,
     step::DetachedBlock,
 };
-use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode, editor_host::ColumnAlign};
+use crate::kind::ColumnAlign;
+use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode};
 
 /// Payload of an atomic block.
 #[derive(Clone, Debug, PartialEq)]

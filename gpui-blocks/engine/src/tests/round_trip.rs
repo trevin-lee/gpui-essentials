@@ -4,9 +4,9 @@
 use markdown::mdast::Node;
 
 use super::*;
+use crate::text_mark::TextMark;
 use crate::{CustomNode, Extension};
 use crate::{inline::InlineText, transaction::TransactionBuilder};
-use gpui_kit::base::text::editor_host::TextMark;
 
 fn round_trip(source: &str) -> String {
     model(source).source()

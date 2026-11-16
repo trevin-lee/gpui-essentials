@@ -6,8 +6,8 @@
 //! copy-as-source, with the options the editor needs always on. It is kept
 //! here so the host API of gpui-kit stays small.
 
+use crate::text_mark::TextMark;
 use gpui::Hsla;
-use gpui_kit::base::text::editor_host::TextMark;
 
 /// Delimiter-safe shared writer seam for links, references and images.
 pub(crate) fn markdown_destination(value: &str) -> String {

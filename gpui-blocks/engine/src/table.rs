@@ -14,7 +14,7 @@ use super::{
     step::DetachedBlock,
     transaction::EditOrigin,
 };
-use gpui_kit::base::text::editor_host::ColumnAlign;
+use crate::kind::ColumnAlign;
 
 /// A table's cells as rows.
 pub(crate) fn grid(doc: &EditorDocument, table: BlockId) -> Vec<Vec<BlockId>> {

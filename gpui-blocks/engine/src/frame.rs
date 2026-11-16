@@ -11,8 +11,9 @@
 
 use std::{collections::HashMap, ops::Range, rc::Rc};
 
+use crate::kind::ColumnAlign;
 use gpui::{Bounds, Pixels, Point, point, px, size};
-use gpui_kit::base::text::editor_host::{ColumnAlign, LeafGeometry};
+use gpui_kit::base::text::editor_host::LeafGeometry;
 
 use super::{id::BlockId, position::BlockPosition, projection::LeafInfo};
 
