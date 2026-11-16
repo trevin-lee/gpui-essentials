@@ -391,6 +391,19 @@ pub fn embed(id: &str, title: &str, view: &str, height: u32) -> String {
     )
 }
 
+/// A mention's document and title read back from its Markdown.
+pub(crate) fn mention_of(markdown: &str) -> Option<(String, String)> {
+    let tree = markdown::to_mdast(markdown, &markdown::ParseOptions::gfm()).ok()?;
+    let [Node::Paragraph(paragraph)] = tree.children()?.as_slice() else {
+        return None;
+    };
+    let [Node::Link(link)] = paragraph.children.as_slice() else {
+        return None;
+    };
+    let doc = DocRef::from_link(link)?;
+    Some((doc.id.to_string(), doc.title.to_string()))
+}
+
 /// An embed's document, title, view and height read back from its Markdown.
 pub(crate) fn embed_of(markdown: &str) -> Option<(String, String, String, u32)> {
     let tree = markdown::to_mdast(markdown, &markdown::ParseOptions::gfm()).ok()?;
@@ -1030,6 +1043,127 @@ mod tests {
             editor.read_with(cx, |e, cx| e.markdown(cx)),
             "Intro\n\n[Q4 board](doc:b1 \"embed board 320\")\n\n"
         );
+    }
+
+    /// Pastes `text` as the editor's own copy of a line's content would be.
+    fn paste(cx: &mut VisualTestContext, text: &str) {
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string_with_metadata(
+            text.to_string(),
+            "gpui-kit/block-editor/inline-markdown/v1".to_string(),
+        ));
+        keys_paste(cx);
+    }
+
+    /// Pastes `text` as another app's would be.
+    fn paste_external(cx: &mut VisualTestContext, text: &str) {
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.to_string()));
+        keys_paste(cx);
+    }
+
+    fn keys_paste(cx: &mut VisualTestContext) {
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-v"
+        } else {
+            "ctrl-v"
+        });
+        draw(cx);
+    }
+
+    fn new_line(editor: &Entity<Editor>, cx: &mut VisualTestContext) {
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let _ = s.select_end(cx);
+            })
+        });
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+    }
+
+    #[gpui_kit::test]
+    fn a_pasted_doc_link_can_become_an_embed(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
+        new_line(&editor, cx);
+        paste(cx, "[Board](doc:b1)");
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Board](doc:b1)"
+        );
+        // Already a mention: the offer is a page or an embed.
+        assert!(cx.debug_bounds("blocks-paste-Mention").is_none());
+        let embed = cx
+            .debug_bounds("blocks-paste-Embed")
+            .expect("offered")
+            .center();
+        cx.simulate_click(embed, Modifiers::none());
+        draw(cx);
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Board](doc:b1 \"embed page 320\")\n\n"
+        );
+        assert!(
+            cx.debug_bounds("blocks-paste-Embed").is_none(),
+            "the offer closes"
+        );
+        // One undo takes it back to the pasted link.
+        editor.update(cx, |e, cx| e.state().update(cx, |s, cx| s.undo(cx)));
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Board](doc:b1)"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_pasted_doc_address_can_become_a_page_titled_by_the_app(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
+        new_line(&editor, cx);
+        paste_external(cx, "doc:b1");
+        assert!(cx.debug_bounds("blocks-paste-Mention").is_some());
+        let page = cx.debug_bounds("blocks-paste-Page").unwrap().center();
+        cx.simulate_click(page, Modifiers::none());
+        draw(cx);
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Q4 board](doc:b1 \"page\")\n\n"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn a_link_pasted_from_another_app_can_become_a_mention(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
+        new_line(&editor, cx);
+        paste_external(cx, "[Board](doc:b1)");
+        let mention = cx
+            .debug_bounds("blocks-paste-Mention")
+            .expect("offered")
+            .center();
+        cx.simulate_click(mention, Modifiers::none());
+        draw(cx);
+        assert_eq!(
+            editor.read_with(cx, |e, cx| e.markdown(cx)),
+            "Intro\n\n[Board](doc:b1)"
+        );
+    }
+
+    #[gpui_kit::test]
+    fn no_offer_for_a_link_among_words_or_after_typing(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let _ = s.select_end(cx);
+            })
+        });
+        paste(cx, " [Board](doc:b1)");
+        assert!(cx.debug_bounds("blocks-paste-Page").is_none());
+        new_line(&editor, cx);
+        paste(cx, "[Board](doc:b1)");
+        assert!(cx.debug_bounds("blocks-paste-Page").is_some());
+        cx.simulate_input("x");
+        draw(cx);
+        assert!(cx.debug_bounds("blocks-paste-Page").is_none());
     }
 
     #[test]
