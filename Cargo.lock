@@ -2274,14 +2274,24 @@ name = "gpui-blocks"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "gpui-blocks-engine",
  "gpui-kit",
- "gpui-kit-markdown-editor",
  "gpui-pre",
  "gpui-pre-macos",
  "image",
  "markdown",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "gpui-blocks-engine"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "gpui-kit",
+ "markdown",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -2749,16 +2759,6 @@ dependencies = [
  "rust-embed",
  "wasm-bindgen",
  "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "gpui-kit-markdown-editor"
-version = "0.2.0"
-source = "git+https://github.com/trevin-lee/gpui-kit-markdown-editor?rev=ef1554224b5e762593aa4c6e7475bca91c2915a8#ef1554224b5e762593aa4c6e7475bca91c2915a8"
-dependencies = [
- "gpui-kit",
- "markdown",
- "unicode-segmentation",
 ]
 
 [[package]]

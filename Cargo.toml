@@ -1,7 +1,7 @@
 # The GPUI crates in one workspace, so they build and test against one GPUI.
 [workspace]
 resolver = "3"
-members = ["gpui-blocks", "gpui-calendar", "gpui-chatwidgets", "gpui-core", "gpui-flow", "gpui-tables"]
+members = ["gpui-blocks", "gpui-blocks/engine", "gpui-calendar", "gpui-chatwidgets", "gpui-core", "gpui-flow", "gpui-tables"]
 
 [workspace.package]
 edition = "2024"
