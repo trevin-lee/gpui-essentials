@@ -363,6 +363,8 @@ pub struct NodeContext {
     pub colors: FlowColors,
     /// How large (in points) the area a finger can take a handle or a grip by is, at least.
     pub(crate) touch_size: Pixels,
+    /// Whether finger-sized targets are built (see [`crate::FlowOptions::touch_targets`]).
+    pub(crate) touch_targets: bool,
     /// In a tree layout, how deep the node is (0 for a root); none otherwise.
     pub depth: Option<usize>,
     /// In a tree layout, how many children the node has, and whether they're folded away.
@@ -502,7 +504,7 @@ impl NodeContext {
                 Reach::Corner(corner),
             );
             placed
-                .child(touch)
+                .when(self.touch_targets, |d| d.child(touch))
                 .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                     let took = flow
                         .update(cx, |flow, cx| {
@@ -686,7 +688,9 @@ impl RenderOnce for Handle {
         placed
             // A finger takes a handle only while it's drawn: one nobody can see mustn't turn
             // a touch at a shape's edge into a connection.
-            .when(connectable && !hidden, |d| d.child(touch))
+            .when(connectable && !hidden && ctx.touch_targets, |d| {
+                d.child(touch)
+            })
             .when(connectable, |d| {
                 let flow = ctx.flow.clone();
                 let node = ctx.id.clone();
