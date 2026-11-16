@@ -190,6 +190,61 @@ higher `version`. Otherwise it fixes ids as [Ids](#ids) says. On load, the flow 
 or size that isn't a finite number as 0 or absent. Nothing in a document can make the flow fetch,
 open or run anything.
 
+## Edits
+
+The flow tells its host what changed as a batch of operations by id
+(`FlowEvent::Edits`), and takes batches from elsewhere with `Flow::apply()`. A server stores a
+flow by applying each batch to its document in order (`Document::apply()` in Rust), so two
+people, or a person and an agent, editing different things never overwrite each other.
+
+```json
+[
+  { "op": "addNode", "node": { "id": "Zr81mXbT0qvN", "position": { "x": 220, "y": 0 }, "data": { "label": "Press" } } },
+  { "op": "addEdge", "edge": { "id": "c7HhQ2wLx5Ke", "source": "k3W9cQe2LfAp", "target": "Zr81mXbT0qvN" } },
+  { "op": "patchNode", "id": "k3W9cQe2LfAp", "patch": { "position": { "x": 40 }, "data": { "label": "Launch!" } } },
+  { "op": "removeEdge", "id": "e1" },
+  { "op": "removeNode", "id": "n7" }
+]
+```
+
+| `op` | Fields | Applied |
+|---|---|---|
+| `addNode` | `node`: the whole node, as stored | Added at the end of `nodes`. One with the same id is replaced, in its place. |
+| `patchNode` | `id`, `patch` | The patch is merged into the node's stored form (below). |
+| `removeNode` | `id` | The node is taken out. |
+| `addEdge`, `patchEdge`, `removeEdge` | The same, with `edge` | The same, on `edges`. |
+
+A frame is a node, so frames change by the node operations.
+
+**A patch** is a JSON merge patch ([RFC 7386](https://www.rfc-editor.org/rfc/rfc7386)) of the
+stored form, holding only what changed: an object is merged field by field (so moving a node
+sends `{"position": {"x": 40}}` when only `x` changed, and relabelling it
+`{"data": {"label": "Launch!"}}`), anything else (a string, a number, an array) replaces the
+field, and `null` takes the field away. A patch never changes an `id` or `selected`; a reader
+drops those from it. If a patched node or edge no longer reads (a field of the wrong type), the
+patch is skipped.
+
+**A removal takes only what it names.** When this crate deletes a node, the same batch also
+removes every edge that touched it, and removes or unparents (with a `patchNode` of
+`"parentId": null` and its new `position`) each node inside it. A reader applies
+operations literally and doesn't cascade: an edge or `parentId` left naming a removed node
+(when, say, someone connected to it while someone else deleted it) is kept, and drawn as if
+absent. Undoing the removal brings the node back, and that edge with it.
+
+**What isn't there:** a patch or removal of an id that isn't there is skipped; an add of an id
+that is replaces it; an add with an invalid id is skipped.
+
+**Batches.** One batch is one edit, sent when it settles: a drag of many nodes, by mouse or
+finger, is one batch at its end; making a frame is the frame's `addNode` and each child's
+`patchNode`; deleting is every removal at once. Within a batch, adds come first (nodes, then
+edges), then patches, then removals (edges, then nodes). Edits made through the flow's methods
+(`update_node`, `set_nodes`, `connect`, …) are sent too. Loading (`set_document`, `restore`)
+and applying (`apply`) send nothing, and neither do selecting, panning and zooming.
+
+**In a mind map,** a node's place under its root is the layout's, worked out on each device, so
+it isn't sent: only a root's `position` is. Adding a child is its `addNode` and the `addEdge`
+from its parent.
+
 ## React Flow
 
 Without `format`, `version` and `layout`, a document is React Flow's own `{ nodes, edges,

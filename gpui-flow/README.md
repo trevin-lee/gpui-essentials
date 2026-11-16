@@ -49,6 +49,11 @@ Run the example with `cargo run --release --example flow` from this folder.
   kept. Nothing selected is stored, and `Flow::set_document()` keeps the selection. New ids are
   random, so two editors adding at once don't clash. [docs/json.md](docs/json.md) has every
   field.
+- **Edits as operations.** Each settled edit is sent as one batch (`FlowEvent::Edits`) of
+  `addNode`, `patchNode`, `removeNode` and the same for edges, by id, a patch holding only the
+  fields that changed (a JSON merge patch). A drag of many nodes is one batch, at its end.
+  `Flow::apply()` takes batches from elsewhere without sending them back or losing the
+  selection, so a server can merge an agent's edits with the owner's.
 - **With the mouse and keys.** Drag the pane to pan; scroll or pinch to zoom about the pointer;
   drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
   rectangle; drag from a handle to another (either direction) to connect; click an edge to

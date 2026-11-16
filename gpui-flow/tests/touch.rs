@@ -78,6 +78,17 @@ fn a_finger_drags_a_node_and_pans_the_pane(cx: &mut TestAppContext) {
             .iter()
             .any(|e| matches!(e, FlowEvent::NodeDragStop(ids) if ids == &["b"]))
     );
+    // The whole drag is one edit, sent when the finger lifts.
+    let edits: Vec<_> = events
+        .borrow()
+        .iter()
+        .filter_map(|e| match e {
+            FlowEvent::Edits(ops) => Some(ops.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert!(matches!(&edits[0][..], [json::Op::PatchNode { id, .. }] if id == "b"));
     // On the empty pane, the flow follows the finger.
     let pane = screen(&flow, cx, xy(600., 60.));
     swipe(cx, pane, offset(pane, -50., 30.));

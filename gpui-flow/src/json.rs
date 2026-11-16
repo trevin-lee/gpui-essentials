@@ -269,3 +269,193 @@ pub fn new_id() -> String {
         })
         .collect()
 }
+
+/// One change to a stored flow, by id. The flow emits them in batches
+/// ([`FlowEvent::Edits`](crate::FlowEvent::Edits)), one batch for each settled edit (a drag
+/// of many nodes is one batch), and applies batches from elsewhere with
+/// [`Flow::apply`](crate::Flow::apply).
+///
+/// Written as JSON with an `op` tag:
+/// `{"op": "patchNode", "id": "k3W9cQe2LfAp", "patch": {"position": {"x": 40}}}`.
+/// A frame is a node, so frames change by the node operations.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum Op {
+    /// A new node, as stored. One whose id is taken replaces it.
+    AddNode {
+        node: Box<Node>,
+    },
+    /// Some of a node's fields changed: a JSON merge patch (RFC 7386) of its stored form, with
+    /// only what changed. An object is merged field by field, anything else replaces, and
+    /// `null` takes a field away.
+    PatchNode {
+        id: NodeId,
+        patch: Map<String, Value>,
+    },
+    /// A node went. Its children and edges go by their own operations in the same batch.
+    RemoveNode {
+        id: NodeId,
+    },
+    AddEdge {
+        edge: Box<Edge>,
+    },
+    PatchEdge {
+        id: crate::types::EdgeId,
+        patch: Map<String, Value>,
+    },
+    RemoveEdge {
+        id: crate::types::EdgeId,
+    },
+}
+
+impl Op {
+    /// The id of the node or edge it changes.
+    pub fn id(&self) -> &str {
+        match self {
+            Op::AddNode { node } => &node.id,
+            Op::AddEdge { edge } => &edge.id,
+            Op::PatchNode { id, .. }
+            | Op::RemoveNode { id }
+            | Op::PatchEdge { id, .. }
+            | Op::RemoveEdge { id } => id,
+        }
+    }
+}
+
+/// Applies a JSON merge patch (RFC 7386) to `target`.
+pub fn merge_patch(target: &mut Value, patch: &Value) {
+    let Value::Object(fields) = patch else {
+        *target = patch.clone();
+        return;
+    };
+    if !target.is_object() {
+        *target = Value::Object(Map::new());
+    }
+    let Value::Object(into) = target else {
+        return;
+    };
+    for (key, value) in fields {
+        if value.is_null() {
+            into.remove(key);
+        } else {
+            merge_patch(into.entry(key.clone()).or_insert(Value::Null), value);
+        }
+    }
+}
+
+/// The merge patch that makes `old` into `new`, or none when they're the same. Objects are
+/// compared field by field; anything else is replaced whole. (A `null` inside `new` can't be
+/// said by a merge patch, and comes out as the field taken away.)
+pub fn merge_diff(old: &Value, new: &Value) -> Option<Value> {
+    if old == new {
+        return None;
+    }
+    let (Value::Object(a), Value::Object(b)) = (old, new) else {
+        return Some(new.clone());
+    };
+    let mut patch = Map::new();
+    for (key, value) in b {
+        match a.get(key) {
+            Some(was) => {
+                if let Some(p) = merge_diff(was, value) {
+                    patch.insert(key.clone(), p);
+                }
+            }
+            None => {
+                patch.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    for key in a.keys() {
+        if !b.contains_key(key) {
+            patch.insert(key.clone(), Value::Null);
+        }
+    }
+    Some(Value::Object(patch))
+}
+
+/// The fields of `new` that differ from `old`, as a patch of their stored forms. Selection
+/// isn't stored, so it's never in one.
+pub(crate) fn diff_stored<T: Serialize>(old: &T, new: &T) -> Map<String, Value> {
+    let (Ok(a), Ok(b)) = (serde_json::to_value(old), serde_json::to_value(new)) else {
+        return Map::new();
+    };
+    let mut patch = match merge_diff(&a, &b) {
+        Some(Value::Object(p)) => p,
+        _ => Map::new(),
+    };
+    patch.remove("selected");
+    patch
+}
+
+/// `item` with `patch` merged into its stored form; none when the result doesn't read back.
+/// The id and the selection stay as they were.
+pub(crate) fn patched<T>(item: &T, patch: &Map<String, Value>) -> Option<T>
+where
+    T: Serialize + serde::de::DeserializeOwned,
+{
+    let mut value = serde_json::to_value(item).ok()?;
+    let keep_id = value.get("id").cloned();
+    let keep_selected = value.get("selected").cloned();
+    merge_patch(&mut value, &Value::Object(patch.clone()));
+    let fields = value.as_object_mut()?;
+    match keep_id {
+        Some(id) => fields.insert("id".into(), id),
+        None => fields.remove("id"),
+    };
+    match keep_selected {
+        Some(s) => fields.insert("selected".into(), s),
+        None => fields.remove("selected"),
+    };
+    serde_json::from_value(value).ok()
+}
+
+impl Document {
+    /// Applies a batch of operations, as a server would to the document it stores. A patch or
+    /// removal of an id that isn't there is skipped, an add of one that is replaces it, and an
+    /// add with an invalid id is skipped.
+    pub fn apply(&mut self, ops: &[Op]) {
+        for op in ops {
+            match op {
+                Op::AddNode { node } => {
+                    if !valid_id(&node.id) {
+                        continue;
+                    }
+                    let mut node = (**node).clone();
+                    node.selected = false;
+                    match self.nodes.iter_mut().find(|n| n.id == node.id) {
+                        Some(n) => *n = node,
+                        None => self.nodes.push(node),
+                    }
+                }
+                Op::PatchNode { id, patch } => {
+                    if let Some(n) = self.nodes.iter_mut().find(|n| &n.id == id)
+                        && let Some(new) = patched(n, patch)
+                    {
+                        *n = new;
+                    }
+                }
+                Op::RemoveNode { id } => self.nodes.retain(|n| &n.id != id),
+                Op::AddEdge { edge } => {
+                    if !valid_id(&edge.id) {
+                        continue;
+                    }
+                    let mut edge = (**edge).clone();
+                    edge.selected = false;
+                    match self.edges.iter_mut().find(|e| e.id == edge.id) {
+                        Some(e) => *e = edge,
+                        None => self.edges.push(edge),
+                    }
+                }
+                Op::PatchEdge { id, patch } => {
+                    if let Some(e) = self.edges.iter_mut().find(|e| &e.id == id)
+                        && let Some(new) = patched(e, patch)
+                    {
+                        *e = new;
+                    }
+                }
+                Op::RemoveEdge { id } => self.edges.retain(|e| &e.id != id),
+            }
+        }
+    }
+}
