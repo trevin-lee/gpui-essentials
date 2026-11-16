@@ -49,6 +49,25 @@ lines = [
 ]
 for n in names:
     lines.append(f'    ("{n}", include_bytes!("../../assets/lucide/{n}.svg")),')
+lines += ["];", ""]
+
+# Lucide's old names for its icons (from each icon's metadata), which lucide-react still takes and
+# so agents still write: each to its icon, sorted, leaving out any that is an icon's own name.
+import json
+known = set(names)
+aliases = {}
+for n in names:
+    meta = src / f"{n}.json"
+    if not meta.exists():
+        continue
+    for a in json.loads(meta.read_text()).get("aliases", []):
+        a = a["name"] if isinstance(a, dict) else a
+        if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", a) and a not in known:
+            aliases.setdefault(a, n)
+lines.append("/// Old names, each with the icon it's now called, sorted by old name.")
+lines.append("pub(crate) static ALIASES: &[(&str, &str)] = &[")
+for a in sorted(aliases):
+    lines.append(f'    ("{a}", "{aliases[a]}"),')
 lines += ["];", "", "#[allow(non_upper_case_globals)]", "impl super::IconName {"]
 seen = set()
 for n in names:
@@ -59,4 +78,4 @@ for n in names:
     lines.append(f'    pub const {c}: Self = Self("{n}");')
 lines += ["}", ""]
 pathlib.Path("src/icon/lucide.rs").write_text("\n".join(lines))
-print(f"{len(names)} icons")
+print(f"{len(names)} icons, {len(aliases)} old names")
