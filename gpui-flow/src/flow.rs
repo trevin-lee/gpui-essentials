@@ -504,6 +504,8 @@ pub struct Flow {
     /// Runs while an animated edge is on screen, to redraw the dashes.
     ticker: Option<Task<()>>,
     started: Instant,
+    /// When the frame being drawn began, by GPUI's clock.
+    frame_time: Instant,
     last_selection: (Vec<NodeId>, Vec<EdgeId>),
     touch: Option<TouchPress>,
     /// In a tree layout: the tree as of the last frame, the nodes folded under a collapsed
@@ -608,7 +610,8 @@ impl Flow {
             pending_fit: None,
             ready: true,
             ticker: None,
-            started: Instant::now(),
+            started: now(cx),
+            frame_time: now(cx),
             last_selection: Default::default(),
             touch: None,
             last_tap: None,
@@ -976,7 +979,7 @@ impl Flow {
     /// moves each node toward its place (at once until every node has a size, and for what's
     /// carried along by a drag). Nodes being dragged are roots of their own until they're
     /// dropped.
-    fn lay_out_tree(&mut self, window: &mut Window) {
+    fn lay_out_tree(&mut self, now: Instant, window: &mut Window) {
         let Some(options) = self.tree_layout() else {
             if !self.folded.is_empty() || !self.tree.parent.is_empty() || !self.placed.is_empty() {
                 self.folded.clear();
@@ -1038,7 +1041,6 @@ impl Flow {
         for id in &dragged {
             carried.extend(full.descendants(id));
         }
-        let now = Instant::now();
         let step = match self.laid_out {
             Some(last) if !options.motion.is_zero() => {
                 let dt = now.duration_since(last).as_secs_f32();
@@ -1786,7 +1788,7 @@ impl Flow {
             self.transition = Some(Transition {
                 from: self.viewport,
                 to,
-                start: Instant::now(),
+                start: now(cx),
                 duration,
             });
             cx.notify();
@@ -2230,7 +2232,7 @@ impl Flow {
         let double = self.last_tap.as_ref().is_some_and(|(at, p, on)| {
             matches!(target, TouchTarget::Pane | TouchTarget::Node(_))
                 && *on == node
-                && at.elapsed() <= DOUBLE_TAP
+                && now(cx).duration_since(*at) <= DOUBLE_TAP
                 && distance(*p, position) <= DOUBLE_TAP_SLOP
         });
         let down = MouseDownEvent {
@@ -2340,7 +2342,7 @@ impl Flow {
                 };
                 // A tap: the next one soon after, on the same thing, is a double tap.
                 self.last_tap = (!press.moved && clicks == 1)
-                    .then(|| (Instant::now(), event.position, press.node.clone()));
+                    .then(|| (now(cx), event.position, press.node.clone()));
                 if let (false, Some(edge)) = (press.moved, press.edge) {
                     self.drag = None;
                     let down = MouseDownEvent {
@@ -3108,7 +3110,8 @@ impl Flow {
         let Some(t) = &self.transition else {
             return;
         };
-        let p = (t.start.elapsed().as_secs_f32() / t.duration.as_secs_f32()).min(1.);
+        let elapsed = now(cx).duration_since(t.start);
+        let p = (elapsed.as_secs_f32() / t.duration.as_secs_f32()).min(1.);
         // Ease out: fast away, gentle in.
         let e = 1. - (1. - p).powi(3);
         let lerp = |a: f32, b: f32| a + (b - a) * e;
@@ -3379,7 +3382,7 @@ impl Flow {
         let viewport = self.viewport;
         let zoom = viewport.zoom;
         let loose = self.options.connection_mode == ConnectionMode::Loose;
-        let phase = self.started.elapsed().as_secs_f32() * DASH_SPEED * zoom;
+        let phase = self.frame_time.duration_since(self.started).as_secs_f32() * DASH_SPEED * zoom;
         canvas(
             |_, _, _| {},
             move |bounds, _, window, cx| {
@@ -3690,7 +3693,8 @@ impl Render for Flow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self.colors.unwrap_or_else(|| FlowColors::from_theme(cx));
         self.enforce_extents();
-        self.lay_out_tree(window);
+        self.frame_time = now(cx);
+        self.lay_out_tree(self.frame_time, window);
         self.try_pending_fit(cx);
         self.step_transition(window, cx);
         self.keep_ticking(cx);
@@ -4096,4 +4100,10 @@ impl Flow {
 /// The distance between two points of the window, in points.
 fn distance(a: Point<Pixels>, b: Point<Pixels>) -> f32 {
     (a - b).magnitude() as f32
+}
+
+/// The time by GPUI's clock: the real one in an app, and one a test moves itself, so
+/// animations step the same however fast the machine draws.
+fn now(cx: &App) -> Instant {
+    cx.background_executor().now()
 }

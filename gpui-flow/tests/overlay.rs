@@ -72,7 +72,7 @@ fn each_step_of_an_animated_zoom_is_heard(cx: &mut TestAppContext) {
     });
     flow.update(cx, |f, cx| f.zoom_to(2., cx));
     for _ in 0..4 {
-        std::thread::sleep(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(60));
         draw(cx);
     }
     let zooms: Vec<f32> = seen.borrow().iter().map(|t| t.scale()).collect();
