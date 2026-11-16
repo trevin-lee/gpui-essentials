@@ -258,6 +258,16 @@ impl Render for Gallery {
                     .child(div().w(rems(14.)).child(Input::new(&self.name)))
                     .child(div().w(rems(22.)).child(Input::new(&self.note))),
             )
+            .child(heading("Markdown", &theme))
+            .child(
+                div().w(rems(36.)).child(
+                    TextView::markdown(
+                        "md",
+                        "### A heading\n\nA paragraph with **bold**, *italic*, `code` and [a link](https://example.test), long enough to wrap in this column. يرجى إرسال خطة الدراسة\n\n- One\n- [x] Done\n\n> A quote\n\n```\nlet code = \"block\";\n```\n\n| Left | Centre | Right |\n|---|:-:|--:|\n| a | b | c |",
+                    )
+                    .selectable(true),
+                ),
+            )
             .child(heading("Press, with a host's own look", &theme))
             .child(
                 Press::new("press")

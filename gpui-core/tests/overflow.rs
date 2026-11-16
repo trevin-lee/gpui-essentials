@@ -16,7 +16,7 @@ use gpui::{
 };
 use gpui_core::{
     Button, ButtonGroup, ButtonVariant, ButtonVariants as _, ControlSize, IconName, Input,
-    InputState, Root, Sizable as _, Theme, Tooltip,
+    InputState, Root, Sizable as _, TextView, Theme, Tooltip,
 };
 
 const WORD: &str = "Pneumonoultramicroscopicsilicovolcanoconiosis-Antidisestablishmentarianism";
@@ -77,6 +77,16 @@ fn components() -> Vec<(String, Make)> {
                 }),
             ));
         }
+    }
+    for (t, text) in texts().into_iter().enumerate() {
+        // Every kind of block, holding the worst text.
+        let doc = format!(
+            "# {text}\n\n{text} with `{text}` and [{text}](https://example.test)\n\n- {text}\n  - {text}\n\n> {text}\n\n```\n{text}\n```\n\n| {text} | b |\n|:-:|--:|\n| {text} | {text} |"
+        );
+        out.push((
+            format!("TextView text {t}"),
+            Rc::new(move |_, _| TextView::markdown("doc", doc.clone()).into_any_element()),
+        ));
     }
     let variants = [
         ButtonVariant::Primary,
@@ -192,20 +202,27 @@ fn overflows(
         let sprites = scene
             .monochrome_sprites
             .iter()
-            .map(|s| (&s.bounds, &s.content_mask))
+            .map(|s| (&s.bounds, &s.content_mask, false))
             .chain(
                 scene
                     .subpixel_sprites
                     .iter()
-                    .map(|s| (&s.bounds, &s.content_mask)),
+                    .map(|s| (&s.bounds, &s.content_mask, false)),
             )
             .chain(
                 scene
                     .polychrome_sprites
                     .iter()
-                    .map(|s| (&s.bounds, &s.content_mask)),
+                    .map(|s| (&s.bounds, &s.content_mask, true)),
             );
-        for (b, m) in sprites {
+        for (b, m, emoji) in sprites {
+            // An emoji's bitmap is wider than its advance, padded with clear pixels either side:
+            // its sprite overstates its ink by up to a seventh of its width each side.
+            let slack = if emoji {
+                slack.max(b.size.width.as_f32() / 7.)
+            } else {
+                slack
+            };
             let (left, right) = (
                 b.origin.x.as_f32(),
                 b.origin.x.as_f32() + b.size.width.as_f32(),
@@ -250,9 +267,11 @@ fn every_component_keeps_its_text_in_its_box() {
                 if name.starts_with("Tooltip") && width < 160. {
                     continue;
                 }
-                // A field's padding and border take 26 CSS pixels: narrower than 60 there's no
-                // room for a character at all.
-                if name.starts_with("Input") && width / zoom < 60. {
+                // Under 60 CSS pixels there's no room for a character: a field's padding and
+                // border take 26, and a table's cells and a nested list's text have less than one
+                // (such a character is cut at its cell, never drawn over it).
+                if (name.starts_with("Input") || name.starts_with("TextView")) && width / zoom < 60.
+                {
                     continue;
                 }
                 let mut cx = app_with_text();
