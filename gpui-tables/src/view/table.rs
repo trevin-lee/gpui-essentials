@@ -56,6 +56,8 @@ pub(crate) enum Action {
     TogglePerson(Person),
     ToggleRelation(String),
     ClearValue,
+    /// Something done to a property: its pages, and the edits they make.
+    Prop(super::properties::PropAction),
 }
 
 /// One entry of a menu or picker.
@@ -70,41 +72,62 @@ pub(crate) struct Entry {
     pub checked: Option<bool>,
     /// An option's colour: the entry is drawn as the option's pill, as in a cell.
     pub chip: Option<crate::model::Color>,
+    /// Muted text at the entry's end: the current type, number format.
+    pub hint: Option<String>,
+    /// Shown and skipped (an action past a limit).
+    pub disabled: bool,
+    /// Where the menu opens, rather than its first entry.
+    pub highlight: bool,
 }
 
 impl Entry {
-    fn heading(label: impl Into<String>) -> Self {
+    pub(crate) fn heading(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
             action: None,
             icon: None,
             checked: None,
             chip: None,
+            hint: None,
+            disabled: false,
+            highlight: false,
         }
     }
 
-    fn act(label: impl Into<String>, action: Action) -> Self {
+    pub(crate) fn act(label: impl Into<String>, action: Action) -> Self {
         Self {
-            label: label.into(),
             action: Some(action),
-            icon: None,
-            checked: None,
-            chip: None,
+            ..Self::heading(label)
         }
     }
 
-    fn icon(mut self, icon: gpui_core::IconName) -> Self {
+    pub(crate) fn icon(mut self, icon: gpui_core::IconName) -> Self {
         self.icon = Some(icon);
         self
     }
 
-    fn checked(mut self, checked: bool) -> Self {
+    pub(crate) fn checked(mut self, checked: bool) -> Self {
         self.checked = Some(checked);
         self
     }
 
-    fn chip(mut self, color: crate::model::Color) -> Self {
+    pub(crate) fn chip(mut self, color: crate::model::Color) -> Self {
         self.chip = Some(color);
+        self
+    }
+
+    pub(crate) fn hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    pub(crate) fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub(crate) fn highlighted(mut self, on: bool) -> Self {
+        self.highlight = on;
         self
     }
 }
@@ -122,6 +145,16 @@ pub(crate) enum Popover {
     Date { cell: CellRef },
     /// A column's filter value, typed in place: the field under its header.
     FilterValue { column: usize },
+    /// The + after the last column: a new property's name and type.
+    AddProperty,
+    /// A new relation's database and whether it's two-way, after its name
+    /// ([`TableView::new_relation`] holds them).
+    AddRelation,
+    /// A page of a property's menu past the column's own: its type, options, format, ...
+    Property {
+        property_id: String,
+        page: super::properties::Page,
+    },
 }
 
 /// A typed value asked for: of the host's field, or (when the host hands it back) of the
@@ -247,6 +280,17 @@ pub struct TableView {
     pub(crate) focus_group: Option<(String, String)>,
     /// The board's state, when the view is a board.
     pub(crate) board: super::board::Board,
+    /// The field of a property's menu (a name, an option's name), while one's open.
+    pub(crate) field: Option<super::properties::MenuField>,
+    /// Why the open menu refused what was asked (a name taken, a limit reached).
+    pub(crate) note: Option<String>,
+    /// The type highlighted in the add-property menu (a place in `PropertyType::ADDABLE`), and
+    /// a count of its moves, so its list draws anew with the highlight there.
+    pub(crate) add_kind: (usize, u64),
+    /// A relation being added: its name, database and whether it's two-way.
+    pub(crate) new_relation: Option<super::properties::NewRelation>,
+    /// A property just added, whose column is scrolled into view once the host hands it back.
+    pub(crate) pending_column: Option<String>,
 }
 
 impl Focusable for TableView {
@@ -289,6 +333,11 @@ impl TableView {
             pending_row: None,
             focus_group: None,
             board: super::board::Board::default(),
+            field: None,
+            note: None,
+            add_kind: (0, 0),
+            new_relation: None,
+            pending_column: None,
         }
     }
 
@@ -481,6 +530,7 @@ impl TableView {
     /// Closes an open menu or picker.
     pub fn close_popover(&mut self, cx: &mut Context<Self>) {
         self.date = None;
+        self.close_property_menu();
         if self.popover.take().is_some() {
             cx.notify();
         }
@@ -654,6 +704,24 @@ impl TableView {
         {
             self.popover = None;
         }
+        // A property's page whose property is gone closes; a property just added has its
+        // column scrolled into view.
+        if let Some(Popover::Property { property_id, .. }) = &self.popover
+            && fields.property(property_id).is_none()
+        {
+            self.popover = None;
+            self.close_property_menu();
+        }
+        if let Some(id) = self.pending_column.clone()
+            && let Some(c) = self.shown.columns.iter().position(|c| c.property_id == id)
+        {
+            // The new column is the last: scrolled to the end, the + after it in view too.
+            self.pending_column = None;
+            self.reveal_column(c);
+            if c + 1 == self.shown.columns.len() {
+                self.scroll_x = self.max_scroll_x();
+            }
+        }
     }
 
     // --- Geometry ---------------------------------------------------------------------------
@@ -698,7 +766,7 @@ impl TableView {
     }
 
     /// A column's left edge in the window.
-    fn column_left(&self, column: usize) -> Pixels {
+    pub(crate) fn column_left(&self, column: usize) -> Pixels {
         let origin = self.bounds.get().origin.x;
         if column == 0 {
             return origin;
@@ -746,7 +814,7 @@ impl TableView {
     }
 
     /// Scrolls sideways so a column is in view (the title's always is).
-    fn reveal_column(&mut self, column: usize) {
+    pub(crate) fn reveal_column(&mut self, column: usize) {
         if column == 0 || self.bounds.get().size.width <= px(0.) {
             return;
         }
@@ -821,7 +889,7 @@ impl TableView {
         }
     }
 
-    fn database_id(&self) -> String {
+    pub(crate) fn database_id(&self) -> String {
         self.database.id.clone()
     }
 
@@ -981,10 +1049,8 @@ impl TableView {
                         .and_then(Value::as_number)
                         .map(|x| format::number_for_editing(x, &p.config))
                         .unwrap_or_default(),
-                    _ => r
-                        .value(&p.id)
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
+                    _ => p
+                        .shown_text(r.value(&p.id).and_then(Value::as_str).unwrap_or_default())
                         .to_owned(),
                 };
                 let target = TextTarget::Cell {
@@ -1402,12 +1468,15 @@ impl TableView {
                 let Some(p) = fields.properties.get(col.property) else {
                     return Vec::new();
                 };
-                let mut out = Vec::new();
+                // Its property's entries first, as Notion's; it opens on Sort ascending.
+                let mut out = self.property_head(p);
                 let sorted = view.sort.iter().find(|s| s.property_id == p.id);
+                out.push(Entry::heading("Sort"));
                 out.push(
                     Entry::act("Sort ascending", Action::Sort(Direction::Ascending))
                         .icon(I::ArrowUp)
-                        .checked(sorted.is_some_and(|s| s.direction == Direction::Ascending)),
+                        .checked(sorted.is_some_and(|s| s.direction == Direction::Ascending))
+                        .highlighted(true),
                 );
                 out.push(
                     Entry::act("Sort descending", Action::Sort(Direction::Descending))
@@ -1439,8 +1508,10 @@ impl TableView {
                     )
                     .icon(I::Columns3),
                 );
+                out.extend(self.property_tail(p));
                 out
             }
+            Some(Popover::Property { .. } | Popover::AddRelation) => self.property_entries(),
             Some(Popover::Columns) => {
                 let shown: Vec<&str> = self
                     .shown
@@ -1472,7 +1543,7 @@ impl TableView {
                 let value = self.rows[row].value(&p.id);
                 match p.kind {
                     PropertyType::Select => {
-                        let current = value.and_then(Value::as_str);
+                        let current = value.and_then(Value::option_id);
                         let mut out: Vec<Entry> = p
                             .options()
                             .iter()
@@ -1488,7 +1559,7 @@ impl TableView {
                         out
                     }
                     PropertyType::MultiSelect => {
-                        let current = value.and_then(Value::as_ids).unwrap_or(&[]);
+                        let current = value.and_then(Value::option_ids).unwrap_or(&[]);
                         let mut out: Vec<Entry> = p
                             .options()
                             .iter()
@@ -1702,6 +1773,10 @@ impl TableView {
         cx: &mut Context<Self>,
     ) {
         self.ensure();
+        if let Action::Prop(a) = action {
+            self.activate_property(a, window, cx);
+            return;
+        }
         let Some(fields) = self.database.database.clone() else {
             return;
         };
@@ -1793,7 +1868,7 @@ impl TableView {
                 if let Some((row, p)) = self.picker_target() {
                     let mut ids = self.rows[row]
                         .value(&p.id)
-                        .and_then(Value::as_ids)
+                        .and_then(Value::option_ids)
                         .unwrap_or(&[])
                         .to_vec();
                     match ids.iter().position(|x| *x == id) {
@@ -1843,6 +1918,7 @@ impl TableView {
                     self.emit_edits(edits, window, cx);
                 }
             }
+            Action::Prop(_) => {}
             Action::ClearValue => {
                 if let Some((row, p)) = self.picker_target() {
                     if p.kind == PropertyType::Relation {
@@ -1918,7 +1994,7 @@ impl TableView {
             _ => {
                 let mut ids = r
                     .value(&p.id)
-                    .and_then(Value::as_ids)
+                    .and_then(Value::option_ids)
                     .unwrap_or(&[])
                     .to_vec();
                 ids.push(option.id);
@@ -1974,7 +2050,8 @@ impl TableView {
     }
 
     /// The month's choice: a day (keeping a time of day the value had, and a range's length),
-    /// or none to clear.
+    /// or none to clear. A new value gets the property's `includeTime`: with it, the day's
+    /// start in the viewer's zone.
     pub(crate) fn pick_day(
         &mut self,
         day: Option<i64>,
@@ -1987,7 +2064,16 @@ impl TableView {
         let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
         let value = day.map(|day| {
             let old = self.rows[row].value(&p.id).and_then(Value::as_date);
-            ops::date_on(old, day, offset)
+            match old {
+                None if p.config.include_time == Some(true) => {
+                    Value::Date(crate::model::DateValue {
+                        start: day * crate::engine::DAY_MS - offset,
+                        end: None,
+                        include_time: true,
+                    })
+                }
+                _ => ops::date_on(old, day, offset),
+            }
         });
         self.set_value(value, window, cx);
         self.popover = None;

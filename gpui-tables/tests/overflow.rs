@@ -121,6 +121,9 @@ fn host() -> Rc<TestHost> {
     for c in &mut h.companies {
         c.title = format!("{} {}", c.title, worst());
     }
+    for d in h.databases.get_mut() {
+        d.title = format!("{} {WORD}", d.title);
+    }
     host
 }
 
@@ -360,6 +363,58 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 let field = rect(cx, "editor");
                 for o in overflows_with(cx, Some(field)) {
                     found.push(format!("{case}, a filter's field open: {o}"));
+                }
+                keys(cx, "escape");
+                // The property menus: the + menu with the worst name typed, a select's options
+                // and an option's page, a number's format, a relation's databases, the delete
+                // confirm, and the rename field.
+                cx.update(|window, cx| {
+                    table.update(cx, |t, cx| {
+                        t.close_popover(cx);
+                        t.open_add_property_menu(window, cx)
+                    })
+                });
+                draw(cx);
+                type_text(cx, &worst());
+                let field = rect(cx, "menu-field");
+                for o in overflows_with(cx, Some(field)) {
+                    found.push(format!("{case}, the + menu open: {o}"));
+                }
+                keys(cx, "escape");
+                let first_option = table.read_with(cx, |t, _| {
+                    let f = t.database().database.as_ref().unwrap();
+                    f.property(STAGE).unwrap().options()[0].name.clone()
+                });
+                let pages: [(&str, &[String]); 5] = [
+                    (
+                        STAGE,
+                        &[
+                            "menu-item-Edit options".into(),
+                            format!("menu-item-{first_option}"),
+                        ],
+                    ),
+                    (STAGE, &["menu-item-Edit options".into()]),
+                    (WARMTH, &["menu-item-Number format".into()]),
+                    (COMPANY, &["menu-item-Relation".into()]),
+                    (ROLE, &["menu-item-Delete property".into()]),
+                ];
+                for (p, steps) in pages {
+                    cx.update(|_, cx| table.update(cx, |t, cx| t.open_column_menu(p, cx)));
+                    draw(cx);
+                    for s in steps {
+                        click(cx, s.clone());
+                    }
+                    for o in overflows(cx) {
+                        found.push(format!("{case}, {steps:?} open: {o}"));
+                    }
+                    keys(cx, "escape");
+                }
+                cx.update(|_, cx| table.update(cx, |t, cx| t.open_column_menu(ROLE, cx)));
+                draw(cx);
+                click(cx, "menu-item-Rename");
+                let field = rect(cx, "menu-field");
+                for o in overflows_with(cx, Some(field)) {
+                    found.push(format!("{case}, the rename field open: {o}"));
                 }
                 keys(cx, "escape");
             }

@@ -7,7 +7,8 @@
 //! ```
 //!
 //! The host here keeps the docs in memory and applies the edits itself (both sides of a two-way
-//! relation too), so the table changes as you use it. Typed values (titles, text, numbers,
+//! relation too, and a new two-way relation's other side in the other database), so the table
+//! changes as you use it, properties added and changed from the + and the columns' menus too. Typed values (titles, text, numbers,
 //! emails...) are edited in place, in gpui-core's `Input`: the host doesn't implement
 //! `TableHost::edit_text`.
 //!
@@ -19,7 +20,9 @@
 //! Pipeline by stage), `board-drag` (a card of Interactions by kind dragged to another column),
 //! `board-light` (Companies by industry, in the light theme) and `board-worst`; and lists:
 //! `list` (Interactions, most recent first), `list-grouped` (People by stage) and `list-light`
-//! (the Companies directory, in the light theme).
+//! (the Companies directory, in the light theme); and properties: `columns` (the + menu, a new
+//! property named, its type to pick) and `options` (a select's options, to rename, recolour,
+//! reorder and delete).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -29,7 +32,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{ActiveTheme as _, Press, Selectable as _, Theme};
 use gpui_tables::engine::relation;
-use gpui_tables::view::{RelatedRow, TableHost, TableTheme, TableView};
+use gpui_tables::view::{RelatedDatabase, RelatedRow, TableHost, TableTheme, TableView};
 use gpui_tables::*;
 
 const PEOPLE: &str = include_str!("../tests/fixtures/people.json");
@@ -355,6 +358,23 @@ impl TableHost for Host {
             .collect();
         rows.sort_by_key(|r| r.title.to_lowercase());
         rows
+    }
+
+    fn databases(&self) -> Vec<RelatedDatabase> {
+        self.dbs
+            .borrow()
+            .iter()
+            .map(|d| RelatedDatabase {
+                id: d.doc.id.clone(),
+                title: d.doc.title.clone(),
+                properties: d
+                    .doc
+                    .database
+                    .as_ref()
+                    .map(|f| f.properties.clone())
+                    .unwrap_or_default(),
+            })
+            .collect()
     }
 
     fn now(&self) -> i64 {
@@ -808,6 +828,24 @@ mod shots {
                         let id = named_view(&t, "Directory", cx);
                         t.update(cx, |t, cx| t.set_view(id, cx));
                     }
+                    "columns" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            t.set_scroll_x(px(100_000.), cx);
+                            t.open_add_property_menu(window, cx);
+                        });
+                    }
+                    "options" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            t.open_property_menu(
+                                STAGE,
+                                gpui_tables::view::PropertyMenu::Options,
+                                window,
+                                cx,
+                            )
+                        });
+                    }
                     "scrolled" => {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| {
@@ -828,6 +866,16 @@ mod shots {
                             let text = format!("{}\nAdvises two seed-stage founders", s.value());
                             s.set_value(text, window, cx)
                         });
+                    }
+                });
+                settle(window, cx).await;
+            }
+            if scene == "columns" {
+                // A name typed for the new property.
+                let _ = cx.update_window(window, |_, window, cx| {
+                    let t = crm.read(cx).table();
+                    if let Some(state) = t.read(cx).menu_field_state() {
+                        state.update(cx, |s, cx| s.set_value("Deal size", window, cx));
                     }
                 });
                 settle(window, cx).await;

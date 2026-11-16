@@ -100,6 +100,27 @@ impl Value {
         }
     }
 
+    /// The option ids a select or multi-select value names, read leniently across the two (a
+    /// property changed from one to the other keeps its rows as they were): a multi-select's
+    /// list, or a select's one id as a list of one.
+    pub fn option_ids(&self) -> Option<&[String]> {
+        match self {
+            Self::Ids(ids) => Some(ids),
+            Self::Text(id) => Some(std::slice::from_ref(id)),
+            _ => None,
+        }
+    }
+
+    /// The option a select value names, read leniently: its id, or the first of a
+    /// multi-select's list (a property changed from a multi-select to a select).
+    pub fn option_id(&self) -> Option<&str> {
+        match self {
+            Self::Text(id) => Some(id),
+            Self::Ids(ids) => ids.first().map(String::as_str),
+            _ => None,
+        }
+    }
+
     /// The people, or an empty list for `[]`.
     pub fn as_people(&self) -> Option<&[Person]> {
         match self {

@@ -15,6 +15,17 @@ pub struct RelatedRow {
     pub title: String,
 }
 
+/// A database a relation property can point at, as the relation menu lists it, with its
+/// properties: a two-way relation's other side is made among them, its `order` after theirs,
+/// its name unlike theirs, and only while there's room under the properties' limit.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RelatedDatabase {
+    /// The database doc's id.
+    pub id: String,
+    pub title: String,
+    pub properties: Vec<Property>,
+}
+
 /// What a typed value is for.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextTarget {
@@ -121,6 +132,13 @@ pub trait TableHost {
     /// The rows a relation picker offers: `database_id`'s rows, in the order to list them.
     fn relation_rows(&self, database_id: &str) -> Vec<RelatedRow> {
         let _ = database_id;
+        Vec::new()
+    }
+
+    /// The databases a relation property can relate to, in the order to list them, each with
+    /// its properties (for a two-way relation's other side). The table's own database is always
+    /// offered, whether or not it's here; by default it's the only one.
+    fn databases(&self) -> Vec<RelatedDatabase> {
         Vec::new()
     }
 

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::*;
-use gpui_tables::view::{RelatedRow, TableHost, TableTheme, TableView, TextEdit};
+use gpui_tables::view::{RelatedDatabase, RelatedRow, TableHost, TableTheme, TableView, TextEdit};
 use gpui_tables::*;
 use gpui_tables::{Edit, View};
 
@@ -107,6 +107,10 @@ pub struct TestHost {
     pub apply: Cell<bool>,
     pub table: RefCell<Option<WeakEntity<TableView>>>,
     pub companies: Vec<Doc>,
+    /// The other databases a relation can point at (Companies by default).
+    pub databases: RefCell<Vec<RelatedDatabase>>,
+    /// The limits the table is held to.
+    pub limits: Cell<Limits>,
 }
 
 impl TestHost {
@@ -120,6 +124,8 @@ impl TestHost {
             apply: Cell::new(true),
             table: RefCell::default(),
             companies: load("companies").1,
+            databases: RefCell::new(vec![related(&load("companies").0)]),
+            limits: Cell::new(Limits::default()),
         })
     }
 
@@ -170,8 +176,38 @@ impl TestHost {
     }
 }
 
+/// A database as a relation's menu lists it.
+pub fn related(db: &Doc) -> RelatedDatabase {
+    RelatedDatabase {
+        id: db.id.clone(),
+        title: db.title.clone(),
+        properties: db
+            .database
+            .as_ref()
+            .map(|f| f.properties.clone())
+            .unwrap_or_default(),
+    }
+}
+
 fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
     match edit {
+        Edit::PropertyCreated {
+            database_id,
+            property,
+        } if *database_id == db.id => {
+            let f = db.database.as_mut().unwrap();
+            match f.properties.iter_mut().find(|p| p.id == property.id) {
+                Some(p) => *p = property.clone(),
+                None => f.properties.push(property.clone()),
+            }
+        }
+        Edit::PropertyDeleted {
+            database_id,
+            property_id,
+        } if *database_id == db.id => {
+            let f = db.database.as_mut().unwrap();
+            f.properties.retain(|p| p.id != *property_id);
+        }
         Edit::RowCreated {
             row_id,
             database_id,
@@ -214,7 +250,10 @@ fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
                 }
             }
         }
-        Edit::PropertyChanged { property, .. } => {
+        Edit::PropertyChanged {
+            property,
+            database_id,
+        } if *database_id == db.id => {
             let f = db.database.as_mut().unwrap();
             if let Some(p) = f.properties.iter_mut().find(|p| p.id == property.id) {
                 *p = property.clone();
@@ -302,6 +341,14 @@ impl TableHost for TestHost {
 
     fn now(&self) -> i64 {
         NOW
+    }
+
+    fn databases(&self) -> Vec<RelatedDatabase> {
+        self.databases.borrow().clone()
+    }
+
+    fn limits(&self) -> Limits {
+        self.limits.get()
     }
 }
 

@@ -8,16 +8,16 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, FontWeight, Hsla,
-    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Render, Role, ScrollEvent, SharedString, StatefulInteractiveElement,
-    Styled, TextAlign, TouchDragEvent, TouchPhase, Window, anchored, canvas, deferred, div, point,
-    px, uniform_list,
+    AnyElement, App, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, Entity, FontWeight,
+    Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Render, Role, ScrollEvent, SharedString,
+    StatefulInteractiveElement, Styled, TextAlign, TouchDragEvent, TouchPhase, Window, anchored,
+    canvas, deferred, div, point, px, uniform_list,
 };
 use gpui_core::{
-    DatePickerColors, DismissReason, Icon, IconName, Input, MenuSelect, MonthGrid, Picker,
-    Popover as CorePopover, PopoverColors, PopupMenu, PopupMenuColors, PopupMenuItem, Press,
-    Selectable as _,
+    DatePickerColors, DismissReason, Icon, IconName, Input, InputState, MenuSelect, MonthGrid,
+    Picker, Popover as CorePopover, PopoverColors, PopupMenu, PopupMenuColors, PopupMenuItem,
+    Press, Selectable as _,
 };
 
 use super::format;
@@ -342,11 +342,11 @@ impl TableView {
         let strip = (1..cols)
             .map(|c| self.render_header_cell(c, cx))
             .collect::<Vec<_>>();
-        let more = Press::new("gpui-tables-columns")
+        let more = Press::new("gpui-tables-add-property")
             .tab_stop(false)
             .focus_ring_color(t.colors.focus)
-            .accessibility_label("Show and hide properties")
-            .debug_selector(|| "columns-button".into())
+            .accessibility_label("Add a property")
+            .debug_selector(|| "add-property".into())
             .flex_none()
             .w(t.hit(32., self.rem))
             .h_full()
@@ -361,8 +361,8 @@ impl TableView {
                 t.colors.text_muted,
             ))
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                this.open_columns_menu(cx);
                 window.focus(&this.focus, cx);
+                this.open_add_property_menu(window, cx);
             }));
         // Where a dragged column would land.
         let indicator = match &self.drag {
@@ -810,12 +810,12 @@ impl TableView {
                 .map(|x| format::number(x, &p.config))
                 .unwrap_or_default(),
             PropertyType::Select => v
-                .and_then(Value::as_str)
+                .and_then(Value::option_id)
                 .and_then(|id| p.option(id))
                 .map(|o| o.name.clone())
                 .unwrap_or_default(),
             PropertyType::MultiSelect => v
-                .and_then(Value::as_ids)
+                .and_then(Value::option_ids)
                 .unwrap_or(&[])
                 .iter()
                 .filter_map(|id| p.option(id).map(|o| o.name.clone()))
@@ -837,7 +837,9 @@ impl TableView {
             PropertyType::EditedTime => format::instant(r.updated, offset),
             PropertyType::CreatedBy => self.person_text(r.created_by()),
             PropertyType::EditedBy => self.person_text(r.edited_by()),
-            _ => v.and_then(Value::as_str).unwrap_or_default().to_owned(),
+            _ => p
+                .shown_text(v.and_then(Value::as_str).unwrap_or_default())
+                .to_owned(),
         }
     }
 
@@ -965,16 +967,18 @@ impl TableView {
                     .child(open)
                     .into_any_element()
             }
-            PropertyType::Select => match v.and_then(Value::as_str).and_then(|id| p.option(id)) {
-                Some(o) => div()
-                    .min_w_0()
-                    .flex()
-                    .child(self.chip(o.name.clone(), &o.color))
-                    .into_any_element(),
-                None => div().into_any_element(),
-            },
+            PropertyType::Select => {
+                match v.and_then(Value::option_id).and_then(|id| p.option(id)) {
+                    Some(o) => div()
+                        .min_w_0()
+                        .flex()
+                        .child(self.chip(o.name.clone(), &o.color))
+                        .into_any_element(),
+                    None => div().into_any_element(),
+                }
+            }
             PropertyType::MultiSelect => {
-                let ids = v.and_then(Value::as_ids).unwrap_or(&[]);
+                let ids = v.and_then(Value::option_ids).unwrap_or(&[]);
                 div()
                     .flex_1()
                     .min_w_0()
@@ -1009,12 +1013,13 @@ impl TableView {
                     })
                     .into_any_element()
             }
-            PropertyType::Url | PropertyType::Email => {
-                line(v.and_then(Value::as_str).unwrap_or_default().to_owned())
-                    .text_color(t.colors.text)
-                    .underline()
-                    .into_any_element()
-            }
+            PropertyType::Url | PropertyType::Email => line(
+                p.shown_text(v.and_then(Value::as_str).unwrap_or_default())
+                    .to_owned(),
+            )
+            .text_color(t.colors.text)
+            .underline()
+            .into_any_element(),
             PropertyType::CreatedTime | PropertyType::EditedTime => line(self.cell_text(r, p))
                 .text_color(t.colors.text_muted)
                 .into_any_element(),
@@ -1191,6 +1196,24 @@ impl TableView {
                 )
             }
             Popover::Picker { cell } | Popover::Date { cell } => self.cell_bounds(*cell),
+            Popover::AddProperty | Popover::AddRelation => self.add_button_bounds(),
+            Popover::Property { property_id, .. } => self
+                .shown
+                .columns
+                .iter()
+                .position(|c| c.property_id == *property_id)
+                .map_or_else(|| self.add_button_bounds(), |c| self.header_bounds(c)),
+        };
+        // A header partly scrolled past the table's left edge hangs its menu from what shows of
+        // it, so the menu stays in the window.
+        let table = self.bounds.get();
+        let target = if target.left() < table.left() && target.right() > table.left() {
+            gpui::Bounds::new(
+                point(table.left(), target.top()),
+                gpui::size(target.right() - table.left(), target.size.height),
+            )
+        } else {
+            target
         };
         // A menu's width, or its anchor's if that's wider, inside the window (its edges, the
         // popover's border and padding).
@@ -1210,12 +1233,63 @@ impl TableView {
             Popover::Header { column } => popover
                 .accessibility_label(format!("{} column", name(column)))
                 .p(t.px(4.))
-                .child(body.w(width).child(self.popup_menu(cx)))
+                .child(
+                    body.w(width)
+                        .children(self.render_note(cx))
+                        .child(self.popup_menu(cx)),
+                )
                 .into_any_element(),
             Popover::Columns => popover
                 .accessibility_label("Properties")
                 .p(t.px(4.))
                 .child(body.w(width).child(self.popup_menu(cx)))
+                .into_any_element(),
+            // A name is typed: the field has the keyboard, and the popover leaves it there.
+            Popover::AddProperty => popover
+                .take_focus(false)
+                .accessibility_label("Add a property")
+                .p(t.px(4.))
+                .child(body.w(width).child(self.render_add_property(cx)))
+                .into_any_element(),
+            Popover::Property { page, property_id } if page.is_field() => {
+                let label = self
+                    .database
+                    .database
+                    .as_ref()
+                    .and_then(|f| f.property(&property_id))
+                    .map_or_else(String::new, |p| p.name.clone());
+                popover
+                    .take_focus(false)
+                    .accessibility_label(label)
+                    .p(t.px(4.))
+                    .child(body.w(width).child(self.render_field_page(&page, cx)))
+                    .into_any_element()
+            }
+            Popover::Property { property_id, .. } => {
+                let label = self
+                    .database
+                    .database
+                    .as_ref()
+                    .and_then(|f| f.property(&property_id))
+                    .map_or_else(String::new, |p| p.name.clone());
+                popover
+                    .accessibility_label(label)
+                    .p(t.px(4.))
+                    .child(
+                        body.w(width)
+                            .children(self.render_note(cx))
+                            .child(self.popup_menu(cx)),
+                    )
+                    .into_any_element()
+            }
+            Popover::AddRelation => popover
+                .accessibility_label("Add a relation")
+                .p(t.px(4.))
+                .child(
+                    body.w(width)
+                        .children(self.render_note(cx))
+                        .child(self.popup_menu(cx)),
+                )
                 .into_any_element(),
             Popover::Picker { cell } => popover
                 .accessibility_label(name(cell.column).to_owned())
@@ -1271,6 +1345,7 @@ impl TableView {
         }
         self.date = None;
         self.popover = None;
+        self.close_property_menu();
         cx.notify();
     }
 
@@ -1279,17 +1354,29 @@ impl TableView {
     /// as `menu-item-<label>`. An option is drawn as the table draws it in a cell, a coloured
     /// pill (`label_element`), while its name stays the entry's label: what assistive tech
     /// reads and what a picker's search matches.
-    fn menu_entries(&self) -> (Vec<MenuEntry>, PickActions) {
+    fn menu_entries(&self) -> (Vec<MenuEntry>, PickActions, Option<SharedString>) {
+        self.entries_of(self.entries())
+    }
+
+    /// Entries as gpui-core's, what each one's id does, and the one to open on.
+    pub(crate) fn entries_of(
+        &self,
+        entries: Vec<Entry>,
+    ) -> (Vec<MenuEntry>, PickActions, Option<SharedString>) {
         let mut used: HashSet<SharedString> = HashSet::new();
         let mut actions = Vec::new();
         let mut out = Vec::new();
-        for e in self.entries() {
+        let mut open_on = None;
+        for e in entries {
             let Entry {
                 label,
                 action,
                 icon,
                 checked,
                 chip,
+                hint,
+                disabled,
+                highlight,
             } = e;
             let Some(action) = action else {
                 out.push(MenuEntry::Heading(label.into()));
@@ -1313,15 +1400,24 @@ impl TableView {
                 let pill = format!("pill:{label}");
                 item = item.label_element(self.chip(label, color).debug_selector(move || pill));
             }
+            if let Some(hint) = hint {
+                item = item.shortcut(hint);
+            }
+            if disabled {
+                item = item.disabled(true);
+            }
+            if highlight && open_on.is_none() {
+                open_on = Some(id.clone());
+            }
             actions.push((id, action));
             out.push(MenuEntry::Item(item));
         }
-        (out, Rc::new(actions))
+        (out, Rc::new(actions), open_on)
     }
 
     /// Runs a picked entry's action. Shift (Shift-Enter, or a Shift-click) adds a sort to the
     /// others rather than replacing them.
-    fn on_pick(
+    pub(crate) fn on_pick(
         &self,
         actions: PickActions,
         cx: &mut Context<Self>,
@@ -1336,7 +1432,7 @@ impl TableView {
     /// A menu's and a picker's colours, from the table's theme: the hover fill for the
     /// highlight, the accent for checks, muted headings.
     #[allow(clippy::needless_update)]
-    fn menu_colors(&self) -> PopupMenuColors {
+    pub(crate) fn menu_colors(&self) -> PopupMenuColors {
         let t = &self.theme;
         PopupMenuColors {
             highlight: Some(t.colors.hover),
@@ -1353,9 +1449,9 @@ impl TableView {
     /// headings (at the table's small size), rows 28 points tall at the table's text size (44 on
     /// touch), checks in a column before the labels as Notion's, opening with its first entry
     /// highlighted.
-    fn popup_menu(&self, cx: &mut Context<Self>) -> PopupMenu {
+    pub(crate) fn popup_menu(&self, cx: &mut Context<Self>) -> PopupMenu {
         let t = &self.theme;
-        let (entries, actions) = self.menu_entries();
+        let (entries, actions, open_on) = self.menu_entries();
         let mut menu = PopupMenu::new(ElementId::NamedInteger(
             "gpui-tables-menu".into(),
             self.menu_serial,
@@ -1372,6 +1468,9 @@ impl TableView {
                 MenuEntry::Item(item) => menu.item(item),
             };
         }
+        if let Some(id) = open_on {
+            menu = menu.highlight(id);
+        }
         menu.on_select(self.on_pick(actions, cx))
     }
 
@@ -1383,7 +1482,7 @@ impl TableView {
     fn picker(&self, cell: super::CellRef, cx: &mut Context<Self>) -> Picker {
         let t = &self.theme;
         let field = FieldColors::of(t);
-        let (entries, actions) = self.menu_entries();
+        let (entries, actions, _) = self.menu_entries();
         let kind = self.cell_target(cell).map(|(_, p)| p.kind.clone());
         let placeholder = match kind {
             Some(PropertyType::Select | PropertyType::MultiSelect) => "Search or create an option",
@@ -1527,16 +1626,16 @@ impl TableView {
 }
 
 /// The colours of every field the table types in (a cell's value in place, a filter's value, a
-/// picker's search), so they all look alike: the caret in the accent, the selection the accent
-/// at 30%, the placeholder faint.
-struct FieldColors {
+/// picker's search, a property's name), so they all look alike: the caret in the accent, the
+/// selection the accent at 30%, the placeholder faint.
+pub(crate) struct FieldColors {
     caret: Hsla,
     selection: Hsla,
     placeholder: Hsla,
 }
 
 impl FieldColors {
-    fn of(t: &super::TableTheme) -> Self {
+    pub(crate) fn of(t: &super::TableTheme) -> Self {
         Self {
             caret: t.colors.accent,
             selection: t.colors.accent.opacity(0.3),
@@ -1546,10 +1645,211 @@ impl FieldColors {
 }
 
 /// A menu's entry, before it's handed to gpui-core: a section's heading, or an entry.
-enum MenuEntry {
+pub(crate) enum MenuEntry {
     Heading(SharedString),
     Item(PopupMenuItem),
 }
 
 /// What each entry's id does.
-type PickActions = Rc<Vec<(SharedString, Action)>>;
+pub(crate) type PickActions = Rc<Vec<(SharedString, Action)>>;
+
+// --- Property menus -------------------------------------------------------------------------
+
+impl TableView {
+    /// Where the + after the last column is, in the window (held inside the table).
+    pub(crate) fn add_button_bounds(&self) -> gpui::Bounds<Pixels> {
+        let t = &self.theme;
+        let b = self.bounds.get();
+        let n = self.shown.columns.len();
+        let w = t.hit(32., self.rem);
+        let left = if n <= 1 {
+            b.origin.x + self.column_px(0)
+        } else {
+            self.column_left(n - 1) + self.column_px(n - 1)
+        };
+        let left = left.min(b.right() - w).max(b.left());
+        gpui::Bounds::new(point(left, b.top()), gpui::size(w, self.header_height()))
+    }
+
+    /// Why the open menu refused something, or what limit it's at: muted, over its entries.
+    pub(crate) fn render_note(&self, cx: &App) -> Option<AnyElement> {
+        let t = &self.theme;
+        let note = self.page_note(cx)?;
+        Some(
+            div()
+                .id("gpui-tables-menu-note")
+                .debug_selector(|| "menu-note".into())
+                .role(Role::Status)
+                .aria_label(SharedString::from(note.clone()))
+                .px(t.px(8.))
+                .py(t.px(4.))
+                .overflow_hidden()
+                .line_clamp(3)
+                .text_size(t.px(t.sizes.small))
+                .text_color(t.colors.text_muted)
+                .child(note)
+                .into_any_element(),
+        )
+    }
+
+    /// A menu's field: gpui-core's Input in a box drawn as the table's other fields.
+    fn field_box(&self, state: &Entity<InputState>, label: String) -> gpui::Div {
+        let t = &self.theme;
+        let field = FieldColors::of(t);
+        div()
+            .debug_selector(|| "menu-field".into())
+            .mx(t.px(4.))
+            .h(t.hit(30., self.rem))
+            .px(t.px(8.))
+            .flex()
+            .items_center()
+            .rounded(t.px(t.sizes.chip_radius))
+            .bg(t.colors.background)
+            .border_2()
+            .border_color(t.colors.focus)
+            .child(
+                Input::new(state)
+                    .appearance(false)
+                    .accessibility_label(label)
+                    .caret_color(field.caret)
+                    .selection_color(field.selection)
+                    .placeholder_color(field.placeholder)
+                    .flex_1()
+                    .min_w_0(),
+            )
+    }
+
+    fn small_menu(&self, id: &'static str) -> PopupMenu {
+        let t = &self.theme;
+        PopupMenu::new(ElementId::NamedInteger(id.into(), self.menu_serial))
+            .take_focus(false)
+            .touch(t.touch)
+            .row_height(t.px(28.))
+            .text_size(t.px(t.sizes.text))
+            .heading_size(t.px(t.sizes.small))
+            .check_leading(true)
+            .colors(self.menu_colors())
+    }
+
+    /// A name typed on a page of its own (a property's, an option's): what it's for, the
+    /// field, a note, and Save and Back for a pointer or a finger (Enter saves, Escape closes).
+    fn render_field_page(
+        &self,
+        page: &super::properties::Page,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use super::properties::{Page, PropAction};
+        let t = &self.theme;
+        let Some(f) = &self.field else {
+            return div().into_any_element();
+        };
+        let title = match page {
+            Page::NewOption => "New option",
+            Page::RenameOption(_) => "Rename option",
+            _ => "Rename property",
+        };
+        let save = cx.listener(|this, pick: &MenuSelect, window, cx| {
+            if pick.id.as_ref() == "Save" {
+                this.commit_field(window, cx);
+            } else {
+                this.activate_property(PropAction::Back, window, cx);
+            }
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(t.px(4.))
+            .child(
+                line(title)
+                    .px(t.px(8.))
+                    .pt(t.px(4.))
+                    .text_size(t.px(t.sizes.small))
+                    .text_color(t.colors.text_muted),
+            )
+            .child(self.field_box(&f.state, title.to_owned()))
+            .children(self.render_note(cx))
+            .child(
+                self.small_menu("gpui-tables-field-menu")
+                    .item(PopupMenuItem::new("Save", "Save").icon(IconName::Check))
+                    .item(PopupMenuItem::new("Back", "Back").icon(IconName::ArrowLeft))
+                    .on_select(save),
+            )
+            .into_any_element()
+    }
+
+    /// The + menu: the new property's name, typed, over the types it can have. Up and Down in
+    /// the field move through the types, Enter makes the highlighted one, a press makes any.
+    fn render_add_property(&self, cx: &mut Context<Self>) -> AnyElement {
+        use super::properties::PropAction;
+        let t = &self.theme;
+        let Some(f) = &self.field else {
+            return div().into_any_element();
+        };
+        let full = self
+            .database
+            .database
+            .as_ref()
+            .is_some_and(|d| d.properties.len() >= self.host.limits().properties);
+        let kinds = PropertyType::ADDABLE;
+        let highlighted = kinds
+            .get(self.add_kind.0)
+            .map_or("", |k| k.label())
+            .to_owned();
+        let mut menu = PopupMenu::new(ElementId::NamedInteger(
+            "gpui-tables-add-types".into(),
+            self.add_kind.1,
+        ))
+        .take_focus(false)
+        .touch(t.touch)
+        .row_height(t.px(28.))
+        .text_size(t.px(t.sizes.text))
+        .heading_size(t.px(t.sizes.small))
+        .check_leading(true)
+        .colors(self.menu_colors())
+        .heading("Type");
+        for k in kinds {
+            menu = menu.item(
+                PopupMenuItem::new(k.label().to_owned(), k.label().to_owned())
+                    .icon(type_icon(k))
+                    .disabled(full),
+            );
+        }
+        let this = cx.entity().downgrade();
+        let menu = menu
+            .highlight(highlighted)
+            .on_highlight(move |id, cx| {
+                let Some(id) = id else { return };
+                let _ = this.update(cx, |t, _| {
+                    if let Some(i) = kinds.iter().position(|k| k.label() == id.as_ref()) {
+                        t.add_kind.0 = i;
+                    }
+                });
+            })
+            .on_select(cx.listener(|this, pick: &MenuSelect, window, cx| {
+                if let Some(k) = PropertyType::ADDABLE
+                    .iter()
+                    .find(|k| k.label() == pick.id.as_ref())
+                {
+                    this.activate_property(PropAction::Add(k.clone()), window, cx);
+                }
+            }));
+        div()
+            .flex()
+            .flex_col()
+            .gap(t.px(4.))
+            .child(
+                self.field_box(&f.state, "Property name".into())
+                    .mt(t.px(4.))
+                    .key_context(super::MENU_FIELD)
+                    .on_action(
+                        cx.listener(|this, _: &super::FieldUp, _, cx| this.move_add_kind(-1, cx)),
+                    )
+                    .on_action(
+                        cx.listener(|this, _: &super::FieldDown, _, cx| this.move_add_kind(1, cx)),
+                    ),
+            )
+            .children(self.render_note(cx))
+            .child(menu)
+            .into_any_element()
+    }
+}

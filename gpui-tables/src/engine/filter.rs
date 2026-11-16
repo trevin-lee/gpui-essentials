@@ -379,13 +379,19 @@ fn test(t: &Test, row: &Doc, offset_ms: i64) -> bool {
             },
             _ => *op == NumOp::Ne,
         },
+        // A select and a multi-select read each other's values (a property changed between
+        // them keeps its rows as they were).
         Pred::SelectIs(id, negate) => {
-            let hit = cell.text().is_some_and(|s| s == id);
+            let hit = match cell {
+                Cell::Value(v) => v.option_id() == Some(id.as_str()),
+                _ => false,
+            };
             hit != *negate
         }
         Pred::Has(id, negate) => {
             let hit = match cell {
                 Cell::Value(Value::Ids(ids)) => ids.iter().any(|x| x == id),
+                Cell::Value(Value::Text(x)) => t.kind == PropertyType::MultiSelect && x == id,
                 _ => false,
             };
             hit != *negate
@@ -423,10 +429,14 @@ fn is_empty(t: &Test, cell: Cell) -> bool {
         Cell::Time(_) | Cell::Person(_) => false,
         Cell::Text(s) => s.is_empty(),
         Cell::Value(v) => match (&t.kind, v, &t.known) {
-            (PropertyType::Select, Value::Text(id), Some(known)) => !known.contains(id),
-            (PropertyType::MultiSelect, Value::Ids(ids), Some(known)) => {
-                !ids.iter().any(|id| known.contains(id))
-            }
+            (PropertyType::Select, v, Some(known)) if v.option_id().is_some() => !v
+                .option_id()
+                .is_some_and(|id| known.iter().any(|k| k == id)),
+            (PropertyType::MultiSelect, v, Some(known)) if v.option_ids().is_some() => !v
+                .option_ids()
+                .unwrap_or(&[])
+                .iter()
+                .any(|id| known.contains(id)),
             (kind, v, _) => !v.fits(kind) || v.is_empty(),
         },
     }
