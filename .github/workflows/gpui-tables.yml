@@ -1,0 +1,87 @@
+name: gpui-tables
+
+# Runs when gpui-tables, or something every crate shares, changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "gpui-tables/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/gpui-tables.yml"
+  pull_request:
+    paths:
+      - "gpui-tables/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/gpui-tables.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  macos:
+    # The views will draw through GPUI, which draws through Metal, so GitHub's macOS runners build
+    # and run the crate's tests with its default features.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # rust-toolchain.toml pins the version; rustup installs it on first use.
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-tables-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-gpui-tables-
+      - run: cargo fmt -p gpui-tables --check
+      - run: cargo clippy -p gpui-tables --locked --all-targets -- -D warnings
+      # Unit, fixture, engine and performance tests, and the README's examples compiled.
+      - run: cargo test -p gpui-tables --locked
+      # The performance bounds, as the README measures them.
+      - run: cargo test -p gpui-tables --locked --release --test performance
+      - run: cargo doc -p gpui-tables --locked --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  engine:
+    # The model and engine alone (default-features = false) must build and pass on Linux with no
+    # GPUI in the build: a server or sync layer checks databases there.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-tables-engine-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-gpui-tables-engine-
+      - run: cargo clippy -p gpui-tables --locked --no-default-features --all-targets -- -D warnings
+      - run: cargo test -p gpui-tables --locked --no-default-features
+      # Nothing of GPUI may be in the engine-only build.
+      - run: "! cargo tree -p gpui-tables --no-default-features -e normal --locked | grep -E 'gpui-(kit|pre)'"
+
+  ios:
+    # The crate must build for iOS too: the views are for the iPhone and iPad apps as well.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-gpui-tables-ios-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-gpui-tables-ios-
+      - run: rustup target add aarch64-apple-ios-sim
+      - run: cargo build -p gpui-tables --locked --target aarch64-apple-ios-sim

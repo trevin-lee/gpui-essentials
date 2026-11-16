@@ -10,6 +10,7 @@ together so they link one GPUI.
 | [gpui-chatwidgets](gpui-chatwidgets) | Draws AI agents' [OpenUI](https://openui.com) cards (cards, tables, charts, forms, buttons) natively, with a parser that builds without GPUI |
 | [gpui-core](gpui-core) | The components the others build on (theme, root, buttons, inputs, markdown text), drawn in the host's theme; replacing GPUI Kit, in progress |
 | [gpui-flow](gpui-flow) | A node-and-edge editor in the manner of React Flow |
+| [gpui-tables](gpui-tables) | Notion-style databases: typed properties, saved table, board and list views, filters, sorts and groups, with a model and engine that build without GPUI |
 
 Each folder has its own README with what the crate does, how to use it, its example window and
 its tests.
@@ -41,7 +42,7 @@ cargo run -p gpui-flow --release --example flow # an example window
 `rust-toolchain.toml` pins Rust 1.100.0, and rustup installs it on the first build. The examples
 and tests need macOS: GPUI draws through Metal. Each crate has its own CI workflow in
 `.github/workflows`, run on GitHub's macOS runners when its folder or the shared files change;
-gpui-chatwidgets' parser-only build is also tested on Linux.
+gpui-chatwidgets' parser-only build and gpui-tables' engine-only build are also tested on Linux.
 
 ## History
 

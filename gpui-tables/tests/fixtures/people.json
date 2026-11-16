@@ -1,0 +1,772 @@
+[
+  {
+    "id": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "kind": "database",
+    "title": "People",
+    "order": "a1",
+    "folderId": "6513270e-269e-4d37-b2a7-4de452e6b438",
+    "parentDocId": null,
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": true,
+    "agents": [
+      "career-planning"
+    ],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788361440000,
+    "updated": 1794335400000,
+    "rev": 14,
+    "seq": 2201,
+    "deleted": false,
+    "database": {
+      "properties": [
+        {
+          "id": "90c192cf-d3ac-44af-8f21-ddb66cad4a26",
+          "name": "Name",
+          "type": "title",
+          "config": {},
+          "order": "a0"
+        },
+        {
+          "id": "a170b338-3926-4059-b28c-105d1fb17c23",
+          "name": "Company",
+          "type": "relation",
+          "config": {
+            "databaseId": "6b0d549b-6f03-475a-9600-a35a099950d8",
+            "twoWay": true,
+            "backPropertyId": "5790f82e-c1d3-4cff-aa3a-f4d46b0a18e8"
+          },
+          "order": "a1"
+        },
+        {
+          "id": "0fd630f1-f29d-4da9-953f-48f1a09f76b5",
+          "name": "Role",
+          "type": "text",
+          "config": {},
+          "order": "a2"
+        },
+        {
+          "id": "0cb1e29c-658c-4a14-95e6-0af593bd04cf",
+          "name": "Email",
+          "type": "email",
+          "config": {},
+          "order": "a3"
+        },
+        {
+          "id": "8e81973e-0bec-47b0-b898-d190f9ebdacc",
+          "name": "Phone",
+          "type": "phone",
+          "config": {},
+          "order": "a4"
+        },
+        {
+          "id": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+          "name": "Stage",
+          "type": "select",
+          "config": {
+            "options": [
+              {
+                "id": "5affb229-7631-4992-b0ce-583505c6af07",
+                "name": "Lead",
+                "color": "gray"
+              },
+              {
+                "id": "7e62aa0a-1df9-4d78-9c65-39382b0537e6",
+                "name": "Warm",
+                "color": "yellow"
+              },
+              {
+                "id": "49952399-c4aa-4ac1-b7dc-76fb0f17a300",
+                "name": "Active",
+                "color": "green"
+              },
+              {
+                "id": "65dc9f50-3f63-4f83-bd05-61e6211c70cf",
+                "name": "Dormant",
+                "color": "brown"
+              }
+            ]
+          },
+          "order": "a5"
+        },
+        {
+          "id": "92276658-1e27-41c0-8a6a-63ec24ede6a4",
+          "name": "Tags",
+          "type": "multiSelect",
+          "config": {
+            "options": [
+              {
+                "id": "7f1b103c-df15-42b0-aab4-77d26415479c",
+                "name": "Mentor",
+                "color": "purple"
+              },
+              {
+                "id": "66d22876-72fd-4202-aa96-fb1a14a0f9e7",
+                "name": "Investor",
+                "color": "blue"
+              },
+              {
+                "id": "230d977e-e225-4159-8720-771f8ca81811",
+                "name": "Friend",
+                "color": "pink"
+              },
+              {
+                "id": "8cdb305f-dd2e-4609-ae36-aab0d1bc52d9",
+                "name": "Recruiter",
+                "color": "orange"
+              },
+              {
+                "id": "fc891b4a-6a50-4f4d-b4d6-6a3a47469a4d",
+                "name": "Alumni",
+                "color": "default"
+              }
+            ]
+          },
+          "order": "a6"
+        },
+        {
+          "id": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+          "name": "Last contacted",
+          "type": "date",
+          "config": {
+            "includeTime": false,
+            "range": false
+          },
+          "order": "a7"
+        },
+        {
+          "id": "923a7369-94e3-4f91-9a61-dbe22e44158b",
+          "name": "Follow up",
+          "type": "checkbox",
+          "config": {},
+          "order": "a8"
+        },
+        {
+          "id": "18f135d2-5f55-4203-b018-50c5a38fd547",
+          "name": "Owner",
+          "type": "person",
+          "config": {
+            "kinds": [
+              "owner",
+              "agent"
+            ]
+          },
+          "order": "a9"
+        },
+        {
+          "id": "907a70c3-1012-4037-b64c-e4228c38fb29",
+          "name": "Profile",
+          "type": "url",
+          "config": {},
+          "order": "aA"
+        },
+        {
+          "id": "7f150524-34b9-45df-9e77-69b10f4205b4",
+          "name": "Interactions",
+          "type": "relation",
+          "config": {
+            "databaseId": "8d116ece-1738-47d9-bd9c-172411e20b8f",
+            "twoWay": true,
+            "backPropertyId": "451abd81-f1d6-4ed6-97f5-e837d70820fe"
+          },
+          "order": "aB"
+        },
+        {
+          "id": "c6f87718-6d76-407e-881e-d162ae2eb154",
+          "name": "Warmth",
+          "type": "number",
+          "config": {
+            "format": "plain",
+            "precision": 0
+          },
+          "order": "aC"
+        },
+        {
+          "id": "ec66a787-95e7-41d1-b731-af10506bf2ef",
+          "name": "Added",
+          "type": "createdTime",
+          "config": {},
+          "order": "aD"
+        },
+        {
+          "id": "3f98e277-4cbd-47ad-9c90-a9587403e430",
+          "name": "Edited",
+          "type": "editedTime",
+          "config": {},
+          "order": "aE"
+        }
+      ],
+      "views": [
+        {
+          "id": "74e69a5d-0dd2-4a65-bd62-8881ad1b72db",
+          "name": "All people",
+          "type": "table",
+          "order": "a0",
+          "sort": [
+            {
+              "propertyId": "90c192cf-d3ac-44af-8f21-ddb66cad4a26",
+              "direction": "ascending"
+            }
+          ],
+          "filter": null,
+          "groupBy": null,
+          "columns": [
+            {
+              "propertyId": "90c192cf-d3ac-44af-8f21-ddb66cad4a26",
+              "width": 240,
+              "hidden": false,
+              "order": "a0"
+            },
+            {
+              "propertyId": "a170b338-3926-4059-b28c-105d1fb17c23",
+              "width": 180,
+              "hidden": false,
+              "order": "a1"
+            },
+            {
+              "propertyId": "0fd630f1-f29d-4da9-953f-48f1a09f76b5",
+              "width": 200,
+              "hidden": false,
+              "order": "a2"
+            },
+            {
+              "propertyId": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+              "width": 120,
+              "hidden": false,
+              "order": "a3"
+            },
+            {
+              "propertyId": "92276658-1e27-41c0-8a6a-63ec24ede6a4",
+              "width": 200,
+              "hidden": false,
+              "order": "a4"
+            },
+            {
+              "propertyId": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+              "width": 140,
+              "hidden": false,
+              "order": "a5"
+            },
+            {
+              "propertyId": "0cb1e29c-658c-4a14-95e6-0af593bd04cf",
+              "width": 220,
+              "hidden": false,
+              "order": "a6"
+            },
+            {
+              "propertyId": "8e81973e-0bec-47b0-b898-d190f9ebdacc",
+              "width": null,
+              "hidden": true,
+              "order": "a7"
+            },
+            {
+              "propertyId": "c6f87718-6d76-407e-881e-d162ae2eb154",
+              "width": 96,
+              "hidden": false,
+              "order": "a8"
+            },
+            {
+              "propertyId": "3f98e277-4cbd-47ad-9c90-a9587403e430",
+              "width": 160,
+              "hidden": true,
+              "order": "a9"
+            }
+          ],
+          "cardProperties": [],
+          "collapsedGroups": []
+        },
+        {
+          "id": "f3aed0b6-c7ac-4491-9ef8-8334e647cb8f",
+          "name": "Pipeline",
+          "type": "board",
+          "order": "a1",
+          "sort": [
+            {
+              "propertyId": "c6f87718-6d76-407e-881e-d162ae2eb154",
+              "direction": "descending"
+            }
+          ],
+          "filter": null,
+          "groupBy": "6b4cb242-4a23-4596-a217-beaddbc496cb",
+          "columns": [],
+          "cardProperties": [
+            "a170b338-3926-4059-b28c-105d1fb17c23",
+            "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+            "18f135d2-5f55-4203-b018-50c5a38fd547"
+          ],
+          "collapsedGroups": [
+            "option:65dc9f50-3f63-4f83-bd05-61e6211c70cf"
+          ]
+        },
+        {
+          "id": "8f2c6ec8-cc41-49a3-ae3a-2b7fdfe01893",
+          "name": "Follow up",
+          "type": "list",
+          "order": "a2",
+          "sort": [
+            {
+              "propertyId": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+              "direction": "ascending"
+            }
+          ],
+          "filter": {
+            "and": [
+              {
+                "propertyId": "923a7369-94e3-4f91-9a61-dbe22e44158b",
+                "op": "isChecked"
+              },
+              {
+                "or": [
+                  {
+                    "propertyId": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+                    "op": "before",
+                    "value": "2026-10-15"
+                  },
+                  {
+                    "propertyId": "ae97ba94-d0ed-482f-8f6d-05584ef8aa38",
+                    "op": "isEmpty"
+                  }
+                ]
+              }
+            ]
+          },
+          "groupBy": null,
+          "columns": [],
+          "cardProperties": [
+            "a170b338-3926-4059-b28c-105d1fb17c23",
+            "ae97ba94-d0ed-482f-8f6d-05584ef8aa38"
+          ],
+          "collapsedGroups": []
+        }
+      ]
+    }
+  },
+  {
+    "id": "9a2ef80f-58ee-4571-b499-8d7c4093f6de",
+    "kind": "page",
+    "title": "Rowan Pike",
+    "order": "a0",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788602400000,
+    "updated": 1793869200000,
+    "rev": 1,
+    "seq": 2160,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Head of operations",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "rowan.pike@kestrel-ceramics.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "49952399-c4aa-4ac1-b7dc-76fb0f17a300",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "7f1b103c-df15-42b0-aab4-77d26415479c"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": false,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "c215a82a-06ec-41ad-aa05-75438b0d590b",
+        "80b0c08b-c770-4420-8aa4-248c8857f9a4"
+      ],
+      "8e81973e-0bec-47b0-b898-d190f9ebdacc": "+1 555 0101",
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1793750400000,
+        "includeTime": false
+      },
+      "907a70c3-1012-4037-b64c-e4228c38fb29": "https://profiles.example/rowan-pike",
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 5
+    }
+  },
+  {
+    "id": "1d87cec3-1f72-46ab-b961-fd925d39d0a8",
+    "kind": "page",
+    "title": "Imani Castell",
+    "order": "a1",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788688800000,
+    "updated": 1793959200000,
+    "rev": 2,
+    "seq": 2161,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "VP Engineering",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "imani@bluefin-robotics.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "7e62aa0a-1df9-4d78-9c65-39382b0537e6",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "66d22876-72fd-4202-aa96-fb1a14a0f9e7",
+        "fc891b4a-6a50-4f4d-b4d6-6a3a47469a4d"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": true,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "owner"
+        },
+        {
+          "kind": "agent",
+          "agentId": "career-planning"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "d86f40f6-b239-43c7-974c-77a2dd02de92"
+      ],
+      "8e81973e-0bec-47b0-b898-d190f9ebdacc": "+1 555 0102",
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1790899200000,
+        "includeTime": false
+      },
+      "907a70c3-1012-4037-b64c-e4228c38fb29": "https://profiles.example/imani-castell",
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 4
+    }
+  },
+  {
+    "id": "fa529ba3-fe3b-4ada-bcf2-0724d953ee26",
+    "kind": "page",
+    "title": "Theo Brandt",
+    "order": "a2",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "career-planning"
+    },
+    "created": 1788775200000,
+    "updated": 1794049200000,
+    "rev": 3,
+    "seq": 2162,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "9d1de2a0-5d15-4a2f-b2ee-4e4519f9919c"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Recruiter",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "theo.brandt@bluefin-robotics.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "5affb229-7631-4992-b0ce-583505c6af07",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "8cdb305f-dd2e-4609-ae36-aab0d1bc52d9"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": true,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "agent",
+          "agentId": "career-planning"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "d86f40f6-b239-43c7-974c-77a2dd02de92"
+      ],
+      "8e81973e-0bec-47b0-b898-d190f9ebdacc": "+1 555 0103",
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 2
+    }
+  },
+  {
+    "id": "4fd58dbe-7bdc-468b-bafb-2c68774b15d7",
+    "kind": "page",
+    "title": "Lena Varga",
+    "order": "a3",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788861600000,
+    "updated": 1794139200000,
+    "rev": 4,
+    "seq": 2163,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "353c631c-dfd4-4f37-9200-339d068739fa"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Founder",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "lena@cedarpine.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "49952399-c4aa-4ac1-b7dc-76fb0f17a300",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "230d977e-e225-4159-8720-771f8ca81811",
+        "7f1b103c-df15-42b0-aab4-77d26415479c"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": false,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "e883a1d4-5de0-4997-84b5-a81842d87208",
+        "9cfc8652-3919-4242-a2ed-dbbd5464ecc2"
+      ],
+      "8e81973e-0bec-47b0-b898-d190f9ebdacc": "+44 20 7946 0958",
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1794355200000,
+        "includeTime": false
+      },
+      "907a70c3-1012-4037-b64c-e4228c38fb29": "https://profiles.example/lena-varga",
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 5
+    }
+  },
+  {
+    "id": "bfeaa155-1a28-47b3-a4e4-e25a15fc899e",
+    "kind": "page",
+    "title": "Sami Halloran",
+    "order": "a4",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "agent",
+      "agentId": "inbox-triage"
+    },
+    "updatedBy": {
+      "kind": "agent",
+      "agentId": "inbox-triage"
+    },
+    "created": 1788948000000,
+    "updated": 1794229200000,
+    "rev": 5,
+    "seq": 2164,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "a268aa87-2607-479d-a050-914a9d33a01c"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Director of partnerships",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "s.halloran@lumen-freight.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "7e62aa0a-1df9-4d78-9c65-39382b0537e6",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": true,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "a49636a2-fa7f-4eab-8c4f-9b0687322e25",
+        "3908f227-c59d-4916-9b0e-e76f2ac34446"
+      ],
+      "8e81973e-0bec-47b0-b898-d190f9ebdacc": "+1 555 0105",
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1789862400000,
+        "includeTime": false
+      },
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 3
+    }
+  },
+  {
+    "id": "7a86f7a2-43c7-4b9a-bd87-a86557b6fb7e",
+    "kind": "page",
+    "title": "Noor Ellison",
+    "order": "a5",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1789034400000,
+    "updated": 1794319200000,
+    "rev": 6,
+    "seq": 2165,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Independent consultant",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "noor@ellison-consulting.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "65dc9f50-3f63-4f83-bd05-61e6211c70cf",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "fc891b4a-6a50-4f4d-b4d6-6a3a47469a4d"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": false,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [],
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1773446400000,
+        "includeTime": false
+      },
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 1
+    }
+  },
+  {
+    "id": "842e7fc2-2954-4a6e-b12a-a1f6d42fddbb",
+    "kind": "page",
+    "title": "Jonah Whitfield-Arce",
+    "order": "a6",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "agent",
+      "agentId": "inbox-triage"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1789120800000,
+    "updated": 1794409200000,
+    "rev": 7,
+    "seq": 2166,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "a268aa87-2607-479d-a050-914a9d33a01c"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Data engineer — rail and ocean freight scheduling, ex-Kestrel",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "jonah.wa@lumen-freight.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "5affb229-7631-4992-b0ce-583505c6af07",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "fc891b4a-6a50-4f4d-b4d6-6a3a47469a4d",
+        "230d977e-e225-4159-8720-771f8ca81811"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": false,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "agent",
+          "agentId": "inbox-triage"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "3908f227-c59d-4916-9b0e-e76f2ac34446"
+      ],
+      "8e81973e-0bec-47b0-b898-d190f9ebdacc": "+1 555 0107",
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1793318400000,
+        "includeTime": false
+      }
+    }
+  },
+  {
+    "id": "f3b7a50d-f373-4a53-b488-f87605e999f3",
+    "kind": "page",
+    "title": "Ana Sofía Durán",
+    "order": "a7",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "owner"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1789207200000,
+    "updated": 1793894400000,
+    "rev": 8,
+    "seq": 2167,
+    "deleted": false,
+    "values": {
+      "a170b338-3926-4059-b28c-105d1fb17c23": [
+        "895fd7b3-26b9-4c7f-9118-bb16000f49c8"
+      ],
+      "0fd630f1-f29d-4da9-953f-48f1a09f76b5": "Designer",
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "anasofia@kestrel-ceramics.example",
+      "6b4cb242-4a23-4596-a217-beaddbc496cb": "49952399-c4aa-4ac1-b7dc-76fb0f17a300",
+      "92276658-1e27-41c0-8a6a-63ec24ede6a4": [
+        "230d977e-e225-4159-8720-771f8ca81811"
+      ],
+      "923a7369-94e3-4f91-9a61-dbe22e44158b": false,
+      "18f135d2-5f55-4203-b018-50c5a38fd547": [
+        {
+          "kind": "owner"
+        }
+      ],
+      "7f150524-34b9-45df-9e77-69b10f4205b4": [
+        "80b0c08b-c770-4420-8aa4-248c8857f9a4",
+        "c2216b02-fc24-4d0b-89d4-88b1cfbf3360"
+      ],
+      "ae97ba94-d0ed-482f-8f6d-05584ef8aa38": {
+        "start": 1794441600000,
+        "includeTime": false
+      },
+      "c6f87718-6d76-407e-881e-d162ae2eb154": 4
+    }
+  },
+  {
+    "id": "b0a844e5-2587-4e6b-9c9b-cf35873be078",
+    "kind": "page",
+    "title": "Duplicate of Rowan",
+    "order": "a8V",
+    "folderId": null,
+    "parentDocId": "36f675cc-81e7-4ef5-a8e2-5d940ed90475",
+    "parentObjectId": null,
+    "cover": null,
+    "favorite": false,
+    "agents": [],
+    "author": {
+      "kind": "agent",
+      "agentId": "inbox-triage"
+    },
+    "updatedBy": {
+      "kind": "owner"
+    },
+    "created": 1788602400000,
+    "updated": 1793613600000,
+    "rev": 4,
+    "seq": 2199,
+    "deleted": true,
+    "values": {
+      "0cb1e29c-658c-4a14-95e6-0af593bd04cf": "rowan.pike@kestrel-ceramics.example"
+    }
+  }
+]
