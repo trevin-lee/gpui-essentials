@@ -351,3 +351,40 @@ fn a_wide_field_doesnt_stretch_the_month(cx: &mut TestAppContext) {
     assert!(m.size.width < px(400.), "{m:?}");
     assert_eq!(m.left(), b.left());
 }
+
+struct Sized {
+    state: Entity<DatePickerState>,
+}
+
+impl Render for Sized {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            gpui_core::MonthGrid::new(&self.state)
+                .day_size(px(28.))
+                .footer(div().debug_selector(|| "footer".into()).child("Today")),
+        )
+    }
+}
+
+#[gpui::test]
+fn a_month_takes_a_day_size_and_a_footer(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let state = cx.new(|cx| {
+            let mut s = DatePickerState::new(window, cx);
+            s.show_month(NaiveDate::from_ymd_opt(2030, 6, 1).unwrap(), cx);
+            s
+        });
+        let v = cx.new(|_| Sized { state });
+        Root::new(v, window, cx)
+    });
+    vcx.run_until_parked();
+    let day = vcx.debug_bounds("day-2030-06-12").unwrap();
+    assert_eq!(day.size, gpui::size(px(28.), px(28.)));
+    let footer = vcx.debug_bounds("footer").expect("the footer is drawn");
+    let last = vcx.debug_bounds("day-2030-07-06").unwrap();
+    assert!(
+        footer.top() >= last.bottom(),
+        "under the days: {footer:?} {last:?}"
+    );
+}

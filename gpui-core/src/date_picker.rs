@@ -487,6 +487,7 @@ impl RenderOnce for DatePicker {
 pub struct MonthGrid {
     state: Entity<DatePickerState>,
     options: MonthOptions,
+    footer: Option<gpui::AnyElement>,
     style: StyleRefinement,
 }
 
@@ -528,6 +529,8 @@ struct MonthOptions {
     dots: Option<Rc<dyn Fn(NaiveDate) -> bool>>,
     touch: bool,
     colors: DatePickerColors,
+    day_size: Option<gpui::AbsoluteLength>,
+    shown_range: Option<(NaiveDate, NaiveDate)>,
 }
 
 impl MonthGrid {
@@ -535,8 +538,30 @@ impl MonthGrid {
         Self {
             state: state.clone(),
             options: MonthOptions::default(),
+            footer: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// A day's width and height (36 CSS pixels unless given; at least 44 points with
+    /// [`touch`](Self::touch)).
+    pub fn day_size(mut self, size: impl Into<gpui::AbsoluteLength>) -> Self {
+        self.options.day_size = Some(size.into());
+        self
+    }
+
+    /// A range drawn for show, as a picked range is: the ends filled, the days between tinted.
+    /// Presses still pick as the state does, one day unless it's a range picker: for editing
+    /// one end of a range kept elsewhere.
+    pub fn shown_range(mut self, start: NaiveDate, end: NaiveDate) -> Self {
+        self.options.shown_range = Some((start.min(end), start.max(end)));
+        self
+    }
+
+    /// Something under the days: Today and Clear buttons, say.
+    pub fn footer(mut self, footer: impl IntoElement) -> Self {
+        self.footer = Some(footer.into_any_element());
+        self
     }
 
     /// A dot under each day `has` says yes to (a calendar's days with events).
@@ -620,6 +645,9 @@ impl RenderOnce for MonthGrid {
             );
         gpui::Refineable::refine(el.style(), &self.style);
         el.child(month_view(&s, &theme, &self.options, cx))
+            .when_some(self.footer, |el, footer| {
+                el.child(div().mt(css(8.)).child(footer))
+            })
     }
 }
 
@@ -637,10 +665,16 @@ fn month_view(
     };
     let month = first_of_month(cursor);
     let start = grid_start(month, week_start);
-    let cell: gpui::DefiniteLength = if options.touch {
-        theme.touch_target.into()
-    } else {
-        css(36.).into()
+    let cell: gpui::DefiniteLength = match (options.touch, options.day_size) {
+        (true, _) => theme.touch_target.into(),
+        (false, Some(size)) => size.into(),
+        (false, None) => css(36.).into(),
+    };
+    // The range drawn: the picked one, else one shown for show.
+    let (range_start, range_end) = match (value.start, value.end, options.shown_range) {
+        (Some(a), Some(b), _) => (Some(a), Some(b)),
+        (_, _, Some((a, b))) => (Some(a), Some(b)),
+        _ => (None, None),
     };
     let dots = options.dots.clone();
     let c = options.colors;
@@ -652,8 +686,10 @@ fn month_view(
     let cursor_border = c.cursor.unwrap_or(theme.ring.opacity(0.5));
     let day_button = |d: NaiveDate| {
         let in_month = d.month() == month.month();
-        let picked = value.start == Some(d) || value.end == Some(d);
-        let between = matches!((value.start, value.end), (Some(a), Some(b)) if d > a && d < b);
+        // What's picked, for assistive tech; drawn as picked too are a shown range's ends.
+        let chosen = value.start == Some(d) || value.end == Some(d);
+        let picked = chosen || range_start == Some(d) || range_end == Some(d);
+        let between = matches!((range_start, range_end), (Some(a), Some(b)) if d > a && d < b);
         let on = d == cursor;
         let s = s.clone();
         Press::new(ElementId::NamedInteger(
@@ -662,7 +698,7 @@ fn month_view(
         ))
         .tab_stop(false)
         .focus_ring(false)
-        .selected(picked)
+        .selected(chosen)
         .accessibility_label(d.format("%A, %B %-d, %Y").to_string())
         .size(cell)
         .flex()
