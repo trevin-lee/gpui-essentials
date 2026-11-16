@@ -303,6 +303,11 @@ pub struct CalendarOptions {
     pub dim_past: bool,
     /// The most rows of all-day events the time grid shows before it says "+N".
     pub all_day_rows: usize,
+    /// Taken by touch, as on a phone or a tablet. A long press picks an event up or makes one,
+    /// a touch on the selected event drags it, a swipe sideways changes the period, small
+    /// things take taps in a 44-point square, and the header's arrows give way to the swipe.
+    /// On by default on iOS and Android.
+    pub touch: bool,
 }
 
 impl Default for CalendarOptions {
@@ -319,6 +324,7 @@ impl Default for CalendarOptions {
             default_calendar: None,
             dim_past: true,
             all_day_rows: 3,
+            touch: cfg!(any(target_os = "ios", target_os = "android")),
         }
     }
 }

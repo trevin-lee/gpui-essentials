@@ -3,14 +3,14 @@
 //! the bottom.
 //!
 //! ```sh
-//! cargo run --release --example calendar
+//! cargo run --release --example calendar [-- --touch]
 //! cargo run --release --example calendar -- --bench [--events 2000] [--packed]
 //! cargo run --release --features shots --example calendar -- --shot out.png [--scene week]
 //! ```
 //!
 //! Scenes: `week`, `day`, `month`, `overlap`, `drag-create`, `drag-move`, `resize`, `dst`,
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
-//! `compact-agenda`. Pictures and the bench draw a window that's never shown
+//! `compact-agenda`, `compact-swipe`, `compact-hold`. Pictures and the bench draw a window that's never shown
 //! and never takes the keyboard.
 
 use std::path::PathBuf;
@@ -31,6 +31,7 @@ struct Args {
     bench: bool,
     events: usize,
     packed: bool,
+    touch: bool,
 }
 
 fn args() -> Args {
@@ -40,6 +41,7 @@ fn args() -> Args {
         bench: false,
         events: 2000,
         packed: false,
+        touch: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -49,6 +51,7 @@ fn args() -> Args {
             "--bench" => out.bench = true,
             "--events" => out.events = it.next().and_then(|n| n.parse().ok()).unwrap_or(2000),
             "--packed" => out.packed = true,
+            "--touch" => out.touch = true,
             _ => {}
         }
     }
@@ -590,7 +593,7 @@ impl Root {
         match args.scene.as_str() {
             "day" => view = CalendarView::Day,
             // A phone: the day, the week and the agenda at an iPhone's width.
-            "compact" => view = CalendarView::Day,
+            "compact" | "compact-swipe" | "compact-hold" => view = CalendarView::Day,
             "compact-week" => {}
             // Tuesday morning, the day with the most links.
             "agenda" | "compact-agenda" => {
@@ -655,6 +658,7 @@ impl Root {
             _ => {}
         }
         let scene = args.scene.clone();
+        let touch = args.touch;
         let calendar = cx.new(|cx| {
             let mut c = Calendar::new(cx)
                 .with_options(|o| {
@@ -667,6 +671,10 @@ impl Root {
                 .with_date(date);
             if pictures {
                 c = c.with_now(now_at);
+            }
+            // The phone scenes are drawn as the phone takes them: by touch.
+            if touch || scene.starts_with("compact") {
+                c.options.touch = true;
             }
             if scene.starts_with("dst") {
                 c.scroll_to_minute(-1.);
@@ -818,7 +826,7 @@ fn main() {
             // The agenda is pictured at the width it's meant for: a narrow column.
             let window_size = match args.scene.as_str() {
                 "agenda" => size(px(720.), px(900.)),
-                "compact" | "compact-week" | "compact-agenda" => size(px(390.), px(844.)),
+                s if s.starts_with("compact") => size(px(390.), px(844.)),
                 _ => size(px(1280.), px(820.)),
             };
             let bounds = Bounds::centered(None, window_size, cx);
@@ -912,6 +920,22 @@ fn drag_to(window: AnyWindowHandle, cx: &mut AsyncApp, at: Point<Pixels>) {
             position: at,
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::none(),
+        }),
+    );
+}
+
+/// A finger on the window, as an iPhone reports one.
+#[cfg_attr(not(feature = "shots"), allow(dead_code))]
+fn finger(window: AnyWindowHandle, cx: &mut AsyncApp, phase: TouchPhase, at: Point<Pixels>) {
+    send(
+        window,
+        cx,
+        PlatformInput::Touch(TouchEvent {
+            id: TouchId(1),
+            phase,
+            position: at,
+            predicted_position: None,
+            force: None,
         }),
     );
 }
@@ -1127,6 +1151,39 @@ mod shots {
                         .read_with(cx, |c, _| c.point_at(monday + Duration::days(11), 0.))
                         .expect("on screen");
                     drag_to(window, cx, point(grab.x + (to.x - grab.x) * 0.0, to.y));
+                }
+                // Selected on a phone: the handle that changes its end.
+                "compact" => {
+                    let _ = cx.update_window(window, |_, _, cx| {
+                        calendar.update(cx, |c, cx| {
+                            c.select(Some(Selection::Event("planning".into())), cx)
+                        })
+                    });
+                }
+                // A finger halfway through a swipe to the next day.
+                "compact-swipe" => {
+                    let from = point_at(cx, 2, 14, 0);
+                    finger(window, cx, TouchPhase::Started, from);
+                    for i in 1..=8 {
+                        wait(cx, 16).await;
+                        let at = point(from.x - px(16. * i as f32), from.y);
+                        finger(window, cx, TouchPhase::Moved, at);
+                        draw(window, cx);
+                    }
+                }
+                // A finger held on empty time, then drawn down: a new event, ninety minutes.
+                "compact-hold" => {
+                    let from = point_at(cx, 2, 17, 40);
+                    finger(window, cx, TouchPhase::Started, from);
+                    wait(cx, 700).await;
+                    draw(window, cx);
+                    let to = point_at(cx, 2, 19, 10);
+                    for i in 1..=8 {
+                        wait(cx, 16).await;
+                        let at = from + (to - from) * (i as f32 / 8.);
+                        finger(window, cx, TouchPhase::Moved, at);
+                        draw(window, cx);
+                    }
                 }
                 "agenda" | "compact-agenda" => {
                     let _ = cx.update_window(window, |_, _, cx| {
