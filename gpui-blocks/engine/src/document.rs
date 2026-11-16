@@ -1,4 +1,5 @@
-// Changed in Trevin Lee's fork (2026): a closed toggle's body is left out of the caret order.
+// Changed in Trevin Lee's fork (2026): a closed toggle's body is left out of the caret order;
+// a block's Markdown and payload can be read.
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -10,7 +11,7 @@ use super::{
     position::BlockPosition,
     step::DetachedBlock,
 };
-use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode};
+use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode, editor_host::ColumnAlign};
 
 /// Payload of an atomic block.
 #[derive(Clone, Debug, PartialEq)]
@@ -433,5 +434,66 @@ impl<'a> BlockRef<'a> {
         doc.children(self.id)
             .iter()
             .map(move |id| BlockRef { doc, id: *id })
+    }
+
+    /// The block alone as the document writes it, its children included.
+    pub fn markdown(&self) -> String {
+        super::serialize::block(self.doc, self.id)
+    }
+
+    /// A paragraph's, heading's or table cell's content as inline Markdown: its marks, links and
+    /// inline atoms (pictures, custom nodes) as the document writes them.
+    pub fn inline_markdown(&self) -> Option<String> {
+        self.doc
+            .inline(self.id)
+            .map(super::serialize::inline_markdown)
+    }
+
+    /// A code block's language: the first word of its info string.
+    pub fn code_language(&self) -> Option<&'a str> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::CodeBlock { lang, .. } => lang.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The rest of a code block's info string, after its language.
+    pub fn code_meta(&self) -> Option<&'a str> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::CodeBlock { meta, .. } => meta.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// A callout's name in ASCII lowercase, such as `note`.
+    pub fn callout_name(&self) -> Option<&'a str> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::Callout { name } => Some(name.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// The number an ordered list starts at, when it's written with one.
+    pub fn list_start(&self) -> Option<u32> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::List { start, .. } => *start,
+            _ => None,
+        }
+    }
+
+    /// Whether a list item is followed by a blank line in Markdown (a loose list's item).
+    pub fn is_spread(&self) -> bool {
+        matches!(
+            self.doc.kind(self.id),
+            Some(BlockKindData::ListItem { spread: true, .. })
+        )
+    }
+
+    /// A table's column alignments, one per column.
+    pub fn column_aligns(&self) -> Option<&'a [ColumnAlign]> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::Table { aligns } => Some(aligns.as_slice()),
+            _ => None,
+        }
     }
 }

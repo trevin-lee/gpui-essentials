@@ -582,3 +582,42 @@ fn code_content_is_not_unescaped() {
     let reloaded = model(&code.source());
     assert_eq!(only_text(&reloaded), content);
 }
+
+#[test]
+fn a_blocks_markdown_and_payload_can_be_read() {
+    let m = BlockEditorModel::from_markdown(
+        "> [!WARNING]\n> Mind the **gap**\n\n3. three\n\n4. four\n\n```rust title=x\nfn main() {}\n```\n\n| a | b |\n| :--- | ---: |\n| 1 | 2 |",
+        crate::surfaces::with_default_surfaces(Default::default()),
+    )
+    .unwrap();
+    let doc = m.document();
+    let top: Vec<_> = doc.root().children().collect();
+    let callout = top[0];
+    assert_eq!(callout.callout_name(), Some("warning"));
+    assert_eq!(callout.markdown(), "> [!WARNING]\n> Mind the **gap**");
+    let text = callout.children().next().unwrap();
+    assert_eq!(text.inline_markdown().as_deref(), Some("Mind the **gap**"));
+    assert_eq!(callout.inline_markdown(), None);
+    let list = top[1];
+    assert_eq!(list.list_start(), Some(3));
+    assert!(list.children().all(|item| !item.is_spread()));
+    let code = top[2];
+    assert_eq!(code.code_language(), Some("rust"));
+    assert_eq!(code.code_meta(), Some("title=x"));
+    assert_eq!(code.text(), Some("fn main() {}"));
+    let table = top[3];
+    assert_eq!(
+        table.column_aligns(),
+        Some(&[ColumnAlign::Left, ColumnAlign::Right][..])
+    );
+    assert_eq!(code.callout_name(), None);
+    assert_eq!(table.list_start(), None);
+}
+
+#[test]
+fn an_item_holding_two_paragraphs_is_spread() {
+    let m = model("- a\n\n  b\n- c");
+    let list = m.document().root().children().next().unwrap();
+    let spread: Vec<bool> = list.children().map(|item| item.is_spread()).collect();
+    assert_eq!(spread, [true, false]);
+}
