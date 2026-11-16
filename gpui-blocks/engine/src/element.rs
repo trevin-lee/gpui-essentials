@@ -173,6 +173,7 @@ impl RenderOnce for BlockEditor {
             code_background: text_style.code_background(),
             mono: theme.tokens.typography.mono.clone(),
             border: text_style.border(),
+            surface: theme.tokens.colors.surface,
         };
         let paragraph_gap = text_style.paragraph_gap().to_pixels(rem);
         let own_extensions = self.state.read(cx).model.doc.ext.clone();

@@ -111,9 +111,11 @@ impl Geometry {
 pub(crate) struct LeafGeom {
     pub(crate) info: LeafInfo,
     geometry: Geometry,
-    /// A table cell's column alignment. gpui-kit paints centred and
-    /// right-aligned cell text shifted inside the text element, but
-    /// `LeafGeometry` positions are unshifted; `row_shift` puts it back.
+    /// A table cell's column alignment, for a cell GPUI Kit drew. GPUI Kit
+    /// paints centred and right-aligned cell text shifted inside the text
+    /// element, but `LeafGeometry` positions are unshifted; `row_shift` puts
+    /// it back. The engine's own leaves are laid out aligned, so theirs stays
+    /// `None`.
     pub(crate) align: ColumnAlign,
 }
 
@@ -421,7 +423,10 @@ impl FrameLayout {
             for row in &shape.grid {
                 for (c, cell) in row.iter().enumerate() {
                     let align = shape.aligns.get(c).copied().unwrap_or_default();
-                    if let Some(ix) = self.index.get(cell) {
+                    // The engine's own leaves are laid out aligned already.
+                    if let Some(ix) = self.index.get(cell)
+                        && matches!(self.leaves[*ix].geometry, Geometry::Kit(_))
+                    {
                         self.leaves[*ix].align = align;
                     }
                 }
