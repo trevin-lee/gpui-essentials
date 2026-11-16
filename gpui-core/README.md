@@ -23,6 +23,10 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   above where there's more room, stays inside the window and scrolls past `max_height`. A click
   outside, Escape, or the trigger scrolling away calls `on_dismiss` with the reason; the host
   owns `open`. While open it has the keyboard, and on closing it hands the focus back.
+- **Sheet.** `Sheet::new(id).open(open).on_dismiss(…).child(…)` is Popover's touch form: a
+  panel across the bottom of the window over a scrim, centred and capped at `max_width` on a
+  wide window, scrolling past nine tenths of its height. A press on the scrim or Escape calls
+  `on_dismiss`; it takes the keyboard while open and hands it back on closing.
 - **Rules.** Nothing redraws while nothing changes, text stays in its box at any width,
   everything works from the keyboard with a focus ring, nothing works by hover alone, and links
   and actions are events for the host.

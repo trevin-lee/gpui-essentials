@@ -43,7 +43,7 @@ use crate::theme::{ActiveTheme as _, Theme};
 
 actions!(gpui_core_popover, [Dismiss]);
 
-const CONTEXT: &str = "GpuiCorePopover";
+pub(crate) const CONTEXT: &str = "GpuiCorePopover";
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
@@ -54,9 +54,9 @@ const EDGE: f32 = 8.;
 const GAP: f32 = 4.;
 
 /// Above other deferred drawing such as tooltips' hosts; the same as the crate's other overlays.
-const PRIORITY: usize = 1;
+pub(crate) const PRIORITY: usize = 1;
 
-type DismissFn = Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
+pub(crate) type DismissFn = Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
 
 /// Why a popover asks to close.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,48 +225,70 @@ impl Styled for Popover {
     }
 }
 
-/// What a popover remembers between frames.
-struct PopoverState {
+/// What an overlay (a popover, a sheet) remembers between frames.
+struct OverlayState {
     focus: FocusHandle,
     open: bool,
     /// What had the focus when it opened.
     opener: Option<FocusHandle>,
 }
 
+/// An overlay's focus, kept across frames under `id`: on opening it takes the keyboard (with
+/// `take`) and remembers what had it; on closing it gives it back to `return_to` or to that,
+/// if the focus is still inside it or lost.
+pub(crate) fn overlay_focus(
+    id: &ElementId,
+    open: bool,
+    take: bool,
+    return_to: Option<FocusHandle>,
+    window: &mut Window,
+    cx: &mut App,
+) -> FocusHandle {
+    let state = window.use_keyed_state(id.clone(), cx, |_, cx| OverlayState {
+        focus: cx.focus_handle(),
+        open: false,
+        opener: None,
+    });
+    let (was_open, focus) = {
+        let s = state.read(cx);
+        (s.open, s.focus.clone())
+    };
+    if open && !was_open {
+        let opener = window.focused(cx);
+        state.update(cx, |s, _| {
+            s.open = true;
+            s.opener = opener;
+        });
+        if take {
+            let focus = focus.clone();
+            window.defer(cx, move |window, cx| window.focus(&focus, cx));
+        }
+    } else if !open && was_open {
+        let opener = state.update(cx, |s, _| {
+            s.open = false;
+            s.opener.take()
+        });
+        // Only if the focus is still inside it, or lost: a click outside that focused
+        // something keeps that.
+        let inside = focus.contains_focused(window, cx) || window.focused(cx).is_none();
+        if let Some(to) = return_to.or(opener).filter(|_| inside) {
+            window.defer(cx, move |window, cx| window.focus(&to, cx));
+        }
+    }
+    focus
+}
+
 impl RenderOnce for Popover {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         crate::init_soon(cx);
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| PopoverState {
-            focus: cx.focus_handle(),
-            open: false,
-            opener: None,
-        });
-        let (was_open, focus) = {
-            let s = state.read(cx);
-            (s.open, s.focus.clone())
-        };
-        if self.open && !was_open {
-            let opener = window.focused(cx);
-            state.update(cx, |s, _| {
-                s.open = true;
-                s.opener = opener;
-            });
-            if self.take_focus {
-                let focus = focus.clone();
-                window.defer(cx, move |window, cx| window.focus(&focus, cx));
-            }
-        } else if !self.open && was_open {
-            let opener = state.update(cx, |s, _| {
-                s.open = false;
-                s.opener.take()
-            });
-            // Only if the focus is still inside it, or lost: a click outside that focused
-            // something keeps that.
-            let inside = focus.contains_focused(window, cx) || window.focused(cx).is_none();
-            if let Some(to) = self.return_focus.clone().or(opener).filter(|_| inside) {
-                window.defer(cx, move |window, cx| window.focus(&to, cx));
-            }
-        }
+        let focus = overlay_focus(
+            &self.id,
+            self.open,
+            self.take_focus,
+            self.return_focus.clone(),
+            window,
+            cx,
+        );
 
         let anchor = Rc::new(Cell::new(self.anchor.map(|a| a.0)));
         let panel = self.open.then(|| self.panel(&focus, anchor.clone(), cx));
