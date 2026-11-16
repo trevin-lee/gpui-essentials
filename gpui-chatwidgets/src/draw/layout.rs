@@ -11,6 +11,87 @@ use super::content::Glyph;
 use crate::openui::{
     Align, Component, Direction, Flex, Justify, Modal, Section, Size, StepItem, Surface,
 };
+use crate::view::Swipe;
+
+/// How far a finger pans a carousel's slide before letting go turns it, in window pixels.
+const SWIPE_TURN: f32 = 40.;
+
+/// Where a slide dragged `x` pixels is drawn: with the finger, or a third as far past the
+/// first or last slide, where there's nothing to turn to.
+fn shown(x: f32, index: usize, count: usize) -> f32 {
+    if (x > 0. && index == 0) || (x < 0. && index + 1 >= count) {
+        x / 3.
+    } else {
+        x
+    }
+}
+
+/// One step of a finger's pan over a carousel of `count` slides: `d` is how far it moved
+/// (window pixels; GPUI locks a pan to the way it started, so one of them is 0). A sideways pan
+/// drags the slide; let go past [`SWIPE_TURN`], it turns to the next (panned left) or the
+/// previous one, else it eases back. Returns whether the step was the carousel's, the drag or
+/// the momentum after it, which then goes no further.
+pub(crate) fn swipe(
+    s: &mut crate::view::Slide,
+    count: usize,
+    phase: TouchPhase,
+    d: Point<f32>,
+) -> bool {
+    let sideways = d.x != 0. && d.y == 0.;
+    let moved = d.x != 0. || d.y != 0.;
+    match phase {
+        TouchPhase::Started => {
+            s.swipe = if !moved {
+                Swipe::Fresh
+            } else if sideways {
+                Swipe::Dragging(d.x)
+            } else {
+                Swipe::Ignoring
+            };
+        }
+        TouchPhase::Moved => match s.swipe {
+            Swipe::Fresh if sideways => s.swipe = Swipe::Dragging(d.x),
+            Swipe::Fresh if moved => s.swipe = Swipe::Ignoring,
+            Swipe::Dragging(x) => s.swipe = Swipe::Dragging(x + d.x),
+            _ => {}
+        },
+        TouchPhase::Ended | TouchPhase::Cancelled => {
+            let ended = phase == TouchPhase::Ended;
+            match std::mem::take(&mut s.swipe) {
+                Swipe::Dragging(x) => {
+                    let x = if ended { x + d.x } else { x };
+                    let index = s.index.min(count.saturating_sub(1));
+                    let to = if !ended {
+                        None
+                    } else if x <= -SWIPE_TURN && index + 1 < count {
+                        Some(index + 1)
+                    } else if x >= SWIPE_TURN && index > 0 {
+                        Some(index - 1)
+                    } else {
+                        None
+                    };
+                    s.from = index;
+                    s.index = to.unwrap_or(index);
+                    s.back = if to.is_some() {
+                        0.
+                    } else {
+                        shown(x, index, count)
+                    };
+                    if to.is_some() || s.back != 0. {
+                        s.moves += 1;
+                    }
+                    if ended {
+                        s.swipe = Swipe::Coasting;
+                    }
+                    return true;
+                }
+                Swipe::Coasting => return true,
+                _ => return false,
+            }
+        }
+    }
+    matches!(s.swipe, Swipe::Dragging(_) | Swipe::Coasting)
+}
 
 /// OpenUI's easing for its accordion (cubic-bezier(0.87, 0, 0.13, 1)), a steep ease-in-out.
 pub(crate) fn steep(t: f32) -> f32 {
@@ -124,6 +205,10 @@ impl Draw<'_, '_> {
                 },
                 if on { t.text.medium } else { self.regular() },
             );
+            let choose = self.cx.listener(move |this, _, _, cx| {
+                this.ui.tabs.insert(key.clone(), i);
+                cx.notify();
+            });
             let trigger = Press::new(self.id(&format!("{path}.tab{i}")))
                 .role(Role::Tab)
                 .accessibility_label(s.title.clone())
@@ -144,12 +229,8 @@ impl Draw<'_, '_> {
                     let sel = self.selector(&format!("tab:{}", s.title));
                     move || sel
                 })
-                .child(label)
-                .on_click(self.cx.listener(move |this, _, _, cx| {
-                    this.ui.tabs.insert(key.clone(), i);
-                    cx.notify();
-                }));
-            strip = strip.child(trigger);
+                .child(label);
+            strip = strip.child(self.on_press(trigger, true, choose));
         }
         let content = self
             .column(
@@ -348,7 +429,35 @@ impl Draw<'_, '_> {
             .border_color(t.colors.line)
             .when(surface == Surface::Sunk, |d| d.bg(t.colors.highlight))
             .child(body);
-        let moving = self.slide_in(card, path, slide, index);
+        let count = slides.len();
+        let moving = match slide.swipe {
+            // A finger has it: it follows, held back past the first or last slide.
+            Swipe::Dragging(x) => card
+                .relative()
+                .left(px(shown(x, index, count)))
+                .into_any_element(),
+            _ => self.slide_in(card, path, slide, index),
+        };
+        let key = path.to_string();
+        let swiped = self.cx.listener(move |this, e: &ScrollEvent, _, cx| {
+            if e.source != ScrollSource::Touch {
+                return;
+            }
+            let d = e.delta.pixel_delta(px(1.));
+            let s = this.ui.carousel.entry(key.clone()).or_default();
+            let before = s.swipe;
+            if swipe(
+                s,
+                count,
+                e.touch_phase,
+                point(f32::from(d.x), f32::from(d.y)),
+            ) {
+                cx.stop_propagation();
+            }
+            if s.swipe != before {
+                cx.notify();
+            }
+        });
         let clip = self
             .sideways(
                 div()
@@ -358,6 +467,7 @@ impl Draw<'_, '_> {
                     .overflow_hidden(),
                 &format!("{path}.clip"),
             )
+            .on_scroll(swiped)
             .child(moving);
         let controls = self.pager(path, index, slides.len());
         div()
@@ -382,6 +492,17 @@ impl Draw<'_, '_> {
         if slide.moves == 0 {
             return el.into_any_element();
         }
+        if slide.back != 0. {
+            // A swipe that didn't turn it: back from where the finger let go.
+            let back = px(slide.back);
+            return el
+                .with_animation(
+                    self.id(&format!("{path}.slide{}", slide.moves)),
+                    Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint()),
+                    move |el, d| el.relative().left(back * (1. - d)),
+                )
+                .into_any_element();
+        }
         let dir = if index >= slide.from { 1. } else { -1. };
         let shift = self.pixels(48.);
         el.with_animation(
@@ -401,7 +522,15 @@ impl Draw<'_, '_> {
         let t = self.t;
         let arrow = |d: &mut Self, glyph: Glyph, to: usize, enabled: bool, name: &str| {
             let key = path.to_string();
-            Press::new(d.id(&format!("{path}.{name}")))
+            let turn = d.cx.listener(move |this, _, _, cx| {
+                let s = this.ui.carousel.entry(key.clone()).or_default();
+                s.from = s.index;
+                s.index = to;
+                s.back = 0.;
+                s.moves += 1;
+                cx.notify();
+            });
+            let press = Press::new(d.id(&format!("{path}.{name}")))
                 .accessibility_label(name.to_string())
                 .disabled(!enabled)
                 .flex_none()
@@ -422,14 +551,8 @@ impl Draw<'_, '_> {
                     } else {
                         t.colors.text_faint
                     },
-                ))
-                .on_click(d.cx.listener(move |this, _, _, cx| {
-                    let s = this.ui.carousel.entry(key.clone()).or_default();
-                    s.from = s.index;
-                    s.index = to;
-                    s.moves += 1;
-                    cx.notify();
-                }))
+                ));
+            d.on_press(press, enabled, turn)
         };
         let prev = arrow(
             self,
@@ -518,8 +641,8 @@ impl Draw<'_, '_> {
                 let sel = self.selector(&format!("close:{}", m.title));
                 move || sel
             })
-            .child(self.glyph(Glyph::Close, 14., t.colors.text_muted))
-            .on_click(close_on_button);
+            .child(self.glyph(Glyph::Close, 14., t.colors.text_muted));
+        let close_button = self.on_press(close_button, true, close_on_button);
         let (esc_key, esc_open) = (path.to_string(), m.open.clone());
         let panel = div()
             .id(self.id(&format!("{path}.panel")))
@@ -588,5 +711,56 @@ impl Draw<'_, '_> {
         )
         .with_priority(2)
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::view::Slide;
+    // The built-in #[test], not GPUI's, which gpui_kit::* brings in.
+    use std::prelude::v1::test;
+
+    fn step(s: &mut Slide, phase: TouchPhase, x: f32, y: f32) -> bool {
+        swipe(s, 3, phase, point(x, y))
+    }
+
+    #[test]
+    fn a_swipe_keeps_its_momentum_from_the_chat_and_then_lets_go() {
+        let mut s = Slide::default();
+        assert!(
+            !step(&mut s, TouchPhase::Started, 0., 0.),
+            "a finger down is no one's yet"
+        );
+        assert!(step(&mut s, TouchPhase::Moved, -30., 0.));
+        assert!(step(&mut s, TouchPhase::Moved, -30., 0.));
+        assert_eq!(s.swipe, Swipe::Dragging(-60.));
+        assert!(step(&mut s, TouchPhase::Ended, 0., 0.));
+        assert_eq!((s.index, s.from, s.moves), (1, 0, 1));
+        // GPUI's momentum after the release: still the carousel's, and it turns nothing more.
+        assert!(step(&mut s, TouchPhase::Moved, -40., 0.));
+        assert!(step(&mut s, TouchPhase::Ended, -5., 0.));
+        assert_eq!((s.index, s.swipe), (1, Swipe::Idle));
+        // An up-and-down pan is never the carousel's.
+        assert!(!step(&mut s, TouchPhase::Started, 0., -12.));
+        assert!(!step(&mut s, TouchPhase::Moved, 0., -40.));
+        assert!(!step(&mut s, TouchPhase::Ended, 0., 0.));
+        assert_eq!(s.index, 1);
+    }
+
+    #[test]
+    fn a_cancelled_or_short_swipe_eases_back_from_where_it_was() {
+        let mut s = Slide::default();
+        step(&mut s, TouchPhase::Started, -12., 0.);
+        step(&mut s, TouchPhase::Moved, -50., 0.);
+        assert!(step(&mut s, TouchPhase::Cancelled, 0., 0.));
+        assert_eq!((s.index, s.back, s.swipe), (0, -62., Swipe::Idle));
+        step(&mut s, TouchPhase::Started, -12., 0.);
+        step(&mut s, TouchPhase::Ended, -8., 0.);
+        assert_eq!((s.index, s.back), (0, -20.));
+        // Past the first slide it's held back to a third, and eases back from there.
+        step(&mut s, TouchPhase::Started, 30., 0.);
+        step(&mut s, TouchPhase::Ended, 30., 0.);
+        assert_eq!((s.index, s.back), (0, 20.));
     }
 }

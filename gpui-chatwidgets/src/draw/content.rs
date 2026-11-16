@@ -687,6 +687,9 @@ impl Draw<'_, '_> {
                         })
                         .child(self.glyph(Glyph::ChevronRight, 16., t.colors.text_muted));
                     let (action, words) = (action.clone(), it.title.clone());
+                    let go = self.cx.listener(move |this, _, window, cx| {
+                        this.press(&action, &words, None, None, window, cx)
+                    });
                     let press = gpui_kit::base::Button::new(self.id(&format!("{path}.i{i}")))
                         .accessibility_label(it.title.clone())
                         .w_full()
@@ -698,10 +701,8 @@ impl Draw<'_, '_> {
                             let sel = self.selector(&format!("item:{}", it.title));
                             move || sel
                         })
-                        .child(row.child(action_side))
-                        .on_click(self.cx.listener(move |this, _, window, cx| {
-                            this.press(&action, &words, None, None, window, cx)
-                        }));
+                        .child(row.child(action_side));
+                    let press = self.on_press(press, true, go);
                     let wrap = div()
                         .w_full()
                         .min_w_0()
