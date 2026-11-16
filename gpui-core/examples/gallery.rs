@@ -60,6 +60,8 @@ struct Gallery {
     tag_open: bool,
     tag: SharedString,
     sort: SharedString,
+    /// What the list is grouped by: the sort menu's submenu.
+    group: SharedString,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -300,11 +302,23 @@ impl Render for Gallery {
                                     .checked(self.sort.as_ref() == k)
                                 }))
                                 .separator()
+                                .item(PopupMenuItem::new("group", "Group by").submenu(
+                                    PopupMenu::new("group-menu").items(
+                                        [("none", "Nothing"), ("kind", "Kind"), ("owner", "Owner")].map(
+                                            |(k, label)| {
+                                                PopupMenuItem::new(k, label)
+                                                    .checked(self.group.as_ref() == k)
+                                            },
+                                        ),
+                                    ),
+                                ))
                                 .item(PopupMenuItem::new("copy", "Copy the list").icon(IconName::Copy).shortcut("⌘C"))
                                 .item(PopupMenuItem::new("delete", "Delete all").icon(IconName::Trash).disabled(true))
                                 .on_select(cx.listener(|g, pick: &MenuSelect, _, cx| {
-                                    if matches!(pick.id.as_ref(), "name" | "date" | "size") {
-                                        g.sort = pick.id.clone();
+                                    match pick.id.as_ref() {
+                                        "name" | "date" | "size" => g.sort = pick.id.clone(),
+                                        "none" | "kind" | "owner" => g.group = pick.id.clone(),
+                                        _ => {}
                                     }
                                     g.sort_open = false;
                                     cx.notify();
@@ -493,6 +507,7 @@ fn main() {
                     tag_open: false,
                     tag: "Work".into(),
                     sort: "name".into(),
+                    group: "none".into(),
                 })
             })
             .expect("the window");

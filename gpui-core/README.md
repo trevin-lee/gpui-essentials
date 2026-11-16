@@ -31,6 +31,9 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
   picked (the pointer moves it too), Enter or a press picks, and Escape closes the popover.
+  `PopupMenuItem::submenu(menu)` opens a menu beside its entry, on the right unless there's
+  no room: on a press, Enter, Space or Right, or when the pointer rests on it; Left or Escape
+  closes only it, and its picks go to the outer menu's `on_select` unless it has its own.
   `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
