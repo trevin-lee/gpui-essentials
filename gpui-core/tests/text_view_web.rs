@@ -450,3 +450,43 @@ fn a_tables_text_size_is_the_hosts() {
     assert!(h(Some(10.)) < h(None), "{} {}", h(Some(10.)), h(None));
     assert!(h(Some(30.)) > h(None));
 }
+
+#[gpui::test]
+fn a_new_style_on_a_drawn_view_lays_it_out_again() {
+    let mut cx = TestAppContext::build_with_text_system(
+        TestDispatcher::new(0),
+        None,
+        Arc::new(gpui_apple::AppleTextSystem::new()),
+    );
+    cx.update(gpui_core::init);
+    let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let m = made.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let v = cx.new(|_| Doc(TextViewStyle::default(), "One.\n\nTwo.\n\nThree."));
+        *m.borrow_mut() = Some(v.clone());
+        Root::new(v, window, cx)
+    });
+    vcx.run_until_parked();
+    let doc = made.borrow().clone().unwrap();
+    let height =
+        |vcx: &mut gpui::VisualTestContext| f32::from(vcx.debug_bounds("doc").unwrap().size.height);
+    let before = height(vcx);
+    // The same view, its gap made wider: the host's new style, not a new view.
+    vcx.update(|_, cx| {
+        doc.update(cx, |d, cx| {
+            d.0.paragraph_gap = gpui::rems(3.);
+            cx.notify();
+        })
+    });
+    vcx.run_until_parked();
+    let wider = height(vcx);
+    assert!(wider > before + 40., "{before} {wider}");
+    vcx.update(|_, cx| {
+        doc.update(cx, |d, cx| {
+            d.0 = TextViewStyle::default();
+            cx.notify();
+        })
+    });
+    vcx.run_until_parked();
+    assert_eq!(height(vcx), before);
+}
