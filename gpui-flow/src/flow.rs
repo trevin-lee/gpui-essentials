@@ -56,6 +56,10 @@ actions!(
         MoveRightFar,
         MoveUpFar,
         MoveDownFar,
+        /// Takes back the last edit.
+        Undo,
+        /// Makes the last edit taken back again.
+        Redo,
     ]
 );
 
@@ -91,6 +95,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-right", MoveRightFar, c),
         KeyBinding::new("shift-up", MoveUpFar, c),
         KeyBinding::new("shift-down", MoveDownFar, c),
+        KeyBinding::new("cmd-z", Undo, c),
+        KeyBinding::new("cmd-shift-z", Redo, c),
     ]);
 }
 
@@ -612,8 +618,28 @@ pub struct Flow {
     /// Whether the nodes or edges may have changed since the last look for edits; what only
     /// pans, zooms, hovers or selects leaves it alone, so those cost no look.
     edited: bool,
+    /// The batches that take back the edits sent, newest last, and those that make edits
+    /// taken back again.
+    undo_stack: Vec<Vec<Op>>,
+    redo_stack: Vec<Vec<Op>>,
+    /// What the next batch sent is.
+    replay: Replay,
     _settle: Subscription,
 }
+
+/// What a batch of edits is, for the undo history.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Replay {
+    /// An edit of the person's: it can be taken back, and what was taken back can't be made
+    /// again.
+    #[default]
+    Edit,
+    Undo,
+    Redo,
+}
+
+/// How many edits can be taken back.
+const UNDO_LIMIT: usize = 200;
 
 impl EventEmitter<FlowEvent> for Flow {}
 
@@ -777,7 +803,12 @@ impl Flow {
             stored_nodes: HashMap::new(),
             stored_edges: HashMap::new(),
             edited: false,
-            _settle: cx.observe_self(Self::settle),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            replay: Replay::Edit,
+            _settle: cx.observe_self(|this, cx| {
+                this.settle(cx);
+            }),
         }
     }
 
@@ -1787,6 +1818,8 @@ impl Flow {
         self.edges = edges;
         self.stored_nodes = stored(&self.nodes);
         self.stored_edges = stored(&self.edges);
+        self.undo_stack.clear();
+        self.redo_stack.clear();
         self.transition = None;
         self.drag = None;
         self.forget_changed(&old);
@@ -1799,13 +1832,14 @@ impl Flow {
 
     /// Once an edit has settled (it isn't in the middle of a drag or a resize), tells the host
     /// what it changed.
-    fn settle(&mut self, cx: &mut Context<Self>) {
+    /// Says whether there was anything to send.
+    fn settle(&mut self, cx: &mut Context<Self>) -> bool {
         // Debug builds always look, to catch a change that didn't mark the flow edited.
         if !self.edited && !cfg!(debug_assertions) {
-            return;
+            return false;
         }
         if matches!(self.drag, Some(Drag::Nodes { .. } | Drag::Resize { .. })) {
-            return;
+            return false;
         }
         let ops = self.unsent();
         debug_assert!(
@@ -1814,39 +1848,135 @@ impl Flow {
         );
         self.edited = false;
         if ops.is_empty() {
-            return;
+            return false;
         }
+        // What takes the batch back: what was added goes, what went comes back, and each
+        // patched field is put back as it was.
+        let (mut back_nodes, mut back_edges, mut back_patches) = (vec![], vec![], vec![]);
+        let (mut drop_nodes, mut drop_edges) = (vec![], vec![]);
         for op in &ops {
             match op {
                 Op::AddNode { node } => {
                     self.stored_nodes.insert(node.id.clone(), (**node).clone());
+                    drop_nodes.push(Op::RemoveNode {
+                        id: node.id.clone(),
+                    });
                 }
                 Op::PatchNode { id, patch } => {
                     if let Some(was) = self.stored_nodes.get_mut(id)
                         && let Some(now) = json::patched(was, patch)
                     {
+                        let back = json::diff_stored(&now, was);
+                        if !back.is_empty() {
+                            back_patches.push(Op::PatchNode {
+                                id: id.clone(),
+                                patch: back,
+                            });
+                        }
                         *was = now;
                     }
                 }
                 Op::RemoveNode { id } => {
-                    self.stored_nodes.remove(id);
+                    if let Some(was) = self.stored_nodes.remove(id) {
+                        back_nodes.push(Op::AddNode {
+                            node: Box::new(was),
+                        });
+                    }
                 }
                 Op::AddEdge { edge } => {
                     self.stored_edges.insert(edge.id.clone(), (**edge).clone());
+                    drop_edges.push(Op::RemoveEdge {
+                        id: edge.id.clone(),
+                    });
                 }
                 Op::PatchEdge { id, patch } => {
                     if let Some(was) = self.stored_edges.get_mut(id)
                         && let Some(now) = json::patched(was, patch)
                     {
+                        let back = json::diff_stored(&now, was);
+                        if !back.is_empty() {
+                            back_patches.push(Op::PatchEdge {
+                                id: id.clone(),
+                                patch: back,
+                            });
+                        }
                         *was = now;
                     }
                 }
                 Op::RemoveEdge { id } => {
-                    self.stored_edges.remove(id);
+                    if let Some(was) = self.stored_edges.remove(id) {
+                        back_edges.push(Op::AddEdge {
+                            edge: Box::new(was),
+                        });
+                    }
                 }
             }
         }
+        let mut back = back_nodes;
+        back.extend(back_edges);
+        back.extend(back_patches);
+        back.extend(drop_edges);
+        back.extend(drop_nodes);
+        match self.replay {
+            Replay::Edit => {
+                self.redo_stack.clear();
+                self.undo_stack.push(back);
+                if self.undo_stack.len() > UNDO_LIMIT {
+                    self.undo_stack.remove(0);
+                }
+            }
+            Replay::Undo => self.redo_stack.push(back),
+            Replay::Redo => self.undo_stack.push(back),
+        }
         cx.emit(FlowEvent::Edits(ops));
+        true
+    }
+
+    /// Takes back the last edit: the person's own, as sent (a drag of many nodes, a deletion,
+    /// whatever one call of the flow's changed), and sends what that changes. Each field is
+    /// put back as it was before the edit; edits from elsewhere aren't taken back, and one to
+    /// a node that's since gone is skipped. Says whether there was an edit to take back.
+    pub fn undo(&mut self, cx: &mut Context<Self>) -> bool {
+        self.step(Replay::Undo, cx)
+    }
+
+    /// Makes the last edit taken back again. Any new edit forgets what was taken back.
+    pub fn redo(&mut self, cx: &mut Context<Self>) -> bool {
+        self.step(Replay::Redo, cx)
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    fn step(&mut self, replay: Replay, cx: &mut Context<Self>) -> bool {
+        if self.drag.is_some() {
+            return false;
+        }
+        // An edit not yet sent is sent first, as an edit of its own.
+        self.settle(cx);
+        loop {
+            let stack = match replay {
+                Replay::Undo => &mut self.undo_stack,
+                _ => &mut self.redo_stack,
+            };
+            let Some(ops) = stack.pop() else {
+                return false;
+            };
+            self.apply_ops(&ops, false, cx);
+            self.edited = true;
+            self.replay = replay;
+            let sent = self.settle(cx);
+            self.replay = Replay::Edit;
+            // One that changes nothing now (what it touched is gone) is passed over.
+            if sent {
+                return true;
+            }
+        }
     }
 
     /// What changed since the nodes and edges were last stored: adds, then patches, then
@@ -1944,6 +2074,13 @@ impl Flow {
     /// that isn't is skipped. A removal takes only what it names: the edges and children that
     /// go with a node come as removals of their own.
     pub fn apply(&mut self, ops: &[Op], cx: &mut Context<Self>) {
+        self.apply_ops(ops, true, cx);
+    }
+
+    /// Applies operations to the nodes and edges, and to the stored copies too when `stored`
+    /// (edits from elsewhere, which aren't sent). Without, they're an edit of this flow's, sent
+    /// when it settles.
+    fn apply_ops(&mut self, ops: &[Op], stored: bool, cx: &mut Context<Self>) {
         // Unsent edits of this flow's own stay unsent: the stored copies take the same ops.
         let mut at: HashMap<NodeId, usize> = self
             .nodes
@@ -1969,7 +2106,9 @@ impl Flow {
                     let mut node = (**node).clone();
                     sanitize_node(&mut node);
                     node.selected = false;
-                    self.stored_nodes.insert(node.id.clone(), node.clone());
+                    if stored {
+                        self.stored_nodes.insert(node.id.clone(), node.clone());
+                    }
                     measured.remove(&node.id);
                     match at.get(&node.id) {
                         Some(&i) => {
@@ -1984,7 +2123,8 @@ impl Flow {
                     }
                 }
                 Op::PatchNode { id, patch } => {
-                    if let Some(was) = self.stored_nodes.get_mut(id)
+                    if stored
+                        && let Some(was) = self.stored_nodes.get_mut(id)
                         && let Some(now) = json::patched(was, patch)
                     {
                         *was = now;
@@ -1999,7 +2139,9 @@ impl Flow {
                     }
                 }
                 Op::RemoveNode { id } => {
-                    self.stored_nodes.remove(id);
+                    if stored {
+                        self.stored_nodes.remove(id);
+                    }
                     if at.contains_key(id) {
                         gone.insert(id.clone());
                         measured.remove(id);
@@ -2012,7 +2154,9 @@ impl Flow {
                     let mut edge = (**edge).clone();
                     sanitize_edge(&mut edge);
                     edge.selected = false;
-                    self.stored_edges.insert(edge.id.clone(), edge.clone());
+                    if stored {
+                        self.stored_edges.insert(edge.id.clone(), edge.clone());
+                    }
                     match edge_at.get(&edge.id) {
                         Some(&i) => {
                             edge.selected =
@@ -2027,7 +2171,8 @@ impl Flow {
                     }
                 }
                 Op::PatchEdge { id, patch } => {
-                    if let Some(was) = self.stored_edges.get_mut(id)
+                    if stored
+                        && let Some(was) = self.stored_edges.get_mut(id)
                         && let Some(now) = json::patched(was, patch)
                     {
                         *was = now;
@@ -2041,7 +2186,9 @@ impl Flow {
                     }
                 }
                 Op::RemoveEdge { id } => {
-                    self.stored_edges.remove(id);
+                    if stored {
+                        self.stored_edges.remove(id);
+                    }
                     if edge_at.contains_key(id) {
                         edges_gone.insert(id.clone());
                     }
@@ -5069,6 +5216,16 @@ impl Render for Flow {
             .on_action(cx.listener(|flow, _: &ZoomOut, _, cx| flow.zoom_out(cx)))
             .on_action(cx.listener(|flow, _: &ZoomReset, _, cx| flow.zoom_to(1., cx)))
             .on_action(cx.listener(|flow, _: &FitView, _, cx| flow.fit_view(cx)))
+            .on_action(cx.listener(|flow, _: &Undo, _, cx| {
+                if !flow.undo(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &Redo, _, cx| {
+                if !flow.redo(cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|flow, _: &FrameSelection, _, cx| {
                 if flow.frame_selection("Frame", cx).is_none() {
                     cx.propagate();
