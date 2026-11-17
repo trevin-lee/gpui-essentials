@@ -144,7 +144,7 @@ pub struct PopupMenuItem {
     shortcut: Option<SharedString>,
     chip: Option<AnyElement>,
     label_element: Option<AnyElement>,
-    submenu: Option<Box<PopupMenu>>,
+    submenu: Option<SubmenuSource>,
     /// Whether it opens a submenu (kept by `text_copy`, which leaves the submenu out).
     opens: bool,
 }
@@ -225,9 +225,32 @@ impl PopupMenuItem {
     /// or Escape closes it again. Its entries are drawn in this menu's row style and colours,
     /// and its picks go to its own [`PopupMenu::on_select`], or else to this menu's.
     pub fn submenu(mut self, menu: PopupMenu) -> Self {
-        self.submenu = Some(Box::new(menu));
+        self.submenu = Some(SubmenuSource::Built(Box::new(menu)));
         self.opens = true;
         self
+    }
+
+    /// A [`submenu`](Self::submenu) made by `build` only when it opens: for a long list where
+    /// each entry has one (an option's colour and actions, say).
+    pub fn submenu_with(mut self, build: impl Fn() -> PopupMenu + 'static) -> Self {
+        self.submenu = Some(SubmenuSource::Lazy(Rc::new(build)));
+        self.opens = true;
+        self
+    }
+}
+
+/// A submenu, made or to be made when it opens.
+enum SubmenuSource {
+    Built(Box<PopupMenu>),
+    Lazy(Rc<dyn Fn() -> PopupMenu>),
+}
+
+impl SubmenuSource {
+    fn make(self) -> PopupMenu {
+        match self {
+            SubmenuSource::Built(menu) => *menu,
+            SubmenuSource::Lazy(build) => build(),
+        }
     }
 }
 
@@ -293,6 +316,8 @@ pub struct PopupMenu {
     row: RowStyle,
     take_focus: bool,
     colors: PopupMenuColors,
+    /// The entry whose submenu is open when it opens.
+    open_submenu: Option<SharedString>,
     /// Set when it's drawn as another menu's submenu: how it closes.
     nested: Option<CloseFn>,
     /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
@@ -312,9 +337,17 @@ impl PopupMenu {
             row: RowStyle::default(),
             take_focus: true,
             colors: PopupMenuColors::default(),
+            open_submenu: None,
             nested: None,
             start_blank: false,
         }
+    }
+
+    /// Opens with entry `id`'s submenu open and the keyboard in it (its first entry
+    /// highlighted), and `id` highlighted here: to bring a keyboard user back where they were.
+    pub fn open_submenu(mut self, id: impl Into<SharedString>) -> Self {
+        self.open_submenu = Some(id.into());
+        self
     }
 
     pub fn item(mut self, item: PopupMenuItem) -> Self {
@@ -411,8 +444,9 @@ struct MenuState {
     focused_once: bool,
     /// Whether it has set its first highlight.
     opened: bool,
-    /// The entry whose submenu is open.
-    open_sub: Option<usize>,
+    /// The entry whose submenu is open, by its id: it stays that entry's while entries come,
+    /// go and move.
+    open_sub: Option<SharedString>,
     /// Whether the pointer opened it (it then opens with nothing highlighted).
     sub_by_pointer: bool,
     /// Counts the pointer's moves, so a rest that's been moved on from does nothing.
@@ -478,8 +512,38 @@ impl RenderOnce for PopupMenu {
                 })
                 .collect(),
         );
-        // Where it opens: the host's entry, else the first that can be picked.
+        let is_sub: Rc<Vec<bool>> = Rc::new(
+            self.entries
+                .iter()
+                .map(|e| matches!(e, Entry::Item(i) if i.submenu.is_some()))
+                .collect(),
+        );
+        // An entry's index by its id, if it has a submenu.
+        let sub_at = {
+            let (ids, is_sub) = (ids.clone(), is_sub.clone());
+            move |id: &SharedString| {
+                ids.iter()
+                    .position(|i| i.as_ref() == Some(id))
+                    .filter(|i| is_sub[*i])
+            }
+        };
+        // Where it opens: the host's entry, else the first that can be picked; with the host's
+        // submenu open, on its entry.
+        let open_submenu = self.open_submenu.clone();
         let highlighted = state.update(cx, |s, _| {
+            if !s.opened
+                && let Some(id) = &open_submenu
+                && let Some(i) = sub_at(id)
+            {
+                s.opened = true;
+                s.open_sub = Some(id.clone());
+                s.sub_by_pointer = false;
+                s.highlighted = Some(i);
+            }
+            // An open submenu whose entry has gone, or lost its submenu, is closed.
+            if s.open_sub.as_ref().is_some_and(|id| sub_at(id).is_none()) {
+                s.open_sub = None;
+            }
             if !s.opened {
                 s.opened = true;
                 let given = self.highlight.as_ref().and_then(|want| {
@@ -518,12 +582,6 @@ impl RenderOnce for PopupMenu {
             }
         });
 
-        let is_sub: Rc<Vec<bool>> = Rc::new(
-            self.entries
-                .iter()
-                .map(|e| matches!(e, Entry::Item(i) if i.submenu.is_some()))
-                .collect(),
-        );
         // Closes the open submenu, giving the keyboard back to this menu.
         let close: CloseFn = Rc::new({
             let state = state.clone();
@@ -546,16 +604,18 @@ impl RenderOnce for PopupMenu {
         let open: OpenFn = Rc::new({
             let state = state.clone();
             let is_sub = is_sub.clone();
+            let ids = ids.clone();
             let set = set.clone();
             move |i, by_pointer, _: &mut Window, cx: &mut App| {
                 if is_sub.get(i) != Some(&true) {
                     return;
                 }
                 set(Some(i), cx);
+                let id = ids[i].clone();
                 state.update(cx, |s, cx| {
                     s.rest += 1;
-                    if s.open_sub != Some(i) {
-                        s.open_sub = Some(i);
+                    if s.open_sub != id {
+                        s.open_sub = id;
                         s.sub_by_pointer = by_pointer;
                         cx.notify();
                     }
@@ -565,18 +625,19 @@ impl RenderOnce for PopupMenu {
         let subs = is_sub.iter().any(|s| *s).then(|| {
             let (open_sub, by_pointer) = {
                 let s = state.read(cx);
-                (s.open_sub, s.sub_by_pointer)
+                (s.open_sub.as_ref().and_then(&sub_at), s.sub_by_pointer)
             };
             // The pointer resting on entry `i`: after a moment, its submenu opens, or the open
             // one closes if it has none.
             let rest: RestFn = Rc::new({
                 let state = state.clone();
                 let is_sub = is_sub.clone();
+                let sub_at = sub_at.clone();
                 let (open, close) = (open.clone(), close.clone());
                 move |i, window: &mut Window, cx: &mut App| {
                     let (now, open_sub) = state.update(cx, |s, _| {
                         s.rest += 1;
-                        (s.rest, s.open_sub)
+                        (s.rest, s.open_sub.as_ref().and_then(&sub_at))
                     });
                     let wanted = (is_sub.get(i) == Some(&true)).then_some(i);
                     if wanted == open_sub {
@@ -604,11 +665,13 @@ impl RenderOnce for PopupMenu {
             // and a rest on the way there is forgotten.
             let entered: Rc<dyn Fn(&mut App)> = Rc::new({
                 let state = state.clone();
+                let sub_at = sub_at.clone();
                 move |cx: &mut App| {
                     state.update(cx, |s, cx| {
                         s.rest += 1;
-                        if s.open_sub.is_some() && s.highlighted != s.open_sub {
-                            s.highlighted = s.open_sub;
+                        let at = s.open_sub.as_ref().and_then(&sub_at);
+                        if at.is_some() && s.highlighted != at {
+                            s.highlighted = at;
                             cx.notify();
                         }
                     })
@@ -788,6 +851,8 @@ fn rows_with(
     let text_size: gpui::AbsoluteLength = row_style.text_size.unwrap_or(theme.text.sm.into());
     let menu_id = std::sync::Arc::new(menu_id.clone());
     let on_select_for_subs = on_select.clone();
+    // A submenu's panel is drawn in the colours of the panel this menu is in.
+    let panel_colors = crate::popover::panel_colors(cx);
     entries
         .into_iter()
         .enumerate()
@@ -963,7 +1028,7 @@ fn rows_with(
                 .filter(|_| open_now)
                 .zip(subs.as_ref())
                 .map(|(menu, subs)| {
-                    let mut menu = *menu;
+                    let mut menu = menu.make();
                     menu.nested = Some(subs.close.clone());
                     menu.start_blank = subs.by_pointer;
                     menu.row = row_style;
@@ -990,9 +1055,9 @@ fn rows_with(
                             .p(css(4.))
                             .rounded(theme.radius_md())
                             .border_1()
-                            .border_color(theme.border)
-                            .bg(theme.popover)
-                            .text_color(theme.popover_foreground)
+                            .border_color(panel_colors.border)
+                            .bg(panel_colors.background)
+                            .text_color(panel_colors.foreground)
                             .shadow_md()
                             .on_hover(move |hovered, _, cx| {
                                 if *hovered {
@@ -1005,6 +1070,7 @@ fn rows_with(
             match panel {
                 Some((key, panel)) => SubmenuElement {
                     key,
+                    colors: panel_colors,
                     row: row.into_any_element(),
                     panel: Some(panel),
                 }
@@ -1060,6 +1126,8 @@ pub(crate) fn place_beside(
 struct SubmenuElement {
     /// The panel's id, which its claim on presses is kept under.
     key: ElementId,
+    /// The panel's colours, which a submenu inside it takes.
+    colors: crate::PopoverColors,
     row: AnyElement,
     panel: Option<Stateful<gpui::Div>>,
 }
@@ -1117,14 +1185,16 @@ impl Element for SubmenuElement {
         // A press on it isn't one outside the popover the menu is in.
         let mut panel = ClaimArea::new(self.key.clone(), panel).into_any_element();
         // Laid out on its own, now that its entry has been placed this frame.
-        let size = panel.layout_as_root(
-            gpui::size(
-                gpui::AvailableSpace::MaxContent,
-                gpui::AvailableSpace::MaxContent,
-            ),
-            window,
-            cx,
-        );
+        let size = crate::popover::with_panel_colors(self.colors, window, cx, |window, cx| {
+            panel.layout_as_root(
+                gpui::size(
+                    gpui::AvailableSpace::MaxContent,
+                    gpui::AvailableSpace::MaxContent,
+                ),
+                window,
+                cx,
+            )
+        });
         let origin = place_beside(bounds, size, view, edge, inset);
         window.defer_draw(
             panel,

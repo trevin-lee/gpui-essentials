@@ -33,7 +33,10 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   picked (the pointer moves it too), Enter or a press picks, and Escape closes the popover.
   `PopupMenuItem::submenu(menu)` opens a menu beside its entry, on the right unless there's
   no room: on a press, Enter, Space or Right, or when the pointer rests on it; Left or Escape
-  closes only it, and its picks go to the outer menu's `on_select` unless it has its own.
+  closes only it, and its picks go to the outer menu's `on_select` unless it has its own. It's
+  drawn in the colours of the popover it's in, stays its entry's while entries come and go,
+  can be made only when it opens (`submenu_with(|| …)`), and a menu can open with one open
+  and the keyboard in it (`open_submenu(id)`).
   `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
