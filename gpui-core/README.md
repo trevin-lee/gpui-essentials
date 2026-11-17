@@ -27,6 +27,12 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   panel across the bottom of the window over a scrim, centred and capped at `max_width` on a
   wide window, scrolling past nine tenths of its height. A press on the scrim or Escape calls
   `on_dismiss`; it takes the keyboard while open and hands it back on closing.
+- **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
+  the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
+  monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab
+  indenting a line or every selected line, Enter keeping the indent, and Ctrl-Tab moving the
+  keyboard on. Only the rows in view are drawn, so a file of thousands of lines types as fast as
+  a short one. Undo, the input method and the rest are a field's.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
