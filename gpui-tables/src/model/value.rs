@@ -30,7 +30,8 @@ pub struct DateValue {
 /// | date | `{"start": ms, "end": ms, "includeTime": false}` | `Date` |
 ///
 /// An empty list reads as `Ids`; the accessors treat it as no people too. Anything else is kept
-/// as `Other`, and the engine treats it as empty.
+/// as `Other`, and the engine treats it as empty. A select may hold a list and a multi-select
+/// one id, as a property changed between the two keeps its values ([`Value::fits`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Null,
@@ -138,15 +139,20 @@ impl Value {
     }
 
     /// Whether this value has the shape a property of `kind` holds. Null fits every type (it
-    /// means no value); derived types hold nothing.
+    /// means no value); derived types hold nothing. A select and a multi-select each take the
+    /// other's shape too, an option id or a list of them, as a property changed from one to the
+    /// other keeps its rows' values ([`Value::option_id`] and [`Value::option_ids`] read them).
     pub fn fits(&self, kind: &PropertyType) -> bool {
         use PropertyType as T;
         match (kind, self) {
             (_, Self::Null) => true,
-            (T::Title | T::Text | T::Url | T::Email | T::Phone | T::Select, Self::Text(_)) => true,
+            (
+                T::Title | T::Text | T::Url | T::Email | T::Phone | T::Select | T::MultiSelect,
+                Self::Text(_),
+            ) => true,
             (T::Number, Self::Number(_)) => true,
             (T::Checkbox, Self::Bool(_)) => true,
-            (T::MultiSelect | T::Relation, Self::Ids(_)) => true,
+            (T::Select | T::MultiSelect | T::Relation, Self::Ids(_)) => true,
             (T::Person, Self::People(_)) => true,
             (T::Person, Self::Ids(ids)) => ids.is_empty(),
             (T::Date, Self::Date(_)) => true,

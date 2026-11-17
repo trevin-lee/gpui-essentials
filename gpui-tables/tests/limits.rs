@@ -113,3 +113,59 @@ fn every_icon_check_has_a_case() {
         assert!(text.iter().any(|t| t == message), "{message}");
     }
 }
+
+/// A CRM fixture: its database doc and rows.
+fn crm(name: &str) -> (Doc, Vec<Doc>) {
+    let path = format!("{}/tests/fixtures/{name}.json", env!("CARGO_MANIFEST_DIR"));
+    let mut docs: Vec<Doc> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let rows = docs.split_off(1);
+    (docs.remove(0), rows)
+}
+
+#[test]
+fn rows_stay_valid_when_a_select_and_a_multi_select_swap_types() {
+    use gpui_tables::PropertyType as T;
+    let limits = Limits::default();
+    let mut swapped = 0;
+    for name in ["people", "companies", "interactions"] {
+        let (db, rows) = crm(name);
+        let fields = db.database.as_ref().unwrap();
+        for row in &rows {
+            assert_eq!(
+                limits.check_doc(row, Some(fields)),
+                [],
+                "{name}: {}",
+                row.title
+            );
+        }
+        // Every select made a multi-select and every multi-select a select, then back.
+        let mut there = fields.clone();
+        for p in &mut there.properties {
+            *p = match p.kind {
+                T::Select => p.retyped(T::MultiSelect),
+                T::MultiSelect => p.retyped(T::Select),
+                _ => continue,
+            };
+            swapped += 1;
+        }
+        let mut back = there.clone();
+        for p in &mut back.properties {
+            *p = match p.kind {
+                T::Select => p.retyped(T::MultiSelect),
+                T::MultiSelect => p.retyped(T::Select),
+                _ => continue,
+            };
+        }
+        for fields in [&there, &back] {
+            for row in &rows {
+                assert_eq!(
+                    limits.check_doc(row, Some(fields)),
+                    [],
+                    "{name}: {}",
+                    row.title
+                );
+            }
+        }
+    }
+    assert_eq!(swapped, 4, "Stage, Tags, Industry and Kind");
+}
