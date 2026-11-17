@@ -710,3 +710,49 @@ fn the_bar_and_its_menus_are_44_points_on_touch(cx: &mut TestAppContext) {
     click(cx, "add-view");
     assert!(rect(cx, item("Board")).size.height >= px(44.));
 }
+
+#[gpui::test]
+fn deleting_the_shown_view_beside_the_first_table_shows_that_table(cx: &mut TestAppContext) {
+    // Only the table and the board: the board's neighbour is the table every view falls back
+    // to.
+    let host = TestHost::new();
+    let (mut db, rows) = load("people");
+    db.database
+        .as_mut()
+        .unwrap()
+        .views
+        .retain(|v| v.id == ALL_PEOPLE || v.id == PIPELINE);
+    let (table, cx) = open_bar(cx, &host, db, rows, size(px(1400.), px(700.)));
+    click(cx, tab("Pipeline"));
+    assert_eq!(shown(&table, cx).id, PIPELINE);
+    view_menu(&table, cx, "Pipeline");
+    click(cx, item("Delete view"));
+    click(cx, item("Delete view"));
+    assert_eq!(
+        last_batch(&host),
+        vec![Edit::ViewDeleted {
+            database_id: PEOPLE.into(),
+            view_id: PIPELINE.into()
+        }]
+    );
+    assert_eq!(shown(&table, cx).id, ALL_PEOPLE);
+    assert_eq!(
+        *host.shown.borrow(),
+        vec![PIPELINE.to_owned(), ALL_PEOPLE.to_owned()],
+        "the host is told the table is shown"
+    );
+    // A board made with the deleted view's id (the host's undo, say) isn't shown in its place.
+    let (db, _) = load("people");
+    table.update(cx, |t, cx| t.set_database(db, cx));
+    draw(cx);
+    assert_eq!(shown(&table, cx).id, ALL_PEOPLE);
+}
+
+#[gpui::test]
+fn pressing_the_shown_fallback_tab_tells_the_host_nothing(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people_bar(cx, &host);
+    click(cx, tab("All people"));
+    assert_eq!(shown(&table, cx).id, ALL_PEOPLE);
+    assert!(host.shown.borrow().is_empty());
+}
