@@ -73,6 +73,13 @@ item](docs/gallery.png)
   wider than its parent. It pulses (half opacity and back every two seconds, every skeleton
   as one) only while it's drawn; `animate(false)` or GPUI's `cx.set_reduce_motion(true)`
   keeps it still.
+- **Avatar.** `Avatar::new(name)` with `.image(…)`: shadcn's circle at 32 pixels (24 or 40
+  with `.small()` or `.large()`), drawing a picture the host already has (an
+  `Arc<RenderImage>`, or an `Arc<Image>`'s bytes, decoded off the main thread; never a URL),
+  and the name's initials on the muted colour until then or without one. To assistive tech
+  it's an image named for the person. `AvatarGroup::new(id).children(…).max(3)` overlaps
+  them by eight pixels, each ringed in the page's colour, with a "+N" circle for the rest,
+  clipped at its edge in a narrow space.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and

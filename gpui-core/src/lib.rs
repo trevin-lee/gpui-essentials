@@ -35,6 +35,7 @@ struct ReadmeDoctests;
 
 mod a11y;
 mod alert;
+mod avatar;
 mod badge;
 mod breadcrumb;
 mod button;
@@ -70,6 +71,7 @@ mod toast;
 mod tooltip;
 
 pub use alert::{Alert, AlertVariant};
+pub use avatar::{Avatar, AvatarGroup, AvatarImage};
 pub use badge::{Badge, BadgeVariant};
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
