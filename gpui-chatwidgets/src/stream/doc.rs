@@ -349,8 +349,8 @@ impl Open {
         match self.kind {
             Kind::None | Kind::Done | Kind::Unknown => Step::Check,
             Kind::Closed => Step::Ends,
-            // A paragraph's next line, unless it can interrupt the paragraph or change it (an
-            // underline, a table's delimiter row).
+            // A paragraph's next line, unless it can interrupt the paragraph (an HTML block's
+            // start among them) or change it (an underline, a table's delimiter row).
             Kind::Paragraph => on(!self.blank && (col >= 4 || !interrupts(r))),
             Kind::Fence { mark, len: n } => Step::On(if col <= 3 && closes(r, mark, n) {
                 Kind::Closed
@@ -443,8 +443,9 @@ fn first(line: &str) -> Kind {
             _ => Kind::Unknown,
         };
     }
-    // A link's definition (which reads as nothing) or a paragraph.
-    if r.starts_with('[') {
+    // A link's definition (which reads as nothing), or an HTML block, which a parser that reads
+    // HTML ends by its own rules (some at a closing mark, mid-line); else a paragraph.
+    if r.starts_with('[') || html_start(r) {
         return Kind::Unknown;
     }
     Kind::Paragraph
@@ -538,7 +539,8 @@ fn item_content(col: usize, width: usize, r: &str) -> Option<usize> {
 }
 
 /// Whether a line can end a paragraph or change it: a heading, a fence, a quote, a rule, a
-/// heading's underline, a list item, a table's delimiter row or a footnote's definition.
+/// heading's underline, a list item, a table's delimiter row, a footnote's definition or the
+/// start of an HTML block.
 fn interrupts(r: &str) -> bool {
     let underline = {
         let t = r.trim_end_matches([' ', '\t']);
@@ -553,7 +555,41 @@ fn interrupts(r: &str) -> bool {
         || item(r).is_some()
         || delimiter_row
         || r.starts_with("[^")
+        || html_start(r)
 }
+
+/// Whether a line, from its first character past the indent, starts an HTML block that can end
+/// a paragraph: CommonMark's kinds 1 to 6, which a parser that reads HTML blocks (as GitHub's
+/// does) ends a paragraph at. A `<script`, `<pre`, `<style` or `<textarea`; a comment, a
+/// processing instruction, a declaration or CDATA (`<!`, `<?`); or a block tag, opening or
+/// closing (`<div`, `</p`). Read generously, as a line taken for one is only checked: any `<!`
+/// or `<?`, and a name from the list, in any case, followed by anything but a letter or a digit.
+/// A line that doesn't start with `<` is never one, so text is told apart at its first byte.
+fn html_start(r: &str) -> bool {
+    let Some(rest) = r.strip_prefix('<') else {
+        return false;
+    };
+    if rest.starts_with(['!', '?']) {
+        return true;
+    }
+    let name = rest.strip_prefix('/').unwrap_or(rest);
+    let n = name.bytes().take_while(u8::is_ascii_alphanumeric).count();
+    let name = &name[..n];
+    n > 0 && HTML_BLOCK_TAGS.iter().any(|t| name.eq_ignore_ascii_case(t))
+}
+
+/// The tags that start an HTML block able to end a paragraph: kind 1's, then kind 6's
+/// (CommonMark 0.31).
+#[rustfmt::skip]
+const HTML_BLOCK_TAGS: &[&str] = &[
+    "script", "pre", "style", "textarea", "address", "article", "aside", "base", "basefont",
+    "blockquote", "body", "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
+    "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset",
+    "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html", "iframe", "legend", "li",
+    "link", "main", "menu", "menuitem", "nav", "noframes", "ol", "optgroup", "option", "p", "param",
+    "search", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title", "tr",
+    "track", "ul",
+];
 
 /// Whether a line closes a fence of `mark` at least `len` long.
 fn closes(r: &str, mark: u8, len: usize) -> bool {
@@ -1241,6 +1277,27 @@ mod tests {
         "bar]: /u",
         "$$",
         "<div>",
+        "</div>",
+        "<DIV class=\"x\">",
+        "  <p>",
+        "<p/>",
+        "<!-- c -->",
+        "<!--",
+        "-->",
+        "<pre>",
+        "</pre>",
+        "<script>",
+        "<?x ?>",
+        "<!DOCTYPE html>",
+        "<![CDATA[",
+        "]]>",
+        "<span>",
+        "<b>bold</b> words",
+        "<divx>",
+        "<",
+        "- <div>",
+        "> <div>",
+        "  <!-- c -->",
         "\u{a0}",
         "a\rb",
         "x\r",
@@ -1285,6 +1342,100 @@ mod tests {
         assert_eq!(blocks(&new.blocks), blocks(&old.blocks), "in {text:?}");
         assert_eq!(new.settled, old.settled, "in {text:?}");
         assert_eq!(new.made, old.made, "in {text:?}");
+    }
+
+    /// Settles `text` in both settlers, in one go and a byte at a time, and checks they agree.
+    fn agrees(text: &str) {
+        let (mut new, mut old) = (Doc::default(), before::Doc::default());
+        new.append(text);
+        old.append(text);
+        while new.settle() {}
+        old.settle();
+        same(&new, &old, text);
+        let (mut new, mut old) = (Doc::default(), before::Doc::default());
+        for (i, c) in text.char_indices() {
+            new.append(&text[i..i + c.len_utf8()]);
+            old.append(&text[i..i + c.len_utf8()]);
+            while new.settle() {}
+            old.settle();
+            same(&new, &old, &text[..i + c.len_utf8()]);
+        }
+        new.replace(text);
+        old.replace(text);
+        while new.restore() {}
+        old.restore();
+        same(&new, &old, text);
+    }
+
+    #[test]
+    fn a_line_that_starts_an_html_block_is_checked() {
+        let para = Open {
+            kind: Kind::Paragraph,
+            words: true,
+            blank: false,
+        };
+        // Kinds 1 to 6 can end a paragraph, for a parser that reads HTML blocks: checked.
+        for line in [
+            "<div>",
+            "</div>",
+            "<DIV class=x>",
+            "   <p>",
+            "<p/>",
+            "<hr/>",
+            "<table",
+            "<!-- c -->",
+            "<!DOCTYPE html>",
+            "<![CDATA[x]]>",
+            "<?x ?>",
+            "<pre>",
+            "<Script>",
+            "<textarea",
+        ] {
+            assert_eq!(para.next(&format!("{line}\n"), 9), Step::Check, "{line:?}");
+            assert_eq!(first(&format!("{line}\n")), Kind::Unknown, "{line:?}");
+        }
+        // Kind 7 (any other tag alone on a line) and inline HTML can't: the paragraph's next
+        // line. A tag indented four columns is the paragraph's text.
+        for line in ["<span>", "<b>bold</b> words", "<divx>", "<", "    <div>"] {
+            assert_eq!(
+                para.next(&format!("{line}\n"), 9),
+                Step::On(Kind::Paragraph),
+                "{line:?}"
+            );
+        }
+        assert_eq!(first("<span>\n"), Kind::Paragraph);
+    }
+
+    #[test]
+    fn html_blocks_settle_as_reading_every_line_again_does() {
+        // Whether a parser reads HTML blocks or not, the settler settles where reading every
+        // line again would.
+        for text in [
+            "\n|---|---|\n<div>\n",
+            "\n|---|---|\n<div>\nafter\n\nmore\n",
+            "A paragraph\n<div>\n",
+            "A paragraph\n<div>\ninside\n\nAfter\n\nThe end\n",
+            "A paragraph\n<!-- c -->\n",
+            "A paragraph\n<!-- c -->\nafter\n\nThe end\n",
+            "<!-- c -->\nafter\nmore\n",
+            "A paragraph\n<span>\nmore\n\nThe end\n",
+            "<span>\nmore\n<div>\nend\n",
+            "<pre>\ncode\n\nstill\n</pre>\ntext\n\nThe end\n",
+            "A paragraph\n<pre>\ncode\n</pre> text\nafter\n\nThe end\n",
+            "- an item\n  <div>\n  inside\n- next\n\nAfter\n\nThe end\n",
+            "- an item\n<div>\nafter\n\nThe end\n",
+            "- an item\n  <!-- c -->\n  more\n\nAfter\n\nThe end\n",
+            "> a quote\n> <div>\n> inside\n\nAfter\n\nThe end\n",
+            "> a quote\n<div>\nafter\n\nThe end\n",
+            "> <!-- c -->\n> more\n\nAfter\n\nThe end\n",
+            "```\ncode\n```\n<div>\nafter\n\nThe end\n",
+            "    code\n<div>\nafter\n\nThe end\n",
+            "| a | b |\n|---|---|\n| 1 | 2 |\n<div>\nafter\n\nThe end\n",
+        ] {
+            agrees(text);
+        }
+        // A tag of kind 7 alone on a line can't end a paragraph, for either kind of parser.
+        assert_eq!(settled("A paragraph\n<span>\nmore\n"), Vec::<String>::new());
     }
 
     #[test]
