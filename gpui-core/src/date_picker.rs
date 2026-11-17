@@ -106,17 +106,34 @@ fn first_of_month(d: NaiveDate) -> NaiveDate {
     d.with_day(1).unwrap_or(d)
 }
 
-/// `d` moved by whole months, kept to the month's last day (31 January + 1 month: 28 February).
+/// The first and last days it goes to: years 1 to 9999, well inside what dates can be, so a
+/// month's grid (which reaches a week either side) and a step past the ends never overflow.
+const FIRST_DAY: NaiveDate = NaiveDate::from_ymd_opt(1, 1, 1).unwrap();
+const LAST_DAY: NaiveDate = NaiveDate::from_ymd_opt(9999, 12, 31).unwrap();
+
+/// `d` kept between [`FIRST_DAY`] and [`LAST_DAY`].
+fn held(d: NaiveDate) -> NaiveDate {
+    d.clamp(FIRST_DAY, LAST_DAY)
+}
+
+/// `d` moved by days, stopping at the ends.
+fn add_days(d: NaiveDate, days: i64) -> NaiveDate {
+    let moved = Duration::try_days(days).and_then(|by| d.checked_add_signed(by));
+    held(moved.unwrap_or(if days < 0 { FIRST_DAY } else { LAST_DAY }))
+}
+
+/// `d` moved by whole months, kept to the month's last day (31 January + 1 month: 28 February),
+/// stopping at the ends.
 fn add_months(d: NaiveDate, months: i32) -> NaiveDate {
-    let total = d.year() * 12 + d.month0() as i32 + months;
+    let d = held(d);
+    let total = (d.year() * 12 + d.month0() as i32)
+        .saturating_add(months)
+        .clamp(FIRST_DAY.year() * 12, LAST_DAY.year() * 12 + 11);
     let (y, m) = (total.div_euclid(12), total.rem_euclid(12) as u32 + 1);
-    let mut day = d.day();
-    loop {
-        if let Some(n) = NaiveDate::from_ymd_opt(y, m, day) {
-            return n;
-        }
-        day -= 1;
-    }
+    (1..=d.day())
+        .rev()
+        .find_map(|day| NaiveDate::from_ymd_opt(y, m, day))
+        .unwrap_or(d)
 }
 
 impl DatePickerState {
@@ -140,7 +157,7 @@ impl DatePickerState {
     pub fn today(mut self, date: NaiveDate) -> Self {
         self.today = Some(date);
         if self.value.start.is_none() {
-            self.cursor = date;
+            self.cursor = held(date);
         }
         self
     }
@@ -166,7 +183,7 @@ impl DatePickerState {
 
     /// Shows the month `date` is in, with the keyboard on `date`, without picking it.
     pub fn show_month(&mut self, date: NaiveDate, cx: &mut Context<Self>) {
-        self.cursor = date;
+        self.cursor = held(date);
         cx.notify();
     }
 
@@ -199,7 +216,7 @@ impl DatePickerState {
             end: if self.range { end } else { None },
         };
         if let Some(s) = start {
-            self.cursor = s;
+            self.cursor = held(s);
         }
         cx.notify();
     }
@@ -207,14 +224,14 @@ impl DatePickerState {
     fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open = !self.open;
         if self.open {
-            self.cursor = self.value.start.unwrap_or_else(|| self.today_date());
+            self.cursor = held(self.value.start.unwrap_or_else(|| self.today_date()));
         }
         window.focus(&self.focus, cx);
         cx.notify();
     }
 
     fn pick(&mut self, day: NaiveDate, cx: &mut Context<Self>) {
-        self.cursor = day;
+        self.cursor = held(day);
         let v = &mut self.value;
         if self.range {
             match (v.start, v.end) {
@@ -245,13 +262,13 @@ impl DatePickerState {
     }
 
     fn move_cursor(&mut self, days: i64, cx: &mut Context<Self>) {
-        self.cursor += Duration::days(days);
+        self.cursor = add_days(self.cursor, days);
         cx.notify();
     }
 
     fn step(&mut self, days: i64, cx: &mut Context<Self>) {
         if self.open {
-            self.cursor += Duration::days(days);
+            self.cursor = add_days(self.cursor, days);
             cx.notify();
         }
     }
@@ -667,7 +684,7 @@ fn month_view(
         let st = s.read(cx);
         (st.cursor, st.value, st.week_start, st.today_date())
     };
-    let month = first_of_month(cursor);
+    let month = first_of_month(held(cursor));
     let start = grid_start(month, week_start);
     let cell: gpui::DefiniteLength = match (options.touch, options.day_size) {
         (true, _) => theme.touch_target.into(),
@@ -797,7 +814,7 @@ fn month_view(
         .children((0..6).map(|w| {
             div()
                 .flex()
-                .children((0..7).map(|d| day_button(start + Duration::days(w * 7 + d))))
+                .children((0..7).map(|d| day_button(add_days(start, w * 7 + d))))
         }))
 }
 
@@ -805,7 +822,9 @@ fn month_view(
 fn grid_start(month: NaiveDate, week_start: Weekday) -> NaiveDate {
     let first = first_of_month(month);
     let lead = (first.weekday().num_days_from_sunday() + 7 - week_start.num_days_from_sunday()) % 7;
-    first - Duration::days(lead as i64)
+    first
+        .checked_sub_signed(Duration::days(lead as i64))
+        .unwrap_or(first)
 }
 
 fn id_hash(s: &str) -> u64 {
@@ -836,5 +855,23 @@ mod tests {
         assert_eq!(add_months(d(2024, 1, 31), 1), d(2024, 2, 29));
         assert_eq!(add_months(d(2026, 1, 15), -1), d(2025, 12, 15));
         assert_eq!(add_months(d(2026, 12, 1), 1), d(2027, 1, 1));
+    }
+
+    #[test]
+    fn steps_stop_at_the_ends_of_the_calendar() {
+        let d = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        assert_eq!(add_months(d(9999, 12, 15), 1), d(9999, 12, 15));
+        assert_eq!(add_months(d(1, 1, 31), -1), d(1, 1, 31));
+        assert_eq!(add_months(NaiveDate::MAX, 1), LAST_DAY);
+        assert_eq!(add_months(NaiveDate::MIN, -12), d(1, 1, 1));
+        assert_eq!(add_months(d(2026, 1, 31), i32::MAX), d(9999, 12, 31));
+        assert_eq!(add_months(d(2026, 1, 31), i32::MIN), d(1, 1, 31));
+        assert_eq!(add_days(d(9999, 12, 30), 7), LAST_DAY);
+        assert_eq!(add_days(NaiveDate::MIN, -1), FIRST_DAY);
+        assert_eq!(add_days(NaiveDate::MAX, i64::MAX), LAST_DAY);
+        assert_eq!(add_days(d(2026, 6, 1), i64::MIN), FIRST_DAY);
+        // A grid reaching a week either side of the ends is still dates.
+        let _ = grid_start(LAST_DAY, Weekday::Mon);
+        let _ = grid_start(FIRST_DAY, Weekday::Sat);
     }
 }
