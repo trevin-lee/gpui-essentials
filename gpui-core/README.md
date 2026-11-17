@@ -138,6 +138,13 @@ item](docs/gallery.png)
   default), and when every slot is full `on_complete` and `InputOtpEvent::Complete` give the
   code, once per code. The keyboard is told no corrections, capitals or suggestions (GPUI has
   no one-time-code content type to ask for yet). `touch()` makes the slots 44 points.
+- **InputGroup.** `InputGroup::new(&state).leading_icon(icon).leading_text("https://")
+  .trailing_text(".com").trailing(button)`: shadcn's input group, an Input with addons inside
+  its border, before or after the text: icons and text in the muted colour, or the host's own
+  element (a button keeps its presses). The border, fill and focus ring are the whole group's,
+  a press on an icon or text addon puts the keyboard in the text, `invalid(true)` gives the
+  destructive border and `touch()` makes it 44 points tall. In a narrow space the text gives
+  way first, then the text addons are cut short.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
