@@ -1,6 +1,7 @@
 //! Find and replace on the page: the bar ⌘F opens (Ctrl+F on Linux and Windows) over the page's
 //! top right corner. The finding itself is the editor's (`BlockEditorState::find` and the rest).
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
     ActiveTheme as _, Button, ButtonVariants as _, IconName, Input, InputEvent, InputState,
@@ -150,8 +151,9 @@ impl Editor {
         (!line.contains(['\n', '\u{FFFC}'])).then(|| line.to_string())
     }
 
-    /// The bar, pinned to the page's top right corner, when it's open.
-    pub(crate) fn find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The bar, pinned to the page's top right corner, when it's open; across the top in the
+    /// compact layout, where it would be wider than the page.
+    pub(crate) fn find_bar(&self, compact: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bar = self.find.as_ref()?;
         let theme = cx.theme().clone();
         let (matches, current) = {
@@ -178,11 +180,19 @@ impl Editor {
                 .small()
                 .accessibility_label(label)
         };
+        // A fixed width, or, across a phone, what the buttons leave.
+        let field = || {
+            if compact {
+                div().flex_1().min_w_0()
+            } else {
+                div().w(px(220.))
+            }
+        };
         let find_row = div()
             .flex()
             .items_center()
             .gap_1()
-            .child(div().w(px(220.)).child(Input::new(&bar.query)))
+            .child(field().child(Input::new(&bar.query)))
             .child(
                 div()
                     .min_w(px(72.))
@@ -228,7 +238,7 @@ impl Editor {
                 .flex()
                 .items_center()
                 .gap_1()
-                .child(div().w(px(220.)).child(Input::new(&bar.replace)))
+                .child(field().child(Input::new(&bar.replace)))
                 .child(
                     Button::new("replace-one")
                         .label("Replace")
@@ -249,8 +259,8 @@ impl Editor {
                 .id("find-bar")
                 .key_context(CONTEXT)
                 .absolute()
-                .top(px(12.))
-                .right(px(16.))
+                .when(compact, |bar| bar.top(px(8.)).left(px(8.)).right(px(8.)))
+                .when(!compact, |bar| bar.top(px(12.)).right(px(16.)))
                 .p_2()
                 .flex()
                 .flex_col()
