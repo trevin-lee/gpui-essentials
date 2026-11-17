@@ -350,8 +350,9 @@ until the next text fills it. At a new width the tallest so far starts again.
   only here, and by any space kept while it was written.
 - **A reference-style link** (`[docs]` with `[docs]: https://…` further down) reads as text
   until its definition comes, then links, in whichever block it is: the TextView reads every
-  block's definitions. A footnote's reference (`[^1]`) is resolved within a block only, so a
-  draft whose text defines a footnote is read again whole when it ends, as one source.
+  block's definitions, in the text's order, so of two with one label the first wins. A
+  footnote's reference (`[^1]`) resolves the same way, and its note is drawn once, where it's
+  written.
 
 ### Settling
 
@@ -421,9 +422,6 @@ it in release, and in its debug job, where it measures only the smallest of each
 - **A selection goes when the text it reaches changes**: one in the settled blocks stays while
   the draft is written, and one that reaches the open block's growing end goes with the next
   delta.
-- **A footnote's reference resolves within its own block** while the draft is written (a
-  link's resolves across blocks); a draft that defines a footnote is read again whole when it
-  ends.
 - gpui-core's TextView's limits apply to each block (512 KB of text, 32 levels of nesting).
 - `examples/stream.rs` replays the long reply at a model's pace (`--cps`, `--delta`), then a
   short one whose message brings a card; `--shots <dir>` saves a picture mid-stream and one at the

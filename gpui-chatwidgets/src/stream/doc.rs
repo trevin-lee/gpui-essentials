@@ -80,7 +80,7 @@ impl Doc {
     }
 
     /// Opens every block whose text or checked line reaches past `at` again.
-    pub fn reopen_from(&mut self, at: usize) {
+    fn reopen_from(&mut self, at: usize) {
         let keep = self.blocks.iter().take_while(|b| b.seen <= at).count();
         self.spare = self.blocks.split_off(keep);
         self.settled = self.blocks.last().map_or(0, |b| b.range.end);
@@ -111,9 +111,8 @@ impl Doc {
     /// block (a list's next item, a paragraph's next line, a table's next row, the inside of a
     /// code fence) and didn't make it something else (a heading's underline, a table's
     /// delimiter row). Nothing after that line can change the block then, as Markdown never
-    /// opens a block again once something has closed it; the one exception, a link defined
-    /// further down, is resolved across blocks by the TextView, and a footnote's is taken care
-    /// of when the draft ends ([`Doc::defines_footnotes`]).
+    /// opens a block again once something has closed it; the one exception, a link or a
+    /// footnote defined further down, is resolved across blocks by the TextView.
     ///
     /// The check reads the open block, so it's only made at a line that could end it: each new
     /// line is read once, into what the open block is so far ([`Open`]), and a line that surely
@@ -238,19 +237,6 @@ impl Doc {
         self.open = Open::default();
         self.read = None;
         Some(first(&self.text[at..end]))
-    }
-
-    /// Whether the text defines a footnote for its references (`[^1]: …`): gpui-core's
-    /// TextView resolves a link's reference across its sources, but not a footnote's, so a draft
-    /// that ends with one is read again whole.
-    pub fn defines_footnotes(&self) -> bool {
-        self.text.lines().any(|l| {
-            let t = l.trim_start_matches(' ');
-            l.len() - t.len() < 4
-                && t.starts_with("[^")
-                && t.find("]:")
-                    .is_some_and(|i| i > 2 && !t[2..i].contains(['[', ']']))
-        })
     }
 }
 
@@ -1075,18 +1061,6 @@ mod tests {
         d.restore();
         assert_eq!(d.blocks.len(), 1);
         assert_eq!(d.tail_key(), keys[1]);
-    }
-
-    #[test]
-    fn footnote_definitions_are_found() {
-        let mut d = Doc::default();
-        d.append("A claim.[^1]\n\n[^1]: The source.\n");
-        assert!(d.defines_footnotes());
-        // A link's definition is the TextView's to resolve.
-        d.replace("See [the docs].\n\n[the docs]: https://x.test\n");
-        assert!(!d.defines_footnotes());
-        d.replace("A [^b] c\n\n  [^x] y");
-        assert!(!d.defines_footnotes());
     }
 
     /// Settling as it was before it kept what the open block is: every line checked, reading the

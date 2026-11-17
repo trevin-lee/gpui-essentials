@@ -266,12 +266,6 @@ impl StreamingMarkdown {
         }
         let more = if self.writing {
             self.doc.settle()
-        } else if self.doc.defines_footnotes() {
-            // A footnote defined in another block than its reference: the TextView resolves a
-            // link's reference across its sources, but not a footnote's. Read the whole text as
-            // one, as a message is.
-            self.doc.reopen_from(0);
-            false
         } else {
             self.doc.restore()
         };
