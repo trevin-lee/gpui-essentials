@@ -4,6 +4,8 @@ A node-and-edge editor for [GPUI](https://www.gpui.rs) apps in the manner of
 [React Flow](https://reactflow.dev): a library, and an example window with one of everything.
 It's young: the API can change between commits, so pin one.
 
+![A flowchart on the canvas: shaped nodes (ellipse, parallelogram, diamond, cylinder, hexagon, cloud), labelled step and dotted edges, a group, pen and marker strokes, the controls and the minimap](docs/whiteboard.png)
+
 ## Use it
 
 It needs Rust 1.100 or newer. It uses GPUI as `gpui-pre = "=0.3.12"` and takes its colours
@@ -16,9 +18,59 @@ gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a c
 gpui-flow = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
-Call `gpui_core::init(cx)` and then `gpui_flow::init(cx)` once at startup.
+Call `gpui_core::init(cx)` and then `gpui_flow::init(cx)` once at startup. A `Flow` is an
+entity; put it in a view like any other:
 
-Run the example with `cargo run --release --example flow` from this folder.
+```rust,no_run
+use gpui::*;
+use gpui_core::Theme;
+use gpui_flow::{Edge, Flow, FlowBackground, Node, xy};
+
+struct Canvas {
+    flow: Entity<Flow>,
+}
+
+impl Render for Canvas {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.flow.clone())
+    }
+}
+
+fn run(cx: &mut App) {
+    gpui_core::init(cx);
+    gpui_flow::init(cx);
+    Theme::set(Theme::dark(), cx);
+    gpui_core::open_window(WindowOptions::default(), cx, |_, cx| {
+        let flow = cx.new(|cx| {
+            Flow::new(cx)
+                .with_nodes(vec![
+                    Node::new("a", xy(0., 0.)).kind("input").label("Start"),
+                    Node::new("b", xy(100., 120.)).label("Then"),
+                ])
+                .with_edges(vec![Edge::new("a-b", "a", "b")])
+                .with_background(FlowBackground::dots())
+                .with_controls()
+                .with_minimap()
+                .fit_view_on_start()
+        });
+        cx.new(|_| Canvas { flow })
+    })
+    .unwrap();
+}
+```
+
+The app serves gpui-core's icons: `gpui_platform::application().with_assets(gpui_core::Icons)`.
+
+Run the example from the repository's root, which opens a window with one of everything:
+
+```sh
+cargo run --release -p gpui-flow --example flow                 # the canvas
+cargo run --release -p gpui-flow --example flow -- --whiteboard # shapes and ink, as above
+cargo run --release -p gpui-flow --features shots --example flow -- --shot out.png --whiteboard
+```
+
+The last one draws the window offscreen into a PNG without showing it, as the picture above was
+made.
 
 ## How it works
 
