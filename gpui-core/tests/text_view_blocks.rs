@@ -342,10 +342,30 @@ fn the_trailing_caret_follows_the_last_source_and_never_moves_the_text() {
         c.origin.x >= right - 1. && c.origin.x <= right + 4.,
         "{c:?} {right}"
     );
-    // An empty tail: at the start of its line, below the rest.
+    // An empty tail: after the text before it, inside the view.
     o.set(&[(1, "Settled."), (2, "")]);
     let c = o.carets()[0];
     let b = o.vcx.debug_bounds("blocks").unwrap();
+    let right = o.last_glyph_right(c.origin.y, c.origin.y + c.size.height);
+    assert!(
+        c.origin.x >= right - 1. && c.origin.x <= right + 4.,
+        "after \"Settled.\": {c:?} {right}"
+    );
+    assert!(
+        c.origin.y + c.size.height <= f32::from(b.bottom()) + 1.,
+        "{c:?} {b:?}"
+    );
+    // Nothing at all: at the start, the view a line tall to hold it.
+    o.set(&[(2, "")]);
+    let c = o.carets()[0];
+    let b = o.vcx.debug_bounds("blocks").unwrap();
+    assert!(b.size.height >= px(10.), "a line tall: {b:?}");
     assert!((c.origin.x - f32::from(b.left())).abs() < 1., "{c:?} {b:?}");
-    assert!(c.origin.y >= f32::from(b.bottom()) - 1., "{c:?} {b:?}");
+    assert!(
+        c.origin.y + c.size.height <= f32::from(b.bottom()) + 1.,
+        "{c:?} {b:?}"
+    );
+    // And without the caret, an empty view takes no room.
+    o.caret(None);
+    assert_eq!(o.vcx.debug_bounds("blocks").unwrap().size.height, px(0.));
 }
