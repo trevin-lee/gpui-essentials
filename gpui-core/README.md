@@ -39,6 +39,12 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   End move along and turn on what they reach, passing over a disabled option and stopping at
   the ends. `touch(true)` makes its options 44 points tall; in a narrow space their labels are
   cut short.
+- **Toast.** `Toast::success("Saved.").show(window, cx)` (or `new`, `error`) shows a note at the
+  bottom of a window whose root is a `Root`, as the web's are: newest at the bottom, at most
+  three, gone by themselves after four seconds (eight for an error or one with an `action`),
+  each with a close button. `id(…)` replaces one shown with the same id; `description(…)` adds a
+  muted line. An error is an alert to assistive tech, the rest a status. Nothing redraws while
+  one shows but its one timer.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
