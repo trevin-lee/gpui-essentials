@@ -44,6 +44,7 @@ mod block_menu;
 pub mod docs;
 mod editor;
 mod find;
+mod format_bar;
 pub mod import;
 pub mod json;
 pub mod mentions;

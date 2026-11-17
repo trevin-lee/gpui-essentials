@@ -22,6 +22,9 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   grip drags the block. A click on the grip opens the block's menu: Turn into (the slash menu's
   blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips to select several blocks
   whole: Delete, ⌘D and ⌘⇧↑ or ↓ act on them all.
+- **Format bar:** select text with the pointer for a bar above it: Turn into, bold, italic,
+  strikethrough, code and link (the app's link field, as ⌘K). On touch the same marks and link
+  are a second row of the long press's menu.
 - **Motion:** while you drag, the blocks you pass slide aside to open a gap, and the block
   springs into it when you let go. Moving a top-level block with ⌘⇧↑ or ↓ (Ctrl on Linux and
   Windows), or undoing a move, slides the blocks to their new places. List items move within

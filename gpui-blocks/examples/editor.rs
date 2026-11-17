@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -683,6 +683,29 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                         root.editor.update(cx, |e, cx| e.focus(window, cx));
                     });
                     window.dispatch_keystroke(Keystroke::parse("@").unwrap(), cx);
+                });
+                settle(window, cx).await;
+            }
+            // The format bar over a few words selected in the intro.
+            "format" => {
+                let _ = cx.update_window(window, |_, window, cx| {
+                    root.update(cx, |root, cx| {
+                        root.editor.update(cx, |e, cx| {
+                            e.focus(window, cx);
+                            e.state().update(cx, |s, cx| {
+                                let Some(leaf) = s.model().document().leaves().nth(1).map(|l| l.id()) else {
+                                    return;
+                                };
+                                let _ = s.set_selection(
+                                    gpui_blocks::markdown_editor::BlockSelection::Text {
+                                        anchor: gpui_blocks::markdown_editor::BlockPosition::new(leaf, 0),
+                                        head: gpui_blocks::markdown_editor::BlockPosition::new(leaf, 4),
+                                    },
+                                    cx,
+                                );
+                            });
+                        });
+                    });
                 });
                 settle(window, cx).await;
             }
