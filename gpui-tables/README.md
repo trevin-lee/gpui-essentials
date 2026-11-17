@@ -998,14 +998,17 @@ nothing draws while nothing changes.
   | Sort by a select, then a number | 1.6 ms |
   | A filter of three conditions, two sorts, grouped by a select | 1.4 ms |
   | Twelve conditions, one per type | 1.7 ms |
-  | Group by multi-select / person / date | 0.7 / 1.0 / 0.5 ms |
+  | Group by select / multi-select / person / date by month | 0.6 / 1.0 / 0.8 / 0.6 ms |
+  | One row's value changed, then regrouped (any of those) | 1.0 ms or less |
   | Read 10,000 rows from JSON (5.4 MB) | 17 ms |
   | Check 10,000 rows against the limits | 2.3 ms |
   | 10,000 fresh order keys | 0.4 ms |
 
   The tests fail past bounds well above these (25 ms for any of a view's work in a release build,
-  forty times that in a debug one), loose enough for a shared CI runner and tight enough to catch
-  a step that goes quadratic.
+  10 ms for a regroup and 5 ms for the group step alone, forty times that in a debug one), loose
+  enough for a shared CI runner and tight enough to catch a step that goes quadratic. Grouping
+  finds each row's group in a small map with a fast hash, building no string per row, and orders
+  the groups once at the end.
 - **The table view** draws only the rows on screen (GPUI's `uniform_list`), works the rows out
   again only when the docs or the view change, and keeps no timers. Measured with `cargo test
   --release --test view_performance -- --nocapture` on an Apple M4 Pro, 10,000 rows of every
@@ -1016,8 +1019,11 @@ nothing draws while nothing changes.
   | The first draw | 2.5 ms |
   | A frame while scrolling down a page, or sideways | 2.8 ms |
   | A sort, a filter and a group by select, worked out and drawn | 18 ms |
+  | A value changed, regrouped by select / multi-select / date / person | 1.4 / 1.9 / 1.4 / 2.1 ms |
+  | The same, regrouped and drawn | 4.0 / 4.2 / 4.2 / 4.8 ms |
 
-  The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one).
+  The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one), and
+  a regroup past 10 ms worked out and 25 ms drawn.
 - **The board view** draws only the cards on screen in each column (a `uniform_list` each).
   Measured the same way, the same 10,000 rows as a board of seven columns, each card showing four
   values:
