@@ -150,16 +150,17 @@ impl Entry {
 /// A menu or picker open over the table, in gpui-core's `Popover`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Popover {
-    /// A column's menu: sort, filter, hide, move.
-    Header { column: usize },
+    /// A column's menu: sort, filter, hide, move. By its property, as the columns' places
+    /// change while it's open (another column deleted or hidden from it).
+    Header { property_id: String },
     /// The list of every property, to show and hide columns.
     Columns,
     /// A cell's picker: options, people or related rows.
     Picker { cell: CellRef },
     /// A cell's month, in gpui-core's `MonthGrid` ([`TableView::date`] holds its state).
     Date { cell: CellRef },
-    /// A column's filter value, typed in place: the field under its header.
-    FilterValue { column: usize },
+    /// A column's filter value, typed in place: the field under its header (its property's).
+    FilterValue { property_id: String },
     /// The + after the last column: a new property's name and type.
     AddProperty,
     /// A new relation's database and whether it's two-way, after its name
@@ -809,8 +810,9 @@ impl TableView {
             self.popover = None;
             self.date = None;
         }
-        if let Some(Popover::Header { column } | Popover::FilterValue { column }) = &self.popover
-            && *column >= self.shown.columns.len()
+        if let Some(Popover::Header { property_id } | Popover::FilterValue { property_id }) =
+            &self.popover
+            && self.column_of(property_id).is_none()
         {
             self.popover = None;
         }
@@ -1283,15 +1285,12 @@ impl TableView {
             },
         );
         if let TextTarget::Filter { property_id, .. } = &pending.target {
-            match self
-                .shown
-                .columns
-                .iter()
-                .position(|c| c.property_id == *property_id)
-            {
-                Some(column) => self.popover = Some(Popover::FilterValue { column }),
-                None => return,
+            if self.column_of(property_id).is_none() {
+                return;
             }
+            self.popover = Some(Popover::FilterValue {
+                property_id: property_id.clone(),
+            });
         }
         state.update(cx, |s, cx| s.focus(window, cx));
         self.editor = Some(Editor {
@@ -1567,13 +1566,23 @@ impl TableView {
     /// Opens a column's menu.
     pub(crate) fn open_header_menu(&mut self, column: usize, cx: &mut Context<Self>) {
         self.ensure();
-        if column >= self.shown.columns.len() {
+        let Some(col) = self.shown.columns.get(column) else {
             return;
-        }
+        };
         self.date = None;
         self.menu_serial += 1;
-        self.popover = Some(Popover::Header { column });
+        self.popover = Some(Popover::Header {
+            property_id: col.property_id.clone(),
+        });
         cx.notify();
+    }
+
+    /// Where a property's column is among those shown, as last worked out.
+    pub(crate) fn column_of(&self, property_id: &str) -> Option<usize> {
+        self.shown
+            .columns
+            .iter()
+            .position(|c| c.property_id == property_id)
     }
 
     pub(crate) fn open_columns_menu(&mut self, cx: &mut Context<Self>) {
@@ -1593,11 +1602,10 @@ impl TableView {
         };
         use gpui_core::IconName as I;
         match &self.popover {
-            Some(Popover::Header { column }) => {
-                let Some(col) = self.shown.columns.get(*column) else {
-                    return Vec::new();
-                };
-                let Some(p) = fields.properties.get(col.property) else {
+            Some(Popover::Header { property_id }) => {
+                let (Some(p), Some(column)) =
+                    (fields.property(property_id), self.column_of(property_id))
+                else {
                     return Vec::new();
                 };
                 // Its property's entries first, as Notion's; it opens on Sort ascending.
@@ -1624,11 +1632,11 @@ impl TableView {
                     out.push(Entry::act("Clear filter", Action::ClearFilter).icon(I::X));
                 }
                 out.push(Entry::heading("Column"));
-                if *column > 0 {
-                    if *column > 1 {
+                if column > 0 {
+                    if column > 1 {
                         out.push(Entry::act("Move left", Action::MoveBy(-1)).icon(I::ArrowLeft));
                     }
-                    if *column + 1 < self.shown.columns.len() {
+                    if column + 1 < self.shown.columns.len() {
                         out.push(Entry::act("Move right", Action::MoveBy(1)).icon(I::ArrowRight));
                     }
                     out.push(Entry::act("Hide", Action::Hide).icon(I::EyeOff));
@@ -1927,11 +1935,9 @@ impl TableView {
         };
         let limits = self.host.limits();
         let header_property = match &self.popover {
-            Some(Popover::Header { column }) => self
-                .shown
-                .columns
-                .get(*column)
-                .map(|c| (*column, c.property_id.clone())),
+            Some(Popover::Header { property_id }) => self
+                .column_of(property_id)
+                .map(|column| (column, property_id.clone())),
             _ => None,
         };
         let close = !matches!(

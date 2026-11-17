@@ -396,3 +396,21 @@ fn a_server_applies_operations_as_the_flow_does() {
     let c: Vec<&Node> = doc.nodes.iter().filter(|n| n.id == "c").collect();
     assert_eq!((c.len(), c[0].label_text().as_ref()), (1, "C2"));
 }
+
+#[gpui::test]
+fn a_node_removed_beside_repeated_ids_is_sent_as_removed(cx: &mut TestAppContext) {
+    // Two nodes share an id (a bad import, say): only the first is stored. Removing another
+    // node still says so, and undo brings it back.
+    let (flow, events, cx) = open(cx, |f| {
+        f.with_nodes(vec![
+            Node::new("a", xy(0., 0.)),
+            Node::new("a", xy(80., 0.)),
+            Node::new("b", xy(160., 0.)),
+        ])
+    });
+    flow.update(cx, |f, cx| {
+        f.remove_nodes(&["b".into()], cx);
+    });
+    draw(cx);
+    assert_eq!(edits(&events).concat(), [Op::RemoveNode { id: "b".into() }]);
+}

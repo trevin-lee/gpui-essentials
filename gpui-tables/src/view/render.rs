@@ -584,6 +584,15 @@ impl TableView {
             }))
     }
 
+    /// A property's name, or nothing for one the database hasn't.
+    fn property_name(&self, property_id: &str) -> &str {
+        self.database
+            .database
+            .as_ref()
+            .and_then(|f| f.property(property_id))
+            .map_or("", |p| p.name.as_str())
+    }
+
     fn property_at(&self, column: usize) -> Option<&Property> {
         let col = self.shown.columns.get(column)?;
         self.database
@@ -612,8 +621,8 @@ impl TableView {
             }) if *c == column => Some(*x - *start_x),
             _ => None,
         };
-        let menu_open =
-            matches!(&self.popover, Some(Popover::Header { column: c }) if *c == column);
+        let menu_open = matches!(&self.popover,
+            Some(Popover::Header { property_id }) if *property_id == p.id);
         let sel_name = name.clone();
         // A narrow column gives its name the room: no type icon, one mark at most.
         let roomy = self.column_px(column) >= t.pixels(90., self.rem);
@@ -1438,8 +1447,11 @@ impl TableView {
             return popover.into_any_element();
         };
         let target = match &open {
-            Popover::Header { column } | Popover::FilterValue { column } => {
-                self.header_bounds(*column)
+            Popover::Header { property_id } | Popover::FilterValue { property_id } => {
+                match self.column_of(property_id) {
+                    Some(column) => self.header_bounds(column),
+                    None => return popover.into_any_element(),
+                }
             }
             Popover::Columns => {
                 let b = self.bounds.get();
@@ -1491,8 +1503,8 @@ impl TableView {
         let popover = popover.open(true).anchor(target);
         let name = |column: usize| self.property_at(column).map_or("", |p| p.name.as_str());
         match open {
-            Popover::Header { column } => popover
-                .accessibility_label(format!("{} column", name(column)))
+            Popover::Header { property_id } => popover
+                .accessibility_label(format!("{} column", self.property_name(&property_id)))
                 .p(t.px(4.))
                 .child(
                     body.w(width)
@@ -1577,10 +1589,10 @@ impl TableView {
                 .child(body.w(width).child(self.picker(cell, cx)))
                 .into_any_element(),
             // The field has the keyboard: the popover leaves it there.
-            Popover::FilterValue { column } => popover
+            Popover::FilterValue { property_id } => popover
                 .take_focus(false)
                 .py(t.px(4.))
-                .child(body.w(width).child(self.render_filter_value(column)))
+                .child(body.w(width).child(self.render_filter_value(&property_id)))
                 .into_any_element(),
             Popover::AddView | Popover::NewBoard | Popover::View { .. } => {
                 popover.open(false).into_any_element()
@@ -1894,13 +1906,13 @@ impl TableView {
 
     /// A filter's value typed in place under the column's header: what it filters by, then the
     /// field. Enter, Tab or pressing elsewhere applies it, Escape closes it.
-    fn render_filter_value(&self, column: usize) -> AnyElement {
+    fn render_filter_value(&self, property_id: &str) -> AnyElement {
         let t = &self.theme;
         let field = FieldColors::of(t);
         let Some(e) = self.editor.as_ref() else {
             return div().into_any_element();
         };
-        let name = self.property_at(column).map_or("", |p| p.name.as_str());
+        let name = self.property_name(property_id);
         let how = match &e.target {
             super::TextTarget::Filter { op, .. } => match op {
                 crate::model::FilterOp::Contains => "contains",

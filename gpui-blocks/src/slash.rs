@@ -9,7 +9,7 @@
 //! [`default_items`] are the built-in blocks; an app adds its own (a widget, say) with
 //! [`Options::slash_item`](crate::Options::slash_item).
 
-use gpui_kit::SharedString;
+use gpui::SharedString;
 use markdown_editor::{BlockKind, EditorCommand};
 
 /// What picking an item does to the caret's line.

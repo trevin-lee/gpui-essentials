@@ -45,6 +45,7 @@ mod picker;
 mod popover;
 mod press;
 mod root;
+mod segmented;
 mod sheet;
 mod size;
 mod slider;
@@ -66,6 +67,7 @@ pub use popover::claim_count;
 pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
+pub use segmented::SegmentedControl;
 pub use sheet::Sheet;
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
 pub use slider::{Slider, SliderEvent, SliderState};
@@ -91,6 +93,7 @@ pub fn init(cx: &mut App) {
         Theme::set(Theme::dark(), cx);
     }
     root::init(cx);
+    segmented::init(cx);
     date_picker::init(cx);
     input::init(cx);
     menu::init(cx);

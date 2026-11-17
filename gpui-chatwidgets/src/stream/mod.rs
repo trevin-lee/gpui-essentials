@@ -3,7 +3,7 @@
 mod doc;
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
@@ -83,6 +83,9 @@ pub struct StreamStats {
     pub tail_reads: usize,
     /// Settled blocks drawn last frame as the space they take, being far off screen.
     pub kept_as_space: usize,
+    /// Bytes settling read again to find where blocks end: about twice each settled block's
+    /// length, however the text came, as only a line that could end the open block is checked.
+    pub reread: usize,
 }
 
 impl StreamingMarkdown {
@@ -200,6 +203,18 @@ impl StreamingMarkdown {
             made: self.doc.made,
             tail_reads: self.tail_reads,
             kept_as_space: self.kept_as_space.get(),
+            reread: self.doc.reread,
+        }
+    }
+
+    /// Works out the blocks now, as the next frame would, without the open tail: for
+    /// benchmarks. True when settling has more to do, which the next frame would carry on.
+    #[doc(hidden)]
+    pub fn settle_now(&mut self) -> bool {
+        if self.writing {
+            self.doc.settle()
+        } else {
+            self.doc.restore()
         }
     }
 
@@ -215,21 +230,23 @@ impl StreamingMarkdown {
     }
 
     /// Works out the blocks and the tail after the text changed: once a frame at most, however
-    /// many deltas came since the last.
-    fn update(&mut self) {
+    /// many deltas came since the last. Settling reads a bounded amount a frame; true when it
+    /// has more to do, in the next frame.
+    fn update(&mut self) -> bool {
         if !self.dirty {
-            return;
+            return false;
         }
-        self.dirty = false;
-        if self.writing {
-            self.doc.settle();
+        let more = if self.writing {
+            self.doc.settle()
         } else if self.doc.defines_links() {
             // A link defined below a block that settled before the definition came: read the
             // whole text as one, as a message is.
             self.doc.reopen_from(0);
+            false
         } else {
-            self.doc.restore();
-        }
+            self.doc.restore()
+        };
+        self.dirty = more;
         let tail = self.doc.tail();
         let source = if self.writing {
             display(tail)
@@ -241,6 +258,7 @@ impl StreamingMarkdown {
             kinds: kinds(&parse_markdown(&source)),
             source: source.into(),
         });
+        more
     }
 
     fn text_view(&self, key: usize, source: SharedString) -> Div {
@@ -261,11 +279,13 @@ impl StreamingMarkdown {
 }
 
 impl Render for StreamingMarkdown {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        self.update();
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        if self.update() {
+            window.request_animation_frame();
+        }
         let mut content = div().relative().w_full().min_w_0().flex().flex_col();
         let mut above: Option<BlockKind> = None;
-        let keys: Vec<usize> = self.doc.blocks.iter().map(|b| b.key).collect();
+        let keys: HashSet<usize> = self.doc.blocks.iter().map(|b| b.key).collect();
         self.seen.retain(|k, _| keys.contains(k));
         for k in keys {
             self.seen.entry(k).or_default();

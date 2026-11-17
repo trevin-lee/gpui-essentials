@@ -91,8 +91,8 @@ pub fn parse_with(source: &str, context: &str) -> Parsed {
     let mut options = markdown::ParseOptions::gfm();
     options.constructs.html_flow = false;
     options.constructs.html_text = false;
-    match markdown::to_mdast(doc, &options) {
-        Ok(Node::Root(root)) => {
+    match to_mdast(doc, &options) {
+        Some(Node::Root(root)) => {
             let mut defs = Defs::new();
             let mut own = String::new();
             definitions(&root.children, source.len(), &mut defs, &mut own, 0);
@@ -101,7 +101,9 @@ pub fn parse_with(source: &str, context: &str) -> Parsed {
                 definitions: own,
             }
         }
-        // Markdown without MDX has no syntax errors; if anything comes back, show the text.
+        // Markdown without MDX has no syntax errors, but the parser can panic on some input (an
+        // unclosed fence in a list item with a list of the other kind after it): then the text
+        // shows as it is, rather than taking the app down with it.
         _ => Parsed {
             blocks: vec![Block::Paragraph(Paragraph::plain(source))],
             definitions: String::new(),
@@ -133,6 +135,17 @@ fn definitions(nodes: &[Node], own_end: usize, defs: &mut Defs, own: &mut String
             definitions(children, own_end, defs, own, depth + 1);
         }
     }
+}
+
+/// The parser's tree for `doc`, or `None` if it errs or panics. The `markdown` crate (1.0.0)
+/// panics on some input (`unreachable!("mismatched ListOrdered / ListUnordered")`); the text
+/// shown here is often a model's, so a panic is caught rather than allowed to end the app.
+fn to_mdast(doc: &str, options: &markdown::ParseOptions) -> Option<Node> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        markdown::to_mdast(doc, options)
+    }))
+    .ok()?
+    .ok()
 }
 
 fn blocks(defs: &Defs, nodes: &[Node], depth: usize) -> Vec<Block> {
@@ -447,6 +460,76 @@ mod tests {
             "{q:?}"
         );
         assert!(matches!(&b[2], Block::Code { text, .. } if text == "a\nb"));
+    }
+
+    #[test]
+    fn input_the_parser_panics_on_shows_as_its_text() {
+        for doc in [
+            "- a\n  ```\n1. a\n",
+            "x\n- ```\n1. a\n",
+            "1. a\n   ```\n- b\n",
+        ] {
+            let b = parse(doc);
+            assert!(!b.is_empty(), "{doc:?}");
+        }
+        let b = parse("- a\n  ```\n1. a\n");
+        assert!(
+            matches!(&b[0], Block::Paragraph(p) if p.text.contains("1. a")),
+            "the text as it is: {b:?}"
+        );
+    }
+
+    /// Random Markdown made of the pieces parsers trip on (list markers, fences, indents,
+    /// quotes, tables, line ends): none of it may panic out of `parse`.
+    #[test]
+    fn random_markdown_never_panics() {
+        const PIECES: [&str; 22] = [
+            "- ",
+            "* ",
+            "+ ",
+            "1. ",
+            "2) ",
+            "10. ",
+            "```",
+            "~~~",
+            "    ",
+            "  ",
+            "\t",
+            "\n",
+            "\n\n",
+            "> ",
+            "# ",
+            "| a | b |\n|---|---|\n",
+            "a",
+            "word ",
+            "[x]: http://x\n",
+            "[x] ",
+            "`",
+            "<div>",
+        ];
+        // A fixed seed: the same documents every run, so a failure can be found again.
+        let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let quiet = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let mut failed = None;
+        for _ in 0..20_000 {
+            let n = 1 + (next() % 24) as usize;
+            let doc: String = (0..n)
+                .map(|_| PIECES[(next() % PIECES.len() as u64) as usize])
+                .collect();
+            if std::panic::catch_unwind(|| parse(&doc)).is_err() {
+                failed = Some(doc);
+                break;
+            }
+        }
+        std::panic::set_hook(quiet);
+        assert_eq!(failed, None, "parse panicked on this");
     }
 
     #[test]

@@ -271,7 +271,10 @@ pub struct Pen {
 }
 
 impl Pen {
+    /// A pen of this tool, colour and width; the width is kept within what a stroke may be
+    /// drawn at (above 0 and at most [`crate::ink::MAX_WIDTH`]).
     pub fn new(tool: crate::ink::InkTool, color: u32, width: f32) -> Self {
+        let width = crate::ink::fit_width(width as f64) as f32;
         Self { tool, color, width }
     }
 
@@ -2187,11 +2190,13 @@ impl Flow {
         let mut patches = Vec::new();
         let mut removes = Vec::new();
         // A node or edge whose id an earlier one has can't be told apart by it: only the first
-        // is stored.
+        // is stored, and only distinct ids are counted.
+        let mut distinct = 0;
         for (i, node) in self.nodes.iter().enumerate() {
             if self.index_of(&node.id) != Some(i) {
                 continue;
             }
+            distinct += 1;
             let Some(was) = self.stored_nodes.get(&node.id) else {
                 let mut node = node.clone();
                 node.selected = false;
@@ -2220,8 +2225,7 @@ impl Flow {
                 }
             }
         }
-        if self.stored_nodes.len() + adds.len() != self.nodes.len() {
-            // (Also when ids repeat; then this finds nothing gone.)
+        if self.stored_nodes.len() + adds.len() != distinct {
             let mut gone: Vec<&NodeId> = self
                 .stored_nodes
                 .keys()
@@ -2255,7 +2259,7 @@ impl Flow {
                 }
             }
         }
-        if self.stored_edges.len() + edge_adds != self.edges.len() {
+        if self.stored_edges.len() + edge_adds != seen.len() {
             let here: HashSet<&EdgeId> = self.edges.iter().map(|e| &e.id).collect();
             let mut gone: Vec<&EdgeId> = self
                 .stored_edges
@@ -2406,6 +2410,10 @@ impl Flow {
         drop(measured);
         if !gone.is_empty() {
             self.nodes.retain(|n| !gone.contains(&n.id));
+            self.shared
+                .ink
+                .borrow_mut()
+                .retain(|id, _| !gone.contains(id));
         }
         if !edges_gone.is_empty() {
             self.edges.retain(|e| !edges_gone.contains(&e.id));
@@ -2420,6 +2428,11 @@ impl Flow {
         let ids: HashSet<&NodeId> = self.nodes.iter().map(|n| &n.id).collect();
         self.shared
             .measured
+            .borrow_mut()
+            .retain(|id, _| ids.contains(id));
+        // And the strokes read for them, which can be large.
+        self.shared
+            .ink
             .borrow_mut()
             .retain(|id, _| ids.contains(id));
     }
@@ -4347,7 +4360,7 @@ impl Flow {
                 let tolerance = 0.35 / self.viewport.zoom.max(0.01);
                 let points = crate::ink::smooth(&points, tolerance);
                 let stroke =
-                    crate::ink::InkStroke::new(pen.tool, pen.color, pen.width as f64, points);
+                    crate::ink::InkStroke::anchored(pen.tool, pen.color, pen.width as f64, points);
                 self.edited = true;
                 self.nodes.push(Node::ink(json::new_id(), &stroke));
                 self.reindex();
@@ -5963,4 +5976,53 @@ fn routed_path(
         0.
     };
     Some(rounded_path(&points, radius, longest_middle(&points)))
+}
+
+#[cfg(test)]
+mod ink_cache_tests {
+    use super::*;
+    use crate::ink::{InkPoint, InkStroke, InkTool};
+    // The built-in #[test], not GPUI's, which the glob above brings in.
+    use std::prelude::v1::test;
+
+    fn drawn(cx: &mut gpui::VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn removed_strokes_leave_the_cache(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let stroke = InkStroke::anchored(
+            InkTool::Ball,
+            0x0000_00ff,
+            2.,
+            vec![
+                InkPoint::at(0., 0., 0., 2.),
+                InkPoint::at(60., 12., 0.1, 2.),
+            ],
+        );
+        let (one, two) = (Node::ink("s1", &stroke), Node::ink("s2", &stroke));
+        let (flow, cx) = cx.add_window_view(move |_, cx| Flow::new(cx).with_nodes(vec![one, two]));
+        drawn(cx);
+        let cached = |cx: &mut gpui::VisualTestContext| {
+            flow.read_with(cx, |f, _| f.shared.ink.borrow().len())
+        };
+        assert_eq!(cached(cx), 2);
+        // Removed here, and by an edit from elsewhere.
+        flow.update(cx, |f, cx| {
+            f.remove_nodes(&["s1".into()], cx);
+        });
+        assert_eq!(cached(cx), 1);
+        flow.update(cx, |f, cx| {
+            f.apply(&[Op::RemoveNode { id: "s2".into() }], cx)
+        });
+        assert_eq!(cached(cx), 0);
+    }
 }

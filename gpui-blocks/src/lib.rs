@@ -1,4 +1,4 @@
-//! A block editor for [GPUI](https://www.gpui.rs) apps built with GPUI Kit.
+//! A block editor for [GPUI](https://www.gpui.rs) apps, drawn with gpui-core.
 //!
 //! A document is blocks (paragraphs, headings, nested bullet, numbered and to-do lists, quotes,
 //! callouts, toggles, code with its language, dividers, tables, pictures) and widgets, blocks an
@@ -24,12 +24,12 @@
 //! crate draws its menus with. It's re-exported as [`markdown_editor`].
 //!
 //! ```no_run
-//! use gpui_kit::*;
+//! use gpui::*;
 //!
-//! gpui_kit::application().run(|cx| {
-//!     gpui_kit::init(cx);
+//! gpui_platform::application().with_assets(gpui_core::Icons).run(|cx| {
+//!     gpui_core::init(cx);
 //!     gpui_blocks::init(cx);
-//!     gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+//!     gpui_core::open_window(WindowOptions::default(), cx, |window, cx| {
 //!         let editor = cx.new(|cx| gpui_blocks::Editor::new("# Hello\n\nType `/`.", window, cx));
 //!         editor.update(cx, |editor, cx| editor.focus(window, cx));
 //!         editor
@@ -58,7 +58,7 @@ struct ReadmeDoctests;
 /// The view's actions, to bind to other keys after [`init`]: `gpui_blocks::MoveBlockUp` and so
 /// on in a keymap.
 pub mod actions {
-    gpui_kit::actions!(
+    gpui::actions!(
         gpui_blocks,
         [
             /// The slash menu's previous item.
@@ -77,11 +77,11 @@ pub mod actions {
     );
 }
 
-/// Sets the editor up: its key bindings and the menus'. Call after `gpui_kit::init`; calling it
+/// Sets the editor up: its key bindings and the menus'. Call after `gpui::init`; calling it
 /// again does nothing.
-pub fn init(cx: &mut gpui_kit::App) {
+pub fn init(cx: &mut gpui::App) {
     struct Initialized;
-    impl gpui_kit::Global for Initialized {}
+    impl gpui::Global for Initialized {}
     if cx.has_global::<Initialized>() {
         return;
     }
@@ -94,7 +94,7 @@ pub fn init(cx: &mut gpui_kit::App) {
 mod tests {
     use std::sync::Arc;
 
-    use gpui_kit::{AnyElement, App, IntoElement, ParentElement as _, Window, div};
+    use gpui::{AnyElement, App, IntoElement, ParentElement as _, Window, div};
     use markdown_editor::{
         BlockEditorModel, BlockKind, BlockPosition, BlockSelection, EditorCommand,
     };

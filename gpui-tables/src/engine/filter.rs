@@ -32,7 +32,7 @@ use serde_json::Value as Json;
 use super::time::{self, days_of};
 use super::{Cell, Context, Field, Issue, Part};
 use crate::model::{
-    Condition, DatabaseFields, Doc, Filter, FilterOp, Person, PropertyType, Value, Within,
+    Condition, DatabaseFields, Doc, Filter, FilterOp, Person, Property, PropertyType, Value, Within,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,6 +74,18 @@ struct Test {
     pred: Pred,
     /// A select's or multi-select's option ids: others count as empty.
     known: Option<HashSet<String>>,
+    /// A text-like property that kept a select's options (its type was changed): its values,
+    /// option ids, are tested by the names its cells show ([`Property::shown_text`]).
+    shown: Option<Box<Property>>,
+}
+
+impl Test {
+    /// The text a cell shows: an option's name for an option id under a property that was a
+    /// select, else the text as stored.
+    fn text<'a>(&'a self, cell: Cell<'a>) -> Option<&'a str> {
+        let s = cell.text()?;
+        Some(self.shown.as_ref().map_or(s, |p| p.shown_text(s)))
+    }
 }
 
 #[derive(Debug)]
@@ -215,11 +227,13 @@ impl Compiler<'_> {
         };
         let known = matches!(p.kind, PropertyType::Select | PropertyType::MultiSelect)
             .then(|| p.options().iter().map(|o| o.id.clone()).collect());
+        let shown = (p.kind.is_text() && !p.options().is_empty()).then(|| Box::new(p.clone()));
         Some(Test {
             field,
             kind: p.kind.clone(),
             pred,
             known,
+            shown,
         })
     }
 }
@@ -360,14 +374,14 @@ fn test(t: &Test, row: &Doc, offset_ms: i64) -> bool {
     match &t.pred {
         Pred::Empty(want) => is_empty(t, cell) == *want,
         Pred::TextIs(needle, negate) => {
-            let hit = cell.text().is_some_and(|s| eq_folded(s, needle));
+            let hit = t.text(cell).is_some_and(|s| eq_folded(s, needle));
             hit != *negate
         }
         Pred::TextContains(needle, negate) => {
-            let hit = cell.text().is_some_and(|s| contains_folded(s, needle));
+            let hit = t.text(cell).is_some_and(|s| contains_folded(s, needle));
             hit != *negate
         }
-        Pred::TextStarts(needle) => cell.text().is_some_and(|s| starts_folded(s, needle)),
+        Pred::TextStarts(needle) => t.text(cell).is_some_and(|s| starts_folded(s, needle)),
         Pred::Num(op, x) => match cell {
             Cell::Value(Value::Number(v)) => match op {
                 NumOp::Eq => v == x,

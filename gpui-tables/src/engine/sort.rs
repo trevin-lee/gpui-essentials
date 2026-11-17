@@ -139,7 +139,11 @@ impl<'p> Sorter<'p> {
                     .collect();
                 text_key(&titles.join(", "))
             }
-            (k, Value::Text(s)) if k.is_text() => text_key(s),
+            // As the cell shows it: an option's name, under a property that was a select.
+            (k, Value::Text(s)) if k.is_text() => match self.field {
+                Field::Stored(p) => text_key(p.shown_text(s)),
+                _ => text_key(s),
+            },
             _ => Key::Empty,
         }
     }

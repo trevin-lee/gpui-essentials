@@ -66,5 +66,13 @@ graphemes or bytes.
 Values for properties the database hasn't, and null values, aren't checked (they count toward
 the 200 values a row may have).
 
+A select and a multi-select each take both shapes, since a property changed from one to the other
+keeps its rows' values: an option id (`"lead"`) or a list of option ids (`["lead", "won"]`, which a
+select reads as its first). The checks are the same for both types: a lone id is an id (at most
+128 characters) naming one of the property's options (path `values.<id>`); a list holds at most
+100 ids (the multi-select limit, a select's list too), none twice, each an id naming an option
+(path `values.<id>[2]`). An empty list is no option. Any other shape is `not a select value` or
+`not a multiSelect value`.
+
 The cases were written by a one-off script, and are kept as data, not regenerated. When a limit or
 a check changes, edit the cases; the crate's tests say which no longer match.

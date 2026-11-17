@@ -76,10 +76,15 @@ fn a_pen_draws_a_stroke_as_one_edit(cx: &mut TestAppContext) {
         (stroke.tool, stroke.color, stroke.width),
         (InkTool::Ball, 0xd030_30ff, 3.)
     );
-    // Smoothed and thinned, from where it began to where it ended, in the flow.
+    // Smoothed and thinned, from where it began to where it ended, in the flow (its points
+    // from their corner, which the transform places).
     let (first, last) = (stroke.points[0], *stroke.points.last().unwrap());
     assert!(stroke.points.len() >= 3 && stroke.points.len() < 41);
-    assert!((first.x - 500.).abs() < 0.5 && (last.x - 700.).abs() < 0.5);
+    let (a, b) = (stroke.place(first.x, first.y), stroke.place(last.x, last.y));
+    assert!(
+        (a.x - 500.).abs() < 0.5 && (b.x - 700.).abs() < 0.5,
+        "{a:?} {b:?}"
+    );
     assert!(last.t >= first.t);
     // Its box is where it was drawn.
     let b = stroke.bounds().unwrap();
@@ -218,4 +223,46 @@ fn a_palette_pen_stores_its_colour(cx: &mut TestAppContext) {
     let red = Pen::palette(Some("red"), 2., &colors).color;
     assert_eq!(red & 0xff, 0xff);
     assert!(red >> 24 > (red >> 16) & 0xff, "{red:08x} is red");
+}
+
+#[gpui::test]
+fn a_stroke_far_out_is_stored_from_its_corner_and_passes_the_limits(cx: &mut TestAppContext) {
+    let (flow, _, cx) = open(cx, with_three);
+    // Far beyond ±20,000, where a point itself would be refused.
+    flow.update(cx, |f, cx| {
+        f.set_viewport(
+            Viewport {
+                x: -25_000.,
+                y: -25_000.,
+                zoom: 1.,
+            },
+            cx,
+        )
+    });
+    draw(cx);
+    // A width out of range is brought into it.
+    flow.update(cx, |f, cx| {
+        f.set_tool(Tool::Pen(Pen::new(InkTool::Ball, 0x0000_00ff, 0.)), cx)
+    });
+    scribble(&flow, cx, xy(25_100., 25_100.), xy(25_300., 25_120.), true);
+    let ink = inks(&flow, cx);
+    assert_eq!(ink.len(), 1);
+    let stroke = InkStroke::of(&ink[0]).unwrap();
+    assert!(stroke.width > 0. && stroke.width <= gpui_flow::ink::MAX_WIDTH);
+    let t = stroke.transform.expect("the corner, in the transform");
+    assert!(t[4] > 25_000. && t[5] > 25_000., "{t:?}");
+    assert!(
+        stroke
+            .points
+            .iter()
+            .all(|p| p.x >= 0. && p.y >= 0. && p.x < 400.)
+    );
+    // Where it was drawn, and nothing the limits refuse.
+    let b = stroke.bounds().unwrap();
+    assert!((b.x - 25_100.).abs() < 10., "{b:?}");
+    assert_eq!(ink[0].position, xy(b.x, b.y));
+    let doc = flow.read_with(cx, |f, _| f.document());
+    assert_eq!(gpui_flow::limits::Limits::default().check(&doc), Vec::new());
+    assert_eq!(Pen::new(InkTool::Ball, 0, 900.).width, 200.);
+    assert_eq!(Pen::new(InkTool::Ball, 0, f32::NAN).width, 1.);
 }
