@@ -62,7 +62,7 @@ stored text is read as a space.
 | `row` | | `cell`s |
 | `cell` | `text` | |
 | `toc` | | |
-| `embed` | `doc`: the document's id; `title`: its title when the embed was made; `view`: how the app shows it (`table`, `board`, `mindmap`, `calendar`, `page`, or another 1 to 24 of `a-z 0-9 -`); `height`: in points, 80 to 1600 | |
+| `embed` | `doc`: the document's id; `title`: its title when the embed was made; `view`: how the app shows it (`table`, `board`, `mindmap`, `calendar`, `page`, or another 1 to 64 of `A-Z a-z 0-9 - _`, such as a database view's id); `height`: in points, 80 to 1600 | |
 | `page` | `doc`: the document's id; `title`: its title when the link was written | |
 | `widget` | `name`, `meta` (the rest of the info string), `body` | |
 | `markdown` | `markdown`: the block as Markdown | |

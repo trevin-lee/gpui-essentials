@@ -378,7 +378,8 @@ pub struct Embed {
 }
 
 /// The Markdown of an embed of the document `id`: a line holding only a link, so other
-/// Markdown tools show a link. `view` must be 1 to 24 of `a-z 0-9 -`, else it's `page`;
+/// Markdown tools show a link. `view` must be 1 to 64 of `A-Z a-z 0-9 - _` (a database view's
+/// id fits), else it's `page`;
 /// `height` is kept within [`HEIGHTS`].
 pub fn embed(id: &str, title: &str, view: &str, height: u32) -> String {
     let view = if valid_view(view) { view } else { DEFAULT_VIEW };
@@ -417,10 +418,10 @@ pub(crate) fn embed_of(markdown: &str) -> Option<(String, String, String, u32)> 
 }
 
 fn valid_view(view: &str) -> bool {
-    (1..=24).contains(&view.len())
+    (1..=64).contains(&view.len())
         && view
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// An embed's view and height from its link title (`embed`, `embed table`,
@@ -1162,6 +1163,20 @@ mod tests {
         cx.simulate_input("x");
         draw(cx);
         assert!(cx.debug_bounds("blocks-paste-Page").is_none());
+    }
+
+    #[test]
+    fn a_database_views_id_is_a_view() {
+        let uuid = "3f2b8c1e-9a4d-4e6f-b1c2-0d9e8f7a6b5C";
+        assert_eq!(
+            embed("a", "T", uuid, 300),
+            format!("[T](doc:a \"embed {uuid} 300\")")
+        );
+        let too_long = "v".repeat(65);
+        assert_eq!(
+            embed("a", "T", &too_long, 300),
+            "[T](doc:a \"embed page 300\")"
+        );
     }
 
     #[test]
