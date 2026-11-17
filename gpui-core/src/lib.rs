@@ -42,6 +42,7 @@ mod button;
 mod card;
 mod collapsible;
 mod date_picker;
+mod empty_state;
 #[cfg(feature = "highlight")]
 pub mod highlight;
 pub mod icon;
@@ -80,6 +81,7 @@ pub use collapsible::Collapsible;
 pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
 };
+pub use empty_state::EmptyState;
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
 pub use item::{Item, ItemGroup, ItemSeparator, ItemVariant};
