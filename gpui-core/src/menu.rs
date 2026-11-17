@@ -440,7 +440,11 @@ impl PopupMenu {
 /// What a menu remembers between frames.
 struct MenuState {
     focus: FocusHandle,
+    /// The highlighted entry's index this frame, worked out from its id.
     highlighted: Option<usize>,
+    /// The highlighted entry, by its id: it stays that entry's while entries come, go and move,
+    /// so Enter picks the entry that's shown highlighted.
+    highlighted_id: Option<SharedString>,
     focused_once: bool,
     /// Whether it has set its first highlight.
     opened: bool,
@@ -482,6 +486,7 @@ impl RenderOnce for PopupMenu {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| MenuState {
             focus: cx.focus_handle(),
             highlighted: None,
+            highlighted_id: None,
             focused_once: false,
             opened: false,
             open_sub: None,
@@ -531,6 +536,16 @@ impl RenderOnce for PopupMenu {
         // submenu open, on its entry.
         let open_submenu = self.open_submenu.clone();
         let highlighted = state.update(cx, |s, _| {
+            // Where the highlighted entry is now: by its id; if it's gone, the first that can be
+            // picked.
+            if s.opened && s.highlighted_id.is_some() {
+                s.highlighted = s
+                    .highlighted_id
+                    .as_ref()
+                    .and_then(|want| ids.iter().position(|id| id.as_ref() == Some(want)))
+                    .filter(|i| pickable[*i])
+                    .or_else(|| step(&pickable, None, 1));
+            }
             if !s.opened
                 && let Some(id) = &open_submenu
                 && let Some(i) = sub_at(id)
@@ -559,6 +574,7 @@ impl RenderOnce for PopupMenu {
                     }
                 });
             }
+            s.highlighted_id = s.highlighted.and_then(|i| ids.get(i).cloned().flatten());
             s.highlighted
         });
         let on_select = self.on_select.clone();
@@ -572,6 +588,7 @@ impl RenderOnce for PopupMenu {
                     let moved = to != s.highlighted;
                     if moved {
                         s.highlighted = to;
+                        s.highlighted_id = to.and_then(|i| ids.get(i).cloned().flatten());
                         cx.notify();
                     }
                     moved
@@ -672,6 +689,7 @@ impl RenderOnce for PopupMenu {
                         let at = s.open_sub.as_ref().and_then(&sub_at);
                         if at.is_some() && s.highlighted != at {
                             s.highlighted = at;
+                            s.highlighted_id = s.open_sub.clone();
                             cx.notify();
                         }
                     })
