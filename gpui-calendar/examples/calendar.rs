@@ -306,9 +306,12 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         .read_only(true),
     );
     {
-        // The design review, as Google Calendar would hand it over: notes and guests.
+        // The design review, as Google Calendar would hand it over: notes, guests, a video
+        // call and its page there.
         let design = out.iter_mut().find(|e| e.id == "design").unwrap();
         design.location = Some("Room 4".into());
+        design.conference = Some("https://meet.example.com/abc-defg-hij".into());
+        design.url = Some("https://calendar.example.com/event?eid=design".into());
         design.notes = Some(
             "Walk through the new onboarding flow and the empty states. Bring the prototype \
              link; decide on the copy for step two."
