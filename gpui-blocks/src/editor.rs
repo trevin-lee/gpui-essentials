@@ -363,6 +363,8 @@ pub struct Editor {
     pub(crate) grip_down: Option<BlockId>,
     /// The block whose menu is open.
     pub(crate) block_menu: Option<BlockId>,
+    /// The block whose menu is open in a sheet, from the touch edit menu's Block….
+    pub(crate) block_sheet: Option<BlockId>,
     scroll: ScrollHandle,
     menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
@@ -523,6 +525,7 @@ impl Editor {
             find: None,
             grip_down: None,
             block_menu: None,
+            block_sheet: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -1776,9 +1779,9 @@ impl Editor {
         )
     }
 
-    /// On a touch screen, Cut, Copy, Paste and Select all above a text selection (Copy and Select
-    /// all when read-only), as iOS shows them. Hidden while a handle moves, and after an item is
-    /// used until the selection changes.
+    /// On a touch screen, Cut, Copy, Paste, Select all and Block… (the block menu, in a sheet)
+    /// above a text selection (Copy and Select all when read-only), as iOS shows them. Hidden
+    /// while a handle moves, and after an item is used until the selection changes.
     fn edit_menu(
         &self,
         window: &Window,
@@ -1842,6 +1845,28 @@ impl Editor {
             items.push(item("Paste", Box::new(Paste)));
         }
         items.push(item("Select all", Box::new(SelectAll)));
+        if !readonly {
+            let this = cx.entity().downgrade();
+            items.push(
+                div()
+                    .id("Block…")
+                    .h(px(44.))
+                    .px(px(14.))
+                    .flex()
+                    .items_center()
+                    .text_size(px(15.))
+                    .whitespace_nowrap()
+                    .child("Block…")
+                    .debug_selector(|| "blocks-menu-Block".into())
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        cx.stop_propagation();
+                        let _ = this.update(cx, |this, cx| {
+                            this.used_menu(cx);
+                            this.open_block_sheet(cx);
+                        });
+                    }),
+            );
+        }
         Some(
             deferred(
                 anchored()
@@ -1985,6 +2010,7 @@ impl Render for Editor {
             .size_0()
         });
         let edit_menu = self.edit_menu(window, cx);
+        let block_sheet = self.block_sheet(cx);
         let find_bar = self.find_bar(compact, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
         let grip_watch = self.grip_down.is_some().then(|| {
@@ -2049,6 +2075,7 @@ impl Render for Editor {
             .children(paste_menu)
             .children(resize)
             .children(edit_menu)
+            .child(block_sheet)
             .children(grip_watch)
             .child(self.long_press_watch(cx));
         // The find bar stays at the top while the page scrolls under it.
@@ -2722,6 +2749,72 @@ mod tests {
         assert_eq!(selected(&editor, cx), (0, 18));
     }
 
+    /// On touch, where there's no grip, the edit menu's Block… opens the block menu in a sheet
+    /// for the top-level block the selection is in; its entries act on that block.
+    #[gpui::test]
+    fn the_touch_menu_reaches_the_block_menu_in_a_sheet(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "intro words\n\nsecond line");
+        let top = |editor: &Entity<Editor>, cx: &mut VisualTestContext, ix: usize| {
+            editor.update(cx, |e, cx| {
+                e.state()
+                    .read(cx)
+                    .model()
+                    .document()
+                    .root()
+                    .children()
+                    .nth(ix)
+                    .map(|b| b.id())
+            })
+        };
+        let at = point_at(&editor, cx, 8);
+        long_press(cx, at);
+        tap(cx, "blocks-menu-Block");
+        draw(cx);
+        assert_eq!(
+            editor.read_with(cx, |e, _| e.block_sheet),
+            top(&editor, cx, 0),
+            "the sheet is for the first paragraph"
+        );
+        assert!(cx.debug_bounds("gpui-core-sheet").is_some());
+        assert!(
+            cx.debug_bounds("blocks-edit-menu").is_none(),
+            "the edit menu closes"
+        );
+        // Turn into: Heading 1.
+        let heading = cx
+            .debug_bounds("menu-item-turn-1")
+            .expect("Turn into's kinds are in the sheet")
+            .center();
+        cx.simulate_click(heading, gpui::Modifiers::none());
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "# intro words\n\nsecond line");
+        assert_eq!(editor.read_with(cx, |e, _| e.block_sheet), None);
+        assert!(
+            cx.debug_bounds("gpui-core-sheet").is_none(),
+            "picking closes it"
+        );
+        // Delete, from a long press in the second paragraph.
+        let second = editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            let leaf = state.model().document().leaves().nth(1).unwrap().id();
+            state
+                .position_bounds(BlockPosition::new(leaf, 2))
+                .unwrap()
+                .center()
+        });
+        long_press(cx, second);
+        tap(cx, "blocks-menu-Block");
+        draw(cx);
+        assert_eq!(
+            editor.read_with(cx, |e, _| e.block_sheet),
+            top(&editor, cx, 1)
+        );
+        let delete = cx.debug_bounds("menu-item-delete").unwrap().center();
+        cx.simulate_click(delete, gpui::Modifiers::none());
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "# intro words");
+    }
+
     #[gpui::test]
     fn a_read_only_touch_menu_only_copies(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "hello world");
@@ -2732,6 +2825,7 @@ mod tests {
         assert!(cx.debug_bounds("blocks-menu-Copy").is_some());
         assert!(cx.debug_bounds("blocks-menu-Cut").is_none());
         assert!(cx.debug_bounds("blocks-menu-Paste").is_none());
+        assert!(cx.debug_bounds("blocks-menu-Block").is_none());
     }
 
     #[gpui::test]

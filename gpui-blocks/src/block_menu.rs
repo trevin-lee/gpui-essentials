@@ -1,8 +1,9 @@
 //! The block menu: a click on a block's ⋮⋮ grip (a press that doesn't drag) opens it beside the
-//! grip, to turn the block into another kind, duplicate it or delete it.
+//! grip, to turn the block into another kind, duplicate it or delete it. On touch, where there's
+//! no grip, the long press's edit menu has Block…, which opens the same entries in a sheet.
 
 use gpui::*;
-use gpui_core::{IconName, Popover, PopupMenu, PopupMenuItem};
+use gpui_core::{IconName, Popover, PopupMenu, PopupMenuItem, Sheet};
 use markdown_editor::{BlockId, BlockPosition, BlockSelection, EditorCommand};
 
 use crate::Editor;
@@ -57,7 +58,36 @@ impl Editor {
     }
 
     pub(crate) fn close_block_menu(&mut self, cx: &mut Context<Self>) {
-        if self.block_menu.take().is_some() {
+        if self.block_menu.take().is_some() | self.block_sheet.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Opens the block menu in a sheet for the top-level block the text selection starts in:
+    /// the touch edit menu's Block….
+    pub(crate) fn open_block_sheet(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        let doc = state.model().document();
+        let start = match state.model().selection() {
+            BlockSelection::Text { anchor, head } => {
+                let leaves: Vec<_> = doc.leaves().map(|leaf| leaf.id()).collect();
+                let at = |p: &BlockPosition| leaves.iter().position(|id| *id == p.block);
+                if at(head) < at(anchor) {
+                    head.block
+                } else {
+                    anchor.block
+                }
+            }
+            _ => return,
+        };
+        let mut block = doc.block(start);
+        while let Some(b) = block
+            && b.parent().is_some_and(|p| p.parent().is_some())
+        {
+            block = b.parent();
+        }
+        if let Some(block) = block.map(|b| b.id()) {
+            self.block_sheet = Some(block);
             cx.notify();
         }
     }
@@ -71,6 +101,7 @@ impl Editor {
         cx: &mut Context<Self>,
     ) {
         self.block_menu = None;
+        self.block_sheet = None;
         let whole = BlockSelection::Blocks {
             anchor: block,
             head: block,
@@ -171,6 +202,47 @@ impl Editor {
             .trigger(grip)
             .p(px(4.))
             .child(menu)
+            .into_any_element()
+    }
+}
+
+impl Editor {
+    /// The block menu as a sheet across the bottom, for touch: Turn into's kinds listed in it
+    /// (a submenu has no room beside a phone's menu), then Duplicate and Delete. Drawn closed
+    /// too, so the focus goes back to the page when it closes.
+    pub(crate) fn block_sheet(&self, cx: &mut Context<Self>) -> AnyElement {
+        let block = self.block_sheet;
+        let has_text = block.is_some_and(|block| self.text_of(block, cx).is_some());
+        let this = cx.entity().downgrade();
+        let dismiss = this.clone();
+        let menu = block.map(|block| {
+            PopupMenu::new("block-sheet-menu")
+                .touch(true)
+                .heading("Turn into")
+                .items(
+                    turn_into_titles()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(ix, title)| {
+                            PopupMenuItem::new(format!("turn-{ix}"), title).disabled(!has_text)
+                        }),
+                )
+                .separator()
+                .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
+                .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash))
+                .on_select(move |picked, window, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        this.block_menu_pick(block, &picked.id, window, cx)
+                    });
+                })
+        });
+        Sheet::new("block-sheet")
+            .open(block.is_some())
+            .on_dismiss(move |_, _, cx| {
+                let _ = dismiss.update(cx, |this, cx| this.close_block_menu(cx));
+            })
+            .accessibility_label("Block")
+            .children(menu)
             .into_any_element()
     }
 }
