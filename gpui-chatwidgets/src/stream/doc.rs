@@ -4,11 +4,7 @@
 use std::ops::Range;
 
 use gpui::SharedString;
-use gpui_core::text::{Block, BlockKind, parse_markdown};
-
-/// The caret at the end of a draft's text while it's being written: a steady bar, drawn as text
-/// in the text's own colour, so it sits where the next word goes and wraps with it.
-pub const CARET: &str = "\u{258D}";
+use gpui_core::text::{Block, parse_markdown};
 
 /// The most of the new text settling reads in one go (a frame), a line at a time: past it, the
 /// rest waits for the next frame.
@@ -29,10 +25,7 @@ pub(crate) struct Settled {
     pub seen: usize,
     /// Its text, without the blank lines around it.
     pub source: SharedString,
-    /// The kinds of its first and last blocks (none for text that draws nothing, as a link's
-    /// definition), for the space above and below it.
-    pub kinds: Option<(BlockKind, BlockKind)>,
-    /// Its own number, for its element's id.
+    /// Its own number: its key in the TextView.
     pub key: usize,
 }
 
@@ -119,7 +112,8 @@ impl Doc {
     /// code fence) and didn't make it something else (a heading's underline, a table's
     /// delimiter row). Nothing after that line can change the block then, as Markdown never
     /// opens a block again once something has closed it; the one exception, a link defined
-    /// further down, is taken care of when the draft ends ([`Doc::defines_links`]).
+    /// further down, is resolved across blocks by the TextView, and a footnote's is taken care
+    /// of when the draft ends ([`Doc::defines_footnotes`]).
     ///
     /// The check reads the open block, so it's only made at a line that could end it: each new
     /// line is read once, into what the open block is so far ([`Open`]), and a line that surely
@@ -184,7 +178,7 @@ impl Doc {
                     both.extend(parse_markdown(line));
                     let read = parse_markdown(&self.text[self.settled..end]);
                     if read == both {
-                        match self.settle_at(at, end, new, || kinds(&alone)) {
+                        match self.settle_at(at, end, new) {
                             Some(kind) => kind,
                             None => break,
                         }
@@ -196,9 +190,7 @@ impl Doc {
                 }
                 // A closed code fence, and a line with words after it: the check would settle
                 // it, and the fence is code from end to end.
-                Step::Ends => match self
-                    .settle_at(at, end, new, || Some((BlockKind::Code, BlockKind::Code)))
-                {
+                Step::Ends => match self.settle_at(at, end, new) {
                     Some(kind) => kind,
                     None => break,
                 },
@@ -215,13 +207,7 @@ impl Doc {
     /// found it finished: the block that was there before a change, if it's the same, else a
     /// new one if `new`. What the open block is then, from the line; none when it's not
     /// settled (not `new` and no block from before).
-    fn settle_at(
-        &mut self,
-        at: usize,
-        end: usize,
-        new: bool,
-        kinds: impl FnOnce() -> Option<(BlockKind, BlockKind)>,
-    ) -> Option<Kind> {
+    fn settle_at(&mut self, at: usize, end: usize, new: bool) -> Option<Kind> {
         let source = trim_blank_lines(&self.text[self.settled..at]);
         let start = self.settled;
         let old = self
@@ -243,7 +229,6 @@ impl Doc {
                     range: start..at,
                     seen: end,
                     source: SharedString::from(source.to_string()),
-                    kinds: kinds(),
                     key: self.next_key - 1,
                 }
             }
@@ -255,16 +240,16 @@ impl Doc {
         Some(first(&self.text[at..end]))
     }
 
-    /// Whether the text defines a link or a footnote for its references (`[a]: https://…`):
-    /// a block that settled before the definition came reads its reference as text, so a draft
+    /// Whether the text defines a footnote for its references (`[^1]: …`): gpui-core's
+    /// TextView resolves a link's reference across its sources, but not a footnote's, so a draft
     /// that ends with one is read again whole.
-    pub fn defines_links(&self) -> bool {
+    pub fn defines_footnotes(&self) -> bool {
         self.text.lines().any(|l| {
             let t = l.trim_start_matches(' ');
             l.len() - t.len() < 4
-                && t.starts_with('[')
+                && t.starts_with("[^")
                 && t.find("]:")
-                    .is_some_and(|i| i > 1 && !t[1..i].contains(['[', ']']))
+                    .is_some_and(|i| i > 2 && !t[2..i].contains(['[', ']']))
         })
     }
 }
@@ -576,26 +561,6 @@ fn closes(r: &str, mark: u8, len: usize) -> bool {
     n >= len && blank(&r[n..])
 }
 
-/// The first and last kinds of some blocks.
-pub(crate) fn kinds(blocks: &[Block]) -> Option<(BlockKind, BlockKind)> {
-    Some((kind(blocks.first()?), kind(blocks.last()?)))
-}
-
-/// A block's kind, as gpui-core's TextView names it for its gaps.
-pub(crate) fn kind(b: &Block) -> BlockKind {
-    match b {
-        Block::Paragraph(_) => BlockKind::Paragraph,
-        Block::Heading(level, _) => BlockKind::Heading(*level),
-        Block::List { start, .. } => BlockKind::List {
-            ordered: start.is_some(),
-        },
-        Block::Code { .. } => BlockKind::Code,
-        Block::Quote(_) => BlockKind::Quote,
-        Block::Rule => BlockKind::Rule,
-        Block::Table { .. } => BlockKind::Table,
-    }
-}
-
 /// Text without the blank lines before it and the white space after it.
 pub(crate) fn trim_blank_lines(s: &str) -> &str {
     let mut start = 0;
@@ -674,15 +639,16 @@ fn open_fence(s: &str) -> Option<usize> {
 }
 
 /// How the open tail shows while it's still being written: what can't be read yet is held
-/// back, what's open is closed for now, and the caret goes at the end.
+/// back and what's open is closed for now. (The caret isn't text: the TextView draws it after
+/// the last character.)
 ///
 /// - A last line of only marks (`1.`, `#`, `---`, a fence's backticks) waits for its words or
 ///   its newline, so a paragraph doesn't flash as a heading and back.
 /// - A line that starts a table waits for its delimiter row, so it doesn't show as text first.
 /// - An open code fence draws as code.
-/// - Emphasis, strike and inline code open on the last line are closed after the caret, so
-///   the words being written are already bold (and never the rest of the text and back); a
-///   marker with nothing after it yet isn't shown.
+/// - Emphasis, strike and inline code open on the last line are closed, so the words being
+///   written are already bold (and never the rest of the text and back); a marker with nothing
+///   after it yet isn't shown.
 /// - A link being written shows as its words.
 pub(crate) fn display(tail: &str) -> String {
     let mut s = tail.to_string();
@@ -691,37 +657,23 @@ pub(crate) fn display(tail: &str) -> String {
     if only_marks(&s[start..]) {
         s.truncate(start);
     }
-    match open_fence(&s) {
-        Some(opener) => {
-            let t = s.trim_end_matches(['\n', '\r']).len();
-            s.truncate(t);
-            // On the opener's line the caret would be the code's language.
-            if !s[opener..].contains('\n') {
-                s.push('\n');
-            }
-            s.push_str(CARET);
-            return s;
-        }
-        None => {
-            hold_table_header(&mut s);
-        }
+    if open_fence(&s).is_some() {
+        let t = s.trim_end_matches(['\n', '\r']).len();
+        s.truncate(t);
+        return s;
     }
+    hold_table_header(&mut s);
     let t = s.trim_end().len();
     s.truncate(t);
     let start = s.rfind('\n').map_or(0, |i| i + 1);
     let last = &s[start..];
-    if last.is_empty() {
-        s.push_str(CARET);
-        return s;
-    }
-    // After a closing fence or a rule, a caret would change what the line is.
-    if only_marks(last) {
+    // Nothing, or a closing fence or a rule: nothing's open.
+    if last.is_empty() || only_marks(last) {
         return s;
     }
     let (shown, closers) = close_line(last);
     s.truncate(start);
     s.push_str(&shown);
-    s.push_str(CARET);
     s.push_str(&closers);
     s
 }
@@ -830,8 +782,8 @@ fn code_spans(s: &str) -> (Vec<bool>, Option<(usize, usize)>) {
     (mask, None)
 }
 
-/// The last line's words with what's open closed for now: the words to show, and what goes
-/// after the caret.
+/// The last line's words with what's open closed for now: the words to show, and the marks
+/// that close what's open, to go after them.
 fn close_line(line: &str) -> (String, String) {
     let (prefix, body) = block_prefix(line);
     // Four spaces in is code, shown as it is.
@@ -901,7 +853,7 @@ fn close_link(s: &mut String) {
 }
 
 /// Closes the emphasis and strikes open at the end of `s`, as their markers: the text to put
-/// after the caret. An opener with nothing after it yet comes off `s`.
+/// after the words. An opener with nothing after it yet comes off `s`.
 fn close_emphasis(s: &mut String, more: bool) -> String {
     let (mask, _) = code_spans(s);
     let b = s.as_bytes();
@@ -954,73 +906,69 @@ fn close_emphasis(s: &mut String, more: bool) -> String {
 mod tests {
     use super::*;
 
-    fn shown(tail: &str) -> String {
-        display(tail).replace(CARET, "|")
-    }
-
     #[test]
     fn open_things_close_for_now() {
-        assert_eq!(shown("Some **bold"), "Some **bold|**");
-        assert_eq!(shown("Some **bold** and *it"), "Some **bold** and *it|*");
-        assert_eq!(shown("a **b *c"), "a **b *c|***");
-        assert_eq!(shown("~~gone"), "~~gone|~~");
-        assert_eq!(shown("run `cargo te"), "run `cargo te|`");
-        assert_eq!(shown("x `` a ` b"), "x `` a ` b|``");
+        assert_eq!(display("Some **bold"), "Some **bold**");
+        assert_eq!(display("Some **bold** and *it"), "Some **bold** and *it*");
+        assert_eq!(display("a **b *c"), "a **b *c***");
+        assert_eq!(display("~~gone"), "~~gone~~");
+        assert_eq!(display("run `cargo te"), "run `cargo te`");
+        assert_eq!(display("x `` a ` b"), "x `` a ` b``");
         // A marker with nothing after it yet isn't shown.
-        assert_eq!(shown("Some **"), "Some|");
-        assert_eq!(shown("Some `"), "Some|");
+        assert_eq!(display("Some **"), "Some");
+        assert_eq!(display("Some `"), "Some");
         // Not emphasis: a times sign, a word's underscores.
-        assert_eq!(shown("2 * 3 is 6"), "2 * 3 is 6|");
+        assert_eq!(display("2 * 3 is 6"), "2 * 3 is 6");
         // A line of only numbers and marks waits for its words or its newline.
-        assert_eq!(shown("Sum:\n2 * 3 = 6"), "Sum:|");
-        assert_eq!(shown("snake_case_name"), "snake_case_name|");
+        assert_eq!(display("Sum:\n2 * 3 = 6"), "Sum:");
+        assert_eq!(display("snake_case_name"), "snake_case_name");
         // Closed already.
-        assert_eq!(shown("**done**"), "**done**|");
-        assert_eq!(shown("`a*b`"), "`a*b`|");
+        assert_eq!(display("**done**"), "**done**");
+        assert_eq!(display("`a*b`"), "`a*b`");
     }
 
     #[test]
     fn a_link_being_written_shows_as_its_words() {
-        assert_eq!(shown("see [the do"), "see the do|");
-        assert_eq!(shown("see [the docs]"), "see the docs|");
-        assert_eq!(shown("see [the docs](https://exa"), "see the docs|");
-        assert_eq!(shown("see ![a cat](https://x"), "see a cat|");
+        assert_eq!(display("see [the do"), "see the do");
+        assert_eq!(display("see [the docs]"), "see the docs");
+        assert_eq!(display("see [the docs](https://exa"), "see the docs");
+        assert_eq!(display("see ![a cat](https://x"), "see a cat");
         assert_eq!(
-            shown("see [docs](https://x.test) now"),
-            "see [docs](https://x.test) now|"
+            display("see [docs](https://x.test) now"),
+            "see [docs](https://x.test) now"
         );
-        assert_eq!(shown("- [ ] a task"), "- [ ] a task|");
+        assert_eq!(display("- [ ] a task"), "- [ ] a task");
     }
 
     #[test]
     fn marks_wait_for_their_words() {
-        assert_eq!(shown("Para\n\n#"), "Para|");
-        assert_eq!(shown("Para\n1."), "Para|");
-        assert_eq!(shown("Title\n=="), "Title|");
-        assert_eq!(shown("Para\n\n# Head"), "Para\n\n# Head|");
-        assert_eq!(shown("- one\n- **tw"), "- one\n- **tw|**");
-        // A finished rule or fence takes no caret.
-        assert_eq!(shown("Para\n\n---\n"), "Para\n\n---");
-        assert_eq!(shown("```\ncode\n```\n"), "```\ncode\n```");
+        assert_eq!(display("Para\n\n#"), "Para");
+        assert_eq!(display("Para\n1."), "Para");
+        assert_eq!(display("Title\n=="), "Title");
+        assert_eq!(display("Para\n\n# Head"), "Para\n\n# Head");
+        assert_eq!(display("- one\n- **tw"), "- one\n- **tw**");
+        // A finished rule or fence.
+        assert_eq!(display("Para\n\n---\n"), "Para\n\n---");
+        assert_eq!(display("```\ncode\n```\n"), "```\ncode\n```");
     }
 
     #[test]
     fn an_open_fence_draws_as_code() {
-        assert_eq!(shown("```rust\nfn main() {\n"), "```rust\nfn main() {|");
-        assert_eq!(shown("```rust\n"), "```rust\n|");
+        assert_eq!(display("```rust\nfn main() {\n"), "```rust\nfn main() {");
+        assert_eq!(display("```rust\n"), "```rust");
         // Its closing backticks wait for the newline: the block stays open meanwhile.
-        assert_eq!(shown("```\ncode\n``"), "```\ncode|");
+        assert_eq!(display("```\ncode\n``"), "```\ncode");
         // Nothing inside is closed.
-        assert_eq!(shown("```\na **b"), "```\na **b|");
+        assert_eq!(display("```\na **b"), "```\na **b");
     }
 
     #[test]
     fn a_table_waits_for_its_delimiter_row() {
-        assert_eq!(shown("Intro\n\n| a | b |\n"), "Intro|");
-        assert_eq!(shown("Intro\n\n| a | b |\n|--"), "Intro|");
+        assert_eq!(display("Intro\n\n| a | b |\n"), "Intro");
+        assert_eq!(display("Intro\n\n| a | b |\n|--"), "Intro");
         assert_eq!(
-            shown("| a | b |\n|---|---|\n| 1 | x"),
-            "| a | b |\n|---|---|\n| 1 | x|"
+            display("| a | b |\n|---|---|\n| 1 | x"),
+            "| a | b |\n|---|---|\n| 1 | x"
         );
     }
 
@@ -1094,18 +1042,21 @@ mod tests {
     }
 
     #[test]
-    fn link_definitions_are_found() {
+    fn footnote_definitions_are_found() {
         let mut d = Doc::default();
-        d.append("See [the docs].\n\n[the docs]: https://x.test\n");
-        assert!(d.defines_links());
-        d.replace("A [b] c\n\n  [x] y");
-        assert!(!d.defines_links());
+        d.append("A claim.[^1]\n\n[^1]: The source.\n");
+        assert!(d.defines_footnotes());
+        // A link's definition is the TextView's to resolve.
+        d.replace("See [the docs].\n\n[the docs]: https://x.test\n");
+        assert!(!d.defines_footnotes());
+        d.replace("A [^b] c\n\n  [^x] y");
+        assert!(!d.defines_footnotes());
     }
 
     /// Settling as it was before it kept what the open block is: every line checked, reading the
     /// open block again. Settling now must settle the same blocks, at the same places.
     mod before {
-        use super::super::{Settled, kinds, trim_blank_lines};
+        use super::super::{Settled, trim_blank_lines};
         use gpui::SharedString;
         use gpui_core::text::parse_markdown;
 
@@ -1191,7 +1142,6 @@ mod tests {
                                         range: start..at,
                                         seen: end,
                                         source: SharedString::from(source.to_string()),
-                                        kinds: kinds(&alone),
                                         key: self.next_key - 1,
                                     }
                                 }
@@ -1329,15 +1279,7 @@ mod tests {
     fn same(new: &Doc, old: &before::Doc, text: &str) {
         let blocks = |b: &[Settled]| {
             b.iter()
-                .map(|b| {
-                    (
-                        b.range.clone(),
-                        b.seen,
-                        b.source.to_string(),
-                        b.kinds,
-                        b.key,
-                    )
-                })
+                .map(|b| (b.range.clone(), b.seen, b.source.to_string(), b.key))
                 .collect::<Vec<_>>()
         };
         assert_eq!(blocks(&new.blocks), blocks(&old.blocks), "in {text:?}");
@@ -1455,7 +1397,7 @@ mod tests {
             assert_eq!(d.blocks.len(), 2);
             assert_eq!(d.blocks[0].range, 0..fence_len);
             assert_eq!(d.blocks[1].source.as_ref(), "After.");
-            assert_eq!(d.blocks[0].kinds, Some((BlockKind::Code, BlockKind::Code)));
+            assert!(d.blocks[0].source.starts_with("```rust\n"));
         };
         // In one go: a frame or two, each bounded.
         let mut d = Doc::default();

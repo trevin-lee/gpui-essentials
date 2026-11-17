@@ -94,8 +94,9 @@ impl Render for Chat {
     }
 }
 
-/// The time each delta took (the text added and a frame drawn), by the length after it.
-fn stream(whole: bool, seed: u64) -> Vec<(usize, Duration)> {
+/// The time each delta took (the text added and a frame drawn), by the length after it: the
+/// first `from` characters come in one delta, untimed, and the rest a few at a time.
+fn stream(text: &str, from: usize, whole: bool, seed: u64) -> Vec<(usize, Duration)> {
     let mut app = TestAppContext::build_with_text_system(
         TestDispatcher::new(seed),
         None,
@@ -112,10 +113,12 @@ fn stream(whole: bool, seed: u64) -> Vec<(usize, Duration)> {
     let s = scroll.clone();
     let (chat, cx) = app.add_window_view(move |_, _| Chat(shown, s));
     cx.simulate_resize(size(px(800.), px(900.)));
-    let chars: Vec<char> = REPLY.chars().collect();
+    let chars: Vec<char> = text.chars().collect();
+    let (first, rest) = chars.split_at(from);
     let mut text = String::new();
     let mut out = Vec::new();
-    for piece in chars.chunks(DELTA) {
+    let pieces = std::iter::once((first, false)).filter(|(p, _)| !p.is_empty());
+    for (piece, timed) in pieces.chain(rest.chunks(DELTA).map(|p| (p, true))) {
         let delta: String = piece.iter().collect();
         text.push_str(&delta);
         let start = Instant::now();
@@ -134,14 +137,16 @@ fn stream(whole: bool, seed: u64) -> Vec<(usize, Duration)> {
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        out.push((text.len(), start.elapsed()));
+        if timed {
+            out.push((text.len(), start.elapsed()));
+        }
     }
     out
 }
 
 /// The median time of the deltas just before each mark.
-fn at_marks(times: &[(usize, Duration)]) -> Vec<Duration> {
-    MARKS
+fn at_marks(times: &[(usize, Duration)], marks: &[usize]) -> Vec<Duration> {
+    marks
         .iter()
         .map(|&m| {
             let mut near: Vec<Duration> = times
@@ -167,11 +172,11 @@ fn a_delta_costs_about_the_same_at_the_end_of_a_long_reply() {
     // Three runs in a release build; one in a debug one, where the bounds are loose anyway.
     let runs = if cfg!(debug_assertions) { 1 } else { 3 };
     for run in 0..runs {
-        streaming.extend(stream(false, run));
-        whole.extend(stream(true, run));
+        streaming.extend(stream(REPLY, 0, false, run));
+        whole.extend(stream(REPLY, 0, true, run));
     }
-    let s = at_marks(&streaming);
-    let w = at_marks(&whole);
+    let s = at_marks(&streaming, &MARKS);
+    let w = at_marks(&whole, &MARKS);
     for (i, m) in MARKS.iter().enumerate() {
         eprintln!(
             "a delta at {m} characters: {:.2} ms streaming, {:.2} ms as one TextView read whole",
@@ -198,6 +203,43 @@ fn a_delta_costs_about_the_same_at_the_end_of_a_long_reply() {
     // since gpui-core's TextView keeps the layout of every unchanged block, re-reading it whole
     // costs about what streaming does, and either is fine as long as streaming stays flat and
     // under its bound.
+}
+
+/// A list that grows an item at a time: it's one block until something after it ends it, so
+/// it's the open block all along, and gpui-core lays a block out whole when it changes. A delta
+/// at its end costs what laying the list out does, growing with the list; printed at 100, 500
+/// and 1,000 items (the list given in one go up to 600 characters before, 100 in a debug build,
+/// then streamed), and held to a bound at 1,000 items (33,000 characters).
+#[test]
+fn a_long_list_growing_by_items_is_laid_out_whole() {
+    let mut text = String::new();
+    let mut marks = Vec::new();
+    for i in 1..=1000 {
+        text.push_str(&format!("- item {i}: a few words about it\n"));
+        if [100, 500, 1000].contains(&i) {
+            marks.push(text.len());
+        }
+    }
+    let (runs, lead) = if cfg!(debug_assertions) {
+        (1, 100)
+    } else {
+        (3, 600)
+    };
+    let mut times = Vec::new();
+    for run in 0..runs {
+        for &m in &marks {
+            times.extend(stream(&text[..m], m - lead, false, run));
+        }
+    }
+    let t = at_marks(&times, &marks);
+    for (i, n) in [100, 500, 1000].iter().enumerate() {
+        eprintln!(
+            "a delta at the end of a {n}-item list ({} characters): {:.2} ms",
+            marks[i],
+            ms(t[i])
+        );
+    }
+    assert!(t[2] < bound(60.), "a delta at 1,000 items took {:?}", t[2]);
 }
 
 /// A code fence 50,000 lines long, then a paragraph, given in one append, a line at a time and
