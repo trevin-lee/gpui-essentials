@@ -80,6 +80,15 @@ item](docs/gallery.png)
   `narrow_shows(i)` says, and `on_narrow_change` tells the host so it can draw a back button.
   Panes clip their content; handles are splitters to assistive tech, and `touch(true)` makes
   them take presses 44 points wide.
+- **Tabs.** `Tabs::new(id).tab(Tab::new(id, label).child(panel))….selected(id).on_change(…)`:
+  a tab list over the selected tab's panel, the only one drawn. The host owns the selection, or
+  leaves it to the tabs with `default_selected(id)`. The list has one Tab stop (the selected
+  tab); Left and Right move along it, wrapping, and Home and End go to its ends, passing over a
+  disabled tab and selecting what they reach (`manual(true)` leaves that to Enter or Space).
+  It's drawn on a muted track with the selected tab raised, or underlined with `line()`; when
+  the tabs don't fit, their labels are cut short, or with `overflow(TabsOverflow::Scroll)` the
+  list scrolls, keeping the focused tab in view. `stretch(true)` fills the width; `touch(true)`
+  makes tabs 44 points.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
