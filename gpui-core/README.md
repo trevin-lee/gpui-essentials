@@ -254,6 +254,17 @@ item](docs/gallery.png)
   in its colour at 40%, or with `fill(AreaFill::Gradient)`; `stacked(true)` stacks the areas.
   The tooltip's x gets a thin line and a ringed dot on each series. The geometry is pure
   functions too (`lines`, `areas`, `chart::curve_segments`).
+- **PieChart.** `PieChart::new(id).slice("chrome", "Chrome", 275.)…` is shadcn's pie chart.
+  Each value above zero is a slice sized by its share; zero, negative and missing values are
+  left out. Slices run from three o'clock counterclockwise, as Recharts draws them, and the pie
+  fills 80% of the shorter side. Slices take the theme's `chart_1` to `chart_5` by their place
+  in the data unless `slice_color(key, colour)` gives one. `donut(true)` cuts a hole of 60% of
+  the radius, and `center_label("1,125", "Visitors")` writes a total in it, cut to fit. The
+  pointer, a tap, or Left and Right push a slice out a little and show its label, value
+  (through `format_value`) and share in a tooltip, in the top corner on its side. It has the
+  same `legend`, empty state, keys, idle behaviour and summary for assistive technology as the
+  other charts. The geometry is pure functions too (`angles`, `radii`, `slice_at`,
+  `chart::slice_angles`, `chart::slice_at`).
 - **Checkbox.** `Checkbox::new(id).label(text).checked(on).on_click(…)`: a small rounded box,
   filled with the primary colour and a check when on, or a dash with `indeterminate(true)`. A
   press on the box or its label, or Space, calls `on_click` with the state to take (on, from

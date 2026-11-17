@@ -1,5 +1,5 @@
-//! Charts: shadcn's Chart (its Recharts wrappers) drawn natively: [`BarChart`], [`LineChart`]
-//! and [`AreaChart`]. The host passes plain data:
+//! Charts: shadcn's Chart (its Recharts wrappers) drawn natively: [`BarChart`], [`LineChart`],
+//! [`AreaChart`] and [`PieChart`]. The host passes plain data:
 //! the categories along the x axis and a series of values for each, with a label and,
 //! optionally, a colour (otherwise the theme's `chart_1` to `chart_5` in turn).
 //!
@@ -32,10 +32,10 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, Background, Bounds, Context, Corners, ElementId, FocusHandle, FontWeight, Hsla,
-    InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
+    App, Background, Bounds, Context, Corners, Div, ElementId, Entity, FocusHandle, FontWeight,
+    Hsla, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
     PaintQuad, ParentElement, Path, PathBuilder, Pixels, Point, Rems, RenderOnce, Role, ShapedLine,
-    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription,
+    SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription,
     TextAlign, TruncateFrom, Window, actions, canvas, deferred, div, fill, linear_color_stop,
     linear_gradient, point, prelude::FluentBuilder as _, px, quad, relative, rems, size,
     transparent_black,
@@ -43,6 +43,10 @@ use gpui::{
 
 use crate::press::focus_ring;
 use crate::theme::{ActiveTheme as _, Theme};
+
+mod pie;
+
+pub use pie::{PieChart, PieSlice, slice_angles, slice_at};
 
 actions!(
     gpui_core_chart,
@@ -1312,19 +1316,9 @@ impl ChartState {
     }
 }
 
-fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui::AnyElement {
-    crate::init_soon(cx);
-    let theme = cx.theme().clone();
-    let Cartesian {
-        id,
-        data,
-        options,
-        scale,
-        summary,
-        marks,
-        style,
-    } = chart;
-    let state = window.use_keyed_state(id.clone(), cx, |window, cx| {
+/// The state of the chart `id`, kept between frames.
+fn chart_state(id: &ElementId, window: &mut Window, cx: &mut App) -> Entity<ChartState> {
+    window.use_keyed_state(id.clone(), cx, |window, cx| {
         let focus = cx.focus_handle();
         // The tooltip the keyboard showed goes when the focus does.
         let blur = cx.on_blur(&focus, window, |s: &mut ChartState, _, cx| s.set(None, cx));
@@ -1334,21 +1328,16 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
             plot: Bounds::default(),
             _blur: blur,
         }
-    });
-    let n = data.len();
-    let empty = data.is_empty();
-    let xs = marks.x_scale();
-    let (focus, active, last_plot) = {
-        let s = state.read(cx);
-        (
-            s.focus.clone(),
-            s.active.filter(|i| *i < n && !empty),
-            s.plot,
-        )
-    };
-    let name = id.to_string();
-    let label = options.label.clone().unwrap_or_else(|| summary.into());
+    })
+}
 
+/// A chart's box: a figure named `label`, full width and 250 pixels tall unless styled.
+fn frame(
+    id: &ElementId,
+    label: SharedString,
+    theme: &Theme,
+    style: &StyleRefinement,
+) -> Stateful<Div> {
     let mut root = div()
         .id(id.clone())
         .key_context(CONTEXT)
@@ -1363,27 +1352,41 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
         .pt(css(8.))
         .text_size(theme.text.xs)
         .rounded(theme.radius_md());
-    gpui::Refineable::refine(root.style(), &style);
+    gpui::Refineable::refine(root.style(), style);
+    root
+}
 
-    if empty {
-        return root
-            .child(
-                div()
-                    .debug_selector({
-                        let name = name.clone();
-                        move || format!("{name}-empty")
-                    })
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(theme.muted_foreground)
-                    .child(options.empty_text),
-            )
-            .into_any_element();
-    }
+/// What a chart with nothing to draw shows: `text`, centred.
+fn empty_state(
+    root: Stateful<Div>,
+    name: &str,
+    text: SharedString,
+    theme: &Theme,
+) -> gpui::AnyElement {
+    let name = name.to_string();
+    root.child(
+        div()
+            .debug_selector(move || format!("{name}-empty"))
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(theme.muted_foreground)
+            .child(text),
+    )
+    .into_any_element()
+}
 
-    // Moves the tooltip to the x value `to` gives from where it is.
+/// Makes `root` a Tab stop with the focus ring, where Left, Right, Home and End move the
+/// tooltip among `n` things and Escape hides it.
+fn keyboard(
+    root: Stateful<Div>,
+    state: &Entity<ChartState>,
+    focus: &FocusHandle,
+    n: usize,
+    cx: &App,
+) -> Stateful<Div> {
+    // Moves the tooltip to what `to` gives from where it is.
     let mover = |to: fn(Option<usize>, usize) -> usize| {
         let state = state.clone();
         move |_: &mut Window, cx: &mut App| {
@@ -1398,26 +1401,145 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
     let first = mover(|_, _| 0);
     let last = mover(|_, n| n - 1);
     let ring = focus_ring(cx);
-    root = root
-        .track_focus(&focus.tab_stop(true))
+    let state = state.clone();
+    root.track_focus(&focus.clone().tab_stop(true))
         .focus_visible(move |s| s.shadow(vec![ring]))
         .aria_description("Left and Right move between values; Escape hides them.")
-        .when_some(active, |d, i| d.aria_value(data.describe(i, &options)))
         .on_action(move |_: &NextPoint, w, cx| next(w, cx))
         .on_action(move |_: &PreviousPoint, w, cx| prev(w, cx))
         .on_action(move |_: &FirstPoint, w, cx| first(w, cx))
         .on_action(move |_: &LastPoint, w, cx| last(w, cx))
-        .on_action({
-            let state = state.clone();
-            move |_: &HideTooltip, _, cx| {
-                // With nothing to hide, Escape goes on to whatever else wants it (a dialog).
-                if state.read(cx).active.is_some() {
-                    state.update(cx, |s, cx| s.set(None, cx));
-                } else {
-                    cx.propagate();
-                }
+        .on_action(move |_: &HideTooltip, _, cx| {
+            // With nothing to hide, Escape goes on to whatever else wants it (a dialog).
+            if state.read(cx).active.is_some() {
+                state.update(cx, |s, cx| s.set(None, cx));
+            } else {
+                cx.propagate();
             }
-        });
+        })
+}
+
+/// The tooltip's card, as shadcn's ChartTooltipContent draws it; the caller places it.
+fn tooltip_card(theme: &Theme) -> Div {
+    div()
+        .absolute()
+        .min_w(css(128.))
+        .max_w(css(240.))
+        .flex()
+        .flex_col()
+        .gap(css(6.))
+        .px(css(10.))
+        .py(css(6.))
+        .rounded(theme.radius_lg())
+        .border_1()
+        .border_color(theme.border.opacity(0.5))
+        .bg(theme.background)
+        .shadow_lg()
+}
+
+/// A tooltip's row: the series' colour, its label, and its value (and anything after it).
+fn tooltip_row(
+    color: Hsla,
+    label: SharedString,
+    value: SharedString,
+    after: Option<SharedString>,
+    theme: &Theme,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(css(8.))
+        .child(div().flex_none().size(css(10.)).rounded(css(2.)).bg(color))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .text_ellipsis()
+                .whitespace_nowrap()
+                .text_color(theme.muted_foreground)
+                .child(label),
+        )
+        .child(
+            div()
+                .flex_none()
+                .font_family(theme.mono_font_family.clone())
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.foreground)
+                .child(value),
+        )
+        .when_some(after, |d, after| {
+            d.child(
+                div()
+                    .flex_none()
+                    .font_family(theme.mono_font_family.clone())
+                    .text_color(theme.muted_foreground)
+                    .child(after),
+            )
+        })
+}
+
+/// A legend: each colour and label, centred under the chart.
+fn legend(items: impl IntoIterator<Item = (Hsla, SharedString)>, theme: &Theme) -> Div {
+    div()
+        .flex()
+        .flex_wrap()
+        .justify_center()
+        .gap_x(css(16.))
+        .gap_y(css(4.))
+        .pt(css(12.))
+        .text_color(theme.foreground)
+        .children(items.into_iter().map(|(color, label)| {
+            div()
+                .flex()
+                .items_center()
+                .gap(css(6.))
+                .min_w_0()
+                .child(div().flex_none().size(css(8.)).rounded(css(2.)).bg(color))
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .child(label),
+                )
+        }))
+}
+
+fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui::AnyElement {
+    crate::init_soon(cx);
+    let theme = cx.theme().clone();
+    let Cartesian {
+        id,
+        data,
+        options,
+        scale,
+        summary,
+        marks,
+        style,
+    } = chart;
+    let state = chart_state(&id, window, cx);
+    let n = data.len();
+    let empty = data.is_empty();
+    let xs = marks.x_scale();
+    let (focus, active, last_plot) = {
+        let s = state.read(cx);
+        (
+            s.focus.clone(),
+            s.active.filter(|i| *i < n && !empty),
+            s.plot,
+        )
+    };
+    let name = id.to_string();
+    let label = options.label.clone().unwrap_or_else(|| summary.into());
+
+    let root = frame(&id, label, &theme, &style);
+    if empty {
+        return empty_state(root, &name, options.empty_text, &theme);
+    }
+    let root = keyboard(root, &state, &focus, n, cx)
+        .when_some(active, |d, i| d.aria_value(data.describe(i, &options)));
 
     let colors: Rc<Vec<Hsla>> = Rc::new(
         (0..data.series.len())
@@ -1614,41 +1736,18 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
         };
         let rows = (0..data.series.len()).filter_map(|s| {
             data.value(s, i).map(|v| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(css(8.))
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(css(10.))
-                            .rounded(css(2.))
-                            .bg(colors[s]),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .text_color(theme.muted_foreground)
-                            .child(data.series[s].label.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_family(theme.mono_font_family.clone())
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.foreground)
-                            .child(options.value_text(v)),
-                    )
+                tooltip_row(
+                    colors[s],
+                    data.series[s].label.clone(),
+                    options.value_text(v),
+                    None,
+                    &theme,
+                )
             })
         });
         let name = name.clone();
-        let card = div()
+        let card = tooltip_card(&theme)
             .debug_selector(move || format!("{name}-tooltip-{i}"))
-            .absolute()
             .top(css(4.))
             // Beside the x value, on the side with more room.
             .map(|d| {
@@ -1658,18 +1757,6 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
                     d.right(relative(1. - frac)).mr(css(10.))
                 }
             })
-            .min_w(css(128.))
-            .max_w(css(240.))
-            .flex()
-            .flex_col()
-            .gap(css(6.))
-            .px(css(10.))
-            .py(css(6.))
-            .rounded(theme.radius_lg())
-            .border_1()
-            .border_color(theme.border.opacity(0.5))
-            .bg(theme.background)
-            .shadow_lg()
             .child(
                 div()
                     .overflow_hidden()
@@ -1752,36 +1839,13 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
     });
 
     let legend = options.legend.then(|| {
-        div()
-            .flex()
-            .flex_wrap()
-            .justify_center()
-            .gap_x(css(16.))
-            .gap_y(css(4.))
-            .pt(css(12.))
-            .text_color(theme.foreground)
-            .children(data.series.iter().enumerate().map(|(s, series)| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(css(6.))
-                    .min_w_0()
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(css(8.))
-                            .rounded(css(2.))
-                            .bg(colors[s]),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .child(series.label.clone()),
-                    )
-            }))
+        legend(
+            data.series
+                .iter()
+                .enumerate()
+                .map(|(s, series)| (colors[s], series.label.clone())),
+            &theme,
+        )
     });
 
     root.child(
