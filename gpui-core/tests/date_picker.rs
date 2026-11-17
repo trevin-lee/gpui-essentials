@@ -388,3 +388,35 @@ fn a_month_takes_a_day_size_and_a_footer(cx: &mut TestAppContext) {
         "under the days: {footer:?} {last:?}"
     );
 }
+
+#[gpui::test]
+fn the_ends_of_the_calendar_draw_and_the_keys_stop_there(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let made = Rc::new(RefCell::new(None));
+    let m = made.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let state = cx.new(|cx| DatePickerState::new(window, cx));
+        *m.borrow_mut() = Some(state.clone());
+        let side = cx.new(|_| Side { state });
+        Root::new(side, window, cx)
+    });
+    vcx.run_until_parked();
+    let state = made.borrow().clone().unwrap();
+    // The last day dates can be: shown as the last the picker goes to, and past it the keys
+    // stay put.
+    vcx.update(|_, cx| state.update(cx, |s, cx| s.show_month(NaiveDate::MAX, cx)));
+    vcx.run_until_parked();
+    keys(vcx, "tab pagedown pagedown down right enter");
+    assert_eq!(
+        state.read_with(vcx, |s, _| s.value().start()),
+        NaiveDate::from_ymd_opt(9999, 12, 31)
+    );
+    // And the first.
+    vcx.update(|_, cx| state.update(cx, |s, cx| s.show_month(NaiveDate::MIN, cx)));
+    vcx.run_until_parked();
+    keys(vcx, "pageup up left enter");
+    assert_eq!(
+        state.read_with(vcx, |s, _| s.value().start()),
+        NaiveDate::from_ymd_opt(1, 1, 1)
+    );
+}
