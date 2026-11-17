@@ -13,8 +13,9 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
-    Button, ButtonGroup, ButtonVariants as _, DatePickerState, DismissReason, IconName, Popover,
-    Press, Selectable as _, Sheet, Sizable as _, Theme,
+    Button, ButtonGroup, ButtonVariants as _, DatePickerState, DismissReason, DropdownMenu,
+    IconName, MenuSelect, Popover, PopoverAlign, PopupMenuItem, Press, Selectable as _, Sheet,
+    Sizable as _, Theme,
 };
 
 use crate::find::Query;
@@ -2701,7 +2702,7 @@ impl Calendar {
 
     /// The header for a narrow calendar or one taken by touch: the title (a short one when
     /// narrow), Today, the period arrows (not on touch, where a swipe changes the period), and
-    /// the views (the agenda called List when narrow). Drawn with plain elements, not gpui-core's
+    /// the views (behind one menu button when narrow, with 3 Days among them). Drawn with plain elements, not gpui-core's
     /// buttons; on touch each control is 44 points tall.
     fn render_compact_header(
         &self,
@@ -2749,21 +2750,12 @@ impl Calendar {
                 .child(label)
         };
         let view = self.view;
-        let views: &[(CalendarView, &str)] = if narrow {
-            &[
-                (CalendarView::Day, "Day"),
-                (CalendarView::Week, "Week"),
-                (CalendarView::Month, "Month"),
-                (CalendarView::AGENDA, "List"),
-            ]
-        } else {
-            &[
-                (CalendarView::Day, "Day"),
-                (CalendarView::Week, "Week"),
-                (CalendarView::Month, "Month"),
-                (CalendarView::AGENDA, "Agenda"),
-            ]
-        };
+        let views: &[(CalendarView, &str)] = &[
+            (CalendarView::Day, "Day"),
+            (CalendarView::Week, "Week"),
+            (CalendarView::Month, "Month"),
+            (CalendarView::AGENDA, "Agenda"),
+        ];
         let title = if narrow {
             self.short_title()
         } else {
@@ -2817,27 +2809,100 @@ impl Calendar {
                                 .on_click(on(Rc::new(|c, cx| c.next(cx)))),
                         )
                     })
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .ml(rems(4. / 15.))
-                            .p(rems(2. / 15.))
-                            .rounded(rems(10. / 15.))
-                            .border_1()
-                            .border_color(colors.line)
-                            .children(views.iter().enumerate().map(|(i, &(v, label))| {
-                                let on_view = match (v, view) {
-                                    (CalendarView::Week, CalendarView::Days(_)) => true,
-                                    (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
-                                    _ => v == view,
-                                };
-                                control(("view", i).into(), label.into(), label, on_view)
-                                    .debug_selector(move || format!("calendar-view-{label}"))
-                                    .on_click(on(Rc::new(move |c, cx| c.set_view(v, cx))))
-                            })),
-                    ),
+                    .map(|d| {
+                        if narrow {
+                            d.child(self.view_menu(control, colors, cx))
+                        } else {
+                            d.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .ml(rems(4. / 15.))
+                                    .p(rems(2. / 15.))
+                                    .rounded(rems(10. / 15.))
+                                    .border_1()
+                                    .border_color(colors.line)
+                                    .children(views.iter().enumerate().map(|(i, &(v, label))| {
+                                        let on_view = match (v, view) {
+                                            (CalendarView::Week, CalendarView::Days(_)) => true,
+                                            (CalendarView::Agenda(_), CalendarView::Agenda(_)) => {
+                                                true
+                                            }
+                                            _ => v == view,
+                                        };
+                                        control(("view", i).into(), label.into(), label, on_view)
+                                            .debug_selector(move || {
+                                                format!("calendar-view-{label}")
+                                            })
+                                            .on_click(on(Rc::new(move |c, cx| c.set_view(v, cx))))
+                                    })),
+                            )
+                        }
+                    }),
             )
+    }
+
+    /// The narrow header's views, behind one button named for the view shown ("3 Days ▾"): Day,
+    /// 3 Days (a phone's week, readable), Week, Month and List. The menu's rows are a finger
+    /// tall on touch.
+    fn view_menu(
+        &self,
+        control: impl Fn(ElementId, SharedString, &str, bool) -> Press,
+        colors: CalendarColors,
+        cx: &mut Context<Self>,
+    ) -> DropdownMenu {
+        const VIEWS: [(&str, CalendarView, &str); 5] = [
+            ("day", CalendarView::Day, "Day"),
+            ("days-3", CalendarView::Days(3), "3 Days"),
+            ("week", CalendarView::Week, "Week"),
+            ("month", CalendarView::Month, "Month"),
+            ("list", CalendarView::AGENDA, "List"),
+        ];
+        let view = self.view;
+        let shown = |v: CalendarView| match (v, view) {
+            (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
+            _ => v == view,
+        };
+        let name: SharedString = match view {
+            CalendarView::Days(n) if n != 3 => format!("{n} Days").into(),
+            _ => VIEWS
+                .iter()
+                .find(|(_, v, _)| shown(*v))
+                .map_or("View", |(_, _, label)| *label)
+                .into(),
+        };
+        let trigger = control(
+            "calendar-views".into(),
+            format!("{name} ▾").into(),
+            &format!("View: {name}"),
+            false,
+        )
+        .ml(rems(4. / 15.))
+        .border_1()
+        .border_color(colors.line)
+        .debug_selector(|| "calendar-views".into());
+        let this = cx.entity().downgrade();
+        DropdownMenu::new("calendar-view-menu")
+            .trigger(trigger)
+            .accessibility_label("View")
+            .touch(self.options.touch)
+            .align(PopoverAlign::End)
+            .items(
+                VIEWS
+                    .iter()
+                    .map(|&(id, v, label)| PopupMenuItem::new(id, label).checked(shown(v))),
+            )
+            .on_select(move |pick: &MenuSelect, window, cx| {
+                let Some(&(_, v, _)) = VIEWS.iter().find(|(id, _, _)| *id == pick.id.as_ref())
+                else {
+                    return;
+                };
+                this.update(cx, |c, cx| {
+                    c.set_view(v, cx);
+                    c.focus.focus(window, cx);
+                })
+                .ok();
+            })
     }
 
     /// Whether the calendar is laid out for a narrow place: from the width it was last drawn

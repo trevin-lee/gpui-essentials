@@ -257,6 +257,7 @@ fn check_header(touch: bool) {
         for view in [
             CalendarView::Day,
             CalendarView::Week,
+            CalendarView::Days(3),
             CalendarView::Month,
             CalendarView::AGENDA,
             CalendarView::Agenda(1),

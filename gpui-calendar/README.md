@@ -98,9 +98,10 @@ their look.
     period.
 - **Narrow widths:** below 600 pixels the calendar lays itself out for a phone. The header is a
   compact one, drawn from plain elements: a short title ("Wed, Nov 18", "Nov 2026"), Today, the
-  arrows, and Day, Week, Month and List. The gutter narrows, days too narrow for "Mon 16" show the name
-  over the number, "+3 more" becomes "+3", and the month's rows drop their times for the
-  title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
+  arrows, and one button for the views, named for the one shown ("3 Days ▾"): its menu has
+  Day, 3 Days, Week, Month and List, its rows a finger tall on touch. The gutter narrows, days
+  too narrow for "Mon 16" show the name over the number, "+3 more" becomes "+3", and the
+  month's rows drop their times for the title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
   to "L…". `short_title()` gives the short title for a header of your own.
 - **The event panel** (`event_panel`, off by default): opening an event (a double click, Enter,
   or a tap on the selected one on touch) shows its details beside it on the Mac, or in a sheet

@@ -672,21 +672,26 @@ fn a_tap_on_other_empty_time_moves_the_pick_without_making_anything(cx: &mut Tes
 }
 
 #[gpui::test]
-fn a_phone_wide_calendar_still_offers_the_week(cx: &mut TestAppContext) {
+fn a_phone_wide_calendar_picks_its_view_from_a_menu_with_three_days(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     cx.simulate_resize(size(px(390.), px(800.)));
     c.update(cx, |c, cx| c.set_view(CalendarView::Day, cx));
     draw(cx);
     draw(cx);
-    for view in [
-        "calendar-view-Day",
-        "calendar-view-Week",
-        "calendar-view-Month",
-        "calendar-view-List",
-    ] {
-        assert!(cx.debug_bounds(view).is_some(), "no {view}");
-    }
-    let week = cx.debug_bounds("calendar-view-Week").unwrap();
-    tap(cx, week.center());
+    // One button for the views, not a row of them.
+    assert!(cx.debug_bounds("calendar-view-Week").is_none());
+    let pick = |cx: &mut VisualTestContext, item: &'static str| {
+        let menu = cx.debug_bounds("calendar-views").expect("the views button");
+        tap(cx, menu.center());
+        let row = cx.debug_bounds(item).expect("the menu's row");
+        assert!(row.size.height >= px(44.), "{row:?}");
+        tap(cx, row.center());
+    };
+    pick(cx, "menu-item-days-3");
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Days(3));
+    assert_eq!(c.read_with(cx, |c, _| c.visible_days().1), 3);
+    pick(cx, "menu-item-week");
     assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Week);
+    pick(cx, "menu-item-list");
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::AGENDA);
 }
