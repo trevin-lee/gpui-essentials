@@ -9,7 +9,7 @@
 use gpui::{Hsla, Rems, rems, rgb, rgba};
 
 /// Built for iOS or Android, where people use a card with a finger: the theme's touch defaults.
-const fn is_mobile() -> bool {
+pub(crate) const fn is_mobile() -> bool {
     cfg!(any(target_os = "ios", target_os = "android"))
 }
 

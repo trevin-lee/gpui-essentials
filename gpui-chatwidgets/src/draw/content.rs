@@ -39,6 +39,16 @@ pub(crate) struct GlyphElement {
 }
 
 impl GlyphElement {
+    /// The glyph, `size` each way, in `color`.
+    pub fn new(glyph: Glyph, size: Rems, color: Hsla) -> Self {
+        GlyphElement {
+            glyph,
+            size,
+            color,
+            angle: 0.,
+        }
+    }
+
     /// The glyph turned by `angle` radians about its centre.
     pub fn turned(mut self, angle: f32) -> Self {
         self.angle = angle;
@@ -129,12 +139,7 @@ impl RenderOnce for GlyphElement {
 
 impl Draw<'_, '_> {
     pub fn glyph(&self, glyph: Glyph, size: f32, color: Hsla) -> GlyphElement {
-        GlyphElement {
-            glyph,
-            size: self.px(size),
-            color,
-            angle: 0.,
-        }
+        GlyphElement::new(glyph, self.px(size), color)
     }
 
     /// A card's title and subtitle.
