@@ -462,6 +462,40 @@ pub fn click(cx: &mut VisualTestContext, what: impl Into<String>) {
     draw(cx);
 }
 
+/// Sets the rows and clicks at `at` in one update, before the window draws them (in tests every
+/// update ends with a draw; a real window draws on its next frame, after input that came first).
+pub fn click_as_rows_change(
+    cx: &mut VisualTestContext,
+    table: &Entity<TableView>,
+    rows: Vec<Doc>,
+    at: Point<Pixels>,
+) {
+    cx.update(|window, cx| {
+        table.update(cx, |t, cx| t.set_rows(rows, cx));
+        let (button, modifiers, click_count) = (MouseButton::Left, Modifiers::none(), 1);
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button,
+                position: at,
+                modifiers,
+                click_count,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button,
+                position: at,
+                modifiers,
+                click_count,
+            }),
+            cx,
+        );
+    });
+    draw(cx);
+}
+
 pub fn click_with(cx: &mut VisualTestContext, what: impl Into<String>, modifiers: Modifiers) {
     let at = rect(cx, what).center();
     cx.simulate_click(at, modifiers);

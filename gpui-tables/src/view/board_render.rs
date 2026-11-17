@@ -228,7 +228,7 @@ impl TableView {
         let (column, index, card) = self.card_at(at)?;
         let col = self.shown.board.as_ref()?.get(column)?;
         Some((
-            self.rows[col.rows[index]].id.clone(),
+            self.shown_row(*col.rows.get(index)?)?.id.clone(),
             col.key_string(),
             card,
         ))
@@ -254,6 +254,7 @@ impl TableView {
     ) -> AnyElement {
         let t = self.theme.clone();
         let ci = info.index;
+        let shown = self.shown_serial;
         let key = info.key.clone();
         let handle = self.board.list(&key);
         let target = self.board.drag.as_ref().and_then(|d| d.target);
@@ -299,6 +300,9 @@ impl TableView {
                     t.colors.text_muted,
                 ))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    if !this.still_shown(shown) {
+                        return;
+                    }
                     window.focus(&this.focus, cx);
                     this.toggle_column(ci, window, cx);
                 }))
@@ -363,6 +367,9 @@ impl TableView {
             ))
             .child(line("New"))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&this.focus, cx);
                 this.new_card(ci, window, cx);
             }));
@@ -419,6 +426,7 @@ impl TableView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = self.theme.clone();
+        let shown = self.shown_serial;
         let entries: Vec<AnyElement> = folded
             .iter()
             .filter_map(|&ci| {
@@ -464,6 +472,9 @@ impl TableView {
                                 .child(info.count.to_string()),
                         )
                         .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            if !this.still_shown(shown) {
+                                return;
+                            }
                             window.focus(&this.focus, cx);
                             this.toggle_column(ci, window, cx);
                         }))
@@ -588,6 +599,7 @@ impl TableView {
         let empty = r.title.is_empty();
         let words = self.card_words(r);
         let rid = r.id.clone();
+        let shown = self.shown_serial;
         let mut lines: Vec<AnyElement> = Vec::new();
         if let Some(fields) = self.database.database.as_ref() {
             for &pi in &self.shown.card_properties {
@@ -690,6 +702,9 @@ impl TableView {
             )
             .children(lines)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&this.focus, cx);
                 this.set_board_spot(BoardSpot::Card { column, index: ix }, cx);
                 this.open_row(row, window, cx);

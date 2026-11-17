@@ -279,6 +279,9 @@ pub struct TableView {
     pub(crate) focus: FocusHandle,
     pub(crate) dirty: bool,
     pub(crate) shown: Shown,
+    /// Counts the times the lines were worked out, so a draw's handlers can tell whether the
+    /// places they kept are still the lines'.
+    pub(crate) shown_serial: u64,
     pub(crate) list: UniformListScrollHandle,
     /// How far the columns after the title are scrolled sideways, in window pixels.
     pub(crate) scroll_x: Pixels,
@@ -304,6 +307,9 @@ pub struct TableView {
     pub(crate) editor: Option<Editor>,
     /// A row asked for with `rowCreated`, focused when the host hands it back.
     pending_row: Option<String>,
+    /// The focused line's row, read when the rows were first replaced since they were last
+    /// worked out (later the lines' places name other rows): what the focus follows then.
+    focus_before_rows: Option<Option<String>>,
     /// A row whose focus should land in this group (by key) when the rows are worked out
     /// again: a list's row dropped into another group, which a multi-select row may share
     /// with others.
@@ -354,6 +360,7 @@ impl TableView {
             focus: cx.focus_handle(),
             dirty: true,
             shown: Shown::default(),
+            shown_serial: 0,
             list: UniformListScrollHandle::new(),
             scroll_x: px(0.),
             bounds: Rc::default(),
@@ -368,6 +375,7 @@ impl TableView {
             pending_text: None,
             editor: None,
             pending_row: None,
+            focus_before_rows: None,
             focus_group: None,
             board: super::board::Board::default(),
             field: None,
@@ -392,7 +400,7 @@ impl TableView {
     /// them). The rows are worked out again on the next draw.
     pub fn set_docs(&mut self, database: Doc, rows: Vec<Doc>, cx: &mut Context<Self>) {
         self.database = database;
-        self.rows = rows;
+        self.replace_rows(rows);
         self.invalidate(cx);
     }
 
@@ -404,8 +412,42 @@ impl TableView {
 
     /// The rows alone.
     pub fn set_rows(&mut self, rows: Vec<Doc>, cx: &mut Context<Self>) {
-        self.rows = rows;
+        self.replace_rows(rows);
         self.invalidate(cx);
+    }
+
+    /// Replaces the rows, noting first which row the focused line is on, while the lines'
+    /// places are still places in these rows.
+    fn replace_rows(&mut self, rows: Vec<Doc>) {
+        if self.focus_before_rows.is_none() {
+            self.focus_before_rows = Some(self.focused_row_id());
+        }
+        self.rows = rows;
+    }
+
+    /// The row the focused line is on, as the lines were last worked out.
+    fn focused_row_id(&self) -> Option<String> {
+        match self.shown.items.get(self.cell?.item)? {
+            Item::Row { row, .. } => self.rows.get(*row).map(|r| r.id.clone()),
+            _ => None,
+        }
+    }
+
+    /// A row by its place in [`TableView::rows`], as the lines were last worked out: None while
+    /// the rows or the view changed since (until they're worked out again, before the next
+    /// draw), so a place kept from a draw never names another row, or none.
+    pub(crate) fn shown_row(&self, row: usize) -> Option<&Doc> {
+        if self.dirty {
+            return None;
+        }
+        self.rows.get(row)
+    }
+
+    /// Whether the lines are still those worked out as `serial` (a draw's, which its click
+    /// handlers keep): not once the docs or the view changed, as a place kept then may be
+    /// another row's now, or none.
+    pub(crate) fn still_shown(&self, serial: u64) -> bool {
+        !self.dirty && self.shown_serial == serial
     }
 
     /// Shows another of the database's views: a board for a view of type `board`, a list for
@@ -608,10 +650,11 @@ impl TableView {
             return;
         }
         self.dirty = false;
-        let previous_row = self.cell.and_then(|c| match self.shown.items.get(c.item) {
-            Some(Item::Row { row, .. }) => self.rows.get(*row).map(|r| r.id.clone()),
-            _ => None,
-        });
+        self.shown_serial = self.shown_serial.wrapping_add(1);
+        let previous_row = match self.focus_before_rows.take() {
+            Some(id) => id,
+            None => self.focused_row_id(),
+        };
         let previous_item = self
             .cell
             .and_then(|c| self.shown.items.get(c.item).copied());
@@ -962,7 +1005,7 @@ impl TableView {
 
     /// Opens a row's page.
     pub(crate) fn open_row(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(r) = self.rows.get(row) {
+        if let Some(r) = self.shown_row(row) {
             self.emit(
                 TableEvent::OpenRow {
                     row_id: r.id.clone(),
@@ -978,6 +1021,7 @@ impl TableView {
         let Item::Row { row, .. } = *self.shown.items.get(cell.item)? else {
             return None;
         };
+        self.shown_row(row)?;
         let col = self.shown.columns.get(cell.column)?;
         let p = self
             .database
