@@ -442,6 +442,8 @@ pub struct Editor {
     /// The blocks' ids in [`Editor::document`].
     /// The blocks' lasting ids, shared with the embeds, which tell the app theirs.
     ids: Arc<std::sync::Mutex<crate::json::Ids>>,
+    /// The comment anchors whose words are tinted (see [`Editor::highlight_quotes`]).
+    pub(crate) quotes: Vec<(String, String)>,
     /// A selection handle being dragged by touch: the selection's other end, which stays, and
     /// how far the finger is from the end it moves.
     touch_drag: Option<(BlockPosition, Point<Pixels>)>,
@@ -552,6 +554,9 @@ impl Editor {
                     this.refresh_paste_offer(*origin == EditOrigin::Paste, cx);
                     this.refresh_slash(open, cx);
                     this.refresh_mention(open, cx);
+                    if !this.quotes.is_empty() {
+                        this.refresh_tints(cx);
+                    }
                     cx.emit(EditorEvent::Changed);
                 }
                 BlockEditorEvent::SelectionChanged => {
@@ -591,6 +596,7 @@ impl Editor {
             open_on_next_change: false,
             hovered: None,
             ids,
+            quotes: Vec::new(),
             headings,
             embed_heights,
             resizing: None,
@@ -1114,7 +1120,7 @@ impl Editor {
     }
 
     /// The blocks' lasting ids, for reading or giving.
-    fn lock_ids(&self) -> std::sync::MutexGuard<'_, crate::json::Ids> {
+    pub(crate) fn lock_ids(&self) -> std::sync::MutexGuard<'_, crate::json::Ids> {
         self.ids
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2253,7 +2259,7 @@ impl Render for Editor {
 mod tests {
     use super::{COMPACT_INSET, Editor, GUTTER, Options, TOP};
     use gpui::{Entity, TestAppContext, VisualTestContext};
-    use markdown_editor::{BlockKind, BlockPosition, BlockSelection};
+    use markdown_editor::{BlockId, BlockKind, BlockPosition, BlockSelection};
     use std::prelude::rust_2024::test;
 
     fn open<'a>(
@@ -2269,6 +2275,77 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// A comment's quote, tinted from its anchor, follows its words as the text around them is
+    /// edited, and goes when they do; a quote over two lines tints both.
+    #[gpui::test]
+    fn quoted_words_stay_tinted_as_the_text_changes(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "intro\n\n- an **item** here\n\nlast line");
+        let leaf = |editor: &Entity<Editor>, cx: &mut VisualTestContext, ix: usize| {
+            editor.update(cx, |e, cx| {
+                e.state()
+                    .read(cx)
+                    .model()
+                    .document()
+                    .leaves()
+                    .nth(ix)
+                    .unwrap()
+                    .id()
+            })
+        };
+        let item = leaf(&editor, cx, 1);
+        let select = |editor: &Entity<Editor>,
+                      cx: &mut VisualTestContext,
+                      from: (BlockId, usize),
+                      to: (BlockId, usize)| {
+            editor.update(cx, |e, cx| {
+                e.state().update(cx, |s, cx| {
+                    s.set_selection(
+                        BlockSelection::Text {
+                            anchor: BlockPosition::new(from.0, from.1),
+                            head: BlockPosition::new(to.0, to.1),
+                        },
+                        cx,
+                    )
+                    .unwrap();
+                })
+            });
+        };
+        select(&editor, cx, (item, 3), (item, 12));
+        let anchor = editor.update(cx, |e, cx| e.selection_anchor(cx)).unwrap();
+        assert_eq!(anchor.1, "item here");
+        editor.update(cx, |e, cx| e.highlight_quotes(vec![anchor.clone()], cx));
+        draw(cx);
+        let tints = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| e.state().read(cx).tints().to_vec())
+        };
+        assert_eq!(tints(&editor, cx), [(item, 3..12)]);
+        // Typing before the words moves the tint with them.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                s.set_selection(BlockSelection::caret(BlockPosition::new(item, 0)), cx)
+                    .unwrap();
+            })
+        });
+        cx.simulate_input("so ");
+        draw(cx);
+        assert_eq!(tints(&editor, cx), [(item, 6..15)]);
+        // Deleting them takes the tint away.
+        select(&editor, cx, (item, 6), (item, 15));
+        cx.simulate_keystrokes("backspace");
+        draw(cx);
+        assert_eq!(tints(&editor, cx), []);
+        // A quote over two paragraphs tints its line in each.
+        let (intro, last) = (leaf(&editor, cx, 0), leaf(&editor, cx, 2));
+        select(&editor, cx, (intro, 2), (last, 4));
+        let anchor = editor.update(cx, |e, cx| e.selection_anchor(cx)).unwrap();
+        editor.update(cx, |e, cx| e.highlight_quotes(vec![anchor], cx));
+        let tinted = tints(&editor, cx);
+        assert_eq!(tinted.first(), Some(&(intro, 2..5)));
+        assert_eq!(tinted.last(), Some(&(last, 0..4)));
+        editor.update(cx, |e, cx| e.highlight_quotes(Vec::new(), cx));
+        assert_eq!(tints(&editor, cx), []);
     }
 
     /// A comment's anchor: the selection's block by its lasting id and the selected text; going
