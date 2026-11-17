@@ -1,7 +1,8 @@
 //! Charts: nice tick values and short labels, or the host's; a bar chart's bars where Recharts
 //! puts them (grouped, stacked, below a zero line); line and area charts' points, gaps, stacks
-//! and monotone curves; the x value under the pointer; the tooltip following the pointer, a tap
-//! and the keyboard; empty data; and nothing redrawing while idle.
+//! and monotone curves; a pie's slices, their hit test and its donut; the x value (or slice)
+//! under the pointer; the tooltip following the pointer, a tap and the keyboard; empty data; and
+//! nothing redrawing while idle.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,8 +17,9 @@ use gpui::{
 };
 use gpui_core::chart::{
     BarRect, CurveSegment, compact_number, curve_segments, format_value, label_stride, nice_ticks,
+    slice_angles, slice_at,
 };
-use gpui_core::{AreaChart, BarChart, Curve, LineChart, Root};
+use gpui_core::{AreaChart, BarChart, Curve, LineChart, PieChart, Root};
 
 fn plot(w: f32, h: f32) -> Bounds<Pixels> {
     Bounds::new(point(px(0.), px(0.)), size(px(w), px(h)))
@@ -451,6 +453,103 @@ fn the_host_writes_the_values() {
     );
 }
 
+#[test]
+fn slices_share_the_circle_by_value() {
+    let slices = slice_angles(&[1., 1., 2.]);
+    let fractions: Vec<f64> = slices.iter().map(|s| s.fraction).collect();
+    assert_eq!(fractions, [0.25, 0.25, 0.5]);
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+    let quarter = std::f32::consts::FRAC_PI_2;
+    assert!(close(slices[0].start, 0.) && close(slices[0].end, quarter));
+    assert!(close(slices[1].start, quarter) && close(slices[1].end, quarter * 2.));
+    assert!(close(slices[2].start, quarter * 2.) && close(slices[2].end, quarter * 4.));
+    assert!(close(slices[2].middle(), quarter * 3.));
+}
+
+#[test]
+fn zero_negative_and_missing_values_get_no_slice() {
+    let slices = slice_angles(&[3., 0., -2., f64::NAN, 1.]);
+    let kept: Vec<(usize, f64)> = slices.iter().map(|s| (s.index, s.fraction)).collect();
+    assert_eq!(kept, [(0, 0.75), (4, 0.25)]);
+    assert!(slice_angles(&[]).is_empty());
+    assert!(slice_angles(&[0., -1., f64::INFINITY]).is_empty());
+    let none = PieChart::new("p").slice("a", "A", 0.).slice("b", "B", -3.);
+    assert!(none.angles().is_empty());
+    assert_eq!(none.accessibility_summary(), "Pie chart, no data");
+    assert_eq!(
+        none.slice_at(plot(200., 200.), point(px(120.), px(80.))),
+        None
+    );
+}
+
+#[test]
+fn a_point_hits_the_slice_it_is_in() {
+    let slices = slice_angles(&[1., 1., 2.]);
+    let c = point(px(100.), px(100.));
+    let (inner, outer) = (px(0.), px(80.));
+    let at = |x: f32, y: f32| slice_at(&slices, c, inner, outer, point(px(x), px(y)));
+    // Counterclockwise from three o'clock: the top right, the top left, then the bottom half.
+    assert_eq!(at(130., 80.), Some(0));
+    assert_eq!(at(70., 80.), Some(1));
+    assert_eq!(at(100., 150.), Some(2));
+    assert_eq!(
+        at(130., 120.),
+        Some(2),
+        "just below three o'clock is the last slice"
+    );
+    assert_eq!(at(179., 99.), Some(0), "just above it, the first");
+    assert_eq!(at(100., 181.), None, "outside the pie");
+    assert_eq!(at(100., 100.), Some(0), "the centre of a pie is in it");
+    // A donut's hole holds nothing.
+    let ring = |x: f32, y: f32| slice_at(&slices, c, px(48.), outer, point(px(x), px(y)));
+    assert_eq!(ring(110., 100.), None);
+    assert_eq!(ring(95., 40.), Some(1));
+    assert_eq!(
+        slice_at(&[], c, inner, outer, point(px(110.), px(90.))),
+        None
+    );
+}
+
+#[test]
+fn the_pie_fills_eighty_percent_of_the_shorter_side() {
+    let area = plot(300., 200.);
+    let (centre, inner, outer) = PieChart::new("p").radii(area);
+    assert_eq!(
+        (centre, inner, outer),
+        (point(px(150.), px(100.)), px(0.), px(80.))
+    );
+    let (_, inner, _) = PieChart::new("p").donut(true).radii(area);
+    assert_eq!(inner, px(48.), "a donut's hole is 60% of it");
+    let chart = PieChart::new("p").slice("a", "A", 1.).slice("b", "B", 3.);
+    assert_eq!(chart.slice_at(area, point(px(160.), px(90.))), Some(0));
+    assert_eq!(chart.slice_at(area, point(px(140.), px(140.))), Some(1));
+}
+
+#[test]
+fn a_pie_says_each_slice_and_its_share() {
+    let chart = PieChart::new("p")
+        .slice("chrome", "Chrome", 275.)
+        .slice("safari", "Safari", 200.)
+        .slice("none", "None", 0.)
+        .slice("firefox", "Firefox", 25.);
+    assert_eq!(
+        chart.accessibility_summary(),
+        "Pie chart: Chrome 275, 55%; Safari 200, 40%; Firefox 25, 5%"
+    );
+    let thirds = PieChart::new("p").slice("a", "A", 1.).slice("b", "B", 2.);
+    assert_eq!(
+        thirds.accessibility_summary(),
+        "Pie chart: A 1, 33.3%; B 2, 66.7%"
+    );
+    let donut = chart
+        .donut(true)
+        .center_label("500", "Visitors")
+        .format_value(|v| format!("${v}").into());
+    let said = donut.accessibility_summary();
+    assert!(said.starts_with("Donut chart: Chrome $275, 55%;"), "{said}");
+    assert!(said.ends_with(". 500 Visitors"), "{said}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // In a window
 
@@ -459,7 +558,23 @@ enum Kind {
     Bar,
     Line,
     Area,
+    Donut,
     Empty,
+    EmptyPie,
+}
+
+/// A donut of four slices; a zero and a negative value in among them have none.
+fn donut() -> PieChart {
+    PieChart::new("sales")
+        .slice("jan", "Jan", 186.)
+        .slice("zero", "Nothing", 0.)
+        .slice("feb", "Feb", 305.)
+        .slice("loss", "Loss", -40.)
+        .slice("mar", "Mar", 237.)
+        .slice("apr", "Apr", 73.)
+        .donut(true)
+        .center_label("801", "Visitors")
+        .legend(true)
 }
 
 struct Panel {
@@ -487,6 +602,11 @@ impl Render for Panel {
                 .series("desktop", "Desktop", DESKTOP)
                 .series("mobile", "Mobile", MOBILE)
                 .dots(true)
+                .into_any_element(),
+            Kind::Donut => donut().into_any_element(),
+            Kind::EmptyPie => PieChart::new("sales")
+                .slice("a", "A", 0.)
+                .slice("b", "B", -1.)
                 .into_any_element(),
             Kind::Area => AreaChart::new("sales")
                 .categories(MONTHS)
@@ -539,6 +659,16 @@ impl Opened<'_> {
             p.origin.x + px(12.) + (p.size.width - px(24.)) / 3. * i as f32
         };
         point(x + px(dx), p.center().y)
+    }
+
+    /// A point in slice `k` of the donut, halfway across its ring, `turn` degrees round from
+    /// its middle.
+    fn in_slice(&mut self, k: usize, turn: f32) -> Point<Pixels> {
+        let chart = donut();
+        let (centre, inner, outer) = chart.radii(self.plot());
+        let angle = chart.angles()[k].middle() + turn.to_radians();
+        let r = (inner + outer) / 2.;
+        point(centre.x + r * angle.cos(), centre.y - r * angle.sin())
     }
 
     fn hover(&mut self, at: Point<Pixels>) {
@@ -722,4 +852,75 @@ fn an_area_chart_redraws_only_for_another_x(cx: &mut TestAppContext) {
     let at = o.at(1, 0.);
     o.hover(at);
     assert_eq!(o.tooltip(), Some(1));
+}
+
+#[gpui::test]
+fn a_donut_shows_the_slice_under_the_pointer(cx: &mut TestAppContext) {
+    let mut o = open(cx, Kind::Donut);
+    let at = o.in_slice(1, 0.);
+    o.hover(at);
+    assert_eq!(o.tooltip(), Some(1));
+    let at = o.in_slice(3, 10.);
+    o.hover(at);
+    assert_eq!(o.tooltip(), Some(3));
+    // The hole and the corners hold no slice.
+    let centre = o.plot().center();
+    o.hover(centre);
+    assert_eq!(o.tooltip(), None);
+    let at = o.in_slice(0, 0.);
+    o.tap(at);
+    assert_eq!(o.tooltip(), Some(0), "a tap shows it too");
+    o.tap(point(px(5.), px(5.)));
+    assert_eq!(o.tooltip(), None);
+}
+
+#[gpui::test]
+fn the_keyboard_moves_between_slices(cx: &mut TestAppContext) {
+    let mut o = open(cx, Kind::Donut);
+    o.keys("tab right");
+    assert_eq!(o.tooltip(), Some(0));
+    o.keys("right right right right");
+    assert_eq!(
+        o.tooltip(),
+        Some(3),
+        "four slices: the zero and the loss have none"
+    );
+    o.keys("left");
+    assert_eq!(o.tooltip(), Some(2));
+    o.keys("home");
+    assert_eq!(o.tooltip(), Some(0));
+    o.keys("escape");
+    assert_eq!(o.tooltip(), None);
+}
+
+#[gpui::test]
+fn a_donut_redraws_only_for_another_slice(cx: &mut TestAppContext) {
+    let mut o = open(cx, Kind::Donut);
+    for _ in 0..10 {
+        assert_eq!(o.frame(), 0, "asked for a frame before anything happened");
+    }
+    let at = o.in_slice(1, 0.);
+    o.hover(at);
+    assert_eq!(o.tooltip(), Some(1));
+    for _ in 0..30 {
+        assert_eq!(o.frame(), 0, "asked for a frame with the tooltip up");
+    }
+    let shown = o.draws.get();
+    for turn in [-15., -5., 5., 15.] {
+        let at = o.in_slice(1, turn);
+        o.hover(at);
+    }
+    assert_eq!(o.draws.get(), shown, "redrew while on the same slice");
+    let at = o.in_slice(2, 0.);
+    o.hover(at);
+    assert!(o.draws.get() > shown, "didn't redraw for another slice");
+}
+
+#[gpui::test]
+fn a_pie_with_nothing_above_zero_says_no_data(cx: &mut TestAppContext) {
+    let mut o = open(cx, Kind::EmptyPie);
+    assert!(o.vcx.debug_bounds("sales-empty").is_some());
+    assert!(o.vcx.debug_bounds("sales-plot").is_none());
+    o.keys("tab right");
+    assert_eq!(o.tooltip(), None);
 }
