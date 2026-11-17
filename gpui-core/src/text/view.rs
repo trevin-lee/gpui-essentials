@@ -258,7 +258,7 @@ impl TextView {
     }
 
     /// A caret in `color` after the text's last character (the last source's, with
-    /// [`blocks`](Self::blocks); at the start of its line when that source is empty), as a reply
+    /// [`blocks`](Self::blocks), or the one before it when that source is empty), as a reply
     /// being written shows. It's only drawn, never laid out, so taking it away can't move the
     /// text. It doesn't blink: a host that wants it to sets and clears it on a timer of its own.
     pub fn trailing_caret(mut self, color: Option<Hsla>) -> Self {
@@ -1325,6 +1325,8 @@ impl Element for ViewElement {
         let state = self.state.clone();
         let tv_style = self.style.clone();
         let fingerprint = self.fingerprint;
+        // An empty view with a caret is a line tall, so the caret is inside it.
+        let caret = self.caret.is_some();
         let text_style = window.text_style();
         let id = window.request_measured_layout(style, move |known, available, window, cx| {
             let width = known.width.or(match available.width {
@@ -1352,7 +1354,13 @@ impl Element for ViewElement {
                     l
                 }),
             };
-            size(width, l.height)
+            let height = if caret && l.leaves.is_empty() {
+                l.height
+                    .max(text_style.line_height_in_pixels(window.rem_size()))
+            } else {
+                l.height
+            };
+            size(width, height)
         });
         (id, ())
     }
@@ -1506,17 +1514,23 @@ impl Element for ViewElement {
             });
         }
 
-        // The trailing caret: after the last source's last character, or where its first line
-        // would start. Drawn over the text, never laid out.
-        if let (Some(color), Some((leaves, at, line))) = (self.caret, &l.tail) {
-            let caret = match l.leaves.get(leaves.clone()).and_then(|ls| ls.last()) {
+        // The trailing caret: after the last source's last character; with that source empty,
+        // after the last character before it; with no text at all, at the start. Drawn over the
+        // text, never laid out (an empty view is a line tall while it has one).
+        if let (Some(color), Some((leaves, _, line))) = (self.caret, &l.tail) {
+            let last = l
+                .leaves
+                .get(leaves.clone())
+                .and_then(|ls| ls.last())
+                .or(l.leaves.last());
+            let caret = match last {
                 Some(leaf) => {
                     let c = leaf
                         .layout
                         .caret(leaf.paragraph.text.len(), Affinity::Downstream);
                     Bounds::new(o + leaf.origin + c.origin, c.size)
                 }
-                None => Bounds::new(o + *at, size(px(2.), *line)),
+                None => Bounds::new(o, size(px(2.), *line)),
             };
             if caret.intersects(&seen) {
                 window.paint_quad(fill(caret, color));
