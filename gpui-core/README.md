@@ -45,6 +45,12 @@ item](docs/gallery.png)
   the ends. The row keeps its length as the page moves. When it doesn't fit its width it drops
   Previous's and Next's words, then shows only "Page 3 of 10" between the arrows (`compact(true)`
   always). `touch(true)` makes its links 44 points.
+- **HoverCard.** `HoverCard::new(id).trigger(link).child(…)` shows a card of more about its
+  trigger, hung from it like a Popover, once the pointer has rested on it for `open_delay`
+  (700 ms) and at once while the trigger has the focus, since nothing works by hover alone. It
+  hides `close_delay` (300 ms) after the pointer leaves the trigger and the card, when the focus
+  leaves, on Escape and on a press outside. It never takes the focus, and keeps whether it's
+  shown itself.
 - **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
   the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
   monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab
