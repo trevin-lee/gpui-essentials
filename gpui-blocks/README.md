@@ -16,6 +16,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   tables you can edit, pictures, and a table of contents that follows the headings.
 - **Slash menu:** type `/` at the start of a line or after a space. Narrow the list by typing,
   pick with ↑ ↓ and Enter, and close it with Esc.
+- **@-mentions:** type `@` for the people, agents, pages and dates your app offers, and pick
+  one to put a mention chip in the text.
 - **Side menu:** hover a block for its handles. "+" adds a line below with the menu open, and the
   grip drags the block. A click on the grip opens the block's menu: Turn into (the slash menu's
   blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips to select several blocks
@@ -231,6 +233,54 @@ the address `doc:id`) offers to show it as a mention, a sub-page or an embed.
 `insert_mention` or `insert_embed`. A click on a link sends `DocClicked`, and the editor
 never opens anything itself. After your documents change, call `editor.refresh_docs(cx)` to
 draw the links again.
+
+## Mentions
+
+Typing `@` at the start of a line, after a space or after `(` opens a menu of who and what can
+be mentioned, grouped (People, Agents, Pages, Dates). Typing narrows it, ↑ ↓ and Enter (or a
+click or tap) pick, and Esc closes it. Picking puts a mention in place of the `@…`, as one undo
+step. A mention is a link, so other Markdown tools show a link, and it's drawn as a chip the
+caret steps over:
+
+```markdown
+Ask [Researcher](agent:researcher) about [Avery Lin](person:avery) and [Q4 roadmap](doc:roadmap)
+before [Nov 20, 2026](date:2026-11-20).
+```
+
+Your app says who and what with `Options::mentions`; the editor knows nothing about people or
+agents. It's asked for candidates as the query is typed, keeps those whose title holds it, and
+adds the dates (Today, Tomorrow, Yesterday, Next Friday and so on, or a typed `2026-12-01`) when
+you give it today's date:
+
+```rust,no_run
+use gpui::App;
+use gpui_blocks::Options;
+use gpui_blocks::mentions::{Date, Mention, MentionKind, Mentions};
+
+struct Team;
+
+impl Mentions for Team {
+    fn candidates(&self, _query: &str, _cx: &App) -> Vec<Mention> {
+        vec![
+            Mention::new(MentionKind::Person, "avery", "Avery Lin").hint("Design"),
+            Mention::new(MentionKind::Agent, "researcher", "Researcher"),
+            Mention::new(MentionKind::Page, "roadmap", "Q4 roadmap").icon("🗺"),
+        ]
+    }
+
+    // Today where the person is; leave it out for no dates.
+    fn today(&self, _cx: &App) -> Option<Date> {
+        Date::new(2026, 11, 18)
+    }
+}
+
+let options = Options::default().mentions(Team);
+```
+
+A click on a person, agent or date chip sends `EditorEvent::MentionClicked { kind, id }`; a
+page's is the `DocClicked` of [links to other documents](#links-to-other-documents). Without
+`Options::mentions`, `@` is an ordinary character, and mentions already in a document are still
+drawn as chips.
 
 ## As JSON
 

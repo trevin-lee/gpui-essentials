@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use gpui::*;
 use gpui_blocks::docs::{DocInfo, Docs};
+use gpui_blocks::mentions::{Date, Mention, MentionKind, Mentions};
 use gpui_blocks::slash::{SlashAction, SlashItem};
 use gpui_blocks::widget::{Widget, fenced};
 use gpui_blocks::{Editor, EditorEvent, Options};
@@ -162,6 +163,7 @@ impl Root {
                 .icon("✦"),
             )
             .docs(DemoDocs)
+            .mentions(DemoMentions)
             .images(local_images(file.clone()))
             .embeds(|embed, _, cx| (embed.view == "board").then(|| demo_board(cx)));
         let editor = cx.new(|cx| Editor::with_options(source, options, window, cx));
@@ -170,6 +172,7 @@ impl Root {
             // other document to link to, and makes untitled pages that go nowhere.
             match event {
                 EditorEvent::DocClicked { id } => eprintln!("open the document {id}"),
+                EditorEvent::MentionClicked { kind, id } => eprintln!("show the {kind:?} {id}"),
                 EditorEvent::NewPageRequested => {
                     this.pages += 1;
                     let id = format!("new-{}", this.pages);
@@ -673,6 +676,16 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                 settle(window, cx).await;
             }
             // The find bar with its replace row, finding "the".
+            // The @ menu, open at the start of the page.
+            "mention" => {
+                let _ = cx.update_window(window, |_, window, cx| {
+                    root.update(cx, |root, cx| {
+                        root.editor.update(cx, |e, cx| e.focus(window, cx));
+                    });
+                    window.dispatch_keystroke(Keystroke::parse("@").unwrap(), cx);
+                });
+                settle(window, cx).await;
+            }
             "find" | "phone" => {
                 let _ = cx.update_window(window, |_, window, cx| {
                     root.update(cx, |root, cx| {
@@ -906,6 +919,35 @@ impl Docs for DemoDocs {
             _ if id.starts_with("new-") => Some(DocInfo::new("Untitled")),
             _ => None,
         }
+    }
+}
+
+/// Who and what the example's `@` offers: a real app answers from its people, its agents and
+/// its documents.
+struct DemoMentions;
+
+impl Mentions for DemoMentions {
+    fn candidates(&self, _: &str, _: &App) -> Vec<Mention> {
+        use MentionKind::*;
+        vec![
+            Mention::new(Person, "avery", "Avery Lin").hint("Design"),
+            Mention::new(Person, "sam", "Sam Rivera").hint("Operations"),
+            Mention::new(Person, "priya", "Priya Raman").hint("Engineering"),
+            Mention::new(Agent, "researcher", "Researcher").hint("Reads and summarises"),
+            Mention::new(Agent, "scheduler", "Scheduler").hint("Finds a time"),
+            Mention::new(Page, "roadmap", "Q4 roadmap").icon("🗺"),
+            Mention::new(Page, "last-week", "Notes from last week").icon("🗒"),
+        ]
+    }
+
+    /// Today in UTC: an app gives the person's own day.
+    fn today(&self, _: &App) -> Option<Date> {
+        let days = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs()
+            / 86_400;
+        Some(Date::new(1970, 1, 1)?.add_days(days as i64))
     }
 }
 
