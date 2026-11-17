@@ -317,9 +317,15 @@ impl Calendar {
                 self.select(Some(Selection::Event(id.clone())), cx);
                 self.open_event(id.clone(), cx);
             }
-            A11yTarget::Day(date) | A11yTarget::More(date) => {
+            A11yTarget::Day(date) => {
                 self.set_view(CalendarView::Day, cx);
                 self.go_to(*date, cx);
+            }
+            A11yTarget::More(date) => {
+                if !self.open_more(*date, cx) {
+                    self.set_view(CalendarView::Day, cx);
+                    self.go_to(*date, cx);
+                }
             }
             A11yTarget::Crowd(ids) => {
                 if let Some(id) = ids.first() {

@@ -22,8 +22,9 @@ their look.
   "+N more", which opens the row; open or not, it never takes more than 40% of the calendar
   under the day names, so a crowded day can't push the hours away), hour lines, and a line at the current time with the time in the
   gutter. The grid opens with the current time a third of the way down. The month shows spans for
-  all-day and multi-day events, a dot, time and title for the rest, and "+N more", which opens
-  that day. A span is one bar across a week's days; where it goes on past the week (into the
+  all-day and multi-day events, a dot, time and title for the rest, and "+N more", which lists
+  all that day's events in a popover beside it (a sheet on touch), as Google Calendar does; a
+  click on one opens it. `open_more(date)` opens it from your app. A span is one bar across a week's days; where it goes on past the week (into the
   month's next row, or the next period), that end is square with a chevron pointing on.
 - **Agenda:** a list of the days that have events (and today), each under a header that stays
   at the top while its day scrolls by. A row has the time (or "All day", "Day 2 of 3",
