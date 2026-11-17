@@ -58,6 +58,11 @@ item](docs/gallery.png)
   `.icon(name)` (or `Kbd::icon_only(name)`). `KbdGroup::keys(["⌘", "K"])` or
   `KbdGroup::new().child(Kbd…)` sets a shortcut's keys four pixels apart. In a narrow space a
   long key name ends in an ellipsis and a group is clipped at its edge.
+- **Separator.** `Separator::horizontal()` or `Separator::vertical()`: shadcn's one-pixel
+  line in the border colour, across its parent or down the flex row it's in. It's decorative
+  (nothing to assistive tech) unless `.decorative(false)`, which makes it a separator with its
+  orientation (AccessKit's `Role::Splitter`, its name for ARIA's separator); give those an
+  `.id(…)` of their own when there are several side by side.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
