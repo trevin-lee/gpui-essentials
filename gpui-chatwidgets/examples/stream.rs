@@ -11,7 +11,9 @@
 //!
 //! `--cps` is characters a second (240, about 60 tokens a second, unless given) and `--delta`
 //! characters a delta (6). With `--shots <dir>` it draws the reply from a window that's never
-//! shown, saves a picture mid-stream and one after the message replaced the draft, then quits.
+//! shown, saves a picture mid-stream, one after the message replaced the draft, and one of a
+//! reply with code being written, its code blocks' Copy buttons shown as for a finger, then
+//! quits.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -25,6 +27,8 @@ use gpui_core::text::TextViewStyle;
 
 const LONG: &str = include_str!("replies/long.md");
 const SHORT: &str = "Here's the week at a glance, with the two days that still need a **decision** marked. Pick one and I'll book it.";
+/// A reply with code, cut off inside its second code block: for the shot of the Copy buttons.
+const CODE: &str = "Stop the old timer first:\n\n```bash\nsudo systemctl disable --now backup.timer\n```\n\nThen point the job at the new server:\n\n```ini\n[backup]\ntarget = backup-02:/srv/nightly\nkeep = 14\n";
 const CARD: &str = r#"root = Stack([CardHeader("Your week"), TextContent("Two days still need a decision."), Buttons([Button("Book Tuesday"), Button("Book Thursday", @ToAssistant("Book Thursday"), "secondary")])])"#;
 
 struct Options {
@@ -173,6 +177,7 @@ impl Chat {
 async fn stream(
     chat: &Entity<Chat>,
     text: &str,
+    touch: bool,
     o: &Options,
     on_progress: &mut dyn FnMut(f32, &mut AsyncApp),
     cx: &mut AsyncApp,
@@ -183,6 +188,7 @@ async fn stream(
             .style(style())
             .selectable(true)
             .on_link_click(|url, _, _, _| println!("open: {url}"))
+            .touch(touch)
     });
     chat.update(cx, |c, cx| {
         c.messages.push(Message::Reply(draft.clone()));
@@ -280,7 +286,7 @@ fn main() {
                 .timer(Duration::from_millis(300))
                 .await;
             // The long reply: written, ended, then its message (the same text) replaces it.
-            let draft = stream(&chat, LONG, &o, &mut progress, cx).await;
+            let draft = stream(&chat, LONG, false, &o, &mut progress, cx).await;
             draft.update(cx, |d, cx| d.end(cx));
             if o.shots.is_none() {
                 cx.background_executor()
@@ -290,6 +296,14 @@ fn main() {
             draft.update(cx, |d, cx| d.finish(LONG, cx));
             if let Some(dir) = &o.shots {
                 shot(window, dir, "stream-final", cx);
+                // A reply with code, still being written: Copy on its settled code block and
+                // on the open one, always shown for a finger.
+                chat.update(cx, |c, cx| {
+                    c.messages.push(Message::Owner("And the commands?"));
+                    cx.notify();
+                });
+                let _ = stream(&chat, CODE, true, &o, &mut |_, _| {}, cx).await;
+                shot(window, dir, "stream-code", cx);
                 cx.update(|cx| cx.quit());
                 return;
             }
@@ -301,7 +315,7 @@ fn main() {
                     .push(Message::Owner("And what's left to decide this week?"));
                 cx.notify();
             });
-            let _ = stream(&chat, SHORT, &o, &mut |_, _| {}, cx).await;
+            let _ = stream(&chat, SHORT, false, &o, &mut |_, _| {}, cx).await;
             let _ = cx.update_window(window, |_, window, cx| {
                 chat.update(cx, |c, cx| {
                     let host: Rc<dyn CardHost> = Rc::new(Host);
