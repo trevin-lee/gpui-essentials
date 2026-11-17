@@ -53,6 +53,11 @@ item](docs/gallery.png)
   each with a close button. `id(…)` replaces one shown with the same id; `description(…)` adds a
   muted line. An error is an alert to assistive tech, the rest a status. Nothing redraws while
   one shows but its one timer.
+- **Card.** `Card::new().title(…).description(…).action(element).child(…).footer(element)`:
+  a raised panel in the theme's `card` colours with a border and the large radius. The title
+  and description wrap beside the action at the top right; the children are its content; the
+  footer is a row along the bottom on a quieter fill. `small()` tightens its spacing. It draws
+  only the parts it's given and takes no input of its own.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
