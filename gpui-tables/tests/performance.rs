@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use gpui_tables::engine::{self, Context, query, time};
+use gpui_tables::engine::{self, Context, RowText, query, query_with, time};
 use gpui_tables::*;
 use serde_json::json;
 
@@ -193,6 +193,30 @@ fn filtering_sorting_and_grouping_10000_rows() {
     let out = time("sort by title", 25, || query(&db, &by_title, &rows, &cx));
     let folded = |i: usize| rows[i].title.to_lowercase();
     assert!(out.rows.windows(2).all(|w| folded(w[0]) <= folded(w[1])));
+    // As a view sorts again with the same rows: their titles lowercased once and kept.
+    let mut kept = RowText::new();
+    let again = time("sort by title, the titles kept", 25, || {
+        query_with(&db, &by_title, &rows, &cx, &mut kept)
+    });
+    assert_eq!(again.rows, out.rows);
+
+    // A text filter alone, each row's note lowercased then, and again with them kept, as a
+    // view filters again while a value is typed.
+    for (op, value) in [
+        (FilterOp::Contains, "harbour"),
+        (FilterOp::DoesNotContain, "zzz"),
+    ] {
+        let mut by_note = view();
+        by_note.filter = Some(Filter::condition("note", op.clone(), json!(value)));
+        let label = format!("filter by {op} {value:?} alone");
+        let out = time(&label, 25, || query(&db, &by_note, &rows, &cx));
+        assert!(!out.rows.is_empty());
+        let mut kept = RowText::new();
+        let again = time(&format!("{label}, the notes kept"), 25, || {
+            query_with(&db, &by_note, &rows, &cx, &mut kept)
+        });
+        assert_eq!(again.rows, out.rows);
+    }
 
     let mut two = view();
     two.sort = vec![Sort::ascending("stage"), Sort::descending("n")];
