@@ -782,3 +782,60 @@ fn a_link_defined_further_down_resolves_while_the_reply_streams() {
     press(&mut o);
     assert_eq!(o.links.borrow().as_slice(), ["https://x.test/docs"]);
 }
+
+#[test]
+fn an_empty_tail_keeps_the_caret_after_the_last_character() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    let caret = |o: &mut Opened| {
+        let c = carets(o.cx);
+        assert_eq!(c.len(), 1, "{c:?}");
+        c[0]
+    };
+    // Nothing yet: the caret at the start, inside a draft a line tall.
+    let draft = o.cx.debug_bounds("d:draft").unwrap();
+    let c = caret(&mut o);
+    assert_eq!(shown(&mut o), "");
+    assert!(draft.size.height > px(20.), "{draft:?}");
+    assert!(c.left() <= draft.left() + px(1.), "{c:?} in {draft:?}");
+    assert!(
+        c.top() >= draft.top() && c.bottom() <= draft.bottom(),
+        "{c:?} in {draft:?}"
+    );
+    for delta in deltas("A settled paragraph.\n", 4) {
+        append(&mut o, &delta);
+    }
+    assert_eq!(o.draft.read_with(o.cx, |d, _| d.stats().settled), 0);
+    let before = o.cx.debug_bounds("d:draft").unwrap();
+    let drawn = glyphs(o.cx);
+    // A table's first row settles the paragraph and waits for its delimiter row: the open
+    // tail is empty, and the caret stays after the paragraph's last character, on its line.
+    append(&mut o, "\n| a | b |\n");
+    assert_eq!(o.draft.read_with(o.cx, |d, _| d.stats().settled), 1);
+    assert_eq!(shown(&mut o), "");
+    assert_eq!(glyphs(o.cx), drawn, "nothing moved");
+    let after = o.cx.debug_bounds("d:draft").unwrap();
+    assert_eq!(after, before, "the height didn't change");
+    let c = caret(&mut o);
+    let right = drawn
+        .iter()
+        .map(|g| g[0] + g[2])
+        .max()
+        .expect("the paragraph's glyphs");
+    let x = (f32::from(c.left()) * 100.) as i64;
+    assert!(x >= right - 100 && x <= right + 400, "{c:?} after {right}");
+    assert!(
+        c.top() >= after.top() && c.bottom() <= after.bottom(),
+        "{c:?} in {after:?}"
+    );
+    // Select All copies the text, and nothing that isn't in it.
+    o.cx.simulate_click(after.origin + point(px(2.), px(8.)), Modifiers::none());
+    o.cx.simulate_keystrokes("cmd-a");
+    let all = copied(&mut o);
+    assert_eq!(all, "A settled paragraph.");
+    assert!(!all.contains('\u{200B}'), "{all:?}");
+    // Nothing draws while the empty tail waits.
+    o.cx.executor().advance_clock(Duration::from_secs(10));
+    o.cx.run_until_parked();
+    assert_eq!(o.cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
+}

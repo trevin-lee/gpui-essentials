@@ -319,9 +319,11 @@ A selection in the settled blocks stays while the draft goes on being written.
 In the open block:
 
 - **A steady caret** (gpui-core's `trailing_caret`, a bar in the text's colour) after the text's
-  last character, in a code block or a list item too. It's drawn over the text, never laid out,
-  so it can't move the text, and its going when the draft ends moves nothing. It doesn't blink
-  or fade: nothing draws while no text comes, and nothing draws after the draft ends.
+  last character, in a code block or a list item too. When nothing in the open block shows yet
+  (a block just settled), it stays after the last character before it, on that line; with no
+  text at all, at the start of a line. It's drawn over the text, never laid out, so it can't
+  move the text, and its going when the draft ends moves nothing. It doesn't blink or fade:
+  nothing draws while no text comes, and nothing draws after the draft ends.
 - **Emphasis, strikethrough and inline code open on the last line are closed for now**:
   `**bold` draws bold, and the rest of the text never flips bold and back. A marker with
   nothing after it yet isn't drawn.
@@ -333,8 +335,8 @@ In the open block:
   row waits for its delimiter row**, so it doesn't show as text first.
 
 **The height only grows while the draft is written**: should the open block lay out shorter for
-a moment (a caret's line turning into a heading), the space it had is kept until the next text
-fills it. At a new width the tallest so far starts again.
+a moment (a line's `1` becoming `1.`, which waits for its words), the space it had is kept
+until the next text fills it. At a new width the tallest so far starts again.
 
 ### When it ends
 
