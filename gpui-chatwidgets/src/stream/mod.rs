@@ -4,14 +4,23 @@ mod doc;
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::text::{TextView, TextViewStyle};
+use gpui_core::text::{CodeBlock, TextView, TextViewStyle};
+use gpui_core::{ActiveTheme as _, Press};
 
+use crate::draw::{Glyph, GlyphElement};
 use doc::{Doc, display, trim_blank_lines};
 
 type OnLink = Rc<dyn Fn(&str, &Modifiers, &mut Window, &mut App)>;
+
+/// How long a code block's Copy button says "Copied".
+const COPIED_FOR: Duration = Duration::from_millis(1500);
+
+/// Apple's minimum touch target, in points per side.
+const TOUCH_HIT: f32 = 44.;
 
 /// An agent's reply in Markdown, drawn as it streams in: the host makes one when a reply starts
 /// (a chat server's draft), feeds it the text as it comes ([`append`](Self::append), or
@@ -38,6 +47,11 @@ type OnLink = Rc<dyn Fn(&str, &Modifiers, &mut Window, &mut App)>;
 ///
 /// Text can be selected across blocks, and a selection in the finished blocks stays while the
 /// draft goes on being written.
+///
+/// Each code block has a Copy button in its top-right corner, as a card's code block has: shown
+/// while the pointer is over the block, and always for touch ([`touch`](Self::touch)). It
+/// copies the code without its fences, what's there so far in a code block being written, and
+/// says "Copied" for a moment.
 pub struct StreamingMarkdown {
     id: SharedString,
     style: TextViewStyle,
@@ -54,6 +68,12 @@ pub struct StreamingMarkdown {
     tallest: Rc<Cell<(Pixels, Pixels)>>,
     /// Times the open tail was read again, for [`StreamStats`].
     tail_reads: usize,
+    /// Whether it's used with a finger: Copy buttons always show and take 44-point presses.
+    touch: bool,
+    /// The code block just copied (its source's key and its place in it), while it says so.
+    copied: Option<(u64, usize)>,
+    /// Takes `copied` away.
+    copied_timer: Option<Task<()>>,
 }
 
 /// What a [`StreamingMarkdown`] has done, for tests and benchmarks.
@@ -87,7 +107,17 @@ impl StreamingMarkdown {
             tail: None,
             tallest: Rc::default(),
             tail_reads: 0,
+            touch: crate::theme::is_mobile(),
+            copied: None,
+            copied_timer: None,
         }
+    }
+
+    /// Whether it's used with a finger (by default on iOS and Android): its code blocks' Copy
+    /// buttons always show, rather than on hover, and take presses across 44 points.
+    pub fn touch(mut self, touch: bool) -> StreamingMarkdown {
+        self.touch = touch;
+        self
     }
 
     /// The Markdown's layout: the same style the host draws its finished messages with.
@@ -207,6 +237,21 @@ impl StreamingMarkdown {
         &self.doc.text[..self.doc.settled]
     }
 
+    /// Copies a code block's code, and says so for a moment.
+    fn copy(&mut self, at: (u64, usize), code: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
+        self.copied = Some(at);
+        self.copied_timer = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(COPIED_FOR).await;
+            this.update(cx, |this, cx| {
+                this.copied = None;
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.dirty = true;
         cx.notify();
@@ -248,7 +293,7 @@ impl StreamingMarkdown {
 }
 
 impl Render for StreamingMarkdown {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.update() {
             window.request_animation_frame();
         }
@@ -266,6 +311,14 @@ impl Render for StreamingMarkdown {
         if let Some(f) = self.on_link.clone() {
             view = view.on_link_click(move |url, m, window, cx| f(url, m, window, cx));
         }
+        let copy = CopyButton {
+            id: self.id.clone(),
+            this: cx.entity().downgrade(),
+            copied: self.copied,
+            touch: self.touch,
+            style: self.style.code_block.clone(),
+        };
+        view = view.code_block_overlay(move |code, window, cx| copy.over(code, window, cx));
         // While it's being written its height never goes down: the tallest it's been at this
         // width is kept.
         let (_, tallest) = self.tallest.get();
@@ -298,5 +351,85 @@ impl Render for StreamingMarkdown {
             .min_w_0()
             .when(writing, |d| d.min_h(tallest))
             .child(content)
+    }
+}
+
+/// What a code block's Copy button needs, for the TextView to draw over each code block.
+struct CopyButton {
+    id: SharedString,
+    this: WeakEntity<StreamingMarkdown>,
+    copied: Option<(u64, usize)>,
+    touch: bool,
+    /// The code blocks' box and text, for the button's colours.
+    style: StyleRefinement,
+}
+
+impl CopyButton {
+    /// The button in the top-right corner of a code block's box, which it's laid out over.
+    fn over(&self, code: &CodeBlock, window: &mut Window, cx: &mut App) -> AnyElement {
+        let at = (code.key, code.index);
+        let copied = self.copied == Some(at);
+        let name = format!("{}/code/{}/{}", self.id, code.key, code.index);
+        let group = SharedString::from(format!("{name}/box"));
+        let theme = cx.theme();
+        let text = self.style.text.color.unwrap_or(window.text_style().color);
+        let ground = match &self.style.background {
+            Some(Fill::Color(bg)) => bg.as_solid().unwrap_or(theme.muted),
+            _ => theme.muted,
+        };
+        let (this, source) = (self.this.clone(), code.code.clone());
+        let press = Press::new(ElementId::Name(format!("{name}/copy").into()))
+            .flex()
+            .items_center()
+            .line_height(relative(1.))
+            .accessibility_label("Copy")
+            .focus_on_press(false)
+            .flex_none()
+            .h(rems(26. / 16.))
+            .px(rems(0.5))
+            .gap(rems(0.25))
+            .rounded(theme.radius_sm())
+            .bg(ground)
+            .border_1()
+            .border_color(Hsla { a: 0.14, ..text })
+            .hover(|s| s.bg(Hsla { a: 0.08, ..text }))
+            .text_color(text)
+            .text_size(rems(0.75))
+            .debug_selector({
+                let sel = format!("{name}/copy");
+                move || sel
+            })
+            // Hidden until the pointer is over the block, or while it says Copied, or has the
+            // focus; always there for a finger.
+            .when(!self.touch && !copied, |p| {
+                p.opacity(0.)
+                    .group_hover(group.clone(), |s| s.opacity(1.))
+                    .focus(|s| s.opacity(1.))
+            })
+            .when(self.touch, |p| p.min_hit(px(TOUCH_HIT)))
+            .on_click(move |_, _, cx| {
+                this.update(cx, |this, cx| this.copy(at, &source, cx)).ok();
+            })
+            .child(GlyphElement::new(
+                if copied { Glyph::Check } else { Glyph::Copy },
+                rems(0.75),
+                text,
+            ))
+            .child(if copied { "Copied" } else { "Copy" });
+        div()
+            .group(group)
+            .size_full()
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .p(rems(0.5))
+                    // A press on the button isn't one on the text below it: it doesn't start a
+                    // selection.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(press),
+            )
+            .into_any_element()
     }
 }

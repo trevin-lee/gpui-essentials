@@ -839,3 +839,125 @@ fn an_empty_tail_keeps_the_caret_after_the_last_character() {
     o.cx.run_until_parked();
     assert_eq!(o.cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
 }
+
+/// The Copy buttons drawn, top to bottom: their bounds and the code block each is for (its
+/// source's key and its place in it).
+fn copy_buttons(o: &mut Opened, id: &str) -> Vec<(Bounds<Pixels>, (u64, usize))> {
+    let mut found = Vec::new();
+    for key in 0..64 {
+        for index in 0..4 {
+            let sel: &'static str =
+                Box::leak(format!("{id}/code/{key}/{index}/copy").into_boxed_str());
+            if let Some(b) = o.cx.debug_bounds(sel) {
+                found.push((b, (key, index)));
+            }
+        }
+    }
+    found.sort_by(|a, b| a.0.top().partial_cmp(&b.0.top()).unwrap());
+    found
+}
+
+/// What a click at `at` puts on the clipboard, with the clipboard emptied first.
+fn clipped(o: &mut Opened, at: Point<Pixels>) -> String {
+    o.cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string(String::new())));
+    o.cx.simulate_click(at, Modifiers::none());
+    draw(o.cx);
+    o.cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()))
+        .unwrap_or_default()
+}
+
+const CODE: &str = "Run this first:\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\nThen the script:\n\n```sh\necho one\necho tw";
+
+#[test]
+fn each_code_block_has_a_copy_button_settled_or_still_being_written() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    for delta in deltas(CODE, 5) {
+        append(&mut o, &delta);
+    }
+    // The first code block has settled; the second's fence is still open, in the tail.
+    assert!(
+        o.draft
+            .read_with(o.cx, |d, _| d.settled_text().contains("```rust"))
+    );
+    assert!(shown(&mut o).contains("echo tw"));
+    let buttons = copy_buttons(&mut o, "d");
+    assert_eq!(buttons.len(), 2, "{buttons:?}");
+    let draft = o.cx.debug_bounds("d:draft").unwrap();
+    for (b, _) in &buttons {
+        // In the top-right corner of its block, inside the draft.
+        assert!(b.right() <= draft.right() && b.right() > draft.right() - px(24.));
+    }
+    // Each copies its code without the fences; the open one what's there so far.
+    assert_eq!(
+        clipped(&mut o, buttons[0].0.center()),
+        "fn main() {\n    println!(\"hi\");\n}"
+    );
+    assert_eq!(clipped(&mut o, buttons[1].0.center()), "echo one\necho tw");
+    // A press on the button selects nothing.
+    assert_eq!(copied(&mut o), "");
+    // It goes on growing; the button copies what's there now.
+    append(&mut o, "o\n");
+    let buttons = copy_buttons(&mut o, "d");
+    assert_eq!(clipped(&mut o, buttons[1].0.center()), "echo one\necho two");
+    // Once the draft has ended, both blocks keep theirs.
+    let d = o.draft.clone();
+    o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
+    draw(o.cx);
+    let buttons = copy_buttons(&mut o, "d");
+    assert_eq!(buttons.len(), 2);
+    assert_eq!(clipped(&mut o, buttons[1].0.center()), "echo one\necho two");
+}
+
+#[test]
+fn copy_says_copied_for_a_moment_then_nothing_draws() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    append(&mut o, CODE);
+    let d = o.draft.clone();
+    o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
+    draw(o.cx);
+    let (before, _) = copy_buttons(&mut o, "d")[0];
+    clipped(&mut o, before.center());
+    // "Copied" is wider than "Copy", and the button keeps its corner.
+    let (now, _) = copy_buttons(&mut o, "d")[0];
+    assert!(now.size.width > before.size.width, "{now:?} {before:?}");
+    assert_eq!(now.right(), before.right());
+    o.cx.executor().advance_clock(Duration::from_millis(1000));
+    draw(o.cx);
+    assert_eq!(copy_buttons(&mut o, "d")[0].0, now, "still Copied");
+    o.cx.executor().advance_clock(Duration::from_millis(600));
+    draw(o.cx);
+    assert_eq!(copy_buttons(&mut o, "d")[0].0, before, "Copy again");
+    o.cx.executor().advance_clock(Duration::from_secs(10));
+    o.cx.run_until_parked();
+    assert_eq!(
+        o.cx.update(|window, cx| window.simulate_next_frame(cx)),
+        0,
+        "no frames asked for"
+    );
+}
+
+#[test]
+fn for_a_finger_copy_takes_presses_across_44_points() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    let chat = o.chat.clone();
+    let draft = o.cx.update(|_, cx| {
+        let d = cx.new(|_| StreamingMarkdown::new("t").style(style()).touch(true));
+        chat.update(cx, |c, cx| {
+            c.draft = d.clone();
+            cx.notify();
+        });
+        d
+    });
+    o.draft = draft;
+    append(&mut o, CODE);
+    let buttons = copy_buttons(&mut o, "t");
+    assert_eq!(buttons.len(), 2);
+    let b = buttons[1].0;
+    assert!(b.size.height < px(44.));
+    // Just above what's drawn, inside the 44 points around it.
+    let above = point(b.center().x, b.center().y - px(20.));
+    assert_eq!(clipped(&mut o, above), "echo one\necho tw");
+}

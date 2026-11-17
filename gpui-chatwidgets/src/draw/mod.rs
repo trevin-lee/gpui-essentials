@@ -22,6 +22,7 @@ use crate::openui::{Action, ButtonVariant, Card, Cell, Component, Gap, Size, Ton
 use crate::theme::{CardTheme, ToneColors};
 use crate::view::CardView;
 
+pub(crate) use content::{Glyph, GlyphElement};
 pub(crate) use form::field_key;
 
 /// Something to press: a row centring what's in it, its text one line tall, as every press in
