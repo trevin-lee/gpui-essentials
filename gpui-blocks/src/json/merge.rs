@@ -6,7 +6,9 @@
 //!
 //! Everything here works on [`Document`]s and their block ids, with no editor.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
@@ -333,39 +335,35 @@ pub fn diff(a: &Document, b: &Document) -> Vec<Op> {
     ops
 }
 
-/// The ids of a longest common subsequence of `a` and `b`, which can stay where they are.
+/// The ids of a longest common subsequence of `a` and `b`, which can stay where they are. Ids
+/// are unique in each list, so it's a longest increasing run of `a`'s places in `b`: O(n log n),
+/// however long the lists.
 fn lcs(a: &[String], b: &[String]) -> HashSet<String> {
-    let (n, m) = (a.len(), b.len());
-    if n * m > 1_000_000 {
-        // Very long lists: keep the common prefix and move the rest.
-        return a
-            .iter()
-            .zip(b)
-            .take_while(|(x, y)| x == y)
-            .map(|(x, _)| x.clone())
-            .collect();
-    }
-    let mut table = vec![vec![0u32; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            table[i][j] = if a[i] == b[j] {
-                table[i + 1][j + 1] + 1
-            } else {
-                table[i + 1][j].max(table[i][j + 1])
-            };
+    let place: HashMap<&str, usize> = b.iter().enumerate().map(|(i, x)| (x.as_str(), i)).collect();
+    let seq: Vec<(usize, &String)> = a
+        .iter()
+        .filter_map(|x| place.get(x.as_str()).map(|p| (*p, x)))
+        .collect();
+    // `tails[k]`: the entry of `seq` ending the increasing run of length `k + 1` with the
+    // smallest place; `prev`: each entry's predecessor in its run.
+    let mut tails: Vec<usize> = Vec::new();
+    let mut prev: Vec<Option<usize>> = vec![None; seq.len()];
+    for (i, (p, _)) in seq.iter().enumerate() {
+        let k = tails.partition_point(|t| seq[*t].0 < *p);
+        if k > 0 {
+            prev[i] = Some(tails[k - 1]);
         }
-    }
-    let (mut i, mut j, mut out) = (0, 0, HashSet::new());
-    while i < n && j < m {
-        if a[i] == b[j] {
-            out.insert(a[i].clone());
-            i += 1;
-            j += 1;
-        } else if table[i + 1][j] >= table[i][j + 1] {
-            i += 1;
+        if k == tails.len() {
+            tails.push(i);
         } else {
-            j += 1;
+            tails[k] = i;
         }
+    }
+    let mut out = HashSet::new();
+    let mut at = tails.last().copied();
+    while let Some(i) = at {
+        out.insert(seq[i].1.clone());
+        at = prev[i];
     }
     out
 }
@@ -529,11 +527,12 @@ pub fn merge(base: &Document, ours: &Document, theirs: &Document) -> (Document, 
     }
 
     // Where each block goes: the side that moved it, else where it was.
+    let places = Places::new(&b);
     let moved = |side: &Tree, id: &str| -> bool {
         let (Some(bn), Some(sn)) = (b.nodes.get(id), side.nodes.get(id)) else {
             return false;
         };
-        bn.parent != sn.parent || !same_order(&b, side, id)
+        bn.parent != sn.parent || !places.same_order(side, id)
     };
     let mut source: HashMap<String, From> = HashMap::new();
     for id in kinds.keys() {
@@ -671,7 +670,7 @@ pub fn merge(base: &Document, ours: &Document, theirs: &Document) -> (Document, 
             let from = **from;
             from != From::Base
                 && (b.nodes.get(*id).is_none_or(|n| n.parent != parent_of[*id])
-                    || !same_order(&b, side_tree(from), id))
+                    || !places.same_order(side_tree(from), id))
         })
         .map(|(id, _)| id.clone())
         .collect();
@@ -746,23 +745,48 @@ enum From {
     Base,
 }
 
-/// Whether `id` keeps its place among the siblings it shares with the base in `side`: the
-/// blocks before and after it there, among blocks both have, are the same.
-fn same_order(base: &Tree, side: &Tree, id: &str) -> bool {
-    let parent = &base.nodes[id].parent;
-    let common = |tree: &Tree| -> Vec<String> {
-        tree.siblings(parent)
-            .iter()
-            .filter(|x| {
-                base.nodes.get(*x).is_some_and(|n| n.parent == *parent)
-                    && side.nodes.get(*x).is_some_and(|n| n.parent == *parent)
-            })
-            .cloned()
-            .collect()
-    };
-    let (bl, sl) = (common(base), common(side));
-    let stay = lcs(&bl, &sl);
-    stay.contains(id)
+/// A side (by its address) and a parent in it.
+type SideParent = (*const Tree, String);
+
+/// Which blocks keep their place among the siblings a side shares with the base, worked out
+/// once per side and parent.
+struct Places<'a> {
+    base: &'a Tree,
+    stays: RefCell<HashMap<SideParent, Rc<HashSet<String>>>>,
+}
+
+impl<'a> Places<'a> {
+    fn new(base: &'a Tree) -> Self {
+        Self {
+            base,
+            stays: RefCell::default(),
+        }
+    }
+
+    /// Whether `id` keeps its place among the siblings it shares with the base in `side`: the
+    /// blocks before and after it there, among blocks both have, are the same.
+    fn same_order(&self, side: &Tree, id: &str) -> bool {
+        let base = self.base;
+        let parent = &base.nodes[id].parent;
+        let key = (side as *const Tree, parent.clone());
+        if let Some(stay) = self.stays.borrow().get(&key) {
+            return stay.contains(id);
+        }
+        let common = |tree: &Tree| -> Vec<String> {
+            tree.siblings(parent)
+                .iter()
+                .filter(|x| {
+                    base.nodes.get(*x).is_some_and(|n| n.parent == *parent)
+                        && side.nodes.get(*x).is_some_and(|n| n.parent == *parent)
+                })
+                .cloned()
+                .collect()
+        };
+        let stay = Rc::new(lcs(&common(base), &common(side)));
+        let keeps = stay.contains(id);
+        self.stays.borrow_mut().insert(key, stay);
+        keeps
+    }
 }
 
 /// The content of a block both sides have, merged.

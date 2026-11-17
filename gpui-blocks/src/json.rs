@@ -233,13 +233,9 @@ impl Document {
         ids: &mut Ids,
     ) -> Self {
         let doc = model.document();
-        let mut seen = HashSet::new();
-        let blocks = doc
-            .root()
-            .children()
-            .map(|b| block(b, ids, &mut seen))
-            .collect();
-        ids.retain(&seen);
+        // Ids of blocks no longer in the document are kept: undoing a delete brings a block
+        // back as it was, and it should come back with its id.
+        let blocks = doc.root().children().map(|b| block(b, ids)).collect();
         Self {
             format: FORMAT.into(),
             version: VERSION,
@@ -333,44 +329,103 @@ fn front_matter(front: &str) -> String {
 pub(crate) struct Ids(HashMap<BlockId, String>);
 
 impl Ids {
-    fn get_or_new(&mut self, block: BlockId, seen: &mut HashSet<BlockId>) -> String {
-        seen.insert(block);
+    fn get_or_new(&mut self, block: BlockId) -> String {
         self.0.entry(block).or_insert_with(new_id).clone()
-    }
-
-    fn retain(&mut self, seen: &HashSet<BlockId>) {
-        self.0.retain(|id, _| seen.contains(id));
     }
 
     pub(crate) fn clear(&mut self) {
         self.0.clear();
     }
 
-    /// Gives the model's blocks the ids in `blocks`, matching the two trees block by block. A
-    /// block that doesn't match, an id used twice or an invalid id leaves that block to get a
-    /// new one.
+    /// Gives the model's blocks the ids in `blocks`: the model was read from `blocks`' Markdown,
+    /// which can lose blocks (an empty paragraph) and join them (lists of one type side by side),
+    /// so the trees are matched by kind and content, not by position. A block that matches
+    /// nothing, an id used twice or an invalid id leaves that block to get a new one.
     pub(crate) fn adopt(&mut self, model: &BlockEditorModel, blocks: &[Block]) {
         self.0.clear();
         let mut used = HashSet::new();
         let root = model.document().root();
-        self.adopt_children(root, blocks, &mut used);
+        let blocks: Vec<&Block> = blocks.iter().collect();
+        self.adopt_children(root, &blocks, &mut used);
     }
 
     fn adopt_children(
         &mut self,
         parent: BlockRef<'_>,
-        blocks: &[Block],
+        blocks: &[&Block],
         used: &mut HashSet<String>,
     ) {
-        for (b, json) in parent.children().zip(blocks) {
-            if !same_kind(b, &json.kind) {
-                continue;
+        let mut next = 0;
+        for b in parent.children() {
+            // The first block of its kind and content, past only blocks the Markdown lost;
+            // else the next block the Markdown kept, when its kind matches (its text read back
+            // differently).
+            let mut found = None;
+            for (ix, json) in blocks.iter().enumerate().skip(next) {
+                if same_kind(b, &json.kind) && same_content(b, &json.kind) {
+                    found = Some(ix);
+                    break;
+                }
+                if !lost_in_markdown(json) {
+                    break;
+                }
             }
+            let found = found.or_else(|| {
+                let ix = (next..blocks.len()).find(|ix| !lost_in_markdown(blocks[*ix]))?;
+                same_kind(b, &blocks[ix].kind).then_some(ix)
+            });
+            let Some(ix) = found else {
+                continue;
+            };
+            let json = blocks[ix];
+            next = ix + 1;
             if valid_id(&json.id) && used.insert(json.id.clone()) {
                 self.0.insert(b.id(), json.id.clone());
             }
-            self.adopt_children(b, &json.children, used);
+            // Lists of its type that followed it were joined to it: their items are its own.
+            let mut children: Vec<&Block> = json.children.iter().collect();
+            if matches!(json.kind, Kind::List { .. }) {
+                let mut k = next;
+                while let Some(more) = blocks.get(k) {
+                    if lost_in_markdown(more) {
+                        k += 1;
+                        continue;
+                    }
+                    if !same_list(&json.kind, &more.kind) {
+                        break;
+                    }
+                    children.extend(more.children.iter());
+                    k += 1;
+                    next = k;
+                }
+            }
+            self.adopt_children(b, &children, used);
         }
+    }
+}
+
+/// Whether the Markdown drops `block`: a paragraph with no text.
+fn lost_in_markdown(block: &Block) -> bool {
+    matches!(&block.kind, Kind::Paragraph { text } if text.trim().is_empty())
+}
+
+/// Whether two lists are of one type, so Markdown joins them when they're side by side.
+fn same_list(a: &Kind, b: &Kind) -> bool {
+    matches!(
+        (a, b),
+        (Kind::List { ordered: x, .. }, Kind::List { ordered: y, .. }) if x == y
+    )
+}
+
+/// Whether a model block holds what a JSON block of its kind holds: the same text or code.
+/// Containers match on their kind alone.
+fn same_content(b: BlockRef<'_>, kind: &Kind) -> bool {
+    match kind {
+        Kind::Paragraph { text } | Kind::Heading { text, .. } | Kind::Cell { text } => {
+            b.inline_markdown().unwrap_or_default() == *text
+        }
+        Kind::Code { code, .. } => b.text().unwrap_or_default() == code,
+        _ => true,
     }
 }
 
@@ -433,10 +488,10 @@ fn new_id() -> String {
         .collect()
 }
 
-fn block(b: BlockRef<'_>, ids: &mut Ids, seen: &mut HashSet<BlockId>) -> Block {
-    let id = ids.get_or_new(b.id(), seen);
+fn block(b: BlockRef<'_>, ids: &mut Ids) -> Block {
+    let id = ids.get_or_new(b.id());
     let text = || b.inline_markdown().unwrap_or_default();
-    let mut children = || b.children().map(|c| block(c, ids, seen)).collect();
+    let mut children = || b.children().map(|c| block(c, ids)).collect();
     let (kind, children) = match b.kind() {
         BlockKind::Paragraph => (Kind::Paragraph { text: text() }, Vec::new()),
         BlockKind::Heading { level } => (
@@ -847,6 +902,125 @@ mod tests {
         ids.adopt(&model, &back.blocks);
         let again = Document::from_model(&model, back.front_matter.clone(), &mut ids);
         assert_eq!(again, doc, "the same blocks with the same ids");
+    }
+
+    fn para(id: &str, text: &str) -> Block {
+        Block {
+            id: id.into(),
+            kind: Kind::Paragraph { text: text.into() },
+            children: Vec::new(),
+        }
+    }
+
+    fn list(id: &str, items: &[(&str, &str)]) -> Block {
+        Block {
+            id: id.into(),
+            kind: Kind::List {
+                ordered: false,
+                start: None,
+            },
+            children: items
+                .iter()
+                .map(|(item, text)| Block {
+                    id: (*item).into(),
+                    kind: Kind::Item {
+                        checked: None,
+                        spread: false,
+                    },
+                    children: vec![para(&format!("{item}p"), text)],
+                })
+                .collect(),
+        }
+    }
+
+    /// `blocks` read back through their Markdown, as `Editor::set_document` does, and written
+    /// again with the ids adopted.
+    fn read_back(blocks: Vec<Block>) -> Document {
+        let doc = Document {
+            format: FORMAT.into(),
+            version: VERSION,
+            front_matter: String::new(),
+            blocks,
+        };
+        let model =
+            BlockEditorModel::from_markdown(&doc.to_markdown(), crate::extensions(&[])).unwrap();
+        let mut ids = Ids::default();
+        ids.adopt(&model, &doc.blocks);
+        Document::from_model(&model, String::new(), &mut ids)
+    }
+
+    fn ids(blocks: &[Block]) -> Vec<String> {
+        blocks
+            .iter()
+            .flat_map(|b| std::iter::once(b.id.clone()).chain(ids(&b.children)))
+            .collect()
+    }
+
+    #[test]
+    fn a_paragraph_the_markdown_drops_takes_no_ids_with_it() {
+        // "a", Enter, Enter, "b": the empty paragraph isn't written, so isn't read back.
+        let back = read_back(vec![
+            para("A", "a"),
+            para("E", ""),
+            para("B", "b"),
+            para("C", "c"),
+        ]);
+        let texts: Vec<_> = back
+            .blocks
+            .iter()
+            .map(|b| match &b.kind {
+                Kind::Paragraph { text } => text.as_str(),
+                _ => "",
+            })
+            .collect();
+        assert_eq!(texts, ["a", "b", "c"]);
+        assert_eq!(ids(&back.blocks), ["A", "B", "C"], "each keeps its own id");
+    }
+
+    #[test]
+    fn lists_the_markdown_joins_keep_their_items_ids() {
+        // Two lists of one type side by side come back as one.
+        let back = read_back(vec![
+            list("L1", &[("i1", "one"), ("i2", "two")]),
+            list("L2", &[("i3", "three")]),
+            para("P", "after"),
+        ]);
+        assert_eq!(
+            ids(&back.blocks),
+            ["L1", "i1", "i1p", "i2", "i2p", "i3", "i3p", "P"],
+            "the joined list is the first's, with every item's id; the paragraph after keeps \
+             its id"
+        );
+    }
+
+    #[test]
+    fn an_undone_delete_brings_the_block_back_with_its_id() {
+        use markdown_editor::{BlockSelection, EditorCommand};
+        fn all(blocks: &[Block]) -> Vec<String> {
+            blocks
+                .iter()
+                .flat_map(|b| std::iter::once(b.id.clone()).chain(all(&b.children)))
+                .collect()
+        }
+        let mut model =
+            BlockEditorModel::from_markdown("a\n\nb\n\nc", crate::extensions(&[])).unwrap();
+        let mut ids = Ids::default();
+        let before = Document::from_model(&model, String::new(), &mut ids);
+        let b = model.document().root().children().nth(1).unwrap().id();
+        model
+            .set_selection(BlockSelection::Blocks { anchor: b, head: b })
+            .unwrap();
+        model.run(EditorCommand::DeleteSelection).unwrap();
+        // Saved while it's gone.
+        let deleted = Document::from_model(&model, String::new(), &mut ids);
+        assert_eq!(deleted.blocks.len(), 2);
+        assert!(model.undo());
+        let after = Document::from_model(&model, String::new(), &mut ids);
+        assert_eq!(
+            all(&after.blocks),
+            all(&before.blocks),
+            "the same ids again"
+        );
     }
 
     #[test]

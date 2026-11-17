@@ -3,6 +3,7 @@ use super::{
     step::Step,
     transaction::{EditOrigin, Transaction},
 };
+use std::collections::VecDeque;
 
 const MAX_UNDO_ENTRIES: usize = 1000;
 
@@ -56,7 +57,7 @@ impl UndoEntry {
 /// (caret move, blur); nested begin/commit brackets group edits.
 #[derive(Debug, Default)]
 pub(crate) struct BlockUndoManager {
-    undo: Vec<UndoEntry>,
+    undo: VecDeque<UndoEntry>,
     redo: Vec<UndoEntry>,
     boundary: bool,
     depth: usize,
@@ -78,20 +79,23 @@ impl BlockUndoManager {
             return;
         }
         self.redo.clear();
-        match self.undo.last_mut() {
+        match self.undo.back_mut() {
             Some(last)
                 if !self.boundary && intent != EditIntent::Atomic && last.intent == intent =>
             {
                 last.absorb(tx)
             }
-            _ => {
-                self.undo.push(Self::entry(tx, intent));
-                if self.undo.len() > MAX_UNDO_ENTRIES {
-                    self.undo.remove(0);
-                }
-            }
+            _ => self.push(Self::entry(tx, intent)),
         }
         self.boundary = intent == EditIntent::Atomic;
+    }
+
+    /// Adds an entry, dropping the oldest while there are more than `MAX_UNDO_ENTRIES`.
+    fn push(&mut self, entry: UndoEntry) {
+        self.undo.push_back(entry);
+        while self.undo.len() > MAX_UNDO_ENTRIES {
+            self.undo.pop_front();
+        }
     }
 
     fn entry(tx: Transaction, intent: EditIntent) -> UndoEntry {
@@ -116,7 +120,7 @@ impl BlockUndoManager {
             && let Some(entry) = self.pending.take()
         {
             self.redo.clear();
-            self.undo.push(entry);
+            self.push(entry);
             self.boundary = true;
         }
     }
@@ -135,7 +139,7 @@ impl BlockUndoManager {
 
     pub(crate) fn pop_undo(&mut self) -> Option<UndoEntry> {
         self.boundary = true;
-        self.undo.pop()
+        self.undo.pop_back()
     }
 
     pub(crate) fn push_redo(&mut self, entry: UndoEntry) {
@@ -148,7 +152,7 @@ impl BlockUndoManager {
     }
 
     pub(crate) fn push_undo(&mut self, entry: UndoEntry) {
-        self.undo.push(entry);
+        self.push(entry);
     }
 
     pub(crate) fn clear(&mut self) {
@@ -157,6 +161,36 @@ impl BlockUndoManager {
 
     #[cfg(test)]
     pub(crate) fn last_undo_steps(&self) -> Option<&[Step]> {
-        self.undo.last().map(|entry| entry.steps.as_slice())
+        self.undo.back().map(|entry| entry.steps.as_slice())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{id::BlockId, position::BlockPosition};
+
+    fn entry() -> UndoEntry {
+        let at = BlockSelection::caret(BlockPosition::new(BlockId::next(), 0));
+        UndoEntry {
+            intent: EditIntent::Atomic,
+            steps: Vec::new(),
+            inverse: Vec::new(),
+            selection_before: at.clone(),
+            selection_after: at,
+        }
+    }
+
+    #[test]
+    fn history_never_grows_past_its_cap() {
+        let mut undo = BlockUndoManager::default();
+        // Grouped edits (a host's, or an IME composition) and undone-then-redone ones.
+        for _ in 0..MAX_UNDO_ENTRIES + 500 {
+            undo.begin_transaction();
+            undo.pending = Some(entry());
+            undo.commit_transaction();
+            undo.push_undo(entry());
+        }
+        assert_eq!(undo.undo.len(), MAX_UNDO_ENTRIES);
     }
 }

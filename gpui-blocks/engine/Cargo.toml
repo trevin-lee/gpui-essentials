@@ -1,5 +1,5 @@
-# Changed in Trevin Lee's fork (2026): gpui-kit 0.9.1, Rust 1.100; brought into gpui-essentials as
-# gpui-blocks' engine.
+# Changed in Trevin Lee's fork (2026): Rust 1.100, drawn with gpui-core instead of gpui-kit; brought
+# into gpui-essentials as gpui-blocks' engine.
 [package]
 name = "gpui-blocks-engine"
 version = "0.2.0"
@@ -15,8 +15,6 @@ keywords = ["gpui", "markdown", "editor", "wysiwyg"]
 categories = ["gui", "text-editors"]
 include = [
     "/src",
-    "/assets/icons",
-    "/examples",
     "/tests/fixtures",
     "/docs/*.md",
     "/README.md",
@@ -29,27 +27,14 @@ name = "markdown_editor"
 path = "src/lib.rs"
 doctest = false
 
-[features]
-default = ["syntect"]
-# Syntax highlighting for fenced code blocks (the editor renders through
-# gpui-kit's text renderer, which highlights only when it's on): syntect, about
-# 200 languages. The fork dropped upstream's tree-sitter option when it came into
-# gpui-essentials, which nothing used, so the workspace's lockfile stays lean.
-syntect = ["gpui-kit/syntect"]
-
 [dependencies]
-# The paragraph layer the engine draws its own blocks with (see docs/drawing.md).
+# GPUI itself, under its own name, as gpui-core takes it.
+gpui = { workspace = true }
+# The theme, icons and paragraph layer the engine draws with (see docs/drawing.md).
 gpui-core = { path = "../../gpui-core" }
-gpui-kit = { workspace = true }
 markdown = "1.0.0"
 unicode-segmentation = "1.12.0"
 
 [dev-dependencies]
 anyhow = "1"
-gpui-kit = { workspace = true, features = ["test-support"] }
-
-[[example]]
-name = "story"
-path = "examples/story.rs"
-# The story has its own UI tests (link bar, toolbar commands).
-test = true
+gpui = { workspace = true, features = ["test-support"] }

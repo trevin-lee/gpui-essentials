@@ -304,7 +304,7 @@ fn main() {
         None => SAMPLE.trim_end().to_string(),
     };
     let quiet = args.bench || args.shot.is_some();
-    gpui_kit::application().run(move |cx| {
+    gpui_kit::application().with_assets(Assets).run(move |cx| {
         gpui_kit::init(cx);
         gpui_blocks::init(cx);
         apply_theme(cx);
@@ -995,4 +995,22 @@ fn answer_parts(body: &str) -> (&str, &str, &str) {
         field("asked:"),
         answer.trim_start_matches('\n'),
     )
+}
+
+/// GPUI Kit's assets, and gpui-core's icons, which the editor draws its toggles' chevrons with.
+struct Assets;
+
+impl gpui_kit::AssetSource for Assets {
+    fn load(&self, path: &str) -> gpui_kit::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        match gpui_core::Icons.load(path)? {
+            Some(icon) => Ok(Some(icon)),
+            None => gpui_kit::assets::AllAssets.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> gpui_kit::Result<Vec<gpui_kit::SharedString>> {
+        let mut out = gpui_core::Icons.list(path)?;
+        out.extend(gpui_kit::assets::AllAssets.list(path)?);
+        Ok(out)
+    }
 }

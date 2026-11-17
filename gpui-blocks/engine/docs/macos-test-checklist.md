@@ -1,7 +1,7 @@
 # macOS manual test checklist (about 15 minutes)
 
-For a real Mac; CI runs on Linux and cannot press macOS-only bindings. Run the
-story with a scratch document:
+For a real Mac; CI runs on Linux and cannot press macOS-only bindings. Open a
+scratch document in gpui-blocks' example:
 
 ```sh
 cat > /tmp/qa.md <<'MD'
@@ -27,10 +27,11 @@ fn main() {
 | apple | 3 | red |
 | pear | 5 | green |
 MD
-STORY_MD=/tmp/qa.md cargo run --example story
+cargo run -p gpui-blocks --example editor -- /tmp/qa.md
 ```
 
-Reload the story (quit and rerun) whenever a section says "fresh document".
+Reload the example (quit and rerun) whenever a section says "fresh document". It saves as
+you type, so recreate /tmp/qa.md first.
 Tick each box; note anything that differs from **Expected**.
 
 ## 1. Line and word keys (D21), about 4 min

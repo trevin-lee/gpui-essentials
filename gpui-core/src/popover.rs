@@ -89,6 +89,37 @@ impl PopoverColors {
     }
 }
 
+/// The colours of the panel being laid out: a submenu drawn from inside it takes them.
+struct PanelColors(PopoverColors);
+
+impl gpui::Global for PanelColors {}
+
+/// Runs `f` (a panel's layout) with `colors` as the panel's, for what's drawn from inside it.
+pub(crate) fn with_panel_colors<R>(
+    colors: PopoverColors,
+    window: &mut Window,
+    cx: &mut App,
+    f: impl FnOnce(&mut Window, &mut App) -> R,
+) -> R {
+    let before = cx.try_global::<PanelColors>().map(|g| g.0);
+    cx.set_global(PanelColors(colors));
+    let out = f(window, cx);
+    match before {
+        Some(c) => cx.set_global(PanelColors(c)),
+        None => {
+            cx.remove_global::<PanelColors>();
+        }
+    }
+    out
+}
+
+/// The colours of the panel being laid out, or the theme's outside one.
+pub(crate) fn panel_colors(cx: &App) -> PopoverColors {
+    cx.try_global::<PanelColors>()
+        .map(|g| g.0)
+        .unwrap_or_else(|| PopoverColors::from_theme(cx.theme()))
+}
+
 /// What a popover hangs from, in window coordinates: a box, or a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PopoverAnchor(Bounds<Pixels>);
@@ -312,8 +343,12 @@ impl RenderOnce for Popover {
         );
 
         let anchor = Rc::new(Cell::new(self.anchor.map(|a| a.0)));
+        let colors = self
+            .colors
+            .unwrap_or_else(|| PopoverColors::from_theme(cx.theme()));
         let panel = self.open.then(|| self.panel(&focus, anchor.clone(), cx));
         PopoverElement {
+            colors,
             trigger: self.trigger,
             anchor,
             panel,
@@ -392,17 +427,47 @@ impl Popover {
 /// The areas drawn from inside a popover but outside its panel (submenus), by window and
 /// element: a press on one isn't a press outside the popover. Each is a hitbox from the frame
 /// that drew it, so one no longer drawn is never hit.
+///
+/// Each window keeps the [`MAX_CLAIMS`] it was drawn with last: one drawn claims again every
+/// time it's drawn, so those in view are always the latest, and the claims of menus long gone
+/// (a menu per row, opened once each) don't pile up.
 #[derive(Default)]
-struct Claims(HashMap<(WindowId, ElementId), Hitbox>);
+struct Claims(HashMap<WindowId, Vec<(ElementId, Hitbox)>>);
 
 impl gpui::Global for Claims {}
+
+/// More than are ever drawn at once (a submenu's submenus, a few deep).
+const MAX_CLAIMS: usize = 32;
+
+impl Claims {
+    fn claim(&mut self, window: WindowId, key: ElementId, hitbox: Hitbox, open: &[WindowId]) {
+        // A window that's closed has nothing to claim.
+        self.0.retain(|w, _| open.contains(w));
+        let list = self.0.entry(window).or_default();
+        list.retain(|(k, _)| *k != key);
+        list.push((key, hitbox));
+        if list.len() > MAX_CLAIMS {
+            list.remove(0);
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.0.values().map(Vec::len).sum()
+    }
+}
 
 fn claimed(at: Point<Pixels>, window: &Window, cx: &App) -> bool {
     let id = window.window_handle().window_id();
     cx.try_global::<Claims>().is_some_and(|c| {
-        c.0.iter()
-            .any(|((w, _), hitbox)| *w == id && hitbox.is_hovered_at(at, window))
+        c.0.get(&id)
+            .is_some_and(|list| list.iter().any(|(_, h)| h.is_hovered_at(at, window)))
     })
+}
+
+/// How many presses are claimed across every window, for tests.
+#[doc(hidden)]
+pub fn claim_count(cx: &App) -> usize {
+    cx.try_global::<Claims>().map_or(0, Claims::count)
 }
 
 /// Draws `child` and claims the area it covers for the popover it was drawn from inside, so a
@@ -460,9 +525,9 @@ impl Element for ClaimArea {
         self.child.prepaint(window, cx);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let id = window.window_handle().window_id();
+        let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
         cx.default_global::<Claims>()
-            .0
-            .insert((id, self.key.clone()), hitbox);
+            .claim(id, self.key.clone(), hitbox, &open);
     }
 
     fn paint(
@@ -517,6 +582,8 @@ fn hold_inside(b: Bounds<Pixels>, inside: Bounds<Pixels>) -> Bounds<Pixels> {
 /// Draws the trigger in place, and the open panel over everything, placed from where the
 /// trigger (or the anchor) is this frame.
 struct PopoverElement {
+    /// The panel's colours, which a submenu inside it takes.
+    colors: PopoverColors,
     trigger: Option<AnyElement>,
     anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     panel: Option<Stateful<gpui::Div>>,
@@ -635,14 +702,16 @@ impl Element for PopoverElement {
             .min_w(narrowest)
             .into_any_element();
         // Laid out on its own, now that what it hangs from has been placed this frame.
-        let size = panel.layout_as_root(
-            gpui::size(
-                gpui::AvailableSpace::MaxContent,
-                gpui::AvailableSpace::MaxContent,
-            ),
-            window,
-            cx,
-        );
+        let size = with_panel_colors(self.colors, window, cx, |window, cx| {
+            panel.layout_as_root(
+                gpui::size(
+                    gpui::AvailableSpace::MaxContent,
+                    gpui::AvailableSpace::MaxContent,
+                ),
+                window,
+                cx,
+            )
+        });
         let origin = place(anchor, size, view, edge, gap);
         window.defer_draw(panel, origin, PRIORITY, None::<ContentMask<Pixels>>);
     }

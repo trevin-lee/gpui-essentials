@@ -367,8 +367,8 @@ is text again when the draft ends, each where its space was. A block that's off 
 it is laid out but not painted.
 
 `tests/stream_performance.rs` measures it, and fails if a delta at 10,000 characters costs more
-than three times one at 1,000 (plus half a millisecond), more than 4 ms, or more than half of
-laying the whole text out again, in a release build. CI runs it in release.
+than three times one at 1,000 (plus half a millisecond), or more than 4 ms, in a release build.
+It prints a whole TextView read again each delta alongside, for comparison. CI runs it in release.
 
 ### Limits
 

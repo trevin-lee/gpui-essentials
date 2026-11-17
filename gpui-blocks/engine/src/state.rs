@@ -33,8 +33,8 @@ pub(crate) const CONTEXT: &str = "BlockEditor";
 pub type ImageSourceFn =
     std::sync::Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>;
 /// A host's syntax highlighter: a code block's language (the first word of its fence's info,
-/// possibly empty) and its code to the styles of byte ranges of the code, sorted. With one, the
-/// editor draws code blocks itself; without, GPUI Kit's own highlighting applies.
+/// possibly empty) and its code to the styles of byte ranges of the code, sorted. Without one,
+/// code blocks are drawn uncoloured.
 pub type CodeHighlightFn =
     std::sync::Arc<dyn Fn(&str, &str) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync>;
 
@@ -2589,14 +2589,6 @@ impl BlockEditorState {
         if let Some(item) = cx.read_from_clipboard() {
             self.paste(item, false, cx);
         }
-    }
-    pub(crate) fn on_native_paste(
-        &mut self,
-        _: &gpui_kit::base::input::Paste,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.on_paste(&Paste, window, cx);
     }
     pub(crate) fn on_paste_plain(
         &mut self,

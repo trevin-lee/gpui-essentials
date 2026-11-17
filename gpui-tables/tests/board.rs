@@ -764,3 +764,80 @@ fn a_board_without_a_group_is_one_column(cx: &mut TestAppContext) {
     assert!(values.is_empty());
     let _ = Sort::ascending(NAME);
 }
+
+/// Every row's card bounds, asked right after the rows are set to `rows` (before the board can
+/// draw them).
+fn card_bounds_after(
+    table: &Entity<TableView>,
+    cx: &mut VisualTestContext,
+    rows: Vec<Doc>,
+    ids: &[String],
+) -> Vec<Option<Bounds<Pixels>>> {
+    table.update(cx, |t, cx| {
+        t.set_rows(rows, cx);
+        ids.iter().map(|id| t.card_bounds(id)).collect()
+    })
+}
+
+#[gpui::test]
+fn card_bounds_never_answer_from_an_older_draw(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, rows) = pipeline(false);
+    let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let (table, cx) = open_board(cx, &host, db, rows.clone(), wide());
+    let warm = opt(WARM);
+    assert_eq!(
+        table.read_with(cx, |t, _| t.card_bounds(IMANI)),
+        Some(rect(cx, card(IMANI, &warm)))
+    );
+    // Reordered: until the board draws them, no card's bounds are known.
+    let reversed: Vec<Doc> = rows.iter().rev().cloned().collect();
+    let stale = card_bounds_after(&table, cx, reversed, &ids);
+    assert!(stale.iter().all(Option::is_none), "{stale:?}");
+    draw(cx);
+    assert_eq!(
+        table.read_with(cx, |t, _| t.card_bounds(IMANI)),
+        Some(rect(cx, card(IMANI, &warm)))
+    );
+    // Shrunk to one row: no panic, then the one card and no other.
+    let imani: Vec<Doc> = rows.iter().filter(|r| r.id == IMANI).cloned().collect();
+    let stale = card_bounds_after(&table, cx, imani, &ids);
+    assert!(stale.iter().all(Option::is_none), "{stale:?}");
+    draw(cx);
+    let after: Vec<_> =
+        table.read_with(cx, |t, _| ids.iter().map(|id| t.card_bounds(id)).collect());
+    for (id, b) in ids.iter().zip(after) {
+        if id == IMANI {
+            assert_eq!(b, Some(rect(cx, card(IMANI, &warm))));
+        } else {
+            assert_eq!(b, None, "{id} is gone");
+        }
+    }
+}
+
+#[gpui::test]
+fn a_card_pressed_after_the_rows_changed_opens_no_other_row(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, rows) = pipeline(false);
+    let (table, cx) = open_board(cx, &host, db, rows.clone(), wide());
+    let at = rect(cx, card(IMANI, &opt(WARM))).center();
+    // The rows change between the draw and the press: the press is on Imani's card as drawn,
+    // while its place in the rows is now another row's.
+    let reversed: Vec<Doc> = rows.iter().rev().cloned().collect();
+    host.clear();
+    click_as_rows_change(cx, &table, reversed, at);
+    let opened: Vec<TableEvent> = host
+        .events
+        .borrow()
+        .iter()
+        .filter(|e| matches!(e, TableEvent::OpenRow { .. }))
+        .cloned()
+        .collect();
+    assert!(
+        opened.iter().all(|e| *e
+            == TableEvent::OpenRow {
+                row_id: IMANI.into()
+            }),
+        "{opened:?}"
+    );
+}

@@ -27,18 +27,35 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   panel across the bottom of the window over a scrim, centred and capped at `max_width` on a
   wide window, scrolling past nine tenths of its height. A press on the scrim or Escape calls
   `on_dismiss`; it takes the keyboard while open and hands it back on closing.
+- **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
+  the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
+  monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab
+  indenting a line or every selected line, Enter keeping the indent, and Ctrl-Tab moving the
+  keyboard on. Only the rows in view are drawn, so a file of thousands of lines types as fast as
+  a short one. Undo, the input method and the rest are a field's.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
   picked (the pointer moves it too), Enter or a press picks, and Escape closes the popover.
   `PopupMenuItem::submenu(menu)` opens a menu beside its entry, on the right unless there's
   no room: on a press, Enter, Space or Right, or when the pointer rests on it; Left or Escape
-  closes only it, and its picks go to the outer menu's `on_select` unless it has its own.
+  closes only it, and its picks go to the outer menu's `on_select` unless it has its own. It's
+  drawn in the colours of the popover it's in, stays its entry's while entries come and go,
+  can be made only when it opens (`submenu_with(|| …)`), and a menu can open with one open
+  and the keyboard in it (`open_submenu(id)`).
   `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A
   single-choice host closes its popover on a pick; a several-choice one keeps it open.
+- **TextView.** `TextView::markdown(id, source)` draws GitHub Markdown natively: selectable
+  with `selectable(true)`, links as `on_link_click` events, and `[text][label]` links
+  resolved to their definitions. `TextView::blocks(id, [(key, source), …])` draws several
+  keyed sources as one document (a streamed reply's settled blocks and its live tail): spaced,
+  selected and copied as one view, with each source read again only when its text changes and
+  each top-level block laid out again only when it changes. A selection in unchanged sources
+  stays while later ones change. `trailing_caret(Some(colour))` draws a caret after the last
+  source's text, painted only, so it never moves a line.
 - **Syntax highlighting** (the `highlight` feature, off by default for the grammars' size).
   `Highlighter::new()` knows Rust, Swift, Go, TypeScript/TSX, JavaScript/JSX, Python, JSON,
   TOML, YAML, Bash, SQL, Markdown, HTML, CSS, C and C++ by the names code fences use (case

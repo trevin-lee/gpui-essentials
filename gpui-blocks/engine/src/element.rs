@@ -22,7 +22,6 @@ use gpui::{
 
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
 use crate::support::secondary_modifier;
-use gpui_kit::base::StyledExt as _;
 
 /// Items per cull unit of a long top-level list.
 const LIST_CHUNK: usize = 32;
@@ -155,7 +154,6 @@ impl RenderOnce for BlockEditor {
             code_background: look.muted,
             mono: look.mono_font_family.clone(),
             border: look.border,
-            surface: look.background,
         };
         // The gap below a block, as GPUI Kit's Markdown leaves.
         let paragraph_gap = gpui::rems(0.75).to_pixels(rem);
@@ -202,6 +200,7 @@ impl RenderOnce for BlockEditor {
                 images: image_source.as_ref(),
             },
             code: &code_look,
+            radius: in_px(look.radius_md()),
         };
         let mut children: Vec<AnyElement> = Vec::new();
         {
@@ -558,28 +557,29 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_copy))
             .on_action(window.listener_for(s, BlockEditorState::on_cut))
             .on_action(window.listener_for(s, BlockEditorState::on_paste))
-            .on_action(window.listener_for(s, BlockEditorState::on_native_paste))
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
-                    div()
-                        .w_full()
-                        .refine_style(&self.style)
-                        .child(
-                            div().relative().w_full().children(children).child(
-                                canvas(
-                                    move |bounds, _, _| measured_content.set(bounds),
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full(),
-                            ),
-                        )
-                        .into_any_element(),
+                    {
+                        let mut root = div().w_full();
+                        root.style().refine(&self.style);
+                        root
+                    }
+                    .child(
+                        div().relative().w_full().children(children).child(
+                            canvas(
+                                move |bounds, _, _| measured_content.set(bounds),
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                        ),
+                    )
+                    .into_any_element(),
                 ),
                 content_bounds,
                 padding: root_style.padding,
@@ -716,16 +716,10 @@ impl Element for EditorRoot {
                     .map(|(table, _)| super::frame::TableShape {
                         table: *table,
                         grid: super::table::grid(doc, *table),
-                        aligns: match doc.kind(*table) {
-                            Some(super::kind::BlockKindData::Table { aligns }) => aligns.clone(),
-                            _ => Vec::new(),
-                        },
                     })
                     .collect();
-                // gpui-kit's cell padding is `px_3`: 0.75rem.
-                let pad = window.rem_size() * 0.75;
-                let right = frame.content.map(|c| c.right());
-                frame.layout_tables(&shapes, pad, right);
+                let pad = window.rem_size() * super::draw::CELL_PAD_REMS;
+                frame.layout_tables(&shapes, pad);
             }
             // Scrolled during a drag: the dragged block follows the pointer in content y, so
             // draw again with the content's new top.

@@ -681,6 +681,7 @@ impl TableView {
             .is_some_and(|c| c.item == ix && c.column == column);
         let row_focused = self.cell.is_some_and(|c| c.item == ix);
         let (rid, pid) = (r.id.clone(), p.id.clone());
+        let shown = self.shown_serial;
         let is_check = p.kind == PropertyType::Checkbox;
         let numeric = p.kind == PropertyType::Number;
         let editor = self.editor.as_ref().filter(|e| e.edits(&r.id, &p.id));
@@ -720,8 +721,9 @@ impl TableView {
             })
             .child(content)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                // A press in the field being typed in is the field's (placing the caret).
-                if editing {
+                // A press in the field being typed in is the field's (placing the caret). One
+                // on lines since worked out again may be on another row's place.
+                if editing || !this.still_shown(shown) {
                     return;
                 }
                 let cell = super::CellRef { item: ix, column };
@@ -938,6 +940,7 @@ impl TableView {
                 let rid = r.id.clone();
                 let hit = t.hit(22., self.rem);
                 let focus = self.focus.clone();
+                let shown = self.shown_serial;
                 let open = Press::new(("open", ix))
                     .tab_stop(false)
                     .focus_ring_color(t.colors.focus)
@@ -970,6 +973,9 @@ impl TableView {
                             )),
                     )
                     .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        if !this.still_shown(shown) {
+                            return;
+                        }
                         window.focus(&focus, cx);
                         this.open_row(row, window, cx);
                     }));
@@ -1089,6 +1095,7 @@ impl TableView {
         let key = group.key.to_string();
         let count = group.rows.len();
         let focus = self.focus.clone();
+        let shown = self.shown_serial;
         Press::new(("group", ix))
             .tab_stop(false)
             .focus_ring_color(t.colors.focus)
@@ -1130,6 +1137,9 @@ impl TableView {
                     .child(count.to_string()),
             )
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&focus, cx);
                 this.cell = Some(super::CellRef {
                     item: ix,
@@ -1147,6 +1157,7 @@ impl TableView {
             .and_then(|g| self.shown.groups.get(g))
             .map_or_else(|| "table".to_owned(), |g| g.key.to_string());
         let focus = self.focus.clone();
+        let shown = self.shown_serial;
         Press::new(("new", ix))
             .tab_stop(false)
             .focus_ring_color(t.colors.focus)
@@ -1171,6 +1182,9 @@ impl TableView {
             ))
             .child(line("New"))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&focus, cx);
                 this.cell = Some(super::CellRef {
                     item: ix,

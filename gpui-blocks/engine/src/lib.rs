@@ -1,12 +1,11 @@
 // Changed in Trevin Lee's fork (2026): the reorder and surfaces modules, toggle surface names,
 // the clipboard actions exported, the extension module.
-//! A block-based WYSIWYG Markdown editor for GPUI, built on gpui-kit's
-//! public editor host API (`gpui_kit::base::text::editor_host`).
+//! A block-based WYSIWYG Markdown editor for GPUI, drawn with gpui-core.
 //!
 //! The design began as a spike in
 //! [longbridge/gpui-kit#3049](https://github.com/longbridge/gpui-kit/pull/3049)
 //! and [#3566](https://github.com/longbridge/gpui-kit/pull/3566); see
-//! `docs/design.md`. Call [`init`] once, after `gpui_kit::init`.
+//! `docs/design.md`. Call [`init`] once, after `gpui_core::init`.
 //!
 //! - [`BlockEditorModel`]: the headless model. It has stable [`BlockId`]s,
 //!   validated [`BlockPosition`]s, normalized inline mark runs, invertible
@@ -14,8 +13,8 @@
 //!   blocks ([`EditorCommand`]), and a Markdown serializer.
 //! - [`BlockEditorState`]: the entity that owns a model, focus, IME and
 //!   key bindings, and emits [`BlockEditorEvent`]s.
-//! - [`BlockEditor`]: the view. It renders through gpui-kit's own text
-//!   renderer (a direct model-to-node projection) and culls off-screen blocks.
+//! - [`BlockEditor`]: the view. It draws the blocks on gpui-core's paragraph layer and culls
+//!   off-screen blocks.
 //!
 //! ```ignore
 //! let scroll = ScrollHandle::new();
@@ -43,7 +42,6 @@
 //! area are still culled, but moving the caret never scrolls (a no-op).
 
 // Resolve existing GPUI paths and macro expansions through the Kit facade.
-extern crate gpui_kit as gpui;
 
 mod command;
 mod cull;
@@ -88,13 +86,15 @@ pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
 pub use extension::{CustomNode, Extension, Extensions, InlineContext};
+/// The Markdown parser's syntax tree for `source`, or why it has none: a parser panic too (see
+/// its docs), so no input brings the app down.
+pub use import::parse as parse_markdown;
 pub use input_rule::InputRule;
 pub use kind::ColumnAlign;
 pub use state::{
     BlockEditorEvent, BlockEditorState, ClipboardPolicy, CodeHighlightFn, ImageSourceFn,
     PasteRequest, SubmitPolicy,
 };
-pub use surfaces::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
 /// The editor's clipboard and selection actions, for a host's own menu (an edit menu over a touch
 /// selection, say) to dispatch to the focused editor.
 pub mod actions {
@@ -103,14 +103,14 @@ pub mod actions {
 pub use style::BlockEditorStyle;
 pub use table::{TableEdit, TableLine};
 
-/// Registers the editor's key bindings. Call once at startup, after `gpui_kit::init`.
+/// Registers the editor's key bindings. Call once at startup, after `gpui_core::init`.
 pub fn init(cx: &mut gpui::App) {
     state::init(cx);
 }
-/// gpui-kit's own layers first (theme, global state), then the editor.
+/// gpui-core first (its theme and keys), then the editor.
 #[cfg(test)]
 pub(crate) fn init_for_tests(cx: &mut gpui::App) {
-    gpui_kit::init(cx);
+    gpui_core::init(cx);
     init(cx);
 }
 

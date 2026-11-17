@@ -1,24 +1,8 @@
-//! The containers toggles and callouts are drawn in.
-//!
-//! The editor projects a toggle and a callout as a gpui-kit block surface
-//! (`BlockNode::Surface`), whose container the host registers by name on the
-//! editor's `MarkdownExtensions`. [`with_default_surfaces`] registers a plain
-//! set: a chevron gutter for toggles, and a tinted box for GitHub's five alert
-//! names. Register the same names again afterwards to draw them otherwise; a
-//! later registration replaces an earlier one.
+//! The containers toggles and callouts are drawn in: a chevron gutter for a toggle, and a
+//! tinted box with a bar in the alert's colour for GitHub's five alert names.
 
 use gpui::{App, Div, Hsla, ParentElement as _, Styled as _, Window, div, px, rems};
-use gpui_kit::base::text::MarkdownExtensions;
-use gpui_kit::component::Icon;
-
-/// The surface an open toggle is drawn in.
-pub const TOGGLE_OPEN_SURFACE: &str = "editor-toggle-open";
-/// The surface a closed toggle is drawn in.
-pub const TOGGLE_CLOSED_SURFACE: &str = "editor-toggle-closed";
-
-// Lucide icons (ISC, see assets/icons/LICENSE-LUCIDE).
-const ICON_CHEVRON_RIGHT: &[u8] = include_bytes!("../assets/icons/chevron-right.svg");
-const ICON_CHEVRON_DOWN: &[u8] = include_bytes!("../assets/icons/chevron-down.svg");
+use gpui_core::{Icon, IconName};
 
 /// Width of a toggle's gutter, where its chevron is drawn and clicked, in
 /// rems of the editor's text.
@@ -37,14 +21,13 @@ pub fn toggle_container(open: bool, window: &mut Window, cx: &mut App) -> Div {
     let top = ((line - icon) / 2.).max(px(0.));
     div().relative().pl(rems(TOGGLE_GUTTER_REMS)).child(
         div().absolute().left(px(0.)).top(top).child(
-            Icon::default()
-                .data(if open {
-                    ICON_CHEVRON_DOWN
-                } else {
-                    ICON_CHEVRON_RIGHT
-                })
-                .size(icon)
-                .text_color(gpui_core::Theme::global(cx).muted_foreground),
+            Icon::new(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .size(icon)
+            .color(gpui_core::Theme::global(cx).muted_foreground),
         ),
     )
 }
@@ -68,19 +51,4 @@ pub fn callout_container(name: &str, cx: &mut App) -> Div {
         .bg(tint)
         .px(rems(0.875))
         .py(rems(0.5))
-}
-
-/// `extensions` with toggles' and GitHub's alerts' containers registered.
-pub fn with_default_surfaces(extensions: MarkdownExtensions) -> MarkdownExtensions {
-    let mut extensions = extensions
-        .block_surface(TOGGLE_OPEN_SURFACE, |window, cx| {
-            toggle_container(true, window, cx)
-        })
-        .block_surface(TOGGLE_CLOSED_SURFACE, |window, cx| {
-            toggle_container(false, window, cx)
-        });
-    for name in ALERT_NAMES {
-        extensions = extensions.block_surface(name, move |_, cx| callout_container(name, cx));
-    }
-    extensions
 }

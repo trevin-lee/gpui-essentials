@@ -78,8 +78,8 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
 
 - **Layout:** `Editor` fills the view it's in and scrolls itself. The text sits in a 720 px
   column, with room on its left for the side menu.
-- **Look:** it draws with GPUI Kit's `Theme` and paints no background, so put it in a view that
-  does (`.bg(cx.theme().background)`). The pictures here use the example's dark theme
+- **Look:** it draws with gpui-core's `Theme` (`gpui_core::Theme::set`) and paints no
+  background, so put it in a view that does (`.bg(gpui_core::Theme::global(cx).background)`). The pictures here use the example's dark theme
   (`apply_theme` in `examples/editor.rs`).
 - **The document:** `editor.markdown(cx)` returns it and `editor.set_markdown(..)` replaces it.
   YAML front matter at the top is kept aside and written back unchanged.
@@ -95,8 +95,8 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
 - **Code:** `Options::code_highlighter(..)` colours code blocks: it gets a block's language (the
   first word of its fence's info) and its code, and returns the styles of byte ranges of the
   code. gpui-core's `highlight` feature makes one. It's asked again only when a block's code or
-  language changes; pass a new one when the theme changes. Without it, code blocks keep GPUI
-  Kit's highlighting.
+  language changes; pass a new one when the theme changes. Without it, code blocks are drawn
+  uncoloured.
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor
@@ -297,11 +297,11 @@ has focus. Blocks being moved draw every frame until they come to rest: most of 
 
 ## How it's built
 
-The document model, input, selection, undo and text drawing come from
-[gpui-kit-markdown-editor](https://github.com/wabzqem/gpui-kit-markdown-editor), which draws
-through GPUI Kit's editor host API. They come through
+The document model, input, selection and undo come from
+[gpui-kit-markdown-editor](https://github.com/wabzqem/gpui-kit-markdown-editor), through
 a fork of it in [engine/](engine/) (`gpui-blocks-engine`, not published on its own) that adds
-callouts, toggles, block motion, and the hooks this crate needs to draw its menus. This crate adds the slash
+callouts, toggles, block motion, the hooks this crate needs to draw its menus, and its own drawing
+on gpui-core's paragraph layer in place of GPUI Kit's. This crate adds the slash
 menu, the side menu, the widget API and the example.
 
 ## Status

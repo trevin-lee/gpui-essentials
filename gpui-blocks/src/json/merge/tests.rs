@@ -60,6 +60,38 @@ fn text_edits_apart_both_apply() {
     assert_eq!(merge_text("ab", "aXb", "aYb"), None);
 }
 
+/// A long document: moves on both sides are told apart from blocks staying in place, however
+/// many siblings there are, and the merge stays quick.
+#[test]
+fn moves_in_a_long_document_merge_quickly_and_cleanly() {
+    let n = 3_000;
+    let id = |i: usize| format!("b{i}");
+    let base: Vec<Block> = (0..n).map(|i| p(&id(i), &format!("{i}"))).collect();
+    // `ids` with `from` moved to just after `after`.
+    let moved = |ids: &[String], from: usize, after: usize| -> Vec<String> {
+        let mut out: Vec<String> = ids.iter().filter(|x| **x != id(from)).cloned().collect();
+        let at = out.iter().position(|x| *x == id(after)).unwrap() + 1;
+        out.insert(at, id(from));
+        out
+    };
+    let blocks = |ids: &[String]| -> Vec<Block> {
+        ids.iter()
+            .map(|x| p(x, x.trim_start_matches('b')))
+            .collect()
+    };
+    let base_ids: Vec<String> = (0..n).map(id).collect();
+    // Ours moves block 10 after block 20; theirs moves block 2000 after block 2500.
+    let ours = moved(&base_ids, 10, 20);
+    let theirs = moved(&base_ids, 2000, 2500);
+    let started = std::time::Instant::now();
+    let (m, c) = merge(&doc(base), &doc(blocks(&ours)), &doc(blocks(&theirs)));
+    let took = started.elapsed();
+    assert!(c.is_empty(), "two independent moves: {} conflicts", c.len());
+    let got: Vec<String> = m.blocks.iter().map(|b| b.id.clone()).collect();
+    assert!(got == moved(&ours, 2000, 2500), "both moves, nothing else");
+    assert!(took.as_secs() < 5, "took {took:?}");
+}
+
 #[test]
 fn edits_to_different_blocks_both_apply() {
     let base = doc(vec![p("a", "one"), p("b", "two"), p("c", "three")]);
