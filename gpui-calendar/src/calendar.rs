@@ -330,6 +330,9 @@ pub(crate) struct AgendaRow {
     pub start: SharedString,
     /// "10:30 AM", "Day 2 of 3", or nothing.
     pub end: SharedString,
+    /// When it starts, for a timed event that starts on the row's day; none for one that's
+    /// all day or began on an earlier day. Where the line at the current time goes.
+    pub at: Option<DateTime<Utc>>,
 }
 
 /// Where a touch pan stands, as far as swiping goes.
@@ -1460,10 +1463,15 @@ impl Calendar {
             EventTime::Timed { end, .. } if date == d1 => ("Until".into(), clock(end)),
             EventTime::Timed { .. } => ("All day".into(), format!("Day {nth} of {span}")),
         };
+        let at = match e.time {
+            EventTime::Timed { start, .. } if date == d0 => Some(start),
+            _ => None,
+        };
         AgendaRow {
             chip,
             start: start.into(),
             end: end.into(),
+            at,
         }
     }
 

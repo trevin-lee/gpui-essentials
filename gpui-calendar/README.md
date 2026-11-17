@@ -28,7 +28,9 @@ their look.
   month's next row, or the next period), that end is square with a chevron pointing on.
 - **Agenda:** a list of the days that have events (and today), each under a header that stays
   at the top while its day scrolls by. A row has the time (or "All day", "Day 2 of 3",
-  "Until 2 AM"), the calendar's colour, the title, the place and every link as a pill. It opens
+  "Until 2 AM"), the calendar's colour, the title, the place and every link as a pill. Among
+  today's events a line in the time-now colour sits after the ones that have started and
+  before the first that hasn't, as in Google Calendar's schedule. It opens
   at today and scrolls with the wheel or a trackpad. Nothing in it is dragged; a click selects,
   a double-click opens, a click on a day's header opens that day, and a link opens its link. It
   is the layout meant for a phone, and it fits from 320 pixels wide.

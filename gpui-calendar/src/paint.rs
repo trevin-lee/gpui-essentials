@@ -151,6 +151,8 @@ pub(crate) struct Shared {
     pub agenda_max: Cell<f32>,
     /// An event the next agenda frame scrolls into view.
     pub agenda_reveal: RefCell<Option<EventId>>,
+    /// Where the agenda's line at the current time was drawn in the last frame, if it was.
+    pub agenda_now: Cell<Option<Pixels>>,
 }
 
 /// A frame's geometry.
@@ -2874,6 +2876,8 @@ fn paint_agenda(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
             });
     }
 
+    paint_agenda_now(ink, scene, shared, &places, y_of, rows_area, pad);
+
     // The days' headers, each held at the top while its day scrolls under it.
     let heads: Vec<&AgendaPlace> = places
         .iter()
@@ -2918,6 +2922,72 @@ fn paint_agenda(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         }
         shared.dates.borrow_mut().push((rect, date));
     }
+}
+
+/// The line at the current time among today's rows, as Google Calendar's schedule draws it: a
+/// dot and a line in the time-now colour, after the events that have started and before the
+/// first that hasn't (all-day ones and ones from earlier days count as started).
+fn paint_agenda_now(
+    ink: &mut Ink,
+    scene: &Scene,
+    shared: &Shared,
+    places: &[AgendaPlace],
+    y_of: impl Fn(f32) -> Pixels,
+    rows_area: Bounds<Pixels>,
+    pad: Pixels,
+) {
+    shared.agenda_now.set(None);
+    let Some(d) = scene
+        .laid
+        .agenda
+        .iter()
+        .position(|day| day.date == scene.today)
+    else {
+        return;
+    };
+    let rows = &scene.laid.agenda[d].rows;
+    if rows.is_empty() {
+        return;
+    }
+    let next = rows
+        .iter()
+        .position(|r| r.at.is_some_and(|at| at > scene.now))
+        .unwrap_or(rows.len());
+    let place = |r: usize| places.iter().find(|p| p.day == d && p.row == Some(r));
+    let y = if next < rows.len() {
+        place(next).map(|p| y_of(p.top))
+    } else {
+        place(rows.len() - 1).map(|p| y_of(p.top + p.height))
+    };
+    let Some(y) = y else { return };
+    if y < rows_area.top() || y > rows_area.bottom() {
+        return;
+    }
+    let c = &scene.colors;
+    let b = rows_area;
+    let r = ink.u(4.);
+    let x = b.left() + pad / 2.;
+    ink.window
+        .with_content_mask(Some(ContentMask { bounds: rows_area }), |window| {
+            let mut ink = Ink {
+                window,
+                cx: ink.cx,
+                s: ink.s,
+                family: ink.family.clone(),
+                mark: None,
+                dry: ink.dry,
+            };
+            let thick = ink.u(2.);
+            ink.fill(
+                Bounds::from_corners(
+                    point(x + r, y - thick / 2.),
+                    point(b.right() - pad / 2., y + thick / 2.),
+                ),
+                c.now,
+            );
+            ink.rounded(Bounds::new(point(x, y - r), size(r * 2., r * 2.)), r, c.now);
+        });
+    shared.agenda_now.set(Some(y));
 }
 
 #[allow(clippy::too_many_arguments)]
