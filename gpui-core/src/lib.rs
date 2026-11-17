@@ -41,6 +41,7 @@ mod breadcrumb;
 mod button;
 mod card;
 mod collapsible;
+mod context_menu;
 mod date_picker;
 mod empty_state;
 #[cfg(feature = "highlight")]
@@ -80,6 +81,7 @@ pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
 pub use collapsible::Collapsible;
+pub use context_menu::ContextMenu;
 pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
 };
@@ -140,6 +142,7 @@ pub fn init(cx: &mut App) {
     input::init(cx);
     menu::init(cx);
     navigation_menu::init(cx);
+    context_menu::init(cx);
     picker::init(cx);
     search_list::init(cx);
     popover::init(cx);
