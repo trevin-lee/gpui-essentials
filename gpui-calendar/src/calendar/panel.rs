@@ -45,6 +45,27 @@ pub(super) fn beside(
     Some(point(x, top - gap))
 }
 
+/// What the guest list says above its names, as Google Calendar does: "4 guests", then how
+/// they answered, "2 yes, 1 maybe, 1 awaiting", leaving out the answers nobody gave.
+pub(super) fn guest_summary(guests: &[Attendee]) -> (String, String) {
+    let n = guests.len();
+    let count = format!("{n} {}", if n == 1 { "guest" } else { "guests" });
+    let answers = [
+        (Response::Accepted, "yes"),
+        (Response::Tentative, "maybe"),
+        (Response::Declined, "no"),
+        (Response::NeedsAction, "awaiting"),
+    ]
+    .into_iter()
+    .filter_map(|(response, word)| {
+        let k = guests.iter().filter(|a| a.response == response).count();
+        (k > 0).then(|| format!("{k} {word}"))
+    })
+    .collect::<Vec<_>>()
+    .join(", ");
+    (count, answers)
+}
+
 impl Calendar {
     /// When an event happens, in words: "Wednesday, November 18 · 11 AM – 12 PM".
     fn when(&self, e: &Event) -> String {
@@ -396,20 +417,18 @@ impl Calendar {
         }
         // Guests, and the answer of the one using the calendar.
         if !e.attendees.is_empty() {
-            let going = e
-                .attendees
-                .iter()
-                .filter(|a| a.response == Response::Accepted)
-                .count();
-            let n = e.attendees.len();
+            let (count, answers) = guest_summary(&e.attendees);
             let mut guests = div()
                 .flex()
                 .flex_col()
                 .gap(rems(4. / 15.))
-                .child(div().child(format!(
-                    "{n} {} · {going} going",
-                    if n == 1 { "guest" } else { "guests" }
-                )));
+                .child(div().debug_selector(|| "panel-guests".into()).child(count))
+                .child(
+                    div()
+                        .text_color(muted)
+                        .debug_selector(|| "panel-answers".into())
+                        .child(answers),
+                );
             for (i, a) in e.attendees.iter().enumerate() {
                 let (mark, mark_color): (&str, Hsla) = match a.response {
                     Response::Accepted => ("Going", c.success),
@@ -586,5 +605,36 @@ impl Calendar {
                 .child(div().w(rems(WIDTH / 15.)).child(content))
                 .into_any_element()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::guest_summary;
+    use crate::{Attendee, Response};
+
+    #[test]
+    fn the_guest_list_counts_each_answer() {
+        let guests = [
+            Attendee::new("Ana", Response::Accepted).organizer(true),
+            Attendee::new("Ben", Response::Accepted),
+            Attendee::new("Cy", Response::Tentative),
+            Attendee::new("Di", Response::Declined),
+            Attendee::new("Ed", Response::NeedsAction).me(true),
+            Attendee::new("Flo", Response::NeedsAction),
+        ];
+        assert_eq!(
+            guest_summary(&guests),
+            ("6 guests".into(), "2 yes, 1 maybe, 1 no, 2 awaiting".into())
+        );
+        // Answers nobody gave are left out.
+        assert_eq!(
+            guest_summary(&guests[..2]),
+            ("2 guests".into(), "2 yes".into())
+        );
+        assert_eq!(
+            guest_summary(&guests[4..5]),
+            ("1 guest".into(), "1 awaiting".into())
+        );
     }
 }
