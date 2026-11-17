@@ -110,7 +110,8 @@ their look.
   an event: `Edit`, `Delete`, `ChangeCalendar` and `Rsvp`, the last three asking "this event,
   following or all?" first for a repeating event. A read-only event's panel has no Edit,
   Delete or Change. `open_panel(id)`, `close_panel()` and `panel_event()` drive it from your
-  app; Escape or a click outside closes it, and Delete or Backspace is its Delete.
+  app; Escape or a click outside closes it, `e` is its Edit, and Delete or Backspace is its
+  Delete.
   `panel_style` overrides where it goes: `PanelStyle::Popover` keeps it beside the event on
   touch too (an iPad's, with 44-point rows and buttons, closed by a tap outside),
   `PanelStyle::Sheet` makes it a sheet everywhere, and `PanelStyle::Auto`, the default, is as

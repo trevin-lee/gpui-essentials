@@ -1278,6 +1278,52 @@ fn the_panel_joins_the_call_and_opens_the_events_page(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn e_in_the_open_panel_asks_to_edit_its_event(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, panel_on);
+    let edits = |seen: &Seen| {
+        seen.borrow()
+            .iter()
+            .filter_map(|e| match e {
+                CalendarEvent::Edit(r) => Some(r.id.clone()),
+                _ => None,
+            })
+            .collect::<Vec<EventId>>()
+    };
+    // Without the panel, e does nothing.
+    c.update(cx, |c, cx| c.select(Some(Selection::Event("a".into())), cx));
+    cx.simulate_keystrokes("e");
+    draw(cx);
+    assert!(edits(&seen).is_empty());
+    // With it open (by the host, on another event than the selection), e edits its event.
+    c.update(cx, |c, cx| c.open_panel("notes".into(), cx));
+    draw(cx);
+    cx.simulate_keystrokes("e");
+    draw(cx);
+    assert_eq!(edits(&seen), vec![EventId::from("notes")]);
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    // A read-only event's panel stays, and nothing is asked.
+    c.update(cx, |c, cx| c.open_panel("ro".into(), cx));
+    draw(cx);
+    cx.simulate_keystrokes("e");
+    draw(cx);
+    assert_eq!(edits(&seen).len(), 1);
+    assert_eq!(
+        c.read_with(cx, |c, _| c.panel_event().cloned()),
+        Some("ro".into())
+    );
+    // The panel's Edit does the same.
+    c.update(cx, |c, cx| c.open_panel("a".into(), cx));
+    draw(cx);
+    let edit = cx.debug_bounds("panel-actions").expect("Edit and Delete");
+    cx.simulate_click(
+        point(edit.left() + px(12.), edit.center().y),
+        Modifiers::none(),
+    );
+    draw(cx);
+    assert_eq!(edits(&seen).last(), Some(&EventId::from("a")));
+}
+
+#[gpui::test]
 fn a_read_only_events_panel_has_no_edits(cx: &mut TestAppContext) {
     let (c, _, cx) = open_with(cx, panel_on);
     double_click(cx, spot(&c, cx, day(3), 9, 30));
