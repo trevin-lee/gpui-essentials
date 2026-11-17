@@ -29,6 +29,7 @@ item](docs/gallery.png)
   start), stays inside the window and scrolls past `max_height`. A click
   outside, Escape, or the trigger scrolling away calls `on_dismiss` with the reason; the host
   owns `open`. While open it has the keyboard, and on closing it hands the focus back.
+  `fit_trigger_width(true)` makes it exactly as wide as its trigger, cutting wider content.
 - **Breadcrumb.** `Breadcrumb::new(id).item(BreadcrumbItem::new(id, label))….on_navigate(…)`:
   the path to the current page, its last item, separated by chevrons. The other items are links
   (a press, Enter or Space calls `on_navigate` with the item's id); the current page is no link
@@ -318,6 +319,16 @@ item](docs/gallery.png)
   chooses the next option starting with it. `disable(id)` dims an option, `invalid(true)` gives
   the destructive border, `small()` and `touch()` size it, and a long choice is cut short. It
   isn't searchable: that's Picker.
+- **Combobox.** `Combobox::new(id).placeholder(text).options([(id, label), …])
+  .selected(Some(id)).on_change(…)`: shadcn's combobox, a searchable select. An outline button
+  showing the chosen option (or the placeholder) opens a Popover with a Picker in it: a search
+  field (`search_placeholder`) over the options, the chosen one checked and highlighted. A
+  press, Enter, Space, Down or Up opens it with the keyboard in the field; typing filters (every
+  word, case aside), `empty_text` shows when nothing matches, and Up, Down and Enter or a press
+  choose. Choosing tells `on_change` (the host keeps the value), closes it and gives the
+  keyboard back to the trigger, as Escape does. The trigger is 200 pixels wide unless styled,
+  the list exactly as wide, and long labels are cut short in both. `disable(id)` dims an option
+  and `touch()` makes it and its options 44 points.
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A

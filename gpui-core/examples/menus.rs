@@ -1,4 +1,4 @@
-//! gpui-core's menus in a window: DropdownMenu.
+//! gpui-core's menus in a window: DropdownMenu and Combobox.
 //!
 //! ```sh
 //! cargo run --example menus [-- --light]
@@ -11,10 +11,24 @@ use gpui_core::*;
 
 actions!(menus, [ZoomIn, ZoomOut, Quit]);
 
+const FRAMEWORKS: [(&str, &str); 6] = [
+    ("next", "Next.js"),
+    ("svelte", "SvelteKit"),
+    ("nuxt", "Nuxt.js"),
+    ("remix", "Remix"),
+    ("astro", "Astro"),
+    (
+        "long",
+        "A framework whose name goes on far past the width of the trigger",
+    ),
+];
+
 struct Menus {
     picked: Option<SharedString>,
     status_bar: bool,
     activity_bar: bool,
+    framework: Option<SharedString>,
+    language: Option<SharedString>,
 }
 
 fn heading(text: &'static str, theme: &Theme) -> Div {
@@ -131,6 +145,78 @@ impl Menus {
                     }),
             )
     }
+
+    fn comboboxes(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap(rems(0.75))
+            .child(heading("Combobox", &theme))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(rems(0.75))
+                    .child(
+                        Combobox::new("framework")
+                            .placeholder("Select framework...")
+                            .search_placeholder("Search framework...")
+                            .empty_text("No framework found.")
+                            .accessibility_label("Framework")
+                            .options(FRAMEWORKS)
+                            .selected(self.framework.clone())
+                            .on_change(cx.listener(|this, id: &SharedString, _, cx| {
+                                // Choosing the chosen one again clears it, as shadcn's demo does.
+                                this.framework =
+                                    (this.framework.as_ref() != Some(id)).then(|| id.clone());
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Combobox::new("language")
+                            .placeholder("Select language")
+                            .search_placeholder("Search language...")
+                            .empty_text("No language found.")
+                            .options([
+                                ("en", "English"),
+                                ("fr", "French"),
+                                ("de", "German"),
+                                ("es", "Spanish"),
+                                ("pt", "Portuguese"),
+                                ("ru", "Russian"),
+                                ("ja", "Japanese"),
+                                ("ko", "Korean"),
+                                ("zh", "Chinese"),
+                            ])
+                            .disable("ru")
+                            .selected(self.language.clone())
+                            .on_change(cx.listener(|this, id: &SharedString, _, cx| {
+                                this.language = Some(id.clone());
+                                cx.notify();
+                            }))
+                            .w(rems(16.)),
+                    )
+                    .child(
+                        Combobox::new("combobox-disabled")
+                            .placeholder("Disabled")
+                            .option("none", "Never shown")
+                            .disabled(true),
+                    ),
+            )
+            .child(
+                Combobox::new("combobox-touch")
+                    .placeholder("For touch: 44 points")
+                    .options(FRAMEWORKS)
+                    .selected(self.framework.clone())
+                    .on_change(cx.listener(|this, id: &SharedString, _, cx| {
+                        this.framework = Some(id.clone());
+                        cx.notify();
+                    }))
+                    .touch(),
+            )
+    }
 }
 
 impl Render for Menus {
@@ -146,6 +232,7 @@ impl Render for Menus {
             .gap(rems(2.))
             .child(div().text_size(theme.text.lg).child("Menus"))
             .child(self.dropdowns(cx))
+            .child(self.comboboxes(cx))
     }
 }
 
@@ -180,6 +267,8 @@ fn main() {
                     picked: None,
                     status_bar: true,
                     activity_bar: false,
+                    framework: None,
+                    language: Some("en".into()),
                 })
             })
             .unwrap();

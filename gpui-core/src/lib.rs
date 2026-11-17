@@ -46,6 +46,7 @@ mod carousel;
 pub mod chart;
 mod checkbox;
 mod collapsible;
+mod combobox;
 mod command;
 mod context_menu;
 mod date_picker;
@@ -106,6 +107,7 @@ pub use carousel::Carousel;
 pub use chart::BarChart;
 pub use checkbox::Checkbox;
 pub use collapsible::Collapsible;
+pub use combobox::Combobox;
 pub use command::CommandDialog;
 pub use context_menu::ContextMenu;
 pub use date_picker::{
@@ -193,6 +195,7 @@ pub fn init(cx: &mut App) {
     dropdown_menu::init(cx);
     menubar::init(cx);
     picker::init(cx);
+    combobox::init(cx);
     search_list::init(cx);
     popover::init(cx);
     sidebar::init(cx);
