@@ -103,6 +103,7 @@ fn focused(table: &Entity<TableView>, cx: &mut VisualTestContext) -> Option<Stri
             Item::Row { row, .. } => t.rows()[row].id.clone(),
             Item::Group(g) => format!("group {g}"),
             Item::New(g) => format!("new {g:?}"),
+            Item::Calc(g) => format!("calc {g:?}"),
         })
     })
 }

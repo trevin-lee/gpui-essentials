@@ -593,7 +593,7 @@ impl TableView {
             .map_or("", |p| p.name.as_str())
     }
 
-    fn property_at(&self, column: usize) -> Option<&Property> {
+    pub(crate) fn property_at(&self, column: usize) -> Option<&Property> {
         let col = self.shown.columns.get(column)?;
         self.database
             .database
@@ -748,6 +748,7 @@ impl TableView {
                         self.render_group(ix, g, landing, cx)
                     }
                     Item::New(g) => self.render_new(ix, g, landing, cx),
+                    Item::Calc(g) => self.render_calc(ix, g, cx),
                 })
             })
             .collect()
@@ -1472,6 +1473,12 @@ impl TableView {
             Popover::AddView | Popover::NewBoard | Popover::View { .. } => {
                 return popover.into_any_element();
             }
+            Popover::Calc { property_id, group } => {
+                match self.calc_bounds(property_id, group.as_ref()) {
+                    Some(b) => b,
+                    None => return popover.into_any_element(),
+                }
+            }
             // From the point a right-click pressed, else the first row's handle (or the top of
             // the table, while it's scrolled away).
             Popover::Row { rows, at, .. } => match at {
@@ -1511,6 +1518,11 @@ impl TableView {
                         .children(self.render_note(cx))
                         .child(self.popup_menu(cx)),
                 )
+                .into_any_element(),
+            Popover::Calc { property_id, .. } => popover
+                .accessibility_label(format!("{} calculation", self.property_name(&property_id)))
+                .p(t.px(4.))
+                .child(body.w(width).child(self.popup_menu(cx)))
                 .into_any_element(),
             Popover::Columns => popover
                 .accessibility_label("Properties")
