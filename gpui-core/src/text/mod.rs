@@ -7,7 +7,8 @@ mod view;
 
 pub use markdown::{Align, Block, Item, parse as parse_markdown};
 pub use view::{
-    BlockGap, BlockKind, HeadingMargins, InlineCodeStyle, TextView, TextViewColors, TextViewStyle,
+    BlockGap, BlockKind, CodeBlock, HeadingMargins, InlineCodeStyle, TextView, TextViewColors,
+    TextViewStyle,
 };
 
 /// A piece of code's highlighted ranges (bytes, on character boundaries, in order, none
