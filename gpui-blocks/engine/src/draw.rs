@@ -132,13 +132,11 @@ impl TextLeaf {
                     marks(mark, &style),
                 )),
                 Some(InlineAtom::Custom(node)) => {
-                    let custom = node.data::<CustomNode>();
-                    let drawn = custom.and_then(|custom| {
-                        cx.extensions
-                            .iter()
-                            .find(|e| e.name() == custom.name())
-                            .and_then(|e| e.render_inline(custom, line, window, app))
-                    });
+                    let drawn = cx
+                        .extensions
+                        .iter()
+                        .find(|e| e.name() == node.name())
+                        .and_then(|e| e.render_inline(node, line, window, app));
                     let (element, baseline) = match drawn {
                         Some(drawn) => drawn,
                         None => {
@@ -661,7 +659,7 @@ pub(crate) enum Tree {
         code: String,
         highlights: Rc<[(Range<usize>, gpui::HighlightStyle)]>,
     },
-    Custom(gpui_kit::base::text::MarkdownNode),
+    Custom(CustomNode),
     /// A break, a link definition or an unknown block: nothing to see.
     Nothing,
 }
@@ -942,13 +940,12 @@ pub(crate) fn draw(
                 .into_any_element()
         }
         Tree::Custom(node) => {
-            let drawn = node.data::<CustomNode>().and_then(|custom| {
-                d.leaves
-                    .extensions
-                    .iter()
-                    .find(|e| e.name() == custom.name())
-                    .map(|e| e.render(custom, window, app))
-            });
+            let drawn = d
+                .leaves
+                .extensions
+                .iter()
+                .find(|e| e.name() == node.name())
+                .map(|e| e.render(node, window, app));
             let content =
                 drawn.unwrap_or_else(|| div().child(node.as_text().to_string()).into_any_element());
             div().pb(gap).child(content).into_any_element()
