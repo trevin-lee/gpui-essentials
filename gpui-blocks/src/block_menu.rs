@@ -16,6 +16,30 @@ impl Editor {
         cx.notify();
     }
 
+    /// Selects the top-level blocks from the selection's first block to `block`, whole: what a
+    /// Shift-click on `block`'s grip does. Without a selection of top-level blocks, `block` alone.
+    pub(crate) fn extend_block_selection(&mut self, block: BlockId, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, cx| {
+            let doc = state.model().document();
+            let top = |id: BlockId| {
+                doc.block(id)
+                    .is_some_and(|b| b.parent().map(|p| p.id()) == Some(doc.root().id()))
+            };
+            let anchor = match state.model().selection() {
+                BlockSelection::Blocks { anchor, .. } if top(*anchor) => *anchor,
+                _ => block,
+            };
+            let _ = state.set_selection(
+                BlockSelection::Blocks {
+                    anchor,
+                    head: block,
+                },
+                cx,
+            );
+        });
+        cx.notify();
+    }
+
     /// The grip of `block` was pressed: the menu opens if it's let go without dragging.
     pub(crate) fn grip_pressed(&mut self, block: BlockId) {
         self.grip_down = Some(block);
