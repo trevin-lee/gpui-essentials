@@ -366,13 +366,28 @@ struct KeyState {
 }
 
 impl KeyState {
-    fn read(key: u64, source: SharedString, context: &str, previous: Option<Vec<Piece>>) -> Self {
+    /// Reads `source`, with the definitions of the sources before it and after it if it could
+    /// refer to one.
+    fn read(
+        key: u64,
+        source: SharedString,
+        (before, after): (&str, &str),
+        previous: Option<Vec<Piece>>,
+    ) -> Self {
         let refers = source.contains(']');
-        let parsed = parse_with(&source, if refers { context } else { "" });
+        let parsed = if refers {
+            parse_with(&source, before, after)
+        } else {
+            parse_with(&source, "", "")
+        };
         let mut k = KeyState {
             key,
             refers,
-            read_with: if refers { hash_of(context) } else { 0 },
+            read_with: if refers {
+                context_hash(before, after)
+            } else {
+                0
+            },
             definitions: parsed.definitions,
             source,
             pieces: Vec::new(),
@@ -437,6 +452,11 @@ impl KeyState {
     }
 }
 
+/// The hash of the definitions a source is read with, before it and after it.
+fn context_hash(before: &str, after: &str) -> u64 {
+    hash_of(before) ^ hash_of(after).rotate_left(17)
+}
+
 fn hash_of(text: &str) -> u64 {
     use std::hash::{Hash as _, Hasher as _};
     if text.is_empty() {
@@ -491,17 +511,26 @@ impl ViewState {
                 Some(k) if k.source == *src => k,
                 prev => {
                     changed[i] = true;
-                    KeyState::read(*key, src.clone(), "", prev.map(|k| k.pieces))
+                    KeyState::read(*key, src.clone(), ("", ""), prev.map(|k| k.pieces))
                 }
             });
         }
-        // Then those that could refer to a definition, with every source's.
-        let context: String = keys.iter().map(|k| k.definitions.as_str()).collect();
-        let h = hash_of(&context);
+        // Then those that could refer to a definition, with the definitions of the sources
+        // before them and after them, in the document's order (the first of a label wins).
+        let defs: Vec<String> = keys.iter().map(|k| k.definitions.clone()).collect();
+        let any = defs.iter().any(|d| !d.is_empty());
         for (i, k) in keys.iter_mut().enumerate() {
-            if k.refers && k.read_with != h {
+            if !k.refers {
+                continue;
+            }
+            let (before, after) = if any {
+                (defs[..i].concat(), defs[i + 1..].concat())
+            } else {
+                (String::new(), String::new())
+            };
+            if k.read_with != context_hash(&before, &after) {
                 let pieces = std::mem::take(&mut k.pieces);
-                *k = KeyState::read(k.key, k.source.clone(), &context, Some(pieces));
+                *k = KeyState::read(k.key, k.source.clone(), (&before, &after), Some(pieces));
                 changed[i] = true;
             }
         }

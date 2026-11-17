@@ -46,7 +46,7 @@ pub struct Item {
 }
 
 pub fn parse(source: &str) -> Vec<Block> {
-    parse_with(source, "").blocks
+    parse_with(source, "", "").blocks
 }
 
 /// What [`parse_with`] read: the blocks, and the link reference definitions in the source
@@ -57,37 +57,60 @@ pub struct Parsed {
     pub definitions: String,
 }
 
-/// Reads `source` with `context` after it: link reference definitions from elsewhere (other
-/// parts of one document), so a `[text][label]` here resolves to one defined there. The
-/// context's definitions draw nothing.
-pub fn parse_with(source: &str, context: &str) -> Parsed {
+/// Reads `source` between `before` and `after`: link reference and footnote definitions from
+/// other parts of one document (the sources before it and after it), so a `[text][label]` or a
+/// `[^note]` here resolves to one defined there, and of two with one label the first in the
+/// document wins, as in one document. Their definitions draw nothing here.
+pub fn parse_with(source: &str, before: &str, after: &str) -> Parsed {
     let mut end = source.len().min(MAX_LEN);
     while !source.is_char_boundary(end) {
         end -= 1;
     }
     let source = &source[..end];
-    let mut text = String::new();
-    let doc = if context.is_empty() {
-        source
-    } else {
-        // A blank line first, so the definitions can't join the source's last paragraph.
-        let mut room = MAX_LEN.saturating_sub(source.len());
-        while room < context.len() && !context.is_char_boundary(room) {
-            room -= 1;
+    // What fits of the others' definitions, within the limit.
+    let cut = |text: &str, room: usize| -> usize {
+        let mut n = room.min(text.len());
+        while !text.is_char_boundary(n) {
+            n -= 1;
         }
-        text.reserve(source.len() + room.min(context.len()) + 2);
-        text.push_str(source);
-        text.push_str("\n\n");
-        text.push_str(&context[..room.min(context.len())]);
-        &text
+        n
     };
+    let room = MAX_LEN.saturating_sub(source.len());
+    let before = &before[..cut(before, room / 2)];
+    let after = &after[..cut(after, room - before.len())];
+    let mut doc = String::with_capacity(before.len() + source.len() + after.len() + 4);
+    if !before.is_empty() {
+        // A blank line after, so the source's first line starts a block of its own.
+        doc.push_str(before);
+        doc.push_str("\n\n");
+    }
+    let own = doc.len()..doc.len() + source.len();
+    doc.push_str(source);
+    if !after.is_empty() {
+        // And before, so the definitions can't join the source's last paragraph.
+        doc.push_str("\n\n");
+        doc.push_str(after);
+    }
     // pulldown-cmark doesn't panic on what it's given (it's fuzzed for that, and so is this, in
     // the tests below); the guard is there anyway, where a panic can be caught.
     std::panic::catch_unwind(|| {
-        let parser = Parser::new_ext(doc, options());
-        let definitions = own_definitions(&parser, source.len());
+        let parser = Parser::new_ext(&doc, options());
+        // The source's own definitions, whatever the others define: read alone where they're
+        // there, since with them a label they define first hides the source's.
+        let mut definitions = if before.is_empty() && after.is_empty() {
+            own_definitions(&parser, &own)
+        } else {
+            own_definitions(&Parser::new_ext(source, options()), &(0..source.len()))
+        };
+        let (blocks, notes) = convert_events(parser, 0, Some(own.clone()));
+        // The source's own footnotes, as stubs for the others to be read with.
+        for label in notes {
+            if !label.contains(['[', ']', '\\', '\n', '\r']) {
+                definitions.push_str(&format!("[^{label}]: .\n"));
+            }
+        }
         Parsed {
-            blocks: convert_events(parser, 0),
+            blocks,
             definitions,
         }
     })
@@ -97,13 +120,13 @@ pub fn parse_with(source: &str, context: &str) -> Parsed {
     })
 }
 
-/// The link reference definitions that start before `own_end` (the source's own, not the
-/// context's) as `[label]: <url>` lines. A URL that can't be written back so is left out.
-fn own_definitions(parser: &Parser, own_end: usize) -> String {
+/// The link reference definitions that start in `own` (the source's own, not the others') as
+/// `[label]: <url>` lines. A URL that can't be written back so is left out.
+fn own_definitions(parser: &Parser, own: &std::ops::Range<usize>) -> String {
     let mut defs: Vec<(usize, String, String)> = parser
         .reference_definitions()
         .iter()
-        .filter(|(_, d)| d.span.start < own_end)
+        .filter(|(_, d)| own.contains(&d.span.start))
         .filter(|(label, d)| {
             !d.dest.contains(['<', '>', '\n', '\r', '\\'])
                 && !label.contains(['[', ']', '\\', '\n', '\r'])
@@ -491,11 +514,17 @@ impl Builder {
 
 /// Reads `source`'s blocks (`depth` deep in re-readings of HTML blocks' text).
 fn convert(source: &str, depth: usize) -> Vec<Block> {
-    convert_events(Parser::new_ext(source, options()), depth)
+    convert_events(Parser::new_ext(source, options()), depth, None).0
 }
 
-/// The blocks the parser's events make.
-fn convert_events(parser: Parser, depth: usize) -> Vec<Block> {
+/// The blocks the parser's events make, and the labels of the footnotes defined. With `own`, a
+/// footnote defined outside it (another source's, read here for its label) draws nothing, and
+/// only those inside it are told.
+fn convert_events(
+    parser: Parser,
+    depth: usize,
+    own: Option<std::ops::Range<usize>>,
+) -> (Vec<Block>, Vec<String>) {
     let mut b = Builder {
         frames: vec![Frame::Blocks(Vec::new())],
         text: None,
@@ -506,7 +535,18 @@ fn convert_events(parser: Parser, depth: usize) -> Vec<Block> {
         skipping: 0,
         depth,
     };
-    for e in parser {
+    let mut notes = Vec::new();
+    for (e, at) in parser.into_offset_iter() {
+        if b.skipping == 0
+            && let Event::Start(Tag::FootnoteDefinition(label)) = &e
+        {
+            if own.as_ref().is_some_and(|o| !o.contains(&at.start)) {
+                // Another source's footnote: only its label was wanted.
+                b.skipping = 1;
+                continue;
+            }
+            notes.push(label.to_string());
+        }
         b.event(e);
     }
     b.flush();
@@ -529,10 +569,11 @@ fn convert_events(parser: Parser, depth: usize) -> Vec<Block> {
             _ => {}
         }
     }
-    match b.frames.pop() {
+    let blocks = match b.frames.pop() {
         Some(Frame::Blocks(v)) => v,
         _ => Vec::new(),
-    }
+    };
+    (blocks, notes)
 }
 
 /// `p` with GitHub's bare links (`https://…`, `www.…`) made links, where its text isn't a link
@@ -820,6 +861,55 @@ mod tests {
         );
         assert_eq!(link("@nobody"), None);
         assert_eq!(link("a@b"), None);
+    }
+
+    #[test]
+    fn of_two_definitions_the_first_in_the_document_wins() {
+        let link = |b: &[Block]| match &b[0] {
+            Block::Paragraph(p) => p.link_at(0).map(|s| s.to_string()),
+            other => panic!("{other:?}"),
+        };
+        let first = "[x]: <https://first.test>\n";
+        let second = "[x]: <https://second.test>\n";
+        assert_eq!(
+            link(&parse_with("[t][x]", first, second).blocks).as_deref(),
+            Some("https://first.test")
+        );
+        // An earlier source's wins over the source's own, as in one document.
+        let own = "[t][x]\n\n[x]: https://own.test";
+        assert_eq!(
+            link(&parse_with(own, first, "").blocks).as_deref(),
+            Some("https://first.test")
+        );
+        assert_eq!(
+            link(&parse_with(own, "", second).blocks).as_deref(),
+            Some("https://own.test")
+        );
+        // Only the source's own are told to the others.
+        let p = parse_with(own, first, second);
+        assert_eq!(p.definitions, "[x]: <https://own.test>\n");
+    }
+
+    #[test]
+    fn a_footnote_defined_in_another_source_resolves_and_draws_there_alone() {
+        let defined = parse_with("[^1]: the note", "", "");
+        assert_eq!(defined.definitions, "[^1]: .\n");
+        assert!(format!("{:?}", defined.blocks).contains("the note"));
+        // The reference, read with that source's footnote after it.
+        let b = parse_with("Text[^1].", "", &defined.definitions).blocks;
+        assert_eq!(b.len(), 1, "the stub draws nothing: {b:?}");
+        let Block::Paragraph(p) = &b[0] else {
+            panic!("{b:?}")
+        };
+        assert_eq!(p.text, "Text[1].");
+        assert!(
+            p.spans
+                .iter()
+                .any(|(r, m)| m.muted && &p.text[r.clone()] == "[1]")
+        );
+        // Read alone, it's the text as written.
+        let alone = parse_with("Text[^1].", "", "").blocks;
+        assert!(format!("{alone:?}").contains("[^1]"), "{alone:?}");
     }
 
     /// Random Markdown made of the pieces parsers trip on (list markers, fences, indents,
