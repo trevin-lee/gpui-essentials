@@ -233,13 +233,9 @@ impl Document {
         ids: &mut Ids,
     ) -> Self {
         let doc = model.document();
-        let mut seen = HashSet::new();
-        let blocks = doc
-            .root()
-            .children()
-            .map(|b| block(b, ids, &mut seen))
-            .collect();
-        ids.retain(&seen);
+        // Ids of blocks no longer in the document are kept: undoing a delete brings a block
+        // back as it was, and it should come back with its id.
+        let blocks = doc.root().children().map(|b| block(b, ids)).collect();
         Self {
             format: FORMAT.into(),
             version: VERSION,
@@ -333,13 +329,8 @@ fn front_matter(front: &str) -> String {
 pub(crate) struct Ids(HashMap<BlockId, String>);
 
 impl Ids {
-    fn get_or_new(&mut self, block: BlockId, seen: &mut HashSet<BlockId>) -> String {
-        seen.insert(block);
+    fn get_or_new(&mut self, block: BlockId) -> String {
         self.0.entry(block).or_insert_with(new_id).clone()
-    }
-
-    fn retain(&mut self, seen: &HashSet<BlockId>) {
-        self.0.retain(|id, _| seen.contains(id));
     }
 
     pub(crate) fn clear(&mut self) {
@@ -497,10 +488,10 @@ fn new_id() -> String {
         .collect()
 }
 
-fn block(b: BlockRef<'_>, ids: &mut Ids, seen: &mut HashSet<BlockId>) -> Block {
-    let id = ids.get_or_new(b.id(), seen);
+fn block(b: BlockRef<'_>, ids: &mut Ids) -> Block {
+    let id = ids.get_or_new(b.id());
     let text = || b.inline_markdown().unwrap_or_default();
-    let mut children = || b.children().map(|c| block(c, ids, seen)).collect();
+    let mut children = || b.children().map(|c| block(c, ids)).collect();
     let (kind, children) = match b.kind() {
         BlockKind::Paragraph => (Kind::Paragraph { text: text() }, Vec::new()),
         BlockKind::Heading { level } => (
@@ -999,6 +990,36 @@ mod tests {
             ["L1", "i1", "i1p", "i2", "i2p", "i3", "i3p", "P"],
             "the joined list is the first's, with every item's id; the paragraph after keeps \
              its id"
+        );
+    }
+
+    #[test]
+    fn an_undone_delete_brings_the_block_back_with_its_id() {
+        use markdown_editor::{BlockSelection, EditorCommand};
+        fn all(blocks: &[Block]) -> Vec<String> {
+            blocks
+                .iter()
+                .flat_map(|b| std::iter::once(b.id.clone()).chain(all(&b.children)))
+                .collect()
+        }
+        let mut model =
+            BlockEditorModel::from_markdown("a\n\nb\n\nc", crate::extensions(&[])).unwrap();
+        let mut ids = Ids::default();
+        let before = Document::from_model(&model, String::new(), &mut ids);
+        let b = model.document().root().children().nth(1).unwrap().id();
+        model
+            .set_selection(BlockSelection::Blocks { anchor: b, head: b })
+            .unwrap();
+        model.run(EditorCommand::DeleteSelection).unwrap();
+        // Saved while it's gone.
+        let deleted = Document::from_model(&model, String::new(), &mut ids);
+        assert_eq!(deleted.blocks.len(), 2);
+        assert!(model.undo());
+        let after = Document::from_model(&model, String::new(), &mut ids);
+        assert_eq!(
+            all(&after.blocks),
+            all(&before.blocks),
+            "the same ids again"
         );
     }
 
