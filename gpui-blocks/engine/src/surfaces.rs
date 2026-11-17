@@ -2,11 +2,7 @@
 //! tinted box with a bar in the alert's colour for GitHub's five alert names.
 
 use gpui::{App, Div, Hsla, ParentElement as _, Styled as _, Window, div, px, rems};
-use gpui_kit::component::Icon;
-
-// Lucide icons (ISC, see assets/icons/LICENSE-LUCIDE).
-const ICON_CHEVRON_RIGHT: &[u8] = include_bytes!("../assets/icons/chevron-right.svg");
-const ICON_CHEVRON_DOWN: &[u8] = include_bytes!("../assets/icons/chevron-down.svg");
+use gpui_core::{Icon, IconName};
 
 /// Width of a toggle's gutter, where its chevron is drawn and clicked, in
 /// rems of the editor's text.
@@ -25,14 +21,13 @@ pub fn toggle_container(open: bool, window: &mut Window, cx: &mut App) -> Div {
     let top = ((line - icon) / 2.).max(px(0.));
     div().relative().pl(rems(TOGGLE_GUTTER_REMS)).child(
         div().absolute().left(px(0.)).top(top).child(
-            Icon::default()
-                .data(if open {
-                    ICON_CHEVRON_DOWN
-                } else {
-                    ICON_CHEVRON_RIGHT
-                })
-                .size(icon)
-                .text_color(gpui_core::Theme::global(cx).muted_foreground),
+            Icon::new(if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .size(icon)
+            .color(gpui_core::Theme::global(cx).muted_foreground),
         ),
     )
 }

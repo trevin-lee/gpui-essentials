@@ -40,4 +40,6 @@ name = "editor"
 
 [dev-dependencies]
 futures = "0.3"
+# The example serves gpui-core's icons, which the editor draws its toggles' chevrons with.
+gpui-core = { path = "../gpui-core" }
 gpui-kit = { workspace = true, features = ["test-support"] }
