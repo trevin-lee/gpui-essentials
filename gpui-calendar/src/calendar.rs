@@ -2316,6 +2316,12 @@ impl Calendar {
         if self.asking.is_some() {
             return;
         }
+        // With the panel open, Delete is its Delete: for the event it shows, and the panel
+        // closes rather than stay over the question or a deleted event.
+        if self.panel.is_some() {
+            self.panel_edit(EditKind::Delete, cx);
+            return;
+        }
         if let Some(event) = self
             .selected_event()
             .and_then(|id| self.editable(id))

@@ -1131,6 +1131,62 @@ fn a_web_address_in_the_panel_asks_the_host_to_open_it(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn delete_with_the_panel_open_deletes_its_event(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, panel_on);
+    // The panel on Planning, opened by the host with another event selected.
+    c.update(cx, |c, cx| {
+        c.select(Some(Selection::Event("notes".into())), cx);
+        c.open_panel("a".into(), cx);
+    });
+    draw(cx);
+    cx.simulate_keystrokes("delete");
+    draw(cx);
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: reference("a"),
+            scope: EditScope::This
+        }
+    ));
+    assert!(
+        !seen
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Delete { event, .. } if event.id == "notes"))
+    );
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    // A repeating one: the panel gives way to the question, never under it.
+    c.update(cx, |c, cx| c.open_panel("gym@4".into(), cx));
+    draw(cx);
+    cx.simulate_keystrokes("backspace");
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.is_asking()));
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    assert!(cx.debug_bounds("panel").is_none());
+    cx.simulate_keystrokes("enter");
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: gym4(),
+            scope: EditScope::This
+        }
+    ));
+    // A read-only event's panel deletes nothing.
+    c.update(cx, |c, cx| c.open_panel("ro".into(), cx));
+    draw(cx);
+    cx.simulate_keystrokes("delete");
+    draw(cx);
+    assert!(
+        !seen
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Delete { event, .. } if event.id == "ro"))
+    );
+    // The host was only asked: Planning is still there.
+    assert!(c.read_with(cx, |c, _| c.event("a").is_some()));
+}
+
+#[gpui::test]
 fn a_read_only_events_panel_has_no_edits(cx: &mut TestAppContext) {
     let (c, _, cx) = open_with(cx, panel_on);
     double_click(cx, spot(&c, cx, day(3), 9, 30));
