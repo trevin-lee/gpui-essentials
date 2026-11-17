@@ -34,6 +34,7 @@
 struct ReadmeDoctests;
 
 mod a11y;
+mod alert;
 mod button;
 mod card;
 mod date_picker;
@@ -56,6 +57,7 @@ pub mod theme;
 mod toast;
 mod tooltip;
 
+pub use alert::{Alert, AlertVariant};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
 pub use date_picker::{
