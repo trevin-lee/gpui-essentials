@@ -322,7 +322,13 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.view().map(|v| v.id.as_str()) == Some(view_id.as_str()) {
+        // Already shown as asked: the view asked for, or the fallback when none was. One asked
+        // for that's gone (just deleted) shows the fallback, but the host hasn't been told.
+        let asked = match &self.view_id {
+            Some(id) => Some(id.as_str()),
+            None => self.view().map(|v| v.id.as_str()),
+        };
+        if asked == Some(view_id.as_str()) {
             return;
         }
         self.set_view(view_id.clone(), cx);

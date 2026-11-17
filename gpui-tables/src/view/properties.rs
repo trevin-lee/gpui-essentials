@@ -305,10 +305,9 @@ impl TableView {
     pub(crate) fn menu_property(&self) -> Option<&Property> {
         let fields = self.database.database.as_ref()?;
         match &self.popover {
-            Some(Popover::Header { column }) => fields
-                .properties
-                .get(self.shown.columns.get(*column)?.property),
-            Some(Popover::Property { property_id, .. }) => fields.property(property_id),
+            Some(Popover::Header { property_id } | Popover::Property { property_id, .. }) => {
+                fields.property(property_id)
+            }
             _ => None,
         }
     }
