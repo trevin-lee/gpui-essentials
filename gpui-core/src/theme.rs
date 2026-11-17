@@ -106,6 +106,14 @@ pub struct Colors {
     pub callout_warning_background: Hsla,
     pub callout_caution: Hsla,
     pub callout_caution_background: Hsla,
+    /// A chart's five series colours, in order (shadcn's `--chart-1` to `--chart-5`: its
+    /// default OKLCH values in sRGB, the hex Tailwind gives for them). A sixth series takes the
+    /// first again.
+    pub chart_1: Hsla,
+    pub chart_2: Hsla,
+    pub chart_3: Hsla,
+    pub chart_4: Hsla,
+    pub chart_5: Hsla,
 }
 
 /// A callout's box: its colour at 8%.
@@ -178,6 +186,11 @@ impl Colors {
             callout_warning_background: tint(0xd29922),
             callout_caution: c(0xf85149),
             callout_caution_background: tint(0xf85149),
+            chart_1: c(0x1447e6),
+            chart_2: c(0x00bc7d),
+            chart_3: c(0xfe9a00),
+            chart_4: c(0xad46ff),
+            chart_5: c(0xff2056),
         }
     }
 
@@ -237,6 +250,11 @@ impl Colors {
             callout_warning_background: tint(0x926200),
             callout_caution: c(0xcf242f),
             callout_caution_background: tint(0xcf242f),
+            chart_1: c(0xf54900),
+            chart_2: c(0x009689),
+            chart_3: c(0x104e64),
+            chart_4: c(0xffb900),
+            chart_5: c(0xfe9a00),
         }
     }
 
@@ -248,6 +266,17 @@ impl Colors {
     /// Selected text's highlight: the ring at 30%.
     pub fn selection(&self) -> Hsla {
         self.ring.opacity(0.3)
+    }
+
+    /// The `i`th series' chart colour: `chart_1` to `chart_5`, then round again.
+    pub fn chart(&self, i: usize) -> Hsla {
+        [
+            self.chart_1,
+            self.chart_2,
+            self.chart_3,
+            self.chart_4,
+            self.chart_5,
+        ][i % 5]
     }
 }
 
