@@ -404,6 +404,96 @@ fn on_touch_the_event_panel_is_a_sheet_with_44_point_rows(cx: &mut TestAppContex
     assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
 }
 
+/// Opens Planning's panel with a finger, with a link on it to measure a row by.
+fn open_panel_by_touch(
+    c: &Entity<Calendar>,
+    cx: &mut VisualTestContext,
+    style: PanelStyle,
+) -> Point<Pixels> {
+    c.update(cx, |c, cx| {
+        c.set_options(
+            |o| {
+                o.event_panel = true;
+                o.panel_style = style;
+            },
+            cx,
+        );
+        let mut e = c.event("a").unwrap().clone();
+        e.links = vec![EventLink::doc("d", "Plan")];
+        c.upsert_event(e, cx);
+    });
+    draw(cx);
+    let on = spot(c, cx, day(2), 11, 30);
+    tap(cx, on);
+    tap(cx, on);
+    on
+}
+
+#[gpui::test]
+fn on_touch_the_panel_can_be_a_popover_beside_the_event(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    open_panel_by_touch(&c, cx, PanelStyle::Popover);
+    assert!(has(&seen, &CalendarEvent::Open("a".into())));
+    assert!(cx.debug_bounds("gpui-core-sheet").is_none());
+    let popover = cx.debug_bounds("gpui-core-popover").expect("a popover");
+    // Beside the event, not over it.
+    let chip = c.read_with(cx, |c, _| c.event_bounds("a")).unwrap();
+    let both = popover.intersect(&chip);
+    assert!(
+        both.size.width <= px(0.) || both.size.height <= px(0.),
+        "{popover:?} over {chip:?}"
+    );
+    // A finger's targets.
+    for target in ["panel-link-0", "panel-close"] {
+        let b = cx.debug_bounds(target).expect(target);
+        assert!(b.size.height >= px(44.), "{target}: {:?}", b.size);
+    }
+    // A tap on the link opens it.
+    let link = cx.debug_bounds("panel-link-0").unwrap();
+    tap(cx, link.center());
+    assert!(
+        seen.borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::OpenLink { event, .. } if event.id == "a"))
+    );
+    c.update(cx, |c, cx| c.open_panel("a".into(), cx));
+    draw(cx);
+    assert!(cx.debug_bounds("gpui-core-popover").is_some());
+    // A tap outside it closes it.
+    tap(cx, spot(&c, cx, day(0), 15, 0));
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    assert!(cx.debug_bounds("gpui-core-popover").is_none());
+}
+
+#[gpui::test]
+fn the_panel_can_be_a_sheet_whatever_takes_it(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    open_panel_by_touch(&c, cx, PanelStyle::Sheet);
+    assert!(cx.debug_bounds("gpui-core-popover").is_none());
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
+    let link = cx.debug_bounds("panel-link-0").expect("the link");
+    assert!(link.size.height >= px(44.), "{:?}", link.size);
+    // A tap above it closes it.
+    let sheet = cx.debug_bounds("gpui-core-sheet").unwrap();
+    tap(cx, point(sheet.center().x, sheet.top() - px(30.)));
+    assert!(c.read_with(cx, |c, _| c.panel_event().is_none()));
+    // With a pointer too, where it would otherwise be a popover.
+    c.update(cx, |c, cx| {
+        c.set_options(|o| o.touch = false, cx);
+        c.open_panel("a".into(), cx);
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("gpui-core-popover").is_none());
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
+    // And Auto is a popover there.
+    c.update(cx, |c, cx| {
+        c.set_options(|o| o.panel_style = PanelStyle::Auto, cx)
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("gpui-core-popover").is_some());
+    assert!(cx.debug_bounds("gpui-core-sheet").is_none());
+}
+
 #[gpui::test]
 fn on_touch_the_mini_month_is_a_sheet_of_44_point_days(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);

@@ -110,6 +110,10 @@ their look.
   following or all?" first for a repeating event. A read-only event's panel has no Edit,
   Delete or Change. `open_panel(id)`, `close_panel()` and `panel_event()` drive it from your
   app; Escape or a click outside closes it, and Delete or Backspace is its Delete.
+  `panel_style` overrides where it goes: `PanelStyle::Popover` keeps it beside the event on
+  touch too (an iPad's, with 44-point rows and buttons, closed by a tap outside),
+  `PanelStyle::Sheet` makes it a sheet everywhere, and `PanelStyle::Auto`, the default, is as
+  above.
 - **The mini month** (`mini_month`, off by default): gpui-core's `MonthGrid` to jump to a date.
   Where the calendar is wide (its days still at least 600 pixels with the month beside them),
   it's a column at the calendar's left; narrower, or on touch, it's behind the title: a click
@@ -271,7 +275,7 @@ fn main() {
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
   `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows`, `touch`,
-  `event_panel`, `mini_month` and `scopes`.
+  `event_panel`, `panel_style`, `mini_month` and `scopes`.
 - **The header:** the title, Today, previous and next, and Day / Week / Month / Agenda are
   gpui-core's buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
