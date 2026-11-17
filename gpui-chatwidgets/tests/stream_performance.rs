@@ -206,12 +206,13 @@ fn a_delta_costs_about_the_same_at_the_end_of_a_long_reply() {
 }
 
 /// A list that grows an item at a time: it's one block until something after it ends it, so
-/// it's the open block all along, and gpui-core lays a block out whole when it changes. A delta
-/// at its end costs what laying the list out does, growing with the list; printed at 100, 500
-/// and 1,000 items (the list given in one go up to 600 characters before, 100 in a debug build,
-/// then streamed), and held to a bound at 1,000 items (33,000 characters).
+/// it's the open block all along. gpui-core keeps each of its items' layouts, so a delta lays
+/// out only the item it changed, but the list is still read whole and placed and painted, which
+/// grows with it; printed at 100, 500 and 1,000 items (the list given in one go up to 600
+/// characters before, 100 in a debug build, then streamed), and held to a bound at 1,000 items
+/// (33,000 characters).
 #[test]
-fn a_long_list_growing_by_items_is_laid_out_whole() {
+fn a_long_list_growing_by_items() {
     let mut text = String::new();
     let mut marks = Vec::new();
     for i in 1..=1000 {
@@ -239,7 +240,102 @@ fn a_long_list_growing_by_items_is_laid_out_whole() {
             ms(t[i])
         );
     }
-    assert!(t[2] < bound(60.), "a delta at 1,000 items took {:?}", t[2]);
+    assert!(t[2] < bound(20.), "a delta at 1,000 items took {:?}", t[2]);
+}
+
+/// A block that grows a row (or a line) at a time, `head` then `row(i)` for i in 1..: the median
+/// time of a delta at the end of it at each of `sizes` rows, over three runs in a release build
+/// (one in a debug one), each streamed four characters a delta for the last 600 characters (100
+/// in a debug build) after the rest in one go. And the time reading the block's Markdown alone
+/// takes at each size (the fastest of nine, which a loaded machine slows least), part of what a
+/// delta costs: the rest is laying it out and painting it.
+fn growing(
+    head: &str,
+    row: impl Fn(usize) -> String,
+    sizes: &[usize],
+) -> (Vec<usize>, Vec<Duration>, Vec<Duration>) {
+    let mut text = String::from(head);
+    let mut marks = Vec::new();
+    for i in 1..=*sizes.iter().max().unwrap() {
+        text.push_str(&row(i));
+        if sizes.contains(&i) {
+            marks.push(text.len());
+        }
+    }
+    let (runs, lead) = if cfg!(debug_assertions) {
+        (1, 100)
+    } else {
+        (3, 600)
+    };
+    let mut times = Vec::new();
+    for run in 0..runs {
+        for &m in &marks {
+            times.extend(stream(&text[..m], m - lead, false, run));
+        }
+    }
+    let parsing = marks
+        .iter()
+        .map(|&m| {
+            (0..9)
+                .map(|_| {
+                    let start = Instant::now();
+                    std::hint::black_box(gpui_core::text::parse_markdown(&text[..m]));
+                    start.elapsed()
+                })
+                .min()
+                .unwrap()
+        })
+        .collect();
+    (marks.clone(), at_marks(&times, &marks), parsing)
+}
+
+/// A table that grows a row at a time, four columns of a word or two: one block, the open one,
+/// until something after it ends it, read and laid out whole on each delta. A delta at its end
+/// is laid out and painted at 100, 500 and 1,000 rows, and held to a bound at 500 and at 1,000
+/// (the medians, which a loaded machine's odd slow frame doesn't move). Reading a table grows
+/// faster than its rows (the `markdown` crate's tables), so a long one costs most in reading.
+#[test]
+fn a_long_table_growing_by_rows() {
+    let sizes = [100, 500, 1000];
+    let (marks, t, parsing) = growing(
+        "| Name | Kind | Size | Note |\n|---|---|---|---|\n",
+        |i| format!("| row {i} | file | {} KB | kept |\n", i % 97),
+        &sizes,
+    );
+    for (i, n) in sizes.iter().enumerate() {
+        eprintln!(
+            "a delta at the end of a {n}-row table ({} characters): {:.2} ms, reading its Markdown alone {:.2} ms",
+            marks[i],
+            ms(t[i]),
+            ms(parsing[i])
+        );
+    }
+    assert!(t[1] < bound(80.), "a delta at 500 rows took {:?}", t[1]);
+    assert!(t[2] < bound(250.), "a delta at 1,000 rows took {:?}", t[2]);
+}
+
+/// A code fence that grows a line at a time: one block, the open one, until its closing fence,
+/// read and laid out whole on each delta. A delta at its end is laid out and painted at 200,
+/// 1,000 and 2,000 lines, and held to a bound at 1,000 and at 2,000 (the medians). Reading it
+/// is a small part: most of a delta is laying the code out.
+#[test]
+fn a_long_code_fence_growing_by_lines() {
+    let sizes = [200, 1000, 2000];
+    let (marks, t, parsing) = growing(
+        "```rust\n",
+        |i| format!("let v{i} = f({}, \"x\");\n", i % 97),
+        &sizes,
+    );
+    for (i, n) in sizes.iter().enumerate() {
+        eprintln!(
+            "a delta at the end of a {n}-line code fence ({} characters): {:.2} ms, reading its Markdown alone {:.2} ms",
+            marks[i],
+            ms(t[i]),
+            ms(parsing[i])
+        );
+    }
+    assert!(t[1] < bound(30.), "a delta at 1,000 lines took {:?}", t[1]);
+    assert!(t[2] < bound(60.), "a delta at 2,000 lines took {:?}", t[2]);
 }
 
 /// A code fence 50,000 lines long, then a paragraph, given in one append, a line at a time and
