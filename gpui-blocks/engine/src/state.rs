@@ -2906,6 +2906,17 @@ impl BlockEditorState {
         }
     }
 
+    /// Pastes Markdown the app made from the clipboard (a web page's HTML, say), as the editor's
+    /// own copies paste: parsed into blocks when it has more than one, else its inline marks and
+    /// links go in at the caret, as one undo step.
+    pub fn paste_markdown(&mut self, markdown: &str, cx: &mut Context<Self>) {
+        if self.readonly {
+            return;
+        }
+        self.end_composition();
+        self.paste_text(markdown, false, CopyKind::Blocks, cx);
+    }
+
     /// Resolve an intercepted paste with text not consumed by the host's other
     /// admissions (e.g. image attachments). `None` means wholly handled or
     /// rejected. Returns false when navigation/edits made the request stale.

@@ -45,6 +45,7 @@ pub mod docs;
 mod editor;
 mod find;
 mod format_bar;
+pub mod html;
 pub mod import;
 pub mod json;
 pub mod mentions;
