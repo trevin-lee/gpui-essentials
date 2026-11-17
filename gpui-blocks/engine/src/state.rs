@@ -2046,6 +2046,12 @@ impl BlockEditorState {
 
     /// The active block drag, after cancelling it if the document changed
     /// since it began: the blocks it measured may have moved or gone.
+    /// Whether a block is being dragged: pressed on a handle (see [`Self::begin_block_drag`]) and
+    /// moved far enough to have started.
+    pub fn is_dragging_block(&self) -> bool {
+        self.block_drag.is_some_and(|drag| drag.active)
+    }
+
     pub(crate) fn live_block_drag(&mut self) -> Option<BlockDrag> {
         let drag = self.block_drag?;
         if drag.revision != self.model.revision() {
