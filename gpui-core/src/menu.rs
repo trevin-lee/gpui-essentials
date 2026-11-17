@@ -1253,7 +1253,9 @@ impl Element for SubmenuElement {
             .max_w((view.size.width - edge * 2.).max(px(0.)))
             .into_any_element();
         // A press on it isn't one outside the popover the menu is in.
-        let mut panel = ClaimArea::new(self.key.clone(), panel).into_any_element();
+        let layer = crate::popover::layer(cx);
+        let panel = ClaimArea::new(self.key.clone(), panel).into_any_element();
+        let mut panel = crate::popover::InLayer::new(layer, panel).into_any_element();
         // Laid out on its own, now that its entry has been placed this frame.
         let size = crate::popover::with_panel_colors(self.colors, window, cx, |window, cx| {
             panel.layout_as_root(
@@ -1266,12 +1268,7 @@ impl Element for SubmenuElement {
             )
         });
         let origin = place_beside(bounds, size, view, edge, inset);
-        window.defer_draw(
-            panel,
-            origin,
-            crate::popover::PRIORITY,
-            None::<ContentMask<Pixels>>,
-        );
+        window.defer_draw(panel, origin, layer, None::<ContentMask<Pixels>>);
     }
 
     fn paint(

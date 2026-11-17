@@ -51,6 +51,16 @@ item](docs/gallery.png)
   hides `close_delay` (300 ms) after the pointer leaves the trigger and the card, when the focus
   leaves, on Escape and on a press outside. It never takes the focus, and keeps whether it's
   shown itself.
+- **Dialog.** `Dialog::new(id).open(open).title(…).description(…).on_dismiss(…).child(…)
+  .footer(button)` is a modal panel in the middle of the window over a scrim, at most
+  `max_width` wide and scrolling when taller than the window, with a close button (an ×,
+  `close_button(false)` hides it). Escape, a press on the scrim or the close button calls
+  `on_dismiss` with which it was. On opening, the keyboard goes to `initial_focus` or the first
+  thing inside, Tab and Shift-Tab go round inside it and never out, and on closing the focus
+  goes back. It's drawn over popovers, a popover or menu opened from inside it over it, and
+  toasts over it. `AlertDialog::new(id)….cancel(button).action(button)` asks for a decision:
+  no close button, a press on the scrim doesn't close it, and it opens with the keyboard on
+  the cancel.
 - **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
   the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
   monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab

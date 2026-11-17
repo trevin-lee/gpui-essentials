@@ -47,6 +47,7 @@ mod checkbox;
 mod collapsible;
 mod context_menu;
 mod date_picker;
+mod dialog;
 mod empty_state;
 mod field;
 #[cfg(feature = "highlight")]
@@ -102,6 +103,7 @@ pub use context_menu::ContextMenu;
 pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
 };
+pub use dialog::{AlertDialog, Dialog};
 pub use empty_state::EmptyState;
 pub use field::{Field, FieldGroup, FieldLegend, FieldSet, Label};
 pub use hover_card::{HOVER_CARD_CLOSE_DELAY, HOVER_CARD_OPEN_DELAY, HoverCard};
@@ -168,6 +170,7 @@ pub fn init(cx: &mut App) {
     radio_group::init(cx);
     toggle::init(cx);
     date_picker::init(cx);
+    dialog::init(cx);
     input::init(cx);
     menu::init(cx);
     navigation_menu::init(cx);
