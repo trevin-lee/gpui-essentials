@@ -45,6 +45,29 @@ const GUTTER: f32 = 64.;
 pub(crate) fn bind_keys(cx: &mut App) {
     let menu = Some("BlocksSlashMenu > BlockEditor");
     let editor = Some("BlocksEditor > BlockEditor");
+    let mac = cfg!(target_os = "macos");
+    // Find works from the page and from the find bar.
+    for page in ["BlocksEditor", crate::find::CONTEXT] {
+        cx.bind_keys([
+            KeyBinding::new(if mac { "cmd-f" } else { "ctrl-f" }, FindOpen, Some(page)),
+            KeyBinding::new(
+                if mac { "cmd-alt-f" } else { "ctrl-h" },
+                FindReplaceOpen,
+                Some(page),
+            ),
+            KeyBinding::new(if mac { "cmd-g" } else { "f3" }, FindNext, Some(page)),
+            KeyBinding::new(
+                if mac { "cmd-shift-g" } else { "shift-f3" },
+                FindPrevious,
+                Some(page),
+            ),
+        ]);
+    }
+    cx.bind_keys([KeyBinding::new(
+        "escape",
+        FindClose,
+        Some(crate::find::CONTEXT),
+    )]);
     cx.bind_keys([
         KeyBinding::new("up", SlashUp, menu),
         KeyBinding::new("down", SlashDown, menu),
@@ -297,7 +320,9 @@ struct Slash {
 }
 
 pub struct Editor {
-    state: Entity<BlockEditorState>,
+    pub(crate) state: Entity<BlockEditorState>,
+    /// The find bar, when it's open.
+    pub(crate) find: Option<crate::find::FindBar>,
     scroll: ScrollHandle,
     menu_scroll: ScrollHandle,
     items: Vec<SlashItem>,
@@ -448,6 +473,7 @@ impl Editor {
             paste_offer: None,
             docs: options.docs.clone(),
             touch_drag: None,
+            find: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -1870,7 +1896,8 @@ impl Render for Editor {
             .size_0()
         });
         let edit_menu = self.edit_menu(window, cx);
-        div()
+        let find_bar = self.find_bar(cx);
+        let page = div()
             .id("gpui-blocks")
             .size_full()
             .key_context(if self.slash.is_some() {
@@ -1917,7 +1944,24 @@ impl Render for Editor {
             .children(paste_menu)
             .children(resize)
             .children(edit_menu)
-            .child(self.long_press_watch(cx))
+            .child(self.long_press_watch(cx));
+        // The find bar stays at the top while the page scrolls under it.
+        div()
+            .relative()
+            .size_full()
+            .on_action(
+                cx.listener(|this, _: &FindOpen, window, cx| this.open_find(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &FindReplaceOpen, window, cx| {
+                    this.open_find(true, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &FindNext, _, cx| this.step_find(true, cx)))
+            .on_action(cx.listener(|this, _: &FindPrevious, _, cx| this.step_find(false, cx)))
+            .on_action(cx.listener(|this, _: &FindClose, window, cx| this.close_find(window, cx)))
+            .child(page)
+            .children(find_bar)
     }
 }
 
@@ -2028,6 +2072,80 @@ mod tests {
             source,
             "one undo step"
         );
+    }
+
+    /// ⌘F opens the find bar with the selected word, Enter steps on, Esc closes it and stops
+    /// the highlighting; ⌘⌥F's replace row replaces with Enter, keeping undo whole.
+    #[gpui::test]
+    fn the_find_bar_finds_steps_replaces_and_closes(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "plan one\n\nplan two\n\nplan three");
+        // Select the first "plan".
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let id = s.model().document().leaves().next().unwrap().id();
+                s.set_selection(
+                    BlockSelection::Text {
+                        anchor: BlockPosition::new(id, 0),
+                        head: BlockPosition::new(id, 4),
+                    },
+                    cx,
+                )
+                .unwrap();
+            })
+        });
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-f"
+        } else {
+            "ctrl-f"
+        });
+        draw(cx);
+        let found = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                let (matches, current) = e.state().read(cx).find_matches();
+                (matches.len(), current)
+            })
+        };
+        assert!(
+            editor.read_with(cx, |e, _| e.find.is_some()),
+            "the bar opened"
+        );
+        assert_eq!(
+            found(&editor, cx),
+            (3, Some(0)),
+            "the selected word is the query"
+        );
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(found(&editor, cx).1, Some(1));
+        cx.simulate_keystrokes("shift-enter");
+        draw(cx);
+        assert_eq!(found(&editor, cx).1, Some(0));
+        // The replace row: type a replacement, Enter replaces the current match.
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-alt-f"
+        } else {
+            "ctrl-h"
+        });
+        draw(cx);
+        editor.update_in(cx, |e, window, cx| {
+            let replace = e.find.as_ref().unwrap().replace.clone();
+            replace.update(cx, |r, cx| {
+                r.set_value("goal", window, cx);
+                r.focus(window, cx);
+            });
+        });
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            "goal one\n\nplan two\n\nplan three"
+        );
+        assert_eq!(found(&editor, cx), (2, Some(0)), "on to the next");
+        // Esc closes the bar and the highlighting goes.
+        cx.simulate_keystrokes("escape");
+        draw(cx);
+        assert!(editor.read_with(cx, |e, _| e.find.is_none()));
+        assert_eq!(found(&editor, cx), (0, None));
     }
 
     fn draw(cx: &mut VisualTestContext) {

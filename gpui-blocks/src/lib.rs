@@ -40,6 +40,7 @@
 
 pub mod docs;
 mod editor;
+mod find;
 pub mod import;
 pub mod json;
 pub mod slash;
@@ -72,7 +73,17 @@ pub mod actions {
             /// Moves the caret's block up.
             MoveBlockUp,
             /// Moves the caret's block down.
-            MoveBlockDown
+            MoveBlockDown,
+            /// Opens the find bar (⌘F), or focuses it, with the selected text as the query.
+            FindOpen,
+            /// Opens the find bar with its replace row (⌘⌥F).
+            FindReplaceOpen,
+            /// Selects the next match (⌘G, or Enter in the query).
+            FindNext,
+            /// Selects the previous match (⇧⌘G, or ⇧Enter in the query).
+            FindPrevious,
+            /// Closes the find bar (Esc in it).
+            FindClose
         ]
     );
 }

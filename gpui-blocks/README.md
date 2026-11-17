@@ -26,6 +26,10 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   `~~strike~~`, `` `code` `` and `[text](url)`, and three backticks, `---` or `| a | b |`
   followed by Enter.
 - **Editing:** undo and redo, selection across blocks, IME, and copy and paste as Markdown.
+- **Find and replace:** ⌘F (Ctrl+F) finds on the page, the selected word to start with, and
+  highlights every match: Enter and ⇧Enter (or ⌘G and ⇧⌘G) step through them, and Esc closes the
+  bar. ⌘⌥F (Ctrl+H) adds a replace row: Enter or Replace replaces the selected match, All
+  replaces every one as one undo step. Matching ignores case unless the bar's Aa is on.
 - **Touch:** on an iPhone or iPad, a tap puts the caret there and brings up the keyboard, a long
   press selects a word, handles at the selection's ends move them, and a menu over the
   selection cuts, copies, pastes and selects all.
