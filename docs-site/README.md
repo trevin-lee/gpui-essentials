@@ -1,0 +1,120 @@
+# The documentation site
+
+A static site with a page per component: every variant drawn in the light and the dark theme,
+the code that drew it, and a link to its API docs. It will be published at
+<https://trevin-lee.github.io/gpui-essentials>.
+
+- `render/` is a Rust program that draws each demo in a hidden window (gpui-core's `shots`
+  feature, macOS only), saves the pictures and writes the HTML. It is its own Cargo workspace,
+  with its own `Cargo.lock`, so it never changes the crates' workspace.
+- `demos/<component>/<variant>.rs` are the demos: each file is both compiled into the renderer
+  and shown on the page, so the code on the page is always the code that drew the picture.
+- `render/src/registry.rs` lists the components and their variants.
+- `static/style.css` is the site's one stylesheet.
+
+## Render it
+
+On a Mac, from the repository's root:
+
+```sh
+cargo +1.100.0 run --manifest-path docs-site/render/Cargo.toml -- --out $TMPDIR/site
+```
+
+`--only <component slug>` draws one component's pictures (and still writes every page), which
+is quicker while working on it:
+
+```sh
+cargo +1.100.0 run --manifest-path docs-site/render/Cargo.toml -- --out $TMPDIR/site --only button
+```
+
+It writes `index.html`, `components/<slug>.html`, `style.css` and
+`img/<slug>/<variant>-{light,dark}.png`. Render outside the repository: the pictures are build
+output and are never committed.
+
+On a pull request that changes docs-site/, the `pages` workflow lints the renderer, renders the
+site on GitHub's macOS runner and uploads it as the `site` artifact (`gh run download <run> -n
+site`). Run it by hand from the Actions tab for any branch. Off macOS, `cargo clippy` still
+compiles the renderer and every demo; only drawing the pictures needs a Mac.
+
+## Preview it
+
+```sh
+python3 -m http.server -d $TMPDIR/site
+```
+
+and open <http://localhost:8000>. Every link is relative, so opening `index.html` from the
+folder works too. The "Docs" links lead to `api/`, the rustdoc output, which the published site
+adds beside the pages.
+
+## Add a variant
+
+1. Write `docs-site/demos/<component>/<variant>.rs`. For a component without state of its own,
+   it's one expression whose type is `IntoElement`, written as the body of a `render`:
+
+   ```rust
+   // A quieter action beside the main one: filled with the secondary colour.
+   Button::new("draft").label("Save draft").secondary()
+   ```
+
+   `use gpui::*;` and `use gpui_core::*;` are in scope, and so are `window: &mut Window` and
+   `cx: &mut App`. Several pieces go in a `div()` (`.flex().gap(rems(0.5))…`). Start the file
+   with a comment saying what the variant is for; it shows on the page.
+
+2. Add a line to its component's `variants` in `render/src/registry.rs`:
+
+   ```rust
+   demo("Secondary", "secondary"),
+   ```
+
+   The name is the heading on the page; the slug is the file's name and the pictures'.
+
+A demo that needs state (an `InputState`, a switch that turns, a checked list) is a small view
+instead. The file defines `pub struct Example`, `pub fn new(window: &mut Window, cx: &mut
+Context<Self>) -> Self` and `impl Render for Example`; see `demos/switch/interactive.rs`. Its
+registry line is `view("Interactive", "interactive")`.
+
+Keep demos to what `gpui` and `gpui_core` export, never a crate's internals, and to made-up
+data: names like Alex and Sam, addresses at example.com.
+
+## Add a component
+
+Add a `component!` block to `components()` in `render/src/registry.rs`, and its demos under
+`demos/<slug>/`:
+
+```rust
+component! {
+    family: Display,
+    name: "Badge",
+    slug: "badge",
+    about: "A small pill of text, perhaps with an icon, in four looks.",
+    docs: "gpui_core/struct.Badge.html",
+    variants: [
+        demo("Default", "default"),
+        demo("Outline", "outline"),
+    ],
+},
+```
+
+- `family` is one of `Forms`, `Overlays`, `Menus`, `Charts`, `Scrolling`, `Navigation`,
+  `Containers` and `Display`: the sidebar's groups.
+- `about` is one line, under the name and on the index's card.
+- `docs` is the rustdoc page, from the API docs' root.
+- Its Installation section comes from gpui-core's `components.toml`, found by the name in
+  `docs`: `gpui-core add <name>` with what it also copies and the crates it needs, or, for
+  what stays in gpui-core (inputs, popovers, charts…), the dependency alone.
+- The first variant is the picture on the index's card.
+
+Then render it with `--only <slug>` and look at both pictures.
+
+## How the pictures are made
+
+Each variant is drawn in the middle of a hidden window 720 by 600 points, once in
+`Theme::light()` and once in `Theme::dark()`, at the screen's scale (2× on a Retina Mac, so 1440
+pixels wide; 1× on GitHub's macOS runners, so 720). Both pictures are cropped to the rows the content covers in either, with 40 points
+above and below (at least 180 points tall), and saved as PNGs of at most 256 colours: the
+picture's own colours when it has that few, otherwise a palette from NeuQuant
+([color_quant](https://crates.io/crates/color_quant), MIT) with the background kept exact. The
+renderer warns when a demo reaches the stage's edge, where it would be cut.
+
+Popovers, menus and dialogs are drawn where they open, so a demo of one opens it (`open(true)`)
+and leaves room for it.
