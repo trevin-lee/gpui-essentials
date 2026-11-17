@@ -125,7 +125,7 @@ pub use input_group::InputGroup;
 pub use input_otp::{InputOtp, InputOtpEvent, InputOtpState};
 pub use item::{Item, ItemGroup, ItemSeparator, ItemVariant};
 pub use kbd::{Kbd, KbdGroup};
-pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
+pub use menu::{MenuReorder, MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
 pub use menubar::{Menubar, MenubarMenu, MenubarSelect};
 pub use navigation_menu::{NavigationMenu, NavigationMenuItem, NavigationMenuLink};
 pub use pagination::Pagination;

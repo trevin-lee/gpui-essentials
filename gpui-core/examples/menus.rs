@@ -1,4 +1,5 @@
-//! gpui-core's menus in a window: DropdownMenu and Combobox.
+//! gpui-core's menus in a window: DropdownMenu, Combobox, and a PopupMenu whose entries can be
+//! put in another order.
 //!
 //! ```sh
 //! cargo run --example menus [-- --light]
@@ -29,6 +30,9 @@ struct Menus {
     activity_bar: bool,
     framework: Option<SharedString>,
     language: Option<SharedString>,
+    /// The reorderable list's entries, in order, and whether its menu is open.
+    priorities: Vec<&'static str>,
+    priorities_open: bool,
 }
 
 fn heading(text: &'static str, theme: &Theme) -> Div {
@@ -219,6 +223,63 @@ impl Menus {
     }
 }
 
+impl Menus {
+    /// A list the menu puts in another order: drag an entry (a long press first, by touch), or
+    /// Option-Up and Option-Down on the highlighted one. The menu tells; the list moves.
+    fn reorderable(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let menu = PopupMenu::new("priorities-menu")
+            .heading("Priority")
+            .items(
+                self.priorities
+                    .iter()
+                    .map(|p| PopupMenuItem::new(*p, *p).reorder_group("priorities")),
+            )
+            .separator()
+            .item(PopupMenuItem::new("add", "Add a priority").icon(IconName::Plus))
+            .on_select(Self::picked(cx))
+            .on_reorder(cx.listener(|this, m: &MenuReorder, _, cx| {
+                let moved = this.priorities.remove(m.from);
+                this.priorities.insert(m.to, moved);
+                cx.notify();
+            }));
+        div()
+            .flex()
+            .flex_col()
+            .gap(rems(0.75))
+            .child(heading("Reorderable", &theme))
+            .child(
+                div().flex().child(
+                    Popover::new("priorities")
+                        .open(self.priorities_open)
+                        .on_dismiss(cx.listener(|this, _, _, cx| {
+                            this.priorities_open = false;
+                            cx.notify();
+                        }))
+                        .trigger(
+                            Button::new("priorities-button")
+                                .outline()
+                                .label("Priorities")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.priorities_open = !this.priorities_open;
+                                    cx.notify();
+                                })),
+                        )
+                        .match_trigger_width(false)
+                        .p(rems(0.25))
+                        .w(rems(14.))
+                        .child(menu),
+                ),
+            )
+            .child(
+                div()
+                    .text_size(theme.text.sm)
+                    .text_color(theme.muted_foreground)
+                    .child(self.priorities.join(" · ")),
+            )
+    }
+}
+
 impl Render for Menus {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
@@ -233,6 +294,7 @@ impl Render for Menus {
             .child(div().text_size(theme.text.lg).child("Menus"))
             .child(self.dropdowns(cx))
             .child(self.comboboxes(cx))
+            .child(self.reorderable(cx))
     }
 }
 
@@ -269,6 +331,8 @@ fn main() {
                     activity_bar: false,
                     framework: None,
                     language: Some("en".into()),
+                    priorities: vec!["Urgent", "High", "Medium", "Low", "Someday"],
+                    priorities_open: false,
                 })
             })
             .unwrap();
