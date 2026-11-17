@@ -2,7 +2,6 @@
 mod commands;
 mod containers;
 mod host;
-mod projection;
 mod props;
 mod repro;
 mod round_trip;

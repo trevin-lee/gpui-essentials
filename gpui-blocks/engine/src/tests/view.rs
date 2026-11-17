@@ -269,7 +269,7 @@ fn long_document_reprojects_one_leaf_per_keystroke(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, &doc);
     let leaves = editor.read_with(cx, |e, _| e.model().document().leaves().count());
     assert!(leaves >= 1000, "{leaves}");
-    let before = editor.read_with(cx, |e, _| (e.projection.built(), e.projection.rebuilds));
+    let before = editor.read_with(cx, |e, _| e.snapshots.rebuilds);
     draw(cx);
     let frame = std::time::Instant::now();
     cx.update(|window, cx| {
@@ -277,15 +277,14 @@ fn long_document_reprojects_one_leaf_per_keystroke(cx: &mut TestAppContext) {
         let _ = window.draw(cx);
     });
     let frame = frame.elapsed();
-    let steady = editor.read_with(cx, |e, _| (e.projection.built(), e.projection.rebuilds));
-    assert_eq!(before, steady, "steady frames do not re-project");
+    let steady = editor.read_with(cx, |e, _| e.snapshots.rebuilds);
+    assert_eq!(before, steady, "steady frames rebuild nothing");
     caret_at(&editor, cx, 500, 0);
     let t = std::time::Instant::now();
     type_text(cx, "x");
     let elapsed = t.elapsed();
-    let after = editor.read_with(cx, |e, _| (e.projection.built(), e.projection.rebuilds));
-    assert_eq!(after.0 - steady.0, 1, "one node re-projected");
-    assert_eq!(after.1 - steady.1, 1);
+    let after = editor.read_with(cx, |e, _| e.snapshots.rebuilds);
+    assert_eq!(after - steady, 1, "one snapshot per edit");
     eprintln!(
         "perf: {leaves} leaves, full frame {frame:?}, keystroke+frame {elapsed:?} ({} build, test platform)",
         if cfg!(debug_assertions) {
@@ -659,10 +658,9 @@ fn backspace_after_table_selects_it_and_copy_round_trips(cx: &mut TestAppContext
     assert_eq!(source(&editor, cx), "a\n\nb");
 }
 
-/// Per-node cache (§7.3): an edit inside a 1000-item list rebuilds only the
-/// path from the edited paragraph to the list (paragraph, item, list).
+/// An edit inside a 1000-item list rebuilds the view's snapshot once.
 #[gpui::test]
-fn edit_inside_big_list_rebuilds_only_the_item_path(cx: &mut TestAppContext) {
+fn edit_inside_big_list_rebuilds_the_snapshot_once(cx: &mut TestAppContext) {
     let doc: String = (0..1000).map(|i| format!("- item {i}\n")).collect();
     let (editor, cx) = open(cx, &doc);
     draw(cx);
@@ -672,13 +670,13 @@ fn edit_inside_big_list_rebuilds_only_the_item_path(cx: &mut TestAppContext) {
         let _ = window.draw(cx);
     });
     let frame = frame.elapsed();
-    let steady = editor.read_with(cx, |e, _| e.projection.built());
+    let steady = editor.read_with(cx, |e, _| e.snapshots.rebuilds);
     caret_at(&editor, cx, 500, 0);
     let t = std::time::Instant::now();
     type_text(cx, "x");
     let elapsed = t.elapsed();
-    let after = editor.read_with(cx, |e, _| e.projection.built());
-    assert_eq!(after - steady, 3, "paragraph + item + list");
+    let after = editor.read_with(cx, |e, _| e.snapshots.rebuilds);
+    assert_eq!(after - steady, 1, "one snapshot per edit");
     assert!(source(&editor, cx).contains("- xitem 500\n"));
     eprintln!(
         "perf: 1000-item list, full frame {frame:?}, keystroke+frame {elapsed:?} ({} build, test platform)",
@@ -688,27 +686,6 @@ fn edit_inside_big_list_rebuilds_only_the_item_path(cx: &mut TestAppContext) {
             "release"
         }
     );
-}
-
-#[gpui::test]
-fn table_rows_are_cached_per_row(cx: &mut TestAppContext) {
-    let (editor, cx) = open(
-        cx,
-        "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\nafter",
-    );
-    draw(cx);
-    let steady = editor.read_with(cx, |e, _| e.projection.built());
-    // Leaves: a, b, 1, 2, 3, 4, after. Typing into cell "3" rebuilds the
-    // table and that one row.
-    caret_at(&editor, cx, 4, 0);
-    type_text(cx, "x");
-    assert!(
-        source(&editor, cx).contains("| x3 | 4 |"),
-        "{}",
-        source(&editor, cx)
-    );
-    let after = editor.read_with(cx, |e, _| e.projection.built());
-    assert_eq!(after - steady, 2, "table + one row; other rows reused");
 }
 
 fn caret_leaf(editor: &Entity<BlockEditorState>, cx: &VisualTestContext) -> Option<usize> {
@@ -833,11 +810,10 @@ fn caret_is_scrolled_into_view(cx: &mut TestAppContext) {
     assert!(handle.offset().y < px(0.));
 }
 
-/// Phase 5 element-state reuse: a block culled while scrolled away keeps
-/// its projected node and its shaped text, so scrolling back reshapes
-/// nothing and rebuilds no node.
+/// Phase 5 culling: blocks scrolled away aren't laid out, and scrolling
+/// back rebuilds no snapshot.
 #[gpui::test]
-fn scrolled_back_blocks_reuse_nodes_and_layouts(cx: &mut TestAppContext) {
+fn scrolled_back_blocks_rebuild_no_snapshot(cx: &mut TestAppContext) {
     cx.update(crate::init_for_tests);
     let doc: String = (0..400).map(|i| format!("paragraph {i}\n\n")).collect();
     let handle = gpui::ScrollHandle::new();
@@ -854,7 +830,7 @@ fn scrolled_back_blocks_reuse_nodes_and_layouts(cx: &mut TestAppContext) {
     for _ in 0..3 {
         draw(cx);
     }
-    let built = editor.read_with(cx, |e, _| e.projection.built());
+    let built = editor.read_with(cx, |e, _| e.snapshots.rebuilds);
     // Scroll far down (the top blocks get culled), then back to the top.
     handle.set_offset(gpui::point(px(0.), px(-6000.)));
     for _ in 0..3 {
@@ -869,9 +845,9 @@ fn scrolled_back_blocks_reuse_nodes_and_layouts(cx: &mut TestAppContext) {
     handle.set_offset(gpui::point(px(0.), px(0.)));
     draw(cx);
     assert_eq!(
-        editor.read_with(cx, |e, _| e.projection.built()),
+        editor.read_with(cx, |e, _| e.snapshots.rebuilds),
         built,
-        "no node rebuilt"
+        "no snapshot rebuilt"
     );
 }
 
@@ -1402,11 +1378,10 @@ fn accessibility_roles_and_cached_value(cx: &mut TestAppContext) {
     );
     draw(cx);
     let roles: Vec<_> = editor.update(cx, |e, _| {
-        e.snapshot()
-            .blocks
+        let blocks = e.snapshot().blocks.clone();
+        blocks
             .iter()
-            .flat_map(|b| b.nodes.iter())
-            .map(crate::element::block_role)
+            .map(|b| e.model.doc.kind(*b).and_then(crate::element::block_role))
             .collect()
     });
     assert_eq!(

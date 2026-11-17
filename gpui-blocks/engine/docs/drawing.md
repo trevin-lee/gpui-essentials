@@ -1,10 +1,10 @@
 # Drawing the document without GPUI Kit
 
-The engine draws each top-level block through GPUI Kit's Markdown renderer (`BlockNode::render`
-over a projection built in `direct.rs`), and takes each text leaf's geometry for the caret and hit
-testing from GPUI Kit's `collect_leaf_geometry` (`frame.rs`). This is the plan for drawing with
+The engine drew each top-level block through GPUI Kit's Markdown renderer (`BlockNode::render`
+over a projection built in `direct.rs`), and took each text leaf's geometry for the caret and hit
+testing from GPUI Kit's `collect_leaf_geometry` (`frame.rs`). This was the plan for drawing with
 gpui-core's paragraph layer (`gpui_core::text::paragraph`) instead, a block kind at a time, with
-the editor working after every step.
+the editor working after every step. It's done: every block is drawn by the engine.
 
 ## How it goes
 
@@ -24,8 +24,9 @@ the editor working after every step.
    - pictures, inline and alone (through the host's image loader) (done);
    - code blocks, coloured by the host's highlighter (`with_code_highlighter`; gpui-core's
      `highlight` feature makes one) and uncoloured without one (done).
-3. **The projection goes.** When nothing is drawn through GPUI Kit, `direct.rs`' projection to
-   `BlockNode`, the projection cache and `collect_leaf_geometry` go with it.
+3. **The projection goes** (done). `direct.rs`' projection to `BlockNode`, its node cache and
+   `collect_leaf_geometry` are gone; `projection.rs` keeps only what the view draws from (the
+   top-level blocks, the leaves, the tables' cells) per revision.
 
 ## What GPUI Kit draws today, to match
 
