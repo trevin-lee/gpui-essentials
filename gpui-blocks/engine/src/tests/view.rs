@@ -5004,3 +5004,12 @@ fn replace_one_then_all(cx: &mut TestAppContext) {
     assert_eq!(editor.update(cx, |e, cx| e.replace_all_matches("x", cx)), 0);
     assert_eq!(source(&editor, cx), "a **dog** sat\n\nthe cat and the cat");
 }
+
+/// ⌘D (Ctrl+D off macOS) duplicates the caret's block.
+#[gpui::test]
+fn cmd_d_duplicates_the_caret_block(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "first\n\nsecond");
+    caret_at(&editor, cx, 0, 1);
+    keys(cx, "M-d");
+    assert_eq!(source(&editor, cx), "first\n\nfirst\n\nsecond");
+}
