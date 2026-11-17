@@ -1089,13 +1089,30 @@ fn lay_code(
     };
     y += pt + bw;
     let mut kept = Vec::new();
+    let mut old: Vec<Option<LineLaid>> = cache
+        .as_deref_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
+        .into_iter()
+        .map(Some)
+        .collect();
     for (i, line) in split_lines(&p).into_iter().enumerate() {
-        let cached = cache.as_deref_mut().and_then(|c| {
-            let at = c
-                .iter()
-                .position(|l| l.width == inner && l.key == out.key && l.line == line)?;
-            Some(c.swap_remove(at))
-        });
+        // The line at its place first: a fence growing at its end keeps its lines there. Else,
+        // with the lines laid out at this width and style, one that moved (a line put in
+        // above it); at another width or style, none is looked for.
+        let same = old
+            .get(i)
+            .and_then(Option::as_ref)
+            .is_some_and(|l| probe() && l.width == inner && l.key == out.key);
+        let cached = if !same {
+            None
+        } else if old[i].as_ref().is_some_and(|l| l.line == line) {
+            old[i].take()
+        } else {
+            old.iter()
+                .position(|l| probe() && l.as_ref().is_some_and(|l| l.line == line))
+                .and_then(|at| old[at].take())
+        };
         let laid = match cached {
             Some(l) => l,
             None => {
@@ -1137,6 +1154,13 @@ fn lay_code(
         code: text.strip_suffix('\n').unwrap_or(text).to_string().into(),
     });
     y
+}
+
+/// A cached line or item looked at, counted in tests: always true.
+fn probe() -> bool {
+    #[cfg(test)]
+    tests::PROBES.with(|k| k.set(k.get() + 1));
+    true
 }
 
 /// `p` cut at its line ends: a paragraph a line, each with its share of the spans.
@@ -1185,20 +1209,29 @@ fn lay_list(
         .min(width * 0.25);
     let gap = cx.style.list_marker_gap.unwrap_or(indent * 0.3);
     let mut kept = Vec::new();
+    let mut old: Vec<Option<ItemLaid>> = cache
+        .as_deref_mut()
+        .map(std::mem::take)
+        .unwrap_or_default()
+        .into_iter()
+        .map(Some)
+        .collect();
     for (n, item) in items.iter().enumerate() {
         if n > 0 {
             y += cx.style.list_item_gap.unwrap_or(cx.gap * 0.4);
         }
         // One item on its own, at the list's top left: from the cache, or laid out now.
-        let cached = cache.as_deref_mut().and_then(|c| {
-            let i = c.iter().position(|l| {
-                l.n == n
+        // The item at its place: its number is part of what it was laid out for, so an item
+        // that moved is laid out again anyway.
+        let cached = old.get_mut(n).and_then(|slot| {
+            slot.take_if(|l| {
+                probe()
+                    && l.n == n
                     && l.start == start
                     && l.width == width
                     && l.key == out.key
                     && l.item == *item
-            })?;
-            Some(c.swap_remove(i))
+            })
         });
         let laid = match cached {
             Some(l) => l,
@@ -2124,6 +2157,8 @@ mod tests {
         pub(super) static LINES_LAID: Cell<usize> = const { Cell::new(0) };
         /// How many table cells have been laid out.
         pub(super) static CELLS_LAID: Cell<usize> = const { Cell::new(0) };
+        /// How many cached lines or items have been looked at.
+        pub(super) static PROBES: Cell<usize> = const { Cell::new(0) };
     }
 
     struct Streamed {
@@ -2165,6 +2200,7 @@ mod tests {
         let v = made.borrow().clone().unwrap();
         let laid = |vcx: &mut gpui::VisualTestContext, f: &dyn Fn(&mut Streamed)| {
             LINES_LAID.with(|n| n.set(0));
+            PROBES.with(|n| n.set(0));
             vcx.update(|_, cx| {
                 v.update(cx, |s, cx| {
                     f(s);
@@ -2172,18 +2208,26 @@ mod tests {
                 })
             });
             vcx.run_until_parked();
-            LINES_LAID.with(|n| n.get())
+            (LINES_LAID.with(|n| n.get()), PROBES.with(|n| n.get()))
+        };
+        // Each delta looks at about one cached line a line, not at every line for each one.
+        let few = |(laid, probes): (usize, usize)| {
+            assert!(probes <= 3 * 302, "{probes} cached lines looked at");
+            laid
         };
         // The last line grows: it alone.
-        assert_eq!(laid(vcx, &|s| s.sources[1].1 = fence(300, "let last")), 1);
+        assert_eq!(
+            few(laid(vcx, &|s| s.sources[1].1 = fence(300, "let last"))),
+            1
+        );
         // A new line: it (the line before it is unchanged).
         assert_eq!(
-            laid(vcx, &|s| s.sources[1].1 =
-                format!("{}\nlet more", fence(300, "let last")).into()),
+            few(laid(vcx, &|s| s.sources[1].1 =
+                format!("{}\nlet more", fence(300, "let last")).into())),
             1
         );
         // A new width: every line.
-        assert_eq!(laid(vcx, &|s| s.width = 380.), 302);
+        assert_eq!(few(laid(vcx, &|s| s.width = 380.)), 302);
     }
 
     #[gpui::test]
@@ -2260,6 +2304,7 @@ mod tests {
         let v = made.borrow().clone().unwrap();
         let laid = |vcx: &mut gpui::VisualTestContext, f: &dyn Fn(&mut Streamed)| {
             ITEMS_LAID.with(|n| n.set(0));
+            PROBES.with(|n| n.set(0));
             vcx.update(|_, cx| {
                 v.update(cx, |s, cx| {
                     f(s);
@@ -2267,22 +2312,27 @@ mod tests {
                 })
             });
             vcx.run_until_parked();
-            ITEMS_LAID.with(|n| n.get())
+            (ITEMS_LAID.with(|n| n.get()), PROBES.with(|n| n.get()))
+        };
+        // Each delta looks at about one cached item an item, not at every item for each one.
+        let few = |(laid, probes): (usize, usize)| {
+            assert!(probes <= 3 * 302, "{probes} cached items looked at");
+            laid
         };
         // The last item grows: it alone.
         assert_eq!(
-            laid(vcx, &|s| s.sources[1].1 = list(300, "the last one")),
+            few(laid(vcx, &|s| s.sources[1].1 = list(300, "the last one"))),
             1
         );
         // A new item: it alone.
         assert_eq!(
-            laid(vcx, &|s| {
+            few(laid(vcx, &|s| {
                 s.sources[1].1 = format!("{}\n- and another", list(300, "the last one")).into()
-            }),
+            })),
             1
         );
         // A new width: every item.
-        assert_eq!(laid(vcx, &|s| s.width = 280.), 302);
+        assert_eq!(few(laid(vcx, &|s| s.width = 280.)), 302);
     }
 
     #[gpui::test]
