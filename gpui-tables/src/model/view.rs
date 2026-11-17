@@ -1,6 +1,8 @@
 //! Views: saved ways of looking at a database's rows (a table, a board, a list), each with its
 //! own sort, filter, grouping and columns.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
@@ -136,6 +138,135 @@ impl FilterOp {
     }
 }
 
+string_enum! {
+    /// What a table's footer works out for a column, over the rows shown (of each group, when it
+    /// groups): written in a view's `calculations` by property id. Which apply depends on the
+    /// property's type ([`Calculation::applies_to`]); the engine works them out
+    /// ([`crate::engine::calc`]).
+    pub enum Calculation {
+        /// Every row.
+        CountAll = "countAll",
+        /// Every value: a list's items each (options, people, related rows), else a row's
+        /// non-empty value.
+        CountValues = "countValues",
+        /// The distinct values among them.
+        CountUnique = "countUnique",
+        CountEmpty = "countEmpty",
+        CountNotEmpty = "countNotEmpty",
+        PercentEmpty = "percentEmpty",
+        PercentNotEmpty = "percentNotEmpty",
+        /// Numbers only, as are the next five.
+        Sum = "sum",
+        Average = "average",
+        Median = "median",
+        Min = "min",
+        Max = "max",
+        /// A number's max less its min; a date's latest less its earliest, as a duration.
+        Range = "range",
+        /// Dates (and created and edited times) only, as is the next.
+        Earliest = "earliest",
+        Latest = "latest",
+        /// Checkboxes only, as are the next three.
+        Checked = "checked",
+        Unchecked = "unchecked",
+        PercentChecked = "percentChecked",
+        PercentUnchecked = "percentUnchecked",
+    }
+}
+
+impl Calculation {
+    /// The ones that apply to every type, in the menu's order.
+    pub const ANY: &'static [Calculation] = &[
+        Self::CountAll,
+        Self::CountValues,
+        Self::CountUnique,
+        Self::CountEmpty,
+        Self::CountNotEmpty,
+        Self::PercentEmpty,
+        Self::PercentNotEmpty,
+    ];
+
+    /// A number's, in the menu's order.
+    pub const NUMBER: &'static [Calculation] = &[
+        Self::Sum,
+        Self::Average,
+        Self::Median,
+        Self::Min,
+        Self::Max,
+        Self::Range,
+    ];
+
+    /// A date's (and a created or edited time's), in the menu's order.
+    pub const DATE: &'static [Calculation] = &[Self::Earliest, Self::Latest, Self::Range];
+
+    /// A checkbox's, in the menu's order.
+    pub const CHECKBOX: &'static [Calculation] = &[
+        Self::Checked,
+        Self::Unchecked,
+        Self::PercentChecked,
+        Self::PercentUnchecked,
+    ];
+
+    /// Those of a property's type alone (a number's, a date's, a checkbox's), after
+    /// [`Calculation::ANY`] in the menu.
+    pub fn of_type(kind: &super::PropertyType) -> &'static [Calculation] {
+        use super::PropertyType as T;
+        match kind {
+            T::Number => Self::NUMBER,
+            T::Date | T::CreatedTime | T::EditedTime => Self::DATE,
+            T::Checkbox => Self::CHECKBOX,
+            _ => &[],
+        }
+    }
+
+    /// Whether it applies to a property of `kind`. One that doesn't (left from before a change
+    /// of type, or a name this version doesn't know) works out as nothing.
+    pub fn applies_to(&self, kind: &super::PropertyType) -> bool {
+        Self::ANY.contains(self) || Self::of_type(kind).contains(self)
+    }
+
+    /// Its name in the menu: "Count unique", "Percent checked".
+    pub fn label(&self) -> &str {
+        match self {
+            Self::CountAll => "Count all",
+            Self::CountValues => "Count values",
+            Self::CountUnique => "Count unique",
+            Self::CountEmpty => "Count empty",
+            Self::CountNotEmpty => "Count not empty",
+            Self::PercentEmpty => "Percent empty",
+            Self::PercentNotEmpty => "Percent not empty",
+            Self::Sum => "Sum",
+            Self::Average => "Average",
+            Self::Median => "Median",
+            Self::Min => "Min",
+            Self::Max => "Max",
+            Self::Range => "Range",
+            Self::Earliest => "Earliest",
+            Self::Latest => "Latest",
+            Self::Checked => "Checked",
+            Self::Unchecked => "Unchecked",
+            Self::PercentChecked => "Percent checked",
+            Self::PercentUnchecked => "Percent unchecked",
+            Self::Other(s) => s,
+        }
+    }
+
+    /// Its short name before its result in the footer: "Count", "Unique", "Sum", "Empty"
+    /// (before a count or a percent).
+    pub fn short_label(&self) -> &str {
+        match self {
+            Self::CountAll => "Count",
+            Self::CountValues => "Values",
+            Self::CountUnique => "Unique",
+            Self::CountEmpty | Self::PercentEmpty => "Empty",
+            Self::CountNotEmpty | Self::PercentNotEmpty => "Not empty",
+            Self::Checked | Self::PercentChecked => "Checked",
+            Self::Unchecked | Self::PercentUnchecked => "Unchecked",
+            other => other.label(),
+        }
+    }
+}
+
 /// One way a view sorts: by a property, up or down. A view's sorts apply in turn, each breaking
 /// the ties of the one before.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -263,6 +394,10 @@ pub struct View {
     /// Groups folded shut, by [`crate::engine::GroupKey`] string.
     #[serde(default)]
     pub collapsed_groups: Vec<String>,
+    /// A table's footer: a [`Calculation`] by property id, worked out under its column (and
+    /// each group's). A property without one shows none. Left out of the JSON when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub calculations: BTreeMap<String, Calculation>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -287,6 +422,7 @@ impl View {
             columns: Vec::new(),
             card_properties: Vec::new(),
             collapsed_groups: Vec::new(),
+            calculations: BTreeMap::new(),
             extra: Extra::new(),
         }
     }

@@ -221,7 +221,7 @@ fn groups_show_counts_and_fold(cx: &mut TestAppContext) {
         as_table(db, PIPELINE),
         rows,
         Some(PIPELINE),
-        size(px(1200.), px(700.)),
+        size(px(1200.), px(900.)),
     );
     let items = table.update(cx, |t, _| t.items().to_vec());
     // Five groups (no stage, then each option), Dormant folded in the fixture.
@@ -238,7 +238,7 @@ fn groups_show_counts_and_fold(cx: &mut TestAppContext) {
         vec![format!("option:{DORMANT}"), format!("option:{ACTIVE}")]
     );
     let after = table.update(cx, |t, _| t.items().len());
-    assert_eq!(after, before - 4, "three rows and the New row");
+    assert_eq!(after, before - 5, "three rows, the New row and the footer");
     // Unfolding Dormant shows Noor.
     click(cx, format!("group:option:{DORMANT}"));
     assert_eq!(
@@ -1425,7 +1425,7 @@ fn created_by_and_edited_by_show_who_and_never_edit(cx: &mut TestAppContext) {
     }
     // Theo's doc is older than updatedBy: his editor is his author.
     rows.iter_mut().find(|r| r.id == THEO).unwrap().updated_by = None;
-    let (table, cx) = open_with(cx, &host, db, rows, None, size(px(1600.), px(700.)));
+    let (table, cx) = open_with(cx, &host, db, rows, None, size(px(1600.), px(900.)));
 
     let cols = table.update(cx, |t, _| t.columns());
     assert_eq!((cols[1].0.as_str(), cols[2].0.as_str()), (BY, EDITOR));

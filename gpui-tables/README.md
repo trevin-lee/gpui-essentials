@@ -156,7 +156,7 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
 | ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked and today ringed, with Today and Clear](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
 | ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | ![Two selected rows carried by their handles: they fade where they were, a picture of the row says 2 rows, and a line shows where they'll land](docs/table-rows-drag.png) |
-| ![A row's menu under its handle: Open, Duplicate, Move up, Move down and Delete, each with its key](docs/table-rows.png) | |
+| ![A row's menu under its handle: Open, Duplicate, Move up, Move down and Delete, each with its key](docs/table-rows.png) | ![People grouped by stage, each group's footer counting its rows, its tags and its follow-ups checked, and the latest contact; a footer's calculations open under its cell](docs/table-calculations.png) |
 
 ![The Companies table in the light theme, sorted by two columns](docs/table-light.png)
 
@@ -257,6 +257,23 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
   an order key after every row's (`order::between`) and the values that keep the row where it was
   made: the group's value, and what the filter's conditions ask for. When the host hands the row
   back, its title is focused.
+- **Calculations.** Under the table's rows, and under each open group's (after its New row),
+  is a footer with a cell per column, as Notion's. A cell without a calculation is blank until a
+  pointer is over it (or it's focused, or always on touch), when it says "Calculate". Pressing it,
+  or Enter on it, opens a menu (gpui-core's `PopupMenu`) of the calculations that fit its column:
+  None; Count all, Count values, Count unique, Count empty and Count not empty; Percent empty and
+  Percent not empty; and a number's Sum, Average, Median, Min, Max and Range, a date's (and a
+  created or edited time's) Earliest, Latest and Range, or a checkbox's Checked, Unchecked,
+  Percent checked and Percent unchecked. A pick is a `viewChanged` with the view's
+  `calculations` ([Views](#views)), so every footer of the view shows it. The result is at the
+  cell's right after a short muted label ("Sum 1,240", "Checked 37.5%", "Latest Nov 12, 2026",
+  "Range 8 months"), formatted as the column's cells are: a number in its format, currency and
+  decimal places, a date as its cells show dates, in the viewer's zone. The results are worked
+  out with the rows, by `engine::calc`, when the docs or the view change, never while drawing;
+  `TableView::calculation_text` says what a footer cell shows, and
+  `TableView::open_calculation_menu` opens its menu for a host's own control. A calculation left
+  from another type (a Sum on a column now a date) shows nothing until another is picked. Boards
+  and lists have no footer.
 - **A row's handle.** Each row has a handle (⋮⋮) at its left edge, in its title cell's padding:
   shown while a pointer is over the row, on the focused row and on selected rows, and always on
   touch. A press on it selects the row and opens the rows' menu under it; ⌘-press adds the row to
@@ -302,8 +319,8 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
   ⌥↓ is still the column's menu), and ⌘⇧↑ and ⌘⇧↓ move them. While a value is typed in place
   all of these are the field's.
 - **Touch.** With `TableTheme::with_touch(true)` (the default on iOS) rows, headers, the Open
-  button, a row's handle, group headers, New rows, menu entries and the month's days are at
-  least 44 points each way, column edges take a finger's drag across 44 points while their line
+  button, a row's handle, group headers, New rows, footer cells (which say "Calculate" without
+  a pointer over them), menu entries and the month's days are at least 44 points each way, column edges take a finger's drag across 44 points while their line
   stays thin, and a finger's swipe scrolls either way.
 - **Nothing redraws while nothing changes,** and the table keeps no timers.
 
@@ -716,7 +733,7 @@ by, so renaming a property changes no row. The value's JSON depends on the type:
 ## Views
 
 A database has several saved views, each `{id, name, type, order, sort, filter, groupBy,
-columns, cardProperties, collapsedGroups}`. They're tabs above the database, in `order`, and
+columns, cardProperties, collapsedGroups, calculations}`. They're tabs above the database, in `order`, and
 every person (and agent) sees the same ones.
 
 - **`sort`** is a list of `{propertyId, direction}` (`ascending` or `descending`), applied in
@@ -728,6 +745,41 @@ every person (and agent) sees the same ones.
   show after the others at the default width; `width` null means the default.
 - **`cardProperties`** are the properties a board card shows under the title, or a list line
   beside it.
+- **`calculations`** are a table's footer: `{propertyId: calculation}`, at most one per
+  property, left out when there are none (an addition to the first proposal). A calculation is
+  one of `countAll`, `countValues`, `countUnique`, `countEmpty`, `countNotEmpty`,
+  `percentEmpty`, `percentNotEmpty` (every type); `sum`, `average`, `median`, `min`, `max`,
+  `range` (numbers); `earliest`, `latest`, `range` (dates, created and edited times; the range a
+  duration); and `checked`, `unchecked`, `percentChecked`, `percentUnchecked` (checkboxes). A
+  name the crate doesn't know is kept as written, as is one that no longer fits its property's
+  type after a change of type; both work out as nothing. Each is worked out over the rows the
+  view shows (after its filter), or a group's, by `engine::calculate` (or every one of a view
+  at once by `engine::calculate_view`), so a host or a server can show the same totals with no
+  UI. Empty is what the `isEmpty` filter matches (no value, `""`, `[]`, an option the property
+  no longer has, a value of the wrong shape for its type), a checkbox's empty being unchecked;
+  Count values counts a list's items (options, people, related rows) each; Count unique counts
+  the distinct ones.
+
+  ```rust
+  use gpui_tables::engine::{calculate, query, Calculated, Context};
+  use gpui_tables::{Calculation, DatabaseFields, Doc, Property, PropertyType, Value, View, ViewType};
+
+  let mut db = DatabaseFields::default();
+  db.properties.push(Property::new("name", "Name", PropertyType::Title, "a0"));
+  db.properties.push(Property::new("deal", "Deal", PropertyType::Number, "a1"));
+  let rows: Vec<Doc> = [400., 840.]
+      .iter()
+      .enumerate()
+      .map(|(i, x)| {
+          let values = [("deal".to_owned(), Value::number(*x))].into();
+          Doc::row(format!("r{i}"), "db", format!("Deal {i}"), "a0", values)
+      })
+      .collect();
+  let view = View::new("v", "All", ViewType::Table, "a0");
+  let shown = query(&db, &view, &rows, &Context::new(0));
+  let sum = calculate(db.property("deal").unwrap(), &Calculation::Sum, &rows, &shown.rows);
+  assert_eq!(sum, Some(Calculated::Number(1240.)));
+  ```
 - **`collapsedGroups`** are the groups folded shut, by key: `empty`, `option:<id>`, `checked`,
   `unchecked`, `owner`, `agent:<id>`, `relative:today`, `day:2026-11-15`, `week:2026-11-09`
   (the week's first day), `month:2026-11`, `year:2026`.
@@ -863,6 +915,8 @@ How the host writes them to the server:
   - Adding one, or duplicating one: `viewCreated` with the whole view.
   - Renaming, changing type, grouping, `groupDate`, card properties, removing sorts, clearing
     the filter: one `viewChanged` with the whole view.
+  - A calculation picked (or set to None) in a table's footer: one `viewChanged` with the whole
+    view, its `calculations` changed, as for a column's width.
   - Moving one (Move left or right, a dragged tab): `viewChanged` with its new `order`, or a
     `viewChanged` for every view renumbered, in one batch.
   - Deleting one: `viewDeleted`.
@@ -946,7 +1000,7 @@ the same files. Its README gives the format and every message.
 | Limit | Default |
 |---|---|
 | Properties per database | 200 |
-| Columns and card properties per view, values per row | 200 (the properties limit) |
+| Columns, card properties and calculations per view, values per row | 200 (the properties limit) |
 | Views per database | 50 |
 | Sorts per view | 10 |
 | Options per select or multi-select | 200 |
@@ -1026,12 +1080,17 @@ nothing draws while nothing changes.
   | 10,000 fresh order keys | 0.4 ms |
   | Fold 10,000 rows' words for a search | 7.7 ms |
   | Search them, a query at a time | 0.1 ms |
+  | A median, a count of unique texts and a date's range (a footer's three costliest) | 1.6 ms |
+  | A sum, a percent checked and a count not empty | 0.5 ms |
 
   The tests fail past bounds well above these (25 ms for any of a view's work in a release build,
   10 ms for a regroup and 5 ms for the group step alone, forty times that in a debug one), loose
   enough for a shared CI runner and tight enough to catch a step that goes quadratic. Grouping
   finds each row's group in a small map with a fast hash, building no string per row, and orders
-  the groups once at the end.
+  the groups once at the end. The calculations (`cargo test --release --test calculations --
+  --nocapture`) fail past 2 ms for three, the footer's budget, four times that on CI. A table
+  works its footers out with its rows, once each time the docs or the view change, and never
+  while it draws or scrolls.
 - **The table view** draws only the rows on screen (GPUI's `uniform_list`), works the rows out
   again only when the docs or the view change, and keeps no timers. Measured with `cargo test
   --release --test view_performance -- --nocapture` on an Apple M4 Pro, 10,000 rows of every
@@ -1107,8 +1166,8 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
 - **Templates.** A template is a page with content, which belongs to the docs app and its editor;
   the crate would only pass a template id through `rowCreated`. Prefilled values for a new row in a
   view are in v1.
-- **Also later:** the gallery view, files, a status type, unique ids, sums and counts under a
-  column, and linked views of a database on another page.
+- **Also later:** the gallery view, files, a status type, unique ids, and linked views of a
+  database on another page.
 
 ## Tests
 
@@ -1119,6 +1178,7 @@ cargo test -p gpui-tables --release --test performance -- --nocapture
 cargo test -p gpui-tables --release --test view_performance -- --nocapture
 cargo run --release -p gpui-tables --features shots --example crm -- --shot out.png --scene menu
 cargo run --release -p gpui-tables --features shots --example crm -- --shot out.png --scene rows
+cargo run --release -p gpui-tables --features shots --example crm -- --shot out.png --scene calculations
 ```
 
 - `tests/model.rs`: every fixture reads into the typed model and writes back as the same JSON;
@@ -1133,6 +1193,15 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
 - `tests/limits.rs`: every case in `tests/fixtures/limits`, each with exactly its problems
   ([Limits](#limits)).
 - `tests/performance.rs`: 10,000 rows, timed, as above.
+- `tests/calculations.rs`: three calculations over 10,000 rows, timed; and a table's footers
+  driven by mouse, keyboard and finger: a calculation set from a footer cell's menu (only those
+  of the column's type offered) and cleared with None, as a `viewChanged` with camelCase
+  `calculations` left out when empty; results formatted as their columns' cells (a currency, a
+  date, a percent); a footer under every open group, none under a folded one, its menu closing
+  when its group folds; Down past the New row to the footer and Enter opening its menu; 44
+  points on touch. Each calculation's own cases (no rows, every value empty, a column of mixed
+  shapes after a change of type, numbers at a double's edges) are unit tests in
+  `src/engine/calc.rs`.
 - `tests/view.rs`: the table view driven by mouse, keyboard and finger: sorting (and adding a
   sort with shift), filtering, grouping and folding, resizing and moving columns, hiding and
   showing them, an edit of every editable type, typed values in place (typed, then committed
@@ -1205,8 +1274,8 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   views and its menus (the + menu, a view's menu, its settings, grouping, type, delete, card
   properties and rename, by a table, a board and a list, with a finger's sizes too), and its
   search field (a long query, and the worst one with "No results" for it, the tabs keeping
-  room beside it), laid out
-  with Core Text; no glyph leaves its place.
+  room beside it), and in a table's footers (a calculation under every column, the sums near a
+  double's limit) and a footer's menu, laid out with Core Text; no glyph leaves its place.
 - `tests/fields.rs`: the fields values are typed in, in place, laid out with Core Text: typing
   stops at a value's limit (counted in characters, a title's, an email's, a filter value's), a
   paste is cut to fit, a value already over its limit opens whole and commits cut, a host's

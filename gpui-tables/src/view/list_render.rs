@@ -201,6 +201,8 @@ impl TableView {
                     self.render_list_group(ix, g, landing, &m, cx)
                 }
                 Item::New(g) => self.render_list_new(ix, g, landing, &m, cx),
+                // A table's alone: a list has no footer.
+                Item::Calc(_) => div().into_any_element(),
             };
             out.push(
                 div()

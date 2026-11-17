@@ -41,8 +41,8 @@ and UTF-8 bytes.
 
 | Message | When |
 |---|---|
-| `N is more than L` | Too many: properties, views, sorts, options, columns, card properties, collapsed groups, filter nodes, values in a list, or values in a row |
-| `N characters is more than L` | A string too long: a title, a text, URL, email or phone value, a name, an id, an `order` key |
+| `N is more than L` | Too many: properties, views, sorts, options, columns, card properties, collapsed groups, calculations (a view's, at most one per property), filter nodes, values in a list, or values in a row |
+| `N characters is more than L` | A string too long: a title, a text, URL, email or phone value, a name, an id (a view's `calculations` keys too, at the path `database.views[i].calculations`), an `order` key |
 | `N levels is more than L` | A filter too deep (a lone condition is 1 level) |
 | `<id> is used twice` | Two properties, views, options or columns share an id, or a list value repeats one |
 | `no title property` | A database without a title property |

@@ -170,7 +170,7 @@ impl TableView {
         Some(match *self.shown.items.get(ix)? {
             Item::Group(g) => g,
             Item::Row { group, .. } => group.unwrap_or(0),
-            Item::New(g) => g.unwrap_or(0),
+            Item::New(g) | Item::Calc(g) => g.unwrap_or(0),
         })
     }
 
@@ -222,7 +222,7 @@ impl TableView {
             Some(Item::Row { row, .. }) => self.open_row(row, window, cx),
             Some(Item::Group(g)) => self.toggle_group(g, window, cx),
             Some(Item::New(g)) => self.new_row(g, window, cx),
-            None => {}
+            Some(Item::Calc(_)) | None => {}
         }
     }
 
@@ -267,7 +267,7 @@ impl TableView {
             let slot = match self.shown.items[ix] {
                 Item::Row { .. } => self.slot_of(ix) + usize::from(frac >= 0.5),
                 Item::Group(_) => 0,
-                Item::New(_) => lanes.get(lane)?.rows.len(),
+                Item::New(_) | Item::Calc(_) => lanes.get(lane)?.rows.len(),
             };
             self.can_move_all(&moving, lane).then_some((lane, slot))
         })();
