@@ -44,6 +44,7 @@ mod date_picker;
 pub mod highlight;
 pub mod icon;
 pub mod input;
+mod item;
 mod menu;
 mod navigation_menu;
 mod picker;
@@ -72,6 +73,7 @@ pub use date_picker::{
 };
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
+pub use item::{Item, ItemGroup, ItemSeparator, ItemVariant};
 pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
 pub use navigation_menu::{NavigationMenu, NavigationMenuItem, NavigationMenuLink};
 pub use picker::Picker;
