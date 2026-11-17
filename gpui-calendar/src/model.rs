@@ -380,6 +380,19 @@ impl CalendarView {
     }
 }
 
+/// How the event panel is shown ([`CalendarOptions::panel_style`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PanelStyle {
+    /// A popover beside the event, or a sheet on touch and in a narrow calendar.
+    #[default]
+    Auto,
+    /// A popover beside the event (or below or above it where there's no room beside), on
+    /// touch too: there its rows and buttons are 44 points tall, and a tap outside closes it.
+    Popover,
+    /// A sheet from the bottom of the window, with a pointer too.
+    Sheet,
+}
+
 /// How the calendar behaves and reads. The host can change any of it at any time.
 #[derive(Clone, Debug)]
 pub struct CalendarOptions {
@@ -413,6 +426,10 @@ pub struct CalendarOptions {
     /// its details in a panel: a popover on the Mac, a sheet on touch. `CalendarEvent::Open` is
     /// sent either way. Off by default, for hosts with a panel of their own.
     pub event_panel: bool,
+    /// How the event panel is shown: by default a popover where there's a pointer and room,
+    /// and a sheet on touch or in a narrow calendar. An iPad takes touch with the panel as a
+    /// popover beside the event (`PanelStyle::Popover`), as Apple's Calendar does there.
+    pub panel_style: PanelStyle,
     /// A month to jump to a date from: beside the calendar when it's wide, behind the title
     /// when it's narrow (or taken by touch). Off by default, for hosts with one of their own.
     pub mini_month: bool,
@@ -446,6 +463,7 @@ impl Default for CalendarOptions {
             default_calendar: None,
             dim_past: true,
             event_panel: false,
+            panel_style: PanelStyle::Auto,
             mini_month: false,
             all_day_rows: 3,
             touch: cfg!(any(target_os = "ios", target_os = "android")),

@@ -1,6 +1,7 @@
 //! The event panel: an event's details (time, calendar, place, notes, links, guests) and what
-//! can be done with it, as a popover beside the event on the Mac and a sheet on touch. Every
-//! action goes to the host as a [`CalendarEvent`]; the panel changes nothing itself.
+//! can be done with it, as a popover beside the event on the Mac and a sheet on touch (or as
+//! the host's `panel_style` says). Every action goes to the host as a [`CalendarEvent`]; the
+//! panel changes nothing itself.
 
 use std::ops::Range;
 
@@ -287,8 +288,13 @@ impl Calendar {
         let theme = Theme::global(cx);
         let c = theme.colors;
         let touch = self.options.touch;
-        // A narrow calendar has no room beside an event: the panel is a sheet there too.
-        let sheet = touch || self.is_narrow(window);
+        // A narrow calendar has no room beside an event: the panel is a sheet there too,
+        // unless the host asks for a popover (an iPad's) or a sheet whatever the calendar.
+        let sheet = match self.options.panel_style {
+            PanelStyle::Auto => touch || self.is_narrow(window),
+            PanelStyle::Popover => false,
+            PanelStyle::Sheet => true,
+        };
         let view = window.viewport_size();
         let scale = f32::from(window.rem_size()) / 15.;
         // The body scrolls within the window, between the title and the footer.
