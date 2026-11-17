@@ -1,4 +1,4 @@
-//! gpui-core's charts in a window: line charts smooth and straight (with dots and a gap), area
+//! gpui-core's charts in a window: a pie and a donut (with its total in the hole), line charts smooth and straight (with dots and a gap), area
 //! charts stacked with a gradient and flat with negative values and dollars, and bar charts
 //! grouped and stacked, with negative values, huge values, crowded labels, a single point and
 //! no data at all.
@@ -46,6 +46,41 @@ impl Render for Charts {
             .gap(rems(1.))
             .text_color(theme.foreground)
             .text_size(theme.text.base)
+            .child(
+                div()
+                    .flex()
+                    .gap(rems(1.))
+                    .child(
+                        div().flex_1().min_w_0().child(card(
+                            "Pie chart",
+                            "Visitors by browser",
+                            PieChart::new("pie")
+                                .slice("chrome", "Chrome", 275.)
+                                .slice("safari", "Safari", 200.)
+                                .slice("firefox", "Firefox", 187.)
+                                .slice("edge", "Edge", 173.)
+                                .slice("other", "Other", 90.)
+                                .legend(true)
+                                .h(rems(16.)),
+                        )),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(card(
+                            "Pie chart - donut with text",
+                            "A zero and a negative slice are left out",
+                            PieChart::new("donut")
+                                .slice("chrome", "Chrome", 275.)
+                                .slice("safari", "Safari", 200.)
+                                .slice("none", "None", 0.)
+                                .slice("firefox", "Firefox", 187.)
+                                .slice("refunds", "Refunds", -20.)
+                                .donut(true)
+                                .center_label("662", "Visitors")
+                                .format_value(|v| format!("{v} visits").into())
+                                .h(rems(16.)),
+                        )),
+                    ),
+            )
             .child(
                 div()
                     .flex()
