@@ -915,12 +915,17 @@ fn rows_with(
                     r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
                 })
                 .child(
+                    // As wide as its text, filling the row: a long hint gives way first.
                     div()
-                        .flex_1()
+                        .flex_auto()
                         .min_w_0()
                         .overflow_hidden()
                         .text_ellipsis()
                         .whitespace_nowrap()
+                        .debug_selector({
+                            let id = id_for_panel.clone();
+                            move || format!("menu-label-{id}")
+                        })
                         // Room either side for ink past a glyph's advance.
                         .px(css(3.))
                         .mx(css(-3.))
@@ -930,10 +935,18 @@ fn rows_with(
                         }),
                 )
                 .when_some(item.shortcut, |r, s| {
+                    let id = id_for_panel.clone();
+                    let mut hint = div()
+                        .min_w(css(HINT_MIN))
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .debug_selector(move || format!("menu-hint-{id}"));
+                    // It shrinks long before the label does: the label keeps its text until the
+                    // hint is down to its least, then both are cut short.
+                    hint.style().flex_shrink = Some(HINT_SHRINK);
                     r.child(
-                        div()
-                            .flex_none()
-                            .text_xs()
+                        hint.text_xs()
                             .text_color(if on { highlight_text } else { muted })
                             .child(s),
                     )
@@ -1001,6 +1014,11 @@ fn rows_with(
         })
         .collect()
 }
+
+/// The least a cut-short hint keeps (room for a character or two and the ellipsis), in CSS
+/// pixels, and how much faster than the label it shrinks.
+const HINT_MIN: f32 = 28.;
+const HINT_SHRINK: f32 = 1000.;
 
 /// How far a submenu keeps from the window's edges, and how far it sits out from its entry (the
 /// menu's padding and border), in CSS pixels.
