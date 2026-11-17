@@ -186,6 +186,12 @@ item](docs/gallery.png)
   body is a Tab stop where Up, Down, Home, End, Page Up and Page Down ask for another and
   scroll it into view. Rows light up under the pointer. It's a table of rows and cells to
   assistive technology, named by its caption.
+- **Checkbox.** `Checkbox::new(id).label(text).checked(on).on_click(…)`: a small rounded box,
+  filled with the primary colour and a check when on, or a dash with `indeterminate(true)`. A
+  press on the box or its label, or Space, calls `on_click` with the state to take (on, from
+  indeterminate); the host keeps it. It's a check box to assistive tech (mixed when
+  indeterminate), named by its label; `invalid(true)` gives it the destructive border,
+  `disabled(true)` dims it, `touch()` takes presses 44 points tall, and a long label wraps.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be

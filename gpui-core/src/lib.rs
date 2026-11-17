@@ -42,6 +42,7 @@ mod badge;
 mod breadcrumb;
 mod button;
 mod card;
+mod checkbox;
 mod collapsible;
 mod context_menu;
 mod date_picker;
@@ -89,6 +90,7 @@ pub use badge::{Badge, BadgeVariant};
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
+pub use checkbox::Checkbox;
 pub use collapsible::Collapsible;
 pub use context_menu::ContextMenu;
 pub use date_picker::{
