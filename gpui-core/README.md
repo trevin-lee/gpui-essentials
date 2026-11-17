@@ -199,6 +199,15 @@ item](docs/gallery.png)
   first and passing over `disable(id)`'d ones, and a press on a circle or its label turns it
   on. `disabled(true)` dims them all, `invalid(true)` gives them the destructive border,
   `touch()` makes each option 44 points tall, and a long label wraps.
+- **Toggle and ToggleGroup.** `Toggle::new(id).icon(icon).label(text).pressed(on).on_click(…)`
+  is a button that stays pressed in (shadcn's toggle), plain or `outline()`, in the button
+  sizes; `on_click` is told the state to take, and assistive tech hears it as pressed or not.
+  `ToggleGroup::new(id).item(id, label)` (or `item_with_icon`, `icon_item`)`….selected(ids)
+  .on_change(…)` joins toggles edge to edge: one pressed at most (a radio group to assistive
+  tech; pressing it again lets it out), or any number with `multiple(true)`. `on_change` is told
+  everything that should be pressed. It's one Tab stop; the arrows, Home and End move the
+  keyboard along, going round, and Space or Enter presses. `touch()` makes them 44 points
+  tall; in a narrow space their labels are cut short.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
