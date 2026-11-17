@@ -71,6 +71,7 @@ mod root;
 mod scroll_area;
 mod search_list;
 mod segmented;
+mod select;
 mod separator;
 mod sheet;
 mod sidebar;
@@ -127,6 +128,7 @@ pub use root::{FocusNext, FocusPrev, Root};
 pub use scroll_area::{ScrollArea, ScrollAreaHandle, ScrollAxes};
 pub use search_list::SearchList;
 pub use segmented::SegmentedControl;
+pub use select::Select;
 pub use separator::Separator;
 pub use sheet::Sheet;
 pub use sidebar::{
@@ -169,6 +171,7 @@ pub fn init(cx: &mut App) {
     tabs::init(cx);
     radio_group::init(cx);
     toggle::init(cx);
+    select::init(cx);
     date_picker::init(cx);
     dialog::init(cx);
     input::init(cx);

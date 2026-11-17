@@ -267,6 +267,15 @@ item](docs/gallery.png)
   Left and Right open the menu beside it (Right opens a highlighted submenu first), the pointer
   moving onto another title opens that one, and Escape or a press outside closes it, giving the
   keyboard back to its title. `touch(true)` makes titles and entries 44 points.
+- **Select.** `Select::new(id).placeholder(text).heading(title).option(id, label)…
+  .separator().selected(Some(id)).on_change(…)`: shadcn's select, a field-like button showing
+  the chosen option (or the placeholder, muted) that opens a PopupMenu of the options in a
+  Popover, the chosen one checked and highlighted. A press, Enter, Space, Down or Up opens it;
+  in it the menu's keys work, typing a letter moves to the next option starting with it, and
+  Escape closes it, the keyboard going back to the select. On the closed select a letter
+  chooses the next option starting with it. `disable(id)` dims an option, `invalid(true)` gives
+  the destructive border, `small()` and `touch()` size it, and a long choice is cut short. It
+  isn't searchable: that's Picker.
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A
