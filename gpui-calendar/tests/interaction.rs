@@ -1546,6 +1546,44 @@ fn a_row_of_the_list_drags_its_event_into_the_grid(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_click_on_a_row_that_wobbles_a_pixel_opens_its_event_and_moves_nothing(
+    cx: &mut TestAppContext,
+) {
+    let (c, seen, cx) = open(cx);
+    let ids = crowded(&c, cx);
+    let hidden = ids
+        .iter()
+        .find(|id| c.read_with(cx, |c, _| c.event_bounds(id)).is_none())
+        .unwrap()
+        .clone();
+    let more = c.read_with(cx, |c, _| c.hidden_bounds(&hidden)).unwrap();
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    let first = c.read_with(cx, |c, _| c.crowd_events().unwrap()[0].clone());
+    let row = cx.debug_bounds("crowd-row-0").expect("a row");
+    // A trackpad's click: down, a pixel over, up.
+    let at = row.center();
+    press(cx, at);
+    let wobble = point(at.x + px(1.), at.y);
+    move_to(cx, wobble);
+    assert!(
+        c.read_with(cx, |c, _| !c.is_dragging()),
+        "a pixel isn't a drag"
+    );
+    cx.simulate_mouse_up(wobble, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert!(has(&seen, &CalendarEvent::Open(first.clone())));
+    assert!(
+        !seen
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Move { .. })),
+        "nothing moved"
+    );
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+}
+
+#[gpui::test]
 fn a_screen_reader_hears_how_many_didnt_fit_and_when(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     let ids = crowded(&c, cx);

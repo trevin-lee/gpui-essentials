@@ -199,8 +199,12 @@ pub(crate) struct Asking {
 #[derive(Clone, Debug)]
 pub(crate) enum Drag {
     Press {
+        /// Where the press went down, which a drag must move a few pixels from to start.
         at: Point<Pixels>,
         target: Target,
+        /// Where the event is held from, when that isn't the press (a row in the "+N" list
+        /// holds its event by its start, on the grid behind the list).
+        held: Option<Point<Pixels>>,
     },
     Create {
         date: NaiveDate,
@@ -1522,6 +1526,7 @@ impl Calendar {
         self.drag = Some(Drag::Press {
             at: event.position,
             target,
+            held: None,
         });
         cx.notify();
     }
@@ -1556,7 +1561,7 @@ impl Calendar {
         let next = match drag {
             // The agenda is a list: nothing in it is dragged.
             Drag::Press { .. } if geo.kind == paint::Kind::Agenda => return,
-            Drag::Press { at, target } => {
+            Drag::Press { at, target, held } => {
                 let threshold = 4. * geo.s;
                 let moved = (f32::from(p.x - at.x)).hypot(f32::from(p.y - at.y));
                 if moved < threshold && !now {
@@ -1593,7 +1598,7 @@ impl Calendar {
                             return;
                         };
                         if resize {
-                            let grab = geo.pos(at, area);
+                            let grab = geo.pos(held.unwrap_or(at), area);
                             let shift = match original {
                                 EventTime::Timed { end, .. } if area == Area::Grid => {
                                     let tz = self.options.time_zone;
@@ -1615,7 +1620,7 @@ impl Calendar {
                                 original,
                                 area,
                                 over,
-                                grab: geo.pos(at, area),
+                                grab: geo.pos(held.unwrap_or(at), area),
                                 now: geo.pos(p, over),
                             }
                         }
@@ -1840,7 +1845,16 @@ impl Calendar {
                 self.touch_from = Some(event.start_position);
                 self.touch_moved = false;
                 let at = event.start_position;
-                self.drag_to(Drag::Press { at, target }, at, true, cx);
+                self.drag_to(
+                    Drag::Press {
+                        at,
+                        target,
+                        held: None,
+                    },
+                    at,
+                    true,
+                    cx,
+                );
                 if let Some(Drag::Create { from, to, .. }) = &mut self.drag {
                     *from = time::snap_floor(*from, self.options.snap());
                     *to = *from + self.options.default_duration.num_minutes() as f32;
@@ -1873,7 +1887,11 @@ impl Calendar {
                 }
                 self.touch_from = Some(at);
                 self.touch_moved = false;
-                self.drag = Some(Drag::Press { at, target });
+                self.drag = Some(Drag::Press {
+                    at,
+                    target,
+                    held: None,
+                });
                 true
             }
             _ => self.touch_follow(event.phase, event.position, false, &geo, cx),
