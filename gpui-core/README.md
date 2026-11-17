@@ -68,6 +68,11 @@ item](docs/gallery.png)
   To assistive tech it's a busy indicator (a progress indicator with no value) labelled
   "Loading", or `.accessibility_label(…)`. It turns only while drawn, and not at all under
   GPUI's `cx.set_reduce_motion(true)`.
+- **Skeleton.** `Skeleton::new()` sized like a `div` (`.h_4().w(px(250.))`, `.size_12()
+  .rounded_full()`): shadcn's muted rounded block standing in for content on its way, never
+  wider than its parent. It pulses (half opacity and back every two seconds, every skeleton
+  as one) only while it's drawn; `animate(false)` or GPUI's `cx.set_reduce_motion(true)`
+  keeps it still.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
