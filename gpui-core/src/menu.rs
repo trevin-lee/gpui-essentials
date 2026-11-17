@@ -310,7 +310,7 @@ pub(crate) type OnHighlight = Rc<dyn Fn(Option<&SharedString>, &mut App)>;
 pub struct PopupMenu {
     id: ElementId,
     entries: Vec<Entry>,
-    on_select: Option<OnSelect>,
+    pub(crate) on_select: Option<OnSelect>,
     on_highlight: Option<OnHighlight>,
     highlight: Option<SharedString>,
     row: RowStyle,

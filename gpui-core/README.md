@@ -157,6 +157,13 @@ item](docs/gallery.png)
   can be made only when it opens (`submenu_with(|| …)`), and a menu can open with one open
   and the keyboard in it (`open_submenu(id)`).
   `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
+- **ContextMenu.** `ContextMenu::new(id, element).menu(|window, cx| PopupMenu::new(…)…)` opens
+  the menu over everything: at the pointer on a right-click, where a finger rests on the
+  element for half a second (GPUI's long press, with rows 44 points tall), and under the
+  element on Shift-F10 or the Menu key while it or something in it has the focus. The menu is
+  made only while open. A pick runs its `on_select` (its submenus' picks too) and closes it;
+  Escape, a press outside and the element scrolling out of view close it as well, and the
+  focus goes back to what had it. A plain click, a tap and selecting text stay the element's.
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A

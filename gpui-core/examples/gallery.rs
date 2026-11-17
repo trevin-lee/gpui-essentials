@@ -416,6 +416,60 @@ impl Render for Gallery {
                         ),
                 ),
             )
+            .child(heading(
+                "Context menus (right-click, a long press, or Shift-F10 on a row)",
+                &theme,
+            ))
+            .child(
+                div().w(rems(20.)).flex().flex_col().children(
+                    ["Quarterly report.md", "Approval policy.yaml", "A file whose name is far too long to fit in this row.txt"]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, name)| {
+                            let me = me.clone();
+                            ContextMenu::new(
+                                ("file-row", i),
+                                Press::new(("file", i))
+                                    .flex()
+                                    .items_center()
+                                    .gap(rems(0.5))
+                                    .w_full()
+                                    .px(rems(0.5))
+                                    .py(rems(0.375))
+                                    .rounded(theme.radius_sm())
+                                    .hover(|s| s.bg(theme.accent))
+                                    .text_size(theme.text.sm)
+                                    .child(Icon::new(IconName::File))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .child(name),
+                                    )
+                                    .on_click(pressed(&me, name)),
+                            )
+                            .menu(move |_, _| {
+                                let me = me.clone();
+                                PopupMenu::new("file-menu")
+                                    .item(PopupMenuItem::new("open", "Open"))
+                                    .item(PopupMenuItem::new("rename", "Rename"))
+                                    .item(PopupMenuItem::new("copy", "Copy link").icon(IconName::Copy))
+                                    .separator()
+                                    .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash))
+                                    .on_select(move |pick: &MenuSelect, _, cx| {
+                                        let what: SharedString = format!("{} {name}", pick.id).into();
+                                        me.update(cx, |g, cx| {
+                                            g.pressed = what;
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                    })
+                            })
+                        }),
+                ),
+            )
             .child(heading("A slider (arrows and drag)", &theme))
             .child(
                 div()
