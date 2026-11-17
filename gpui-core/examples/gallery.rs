@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use chrono::Datelike as _;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::*;
 
@@ -68,6 +69,35 @@ struct Gallery {
     group: SharedString,
     /// Whether the split view's sidebar shows.
     sidebar: bool,
+    /// The vault list's open entry.
+    vault: Option<SharedString>,
+}
+
+/// A vault's entries for the searchable list: an id, a title and a user name, five hundred of
+/// them.
+fn vault_entries() -> Vec<(SharedString, SharedString, SharedString)> {
+    const SITES: [&str; 10] = [
+        "GitHub",
+        "Google",
+        "Chase card",
+        "Fastmail",
+        "Tailscale",
+        "Apple",
+        "Amazon",
+        "Stripe",
+        "Cloudflare",
+        "Figma",
+    ];
+    (0..500)
+        .map(|i| {
+            let site = SITES[i % SITES.len()];
+            (
+                format!("v{i}").into(),
+                format!("{site} {}", i / SITES.len() + 1).into(),
+                format!("trevin+{i}@example.com").into(),
+            )
+        })
+        .collect()
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -461,6 +491,68 @@ impl Render for Gallery {
                             .narrow_shows(2),
                     ),
             )
+            .child(heading("A searchable list (type to filter, Up and Down, Enter opens)", &theme))
+            .child({
+                let entries = std::rc::Rc::new(vault_entries());
+                let rows = entries.clone();
+                let muted = theme.muted_foreground;
+                let open = self
+                    .vault
+                    .as_ref()
+                    .and_then(|id| entries.iter().find(|e| &e.0 == id))
+                    .map(|e| format!("Open: {} ({})", e.1, e.2))
+                    .unwrap_or_else(|| "Nothing open".into());
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(rems(1.))
+                    .child(
+                        div().w(rems(18.)).h(rems(12.)).child(
+                            SearchList::new("vault")
+                                .placeholder("Search the vault")
+                                .accessibility_label("Vault")
+                                .empty_text("Nothing in the vault matches")
+                                .row_height(rems(36. / 15.))
+                                .items(entries.iter().map(|(id, title, user)| {
+                                    (id.clone(), SharedString::from(format!("{title} {user}")))
+                                }))
+                                .render_row(move |id, _, _, _, _| {
+                                    // The id is "v" and the entry's index.
+                                    let (title, user) = id
+                                        .strip_prefix('v')
+                                        .and_then(|i| i.parse::<usize>().ok())
+                                        .and_then(|i| rows.get(i))
+                                        .map(|e| (e.1.clone(), e.2.clone()))
+                                        .unwrap_or_default();
+                                    div()
+                                        .flex()
+                                        .gap(rems(0.5))
+                                        .min_w_0()
+                                        .child(div().flex_none().child(title))
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .text_color(muted)
+                                                .child(user),
+                                        )
+                                })
+                                .when_some(self.vault.clone(), |l, id| l.selected(id))
+                                .on_open(cx.listener(|g, id: &SharedString, _, cx| {
+                                    g.vault = Some(id.clone());
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_size(theme.text.sm)
+                            .text_color(theme.muted_foreground)
+                            .child(open),
+                    )
+            })
             .child(heading("Fields", &theme))
             .child(
                 div()
@@ -612,6 +704,7 @@ fn main() {
                     look: "system".into(),
                     group: "none".into(),
                     sidebar: true,
+                    vault: Some("v2".into()),
                 })
             })
             .expect("the window");

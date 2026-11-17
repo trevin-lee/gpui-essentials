@@ -170,6 +170,13 @@ item](docs/gallery.png)
   between the links, Left and Right along the row (switching panels while one is open), and the
   pointer moving onto another trigger switches too. Escape or a press outside closes it,
   following a link calls `on_navigate`, and `touch(true)` makes items 44 points.
+- **SearchList.** `SearchList::new(id).items([(id, search text), …]).render_row(…)
+  .on_open(…).selected(id)` is a page's list beside a detail pane (a vault's logins): a search
+  field above rows the host draws. Typing filters the rows (every word, case aside), Up and
+  Down move a highlight while the field keeps the keyboard, and Enter or a press opens a row.
+  The open row is drawn selected and the highlight goes to it; the highlight stays on its row
+  when the host re-sorts. Escape clears the search. Rows are one height (`row_height`, 44
+  points at least with `touch(true)`), so a list of thousands draws only the rows in view.
 - **TextView.** `TextView::markdown(id, source)` draws GitHub Markdown natively: selectable
   with `selectable(true)`, links as `on_link_click` events, and `[text][label]` links
   resolved to their definitions. `TextView::blocks(id, [(key, source), …])` draws several
