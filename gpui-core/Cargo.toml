@@ -16,8 +16,9 @@ name = "gpui_core"
 # GPUI itself, under its own name, so its macros' `gpui::` paths resolve in this crate and in
 # every crate using it. Pinned exactly in the workspace: one GPUI for everything that links it.
 gpui = { workspace = true }
-# Markdown (GitHub's flavour) for TextView: the parser gpui-blocks uses too.
-markdown = "1.0.0"
+# Markdown (GitHub's flavour) for TextView: rustdoc's parser, fuzzed upstream (and here) never
+# to panic, as the `markdown` crate did on some input (fatal where panics abort, as on iPhone).
+pulldown-cmark = { version = "0.13.6", default-features = false }
 # Grapheme and word boundaries for the caret, the arrow keys and double-clicks.
 unicode-segmentation = "1.12"
 # Dates for DatePicker: the version the workspace's calendar and cards use.
