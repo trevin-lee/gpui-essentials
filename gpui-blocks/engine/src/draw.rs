@@ -809,7 +809,7 @@ pub(crate) fn list_tree(
 }
 
 impl Tree {
-    fn prev(&self) -> Prev {
+    pub(crate) fn prev(&self) -> Prev {
         match self {
             Tree::Text {
                 level: Some(level), ..
@@ -986,7 +986,7 @@ pub(crate) fn draw(
 }
 
 /// A container's blocks, each placed among the others.
-fn children_of(
+pub(crate) fn children_of(
     children: &[Tree],
     depth: usize,
     color: Option<Hsla>,

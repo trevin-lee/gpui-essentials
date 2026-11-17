@@ -4479,6 +4479,72 @@ fn a_host_handle_drags_any_top_level_block(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_host_handle_drags_a_selected_run_together(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\nthird\n\nfourth";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    assert_eq!(blocks.len(), 4);
+    let (first, second) = (blocks[0].0, blocks[1].0);
+    let run = BlockSelection::Blocks {
+        anchor: first,
+        head: second,
+    };
+    editor.update(cx, |e, _| e.model.set_selection(run.clone()).unwrap());
+    // Pressing the second of the selected blocks drags both.
+    let start = gpui::point(blocks[1].1.left() + px(2.), blocks[1].1.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(second, start));
+    let over = gpui::point(start.x, blocks[2].1.center().y + px(2.));
+    cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.block_drag.and_then(|d| d.drop)),
+        Some(3)
+    );
+    assert_eq!(editor.read_with(cx, |e, _| e.selection().clone()), run);
+    cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), "third\n\nfirst\n\nsecond\n\nfourth");
+    assert_eq!(editor.read_with(cx, |e, _| e.selection().clone()), run);
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), src);
+}
+
+#[gpui::test]
+fn a_press_outside_the_selected_run_drags_one_block(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\nthird\n\nfourth";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (first, second, fourth) = (blocks[0].0, blocks[1].0, blocks[3].0);
+    editor.update(cx, |e, _| {
+        e.model
+            .set_selection(BlockSelection::Blocks {
+                anchor: first,
+                head: second,
+            })
+            .unwrap()
+    });
+    let start = gpui::point(blocks[3].1.left() + px(2.), blocks[3].1.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(fourth, start));
+    let over = gpui::point(start.x, blocks[0].1.center().y - px(2.));
+    cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.block_drag.and_then(|d| d.drop)),
+        Some(0)
+    );
+    cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), "fourth\n\nfirst\n\nsecond\n\nthird");
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.selection().clone()),
+        BlockSelection::Blocks {
+            anchor: fourth,
+            head: fourth
+        }
+    );
+}
+
+#[gpui::test]
 fn caret_bounds_follow_the_caret(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, "abc\n\ndef");
     caret_at(&editor, cx, 1, 0);
