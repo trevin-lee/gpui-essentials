@@ -753,23 +753,37 @@ fn leaf(
 /// and the view's style.
 type StyleKey = (Pixels, Hsla, SharedString, Pixels, u64);
 
-fn style_key(text: &gpui::TextStyle, rem: Pixels, style: &TextViewStyle) -> StyleKey {
+/// `fingerprint` is the style's ([`TextViewStyle::fingerprint`]), worked out once per draw.
+fn style_key(text: &gpui::TextStyle, rem: Pixels, fingerprint: u64) -> StyleKey {
     (
         text.font_size.to_pixels(rem),
         text.color,
         text.font_family.clone(),
         rem,
-        style.fingerprint(),
+        fingerprint,
     )
+}
+
+/// Feeds what's formatted into it straight to a hasher, with nothing allocated.
+struct HashWriter<'a>(&'a mut std::collections::hash_map::DefaultHasher);
+
+impl std::fmt::Write for HashWriter<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        std::hash::Hasher::write(self.0, s.as_bytes());
+        Ok(())
+    }
 }
 
 impl TextViewStyle {
     /// Changes when anything a layout reads in the style does, so a host's new style (a theme
     /// switch, a new highlighter) lays the view out again. Functions count by which they are.
+    /// Worked out once each time a view is drawn, the values formatted straight into the hash.
     fn fingerprint(&self) -> u64 {
+        use std::fmt::Write as _;
         use std::hash::{Hash as _, Hasher as _};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        format!(
+        let _ = write!(
+            HashWriter(&mut h),
             "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
             self.paragraph_gap,
             self.heading_base_font_size,
@@ -787,8 +801,7 @@ impl TextViewStyle {
             self.inline_code,
             self.colors,
             (),
-        )
-        .hash(&mut h);
+        );
         let ptr = |p: Option<*const ()>| p.map(|p| p as usize);
         (
             ptr(self
@@ -813,6 +826,7 @@ impl TextViewStyle {
 fn layout_for(
     state: &ViewState,
     style: &TextViewStyle,
+    key: StyleKey,
     text: &gpui::TextStyle,
     width: Pixels,
     window: &mut Window,
@@ -860,7 +874,7 @@ fn layout_for(
     };
     let mut out = ViewLayout {
         width,
-        key: style_key(text, rem, style),
+        key,
         height: px(0.),
         leaves: Vec::new(),
         decos: Vec::new(),
@@ -930,6 +944,7 @@ impl RenderOnce for TextView {
             })
             .child(ViewElement {
                 state,
+                fingerprint: self.style.fingerprint(),
                 style: self.style,
                 selectable: self.selectable,
                 on_link: self.on_link,
@@ -947,6 +962,8 @@ struct Prepainted {
 struct ViewElement {
     state: gpui::Entity<ViewState>,
     style: TextViewStyle,
+    /// The style's fingerprint, worked out once for this draw's measures and prepaint.
+    fingerprint: u64,
     selectable: bool,
     on_link: Option<OnLink>,
 }
@@ -1026,6 +1043,7 @@ impl Element for ViewElement {
         style.min_size.width = Length::Definite(px(0.).into());
         let state = self.state.clone();
         let tv_style = self.style.clone();
+        let fingerprint = self.fingerprint;
         let text_style = window.text_style();
         let id = window.request_measured_layout(style, move |known, available, window, cx| {
             let width = known.width.or(match available.width {
@@ -1033,7 +1051,7 @@ impl Element for ViewElement {
                 _ => None,
             });
             let width = width.unwrap_or(px(400.));
-            let key = style_key(&text_style, window.rem_size(), &tv_style);
+            let key = style_key(&text_style, window.rem_size(), fingerprint);
             let cached = state
                 .read(cx)
                 .layout
@@ -1045,6 +1063,7 @@ impl Element for ViewElement {
                     let l = Rc::new(layout_for(
                         state.read(cx),
                         &tv_style,
+                        key,
                         &text_style,
                         width,
                         window,
@@ -1070,7 +1089,7 @@ impl Element for ViewElement {
     ) -> Prepainted {
         let width = bounds.size.width;
         let text_style = window.text_style();
-        let key = style_key(&text_style, window.rem_size(), &self.style);
+        let key = style_key(&text_style, window.rem_size(), self.fingerprint);
         let cached = self
             .state
             .read(cx)
@@ -1082,6 +1101,7 @@ impl Element for ViewElement {
             None => Rc::new(layout_for(
                 self.state.read(cx),
                 &self.style,
+                key,
                 &text_style,
                 width,
                 window,
