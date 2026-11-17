@@ -514,10 +514,14 @@ fn ten_thousand_rows_regroup_as_a_value_changes() {
 #[test]
 fn ten_thousand_rows_searched_a_key_at_a_time() {
     let (db, rows) = (database(), rows());
+    let mut opens = Vec::new();
+    let mut folds = Vec::new();
     let mut firsts = Vec::new();
+    let mut first_frames = Vec::new();
+    let mut unready = Vec::new();
     let mut keys = Vec::new();
     let mut frames = Vec::new();
-    for run in 0..3 {
+    for run in 0..5 {
         let mut app = TestAppContext::build_with_text_system(
             TestDispatcher::new(run),
             None,
@@ -540,14 +544,24 @@ fn ten_thousand_rows_searched_a_key_at_a_time() {
         let table = made.borrow().clone().unwrap();
         cx.simulate_resize(size(px(1400.), px(900.)));
         draw(cx);
-        // The first key folds every row's words (its title and its columns as they read).
+        // Opening the field (its button, ⌘F), drawn with it: the rows' words are handed to the
+        // background to fold (a test's update ends in a draw of its own).
+        let start = Instant::now();
+        cx.update(|window, cx| table.update(cx, |t, cx| t.open_search(window, cx)));
+        opens.push(start.elapsed());
+        // The fold, off the main thread in an app (a test runs it here, when parked).
+        let start = Instant::now();
+        cx.run_until_parked();
+        folds.push(start.elapsed());
+        // The first key only searches them: timed alone, then with its frame.
+        let start = Instant::now();
         firsts.push(table.update(cx, |t, cx| {
             let start = Instant::now();
             t.set_search(Some("h".into()), cx);
             start.elapsed()
         }));
-        frame(cx);
-        // Each key after that searches them again: timed alone, then with its frame.
+        first_frames.push(start.elapsed() + frame(cx));
+        // Each key after that searches them again.
         for typed in [
             "ha", "har", "harb", "harbo", "harbou", "harbour", "harbou", "harbo",
         ] {
@@ -565,8 +579,26 @@ fn ten_thousand_rows_searched_a_key_at_a_time() {
         }
         table.update(cx, |t, cx| t.set_search(None, cx));
         assert_eq!(table.update(cx, |t, _| t.shown_rows().len()), ROWS);
+        // A first key with nothing folded yet (the docs just changed, and the host's search
+        // opens the field with its query): folded then, on the main thread.
+        let next = table.update(cx, |t, _| t.rows().to_vec());
+        unready.push(table.update(cx, |t, cx| {
+            t.set_rows(next, cx);
+            let start = Instant::now();
+            t.set_search(Some("h".into()), cx);
+            start.elapsed()
+        }));
+        table.update(cx, |t, cx| t.set_search(None, cx));
     }
-    report("the first key of a search of 10,000 rows", firsts, 50);
+    report(
+        "opening the search field over 10,000 rows, drawn",
+        opens,
+        25,
+    );
+    report("folding their words in the background", folds, 50);
+    report("the first key of a search of 10,000 rows", firsts, 3);
+    report("the first key, drawn", first_frames, 12);
     report("each key after it", keys, 3);
     report("each key after it, drawn", frames, 12);
+    report("a first key before the fold is ready", unready, 50);
 }

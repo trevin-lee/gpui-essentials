@@ -3,6 +3,7 @@
 
 use std::cell::Cell as StdCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::{
     App, AppContext as _, Autocapitalize, Bounds, Context, Entity, FocusHandle, Focusable, Pixels,
@@ -334,7 +335,8 @@ pub(crate) struct Shown {
 pub struct TableView {
     pub(crate) host: Rc<dyn TableHost>,
     pub(crate) database: Doc,
-    pub(crate) rows: Vec<Doc>,
+    /// Shared, so a search can fold their words off the main thread.
+    pub(crate) rows: Arc<Vec<Doc>>,
     pub(crate) view_id: Option<String>,
     pub(crate) focus: FocusHandle,
     pub(crate) dirty: bool,
@@ -427,7 +429,7 @@ impl TableView {
         Self {
             host,
             database,
-            rows,
+            rows: Arc::new(rows),
             view_id: None,
             focus: cx.focus_handle(),
             dirty: true,
@@ -499,7 +501,7 @@ impl TableView {
         if self.focus_before_rows.is_none() {
             self.focus_before_rows = Some(self.focused_row_id());
         }
-        self.rows = rows;
+        self.rows = Arc::new(rows);
     }
 
     /// The row the focused line is on, as the lines were last worked out.

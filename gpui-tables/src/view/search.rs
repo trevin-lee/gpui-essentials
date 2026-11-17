@@ -5,27 +5,32 @@
 //! view's own filter, sorts and groups.
 //!
 //! The search is this entity's alone: it's never saved in the view and never handed to the host
-//! as an edit. Each row's words (its title and its shown cells as they read) are folded once,
-//! the first time a search needs them after the docs or the view changed, so a keystroke is a
-//! pass over them and the view's own rows aren't worked out again. Clearing it shows the view as
-//! it was before, scrolled where it was, with its focus and its selection.
+//! as an edit. Each row's words (its title and its shown cells as they read) are folded once
+//! for the docs and the view: off the main thread as the field opens (and again when either
+//! changes while it's open and empty), so the first key, like each after it, is only a pass over
+//! them, and the view's own rows aren't worked out again. A key typed before that fold is done
+//! folds them there and then, so what's found is never stale. Nothing is folded while the field
+//! is closed; what was folded is kept until the docs or the view change. Clearing it shows the
+//! view as it was before, scrolled where it was, with its focus and its selection.
 
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
+use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AppContext as _, ClickEvent, Context, Entity, FocusHandle, InteractiveElement,
     IntoElement, ParentElement, Pixels, Point, Role, ScrollStrategy, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div,
+    StatefulInteractiveElement, Styled, Subscription, Task, Window, div,
 };
 use gpui_core::{IconName, Input, InputEvent, InputState, Press};
 
 use super::ops::{self, ColumnLayout};
-use super::render::{icon, line};
+use super::render::{icon, line, plain_cell_text, reads_host};
 use super::table::TableView;
 use crate::engine::ViewRows;
 use crate::engine::search::{Query, SearchText, search};
-use crate::model::{DatabaseFields, Property, PropertyType, View, ViewType};
+use crate::model::{DatabaseFields, Doc, Property, PropertyType, View, ViewType};
 
 /// The search's state: what's typed, its field, and what it keeps between keystrokes.
 #[derive(Default)]
@@ -56,10 +61,53 @@ pub(crate) struct Search {
 /// What a search keeps between keystrokes.
 #[derive(Default)]
 pub(crate) struct Cache {
-    /// The view's own rows, before searching (while the field's open).
+    /// The view's own rows, before searching, as they were last worked out.
     pub base: Option<ViewRows>,
+    /// The properties whose cells a row is searched by, for the view `base` was worked out for.
+    pub shown: Vec<Property>,
     /// Each row's folded words, for the docs and the view `base` was worked out for.
     pub text: Option<SearchText>,
+    /// Counts the times `base` was worked out: a fold for an older one is dropped.
+    pub serial: u64,
+    /// The fold in the background, until its words are in `text` (dropped, it stops).
+    pub folding: Option<Task<()>>,
+    /// How many folds were begun, in the background or not.
+    pub folds: usize,
+}
+
+/// A view's rows' words, as handed off the main thread to be folded.
+struct Words {
+    rows: Arc<Vec<Doc>>,
+    /// The rows searched (the view's own), by index in `rows`.
+    base: Vec<usize>,
+    shown: Vec<Property>,
+    /// Times are shown this far from UTC.
+    offset_ms: i64,
+    /// What the host says the cells of the shown properties that read through it say (people's
+    /// names, related rows' titles): each row of `base`'s in turn, each such property's in
+    /// `shown`'s order.
+    hosted: Vec<String>,
+}
+
+impl Words {
+    fn fold(self) -> SearchText {
+        let mut text = SearchText::new(self.rows.len());
+        let mut hosted = self.hosted.into_iter();
+        for &r in &self.base {
+            let row = &self.rows[r];
+            let words = std::iter::once(Cow::Borrowed(row.title.as_str())).chain(
+                self.shown.iter().map(|p| {
+                    Cow::Owned(if reads_host(&p.kind) {
+                        hosted.next().unwrap_or_default()
+                    } else {
+                        plain_cell_text(row, p, self.offset_ms)
+                    })
+                }),
+            );
+            text.set(r, words);
+        }
+        text
+    }
 }
 
 /// Where the view was when a search began.
@@ -89,6 +137,9 @@ impl TableView {
     pub fn set_search(&mut self, query: Option<String>, cx: &mut Context<Self>) {
         let text = query.unwrap_or_default();
         self.search.open = !text.is_empty();
+        if !self.search.open {
+            self.stop_folding();
+        }
         self.search.focus_next = false;
         self.search.push = true;
         self.apply_search(text, cx);
@@ -107,6 +158,8 @@ impl TableView {
         }
         self.close_popover(cx);
         self.search.open = true;
+        // The rows' words are folded while the first key's on its way.
+        self.fold_ahead(cx);
         match &self.search.input {
             Some((state, _)) => state.update(cx, |s, cx| {
                 s.select_all(window, cx);
@@ -118,6 +171,13 @@ impl TableView {
     }
 
     // --- What it shows ------------------------------------------------------------------------
+
+    /// How many times the rows' words were folded for a search, in the background or not (for
+    /// tests: a key typed once they're folded folds nothing).
+    #[doc(hidden)]
+    pub fn search_folds(&self) -> usize {
+        self.search.cache.borrow().folds
+    }
 
     /// What the view shows with the search: `query` works out the view's own rows, which are
     /// reused while only the query changes, and searched while there's one.
@@ -132,57 +192,92 @@ impl TableView {
         let base = match (self.search.refilter.replace(false), cache.base.take()) {
             (true, Some(base)) => base,
             _ => {
+                // The docs or the view changed: what was folded no longer holds.
                 cache.text = None;
+                cache.folding = None;
+                cache.serial = cache.serial.wrapping_add(1);
+                cache.shown = shown_properties(fields, view, columns);
                 query()
             }
         };
         let Some(q) = Query::new(&self.search.text) else {
-            // Kept for the first keystroke while the field's open.
-            if self.search.open {
-                cache.base = Some(base.clone());
-            }
+            // Kept for the next keystroke, and for the field when it opens.
+            cache.base = Some(base.clone());
             return base;
         };
-        let text = cache
-            .text
-            .get_or_insert_with(|| self.search_text(fields, view, columns, &base));
-        let found = search(&base, text, &q);
+        let cache = &mut *cache;
+        let text = match cache.text.take() {
+            Some(text) => text,
+            // Not folded yet (or still folding in the background): folded now, so what's found
+            // is never stale.
+            None => {
+                cache.folding = None;
+                cache.folds += 1;
+                self.words(&base, &cache.shown).fold()
+            }
+        };
+        let found = search(&base, cache.text.insert(text), &q);
         cache.base = Some(base);
         found
     }
 
-    /// Each of the view's rows' words, folded: its title and its shown properties' text as
-    /// their cells read (a table's columns, a board's cards' or a list's lines' properties).
-    fn search_text(
-        &self,
-        fields: &DatabaseFields,
-        view: &View,
-        columns: &[ColumnLayout],
-        base: &ViewRows,
-    ) -> SearchText {
-        let shown: Vec<&Property> = match view.kind {
-            ViewType::Board | ViewType::List => ops::card_properties(fields, view)
-                .iter()
-                .filter_map(|id| fields.property(id))
-                .collect(),
-            _ => columns
-                .iter()
-                .filter_map(|c| fields.properties.get(c.property))
-                .collect(),
-        };
-        // A checkbox shows no words; the title is the row's own.
-        let shown: Vec<&Property> = shown
-            .into_iter()
-            .filter(|p| !matches!(p.kind, PropertyType::Title | PropertyType::Checkbox))
-            .collect();
-        let mut text = SearchText::new(self.rows.len());
-        for &r in &base.rows {
-            let row = &self.rows[r];
-            let words = std::iter::once(row.title.clone())
-                .chain(shown.iter().map(|p| self.cell_text(row, p)));
-            text.set(r, words);
+    /// The field's open: the rows' words, unless they're folded or folding, are folded off the
+    /// main thread, so the first key only searches them. The main thread asks the host for
+    /// what cells read through it (people's names, related rows' titles); the rest is worked
+    /// out and folded in the background. It changes nothing shown, so it asks for no frame.
+    pub(crate) fn fold_ahead(&mut self, cx: &mut Context<Self>) {
+        if !self.search.open {
+            return;
         }
-        text
+        self.ensure();
+        let mut cache = self.search.cache.borrow_mut();
+        if cache.text.is_some() || cache.folding.is_some() {
+            return;
+        }
+        let Some(base) = cache.base.as_ref() else {
+            return;
+        };
+        let words = self.words(base, &cache.shown);
+        let serial = cache.serial;
+        cache.folds += 1;
+        let folded = cx.background_spawn(async move { words.fold() });
+        cache.folding = Some(cx.spawn(async move |this, cx| {
+            let text = folded.await;
+            this.update(cx, |this, _| {
+                let mut cache = this.search.cache.borrow_mut();
+                if cache.serial == serial {
+                    cache.text.get_or_insert(text);
+                    cache.folding = None;
+                }
+            })
+            .ok();
+        }));
+    }
+
+    /// The field closed: a fold not done yet is stopped (what's folded is kept, for the docs and
+    /// the view it was folded for).
+    pub(crate) fn stop_folding(&self) {
+        self.search.cache.borrow_mut().folding = None;
+    }
+
+    /// The rows' words to fold: `base`'s rows' titles and `shown`'s cells, those that read
+    /// through the host read now.
+    fn words(&self, base: &ViewRows, shown: &[Property]) -> Words {
+        let hosts: Vec<&Property> = shown.iter().filter(|p| reads_host(&p.kind)).collect();
+        let mut hosted = Vec::with_capacity(base.rows.len() * hosts.len());
+        if !hosts.is_empty() {
+            for &r in &base.rows {
+                let row = &self.rows[r];
+                hosted.extend(hosts.iter().map(|p| self.cell_text(row, p)));
+            }
+        }
+        Words {
+            rows: self.rows.clone(),
+            base: base.rows.clone(),
+            shown: shown.to_vec(),
+            offset_ms: i64::from(self.host.utc_offset_minutes()) * 60_000,
+            hosted,
+        }
     }
 
     /// Whether a search is on and finds nothing.
@@ -317,8 +412,7 @@ impl TableView {
     fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search.open = false;
         self.search.input = None;
-        // Its base is no longer kept up.
-        self.search.cache.borrow_mut().base = None;
+        self.stop_folding();
         window.focus(&self.focus, cx);
         cx.notify();
     }
@@ -336,8 +430,11 @@ impl TableView {
         if !self.search.open {
             self.search.input = None;
             self.search.focused = false;
+            self.stop_folding();
             return;
         }
+        // Folded again in the background when the docs or the view changed while it's open.
+        self.fold_ahead(cx);
         if self.search.input.is_none() {
             let text = self.search.text.clone();
             let state = cx.new(|cx| {
@@ -363,7 +460,7 @@ impl TableView {
                         if this.search.text.is_empty() && this.search.open {
                             this.search.open = false;
                             this.search.input = None;
-                            this.search.cache.borrow_mut().base = None;
+                            this.stop_folding();
                             cx.notify();
                         }
                     }
@@ -527,4 +624,29 @@ impl TableView {
         }
         self.open_search(window, cx);
     }
+}
+
+/// The properties a view's rows are searched by besides their titles: those whose cells it
+/// shows (a table's columns, a board's cards' or a list's lines' properties), but a checkbox
+/// (no words) and the title (the row's own).
+fn shown_properties(
+    fields: &DatabaseFields,
+    view: &View,
+    columns: &[ColumnLayout],
+) -> Vec<Property> {
+    let shown: Vec<&Property> = match view.kind {
+        ViewType::Board | ViewType::List => ops::card_properties(fields, view)
+            .iter()
+            .filter_map(|id| fields.property(id))
+            .collect(),
+        _ => columns
+            .iter()
+            .filter_map(|c| fields.properties.get(c.property))
+            .collect(),
+    };
+    shown
+        .into_iter()
+        .filter(|p| !matches!(p.kind, PropertyType::Title | PropertyType::Checkbox))
+        .cloned()
+        .collect()
 }
