@@ -388,6 +388,16 @@ impl Limits {
                 v.collapsed_groups.len(),
                 self.collapsed_groups,
             );
+            // One per property at most (keyed by its id), so no more than there may be
+            // properties.
+            c.count(
+                || format!("{}.calculations", at()),
+                v.calculations.len(),
+                self.properties,
+            );
+            for id in v.calculations.keys() {
+                c.id(|| format!("{}.calculations", at()), id);
+            }
             if let Some(f) = &v.filter {
                 c.problems
                     .extend(self.check_filter(f, &format!("{}.filter", at())));

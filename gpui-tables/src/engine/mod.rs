@@ -1,6 +1,9 @@
 //! The engine: what a view shows of a database's rows, worked out without any UI. It filters,
 //! sorts and groups rows the way a view says, and helps keep relations consistent.
 //!
+//! It also works out a table footer's calculations ([`calc`]) over the rows a view shows, or a
+//! group's.
+//!
 //! Everything here works on indexes into the host's slice of row docs, so nothing is copied, and
 //! each step costs one pass to build its keys plus the sort: 10,000 rows filter, sort and group
 //! in a few milliseconds (see the README's performance section and `tests/performance.rs`).
@@ -9,6 +12,7 @@
 //! deeper than the limit) it leaves out and reports as an [`Issue`]; it never panics on the
 //! host's data.
 
+pub mod calc;
 pub mod filter;
 pub mod group;
 pub mod relation;
@@ -16,6 +20,7 @@ pub mod search;
 pub mod sort;
 pub mod time;
 
+pub use calc::{Calculated, calculate, calculate_view};
 pub use filter::CompiledFilter;
 pub use group::{DateGroup, Group, GroupKey, Relative};
 pub use time::DAY_MS;

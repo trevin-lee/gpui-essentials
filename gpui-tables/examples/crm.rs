@@ -28,7 +28,9 @@
 //! menu, the first one's submenu open to rename, recolour, reorder and delete it); and views:
 //! `add-view` (the bar's + menu, a new view named, its type to pick), `view-menu` (a view's
 //! menu) and `view-settings` (a board's settings beside its menu, its card properties open); and
-//! `search` (People searched from the bar for a company's name, typed without its capital).
+//! `search` (People searched from the bar for a company's name, typed without its capital); and
+//! `calculations` (People grouped by stage, a calculation under each column of each group, a
+//! number's footer menu open).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -641,6 +643,50 @@ mod shots {
     const ROLE: &str = "0fd630f1-f29d-4da9-953f-48f1a09f76b5";
     const THEO: &str = "fa529ba3-fe3b-4ada-bcf2-0724d953ee26";
     const SAMI: &str = "bfeaa155-1a28-47b3-a4e4-e25a15fc899e";
+    const NAME: &str = "90c192cf-d3ac-44af-8f21-ddb66cad4a26";
+    const TAGS: &str = "92276658-1e27-41c0-8a6a-63ec24ede6a4";
+    const WARMTH: &str = "c6f87718-6d76-407e-881e-d162ae2eb154";
+    const WARM: &str = "7e62aa0a-1df9-4d78-9c65-39382b0537e6";
+
+    /// People's table grouped by stage, showing the name, the date last contacted, the
+    /// follow-up box, the warmth and the tags, with a calculation under each (in the table
+    /// only).
+    fn with_calculations(t: &Entity<TableView>, cx: &mut App) {
+        t.update(cx, |t, cx| {
+            let mut db = t.database().clone();
+            if let Some(f) = db.database.as_mut() {
+                let shown = [NAME, LAST_CONTACTED, FOLLOW_UP, WARMTH, TAGS];
+                let columns: Vec<Column> = f
+                    .properties
+                    .iter()
+                    .map(|p| {
+                        let place = shown.iter().position(|id| *id == p.id);
+                        Column {
+                            property_id: p.id.clone(),
+                            width: None,
+                            hidden: place.is_none(),
+                            order: format!("a{}", place.unwrap_or(9)),
+                        }
+                    })
+                    .collect();
+                for v in &mut f.views {
+                    v.group_by = Some(STAGE.into());
+                    v.columns = columns.clone();
+                    v.calculations = [
+                        (NAME, Calculation::CountAll),
+                        (TAGS, Calculation::CountValues),
+                        (LAST_CONTACTED, Calculation::Latest),
+                        (FOLLOW_UP, Calculation::PercentChecked),
+                        (WARMTH, Calculation::Average),
+                    ]
+                    .into_iter()
+                    .map(|(p, c)| (p.to_owned(), c))
+                    .collect();
+                }
+            }
+            t.set_database(db, cx);
+        });
+    }
 
     /// People's table in the manual order (its sort taken off, in the table only), with Imani
     /// selected, and Theo too for `both`.
@@ -906,6 +952,12 @@ mod shots {
                     "rows-drag" => {
                         let t = pick(0, cx);
                         unsorted_with_selection(&t, true, cx);
+                    }
+                    "calculations" => {
+                        let t = pick(0, cx);
+                        with_calculations(&t, cx);
+                        let warm = format!("option:{WARM}");
+                        t.update(cx, |t, cx| t.open_calculation_menu(WARMTH, Some(&warm), cx));
                     }
                     "scrolled" => {
                         let t = pick(0, cx);

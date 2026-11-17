@@ -3,10 +3,10 @@
 //! Arabic and emoji, numbers of twenty digits), under headers and options with the same names,
 //! are laid out with Core Text (as on screen) in windows 360, 700 and 1400 wide, with the
 //! columns at their widths and at their narrowest, grouped and not, with a menu and a picker
-//! open, with each typed value's field open in place, and with a row's handle, the rows' menu
-//! and a row carried; and on a board's cards and a list's
-//! lines, with every property on them; and in the bar of views and its menus (and its search
-//! field, with "No results" under it), with the views'
+//! open, with each typed value's field open in place, with a row's handle, the rows' menu
+//! and a row carried, and with a calculation under every column and a footer's menu open;
+//! and on a board's cards and a list's lines, with every property on them; and in the bar of
+//! views and its menus (and its search field, with "No results" under it), with the views'
 //! names at their worst, by a table, a board and a list, with a finger's sizes too. Any glyph or icon drawn past what clips it, past the table
 //! or past the window fails the test with where it is. The places a glyph may cross its clip are
 //! the edges of the strip the columns after the title scroll in (and the strip the bar's tabs
@@ -61,8 +61,20 @@ fn hostile() -> (Doc, Vec<Doc>) {
             }
         }
     }
-    // Every mark a header can have: sorts, numbered, and a filter.
+    // Every mark a header can have: sorts, numbered, and a filter. And a calculation under
+    // every column, of its type (the numbers' sum near a double's limit).
     for v in &mut fields.views {
+        for p in &fields.properties {
+            let calc = match p.kind {
+                PropertyType::Number => Calculation::Sum,
+                PropertyType::Date | PropertyType::CreatedTime | PropertyType::EditedTime => {
+                    Calculation::Range
+                }
+                PropertyType::Checkbox => Calculation::PercentChecked,
+                _ => Calculation::CountUnique,
+            };
+            v.calculations.insert(p.id.clone(), calc);
+        }
         v.sort = vec![Sort::ascending(NAME), Sort::descending(WARMTH)];
         v.filter = Some(Filter::condition(
             NAME,
@@ -313,9 +325,11 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 for o in overflows(cx) {
                     found.push(format!("{case}: {o}"));
                 }
-                // A column's menu, a picker of options, related rows and people, the month.
+                // A column's menu, a footer's calculations, a picker of options, related rows
+                // and people, the month.
                 let menus = [
                     ("menu", STAGE),
+                    ("calc", WARMTH),
                     ("tags", TAGS),
                     ("company", COMPANY),
                     ("owner", OWNER),
@@ -327,6 +341,9 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                             t.close_popover(cx);
                             if what == "menu" {
                                 t.open_column_menu(p, cx)
+                            } else if what == "calc" {
+                                let group = t.groups().first().map(|g| g.key.to_string());
+                                t.open_calculation_menu(p, group.as_deref(), cx)
                             } else {
                                 t.edit(ROWAN, p, window, cx)
                             }

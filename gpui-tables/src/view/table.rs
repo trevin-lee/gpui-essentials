@@ -20,8 +20,8 @@ use crate::model::{
     TableEvent, Value, View, ViewType, new_id,
 };
 
-/// One line of the table: a group's header, a row, or the New row at the end of a group (or
-/// of the table, when it isn't grouped).
+/// One line of the table: a group's header, a row, the New row at the end of a group (or of the
+/// table, when it isn't grouped), or a table's calculation footer under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
     /// A group's header, by its place in [`TableView::groups`].
@@ -30,6 +30,9 @@ pub enum Item {
     Row { row: usize, group: Option<usize> },
     /// The New row of a group, or of the table.
     New(Option<usize>),
+    /// The calculation footer of a group, or of the table, after its New row: a table's
+    /// alone (boards and lists have none).
+    Calc(Option<usize>),
 }
 
 /// The focused cell: a line of the table and a column (columns don't matter on a group's header
@@ -62,6 +65,8 @@ pub(crate) enum Action {
     View(super::views::ViewAction),
     /// Something done to rows from their menu.
     Row(super::rows::RowAction),
+    /// A footer's calculation picked for its column (None takes it off).
+    Calc(Option<crate::model::Calculation>),
 }
 
 /// One entry of a menu or picker.
@@ -221,6 +226,12 @@ pub(crate) enum Popover {
         /// Asking whether to delete them (more than one row).
         confirm: bool,
     },
+    /// A column's calculation in a footer: the table's (`group` None) or a group's, by its
+    /// key.
+    Calc {
+        property_id: String,
+        group: Option<String>,
+    },
 }
 
 impl Popover {
@@ -312,6 +323,9 @@ pub(crate) struct Shown {
     /// The properties a board's cards and a list's lines show beside the title (places in
     /// `properties`).
     pub card_properties: Vec<usize>,
+    /// A table's footers' results, by column: the table's one, or each group's by its place
+    /// ([`super::calc::footers`]). Empty when the view has no calculations.
+    pub calcs: Vec<Vec<Option<crate::engine::Calculated>>>,
 }
 
 /// A table of a database's rows, with the active view's sort, filter, grouping and columns.
@@ -762,7 +776,10 @@ impl TableView {
                 card_properties.push(i);
             }
         }
-        if view.group_by.is_some() && !groups.is_empty() {
+        // A table's footers, under each New row.
+        let footed = table.is_some();
+        let grouped = view.group_by.is_some() && !groups.is_empty();
+        if grouped {
             for (gi, g) in groups.iter().enumerate() {
                 let folded = view.collapsed_groups.contains(&g.key.to_string());
                 collapsed.push(folded);
@@ -773,6 +790,9 @@ impl TableView {
                         group: Some(gi),
                     }));
                     items.push(Item::New(Some(gi)));
+                    if footed {
+                        items.push(Item::Calc(Some(gi)));
+                    }
                 }
             }
         } else {
@@ -783,7 +803,22 @@ impl TableView {
                     .map(|&row| Item::Row { row, group: None }),
             );
             items.push(Item::New(None));
+            if footed {
+                items.push(Item::Calc(None));
+            }
         }
+        let calcs = if footed {
+            super::calc::footers(
+                fields,
+                &view,
+                &columns,
+                grouped.then_some((&groups[..], &collapsed[..])),
+                &result.rows,
+                &self.rows,
+            )
+        } else {
+            Vec::new()
+        };
         self.shown = Shown {
             view: Some(view),
             columns,
@@ -797,6 +832,7 @@ impl TableView {
             list,
             table,
             card_properties,
+            calcs,
         };
         // The focus follows its row (or a pending new row), or stays on the same kind of line.
         let wanted = self.pending_row.clone().or(previous_row);
@@ -862,6 +898,7 @@ impl TableView {
             self.popover = None;
             self.close_property_menu();
         }
+        self.close_gone_calc_menu();
         // Selected rows the view no longer shows (deleted, filtered out) are let go, and the
         // rows' menu closes when one of its rows is gone.
         self.prune_selection();
@@ -1108,6 +1145,7 @@ impl TableView {
         match self.shown.items.get(c.item).copied() {
             Some(Item::Group(g)) => self.toggle_group(g, window, cx),
             Some(Item::New(g)) => self.new_row(g, window, cx),
+            Some(Item::Calc(g)) => self.open_calc_menu_on(c.column, g, cx),
             Some(Item::Row { row, .. }) => {
                 let is_title = self
                     .cell_target(c)
@@ -1688,6 +1726,7 @@ impl TableView {
             Some(Popover::Property { .. } | Popover::AddRelation) => self.property_entries(),
             Some(Popover::View { .. } | Popover::NewBoard) => self.view_entries(),
             Some(Popover::Row { .. }) => self.row_entries(),
+            Some(Popover::Calc { .. }) => self.calc_entries(),
             Some(Popover::Columns) => {
                 let shown: Vec<&str> = self
                     .shown
@@ -1961,6 +2000,10 @@ impl TableView {
             self.activate_row(a, window, cx);
             return;
         }
+        if let Action::Calc(c) = action {
+            self.activate_calc(c, window, cx);
+            return;
+        }
         let Some(fields) = self.database.database.clone() else {
             return;
         };
@@ -2111,7 +2154,7 @@ impl TableView {
                     self.emit_edits(edits, window, cx);
                 }
             }
-            Action::Prop(_) | Action::View(_) | Action::Row(_) => {}
+            Action::Prop(_) | Action::View(_) | Action::Row(_) | Action::Calc(_) => {}
             Action::ClearValue => {
                 if let Some((row, p)) = self.picker_target() {
                     if p.kind == PropertyType::Relation {

@@ -40,6 +40,7 @@
 
 mod board;
 mod board_render;
+mod calc;
 pub mod format;
 mod host;
 mod list;
@@ -55,6 +56,7 @@ mod view_bar;
 mod views;
 
 pub use board::{BoardColumn, BoardSpot, CardGhost};
+pub use calc::{duration, result_text};
 pub use host::{RelatedDatabase, RelatedRow, TableHost, TextEdit, TextReply, TextTarget};
 pub use properties::PropertyMenu;
 pub use rows::Select;
