@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AppContext as _, Context, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, ParentElement as _,
-    Render, SharedString, Styled as _, TestAppContext, TestDispatcher, VisualTestContext, Window,
-    div, px,
+    AppContext as _, Context, InteractiveElement as _, IntoElement, KeyDownEvent, KeyUpEvent,
+    Keystroke, ParentElement as _, Render, SharedString, Styled as _, TestAppContext,
+    TestDispatcher, VisualTestContext, Window, div, px,
 };
 use gpui_core::{MenuSelect, Picker, PopupMenuItem, Root};
 
@@ -121,4 +121,44 @@ fn filtering_under_the_limit_draws_every_match() {
     let made: Vec<usize> = (0..1000).filter(|i| drawn(vcx, *i)).collect();
     let want: Vec<usize> = (0..1000).filter(|i| i.to_string().contains("77")).collect();
     assert_eq!(made, want);
+}
+
+struct OneRow;
+
+impl Render for OneRow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .p(px(20.))
+            .w(px(300.))
+            .child(Picker::new("one").visible_rows(1).items((0..200).map(|i| {
+                PopupMenuItem::new(format!("p{i}"), format!("Person {i}")).chip(
+                    div()
+                        .size(px(8.))
+                        .debug_selector(move || format!("chip-{i}")),
+                )
+            })))
+    }
+}
+
+#[test]
+fn with_one_row_in_view_the_first_is_drawn_whole() {
+    let mut cx = app();
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let v = cx.new(|_| OneRow);
+        Root::new(v, window, cx)
+    });
+    vcx.simulate_resize(gpui::size(px(400.), px(800.)));
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    // Its chip is drawn: the row is the entry, not the copy the list measured.
+    assert!(vcx.debug_bounds("menu-item-p0").is_some());
+    assert!(vcx.debug_bounds("chip-0").is_some(), "the first row's chip");
+    // And again on the next draw.
+    vcx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    });
+    assert!(vcx.debug_bounds("chip-0").is_some());
 }
