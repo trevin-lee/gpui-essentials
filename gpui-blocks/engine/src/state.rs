@@ -111,6 +111,8 @@ actions!(
         MoveParagraphEnd,
         SelectParagraphStart,
         SelectParagraphEnd,
+        /// Copies the caret's block, or the selected blocks, right after them (⌘D).
+        DuplicateBlocks,
     ]
 );
 
@@ -236,6 +238,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new(platform_key!("cmd", "c"), Copy, ctx),
         KeyBinding::new(platform_key!("cmd", "x"), Cut, ctx),
         KeyBinding::new(platform_key!("cmd", "v"), Paste, ctx),
+        KeyBinding::new(platform_key!("cmd", "d"), DuplicateBlocks, ctx),
         KeyBinding::new(platform_key!("cmd", "shift-v"), PastePlain, ctx),
         // Composer overrides only; standalone Newline/ModifiedEnter keep
         // Shift+Enter soft breaks and the platform secondary-Enter command.
@@ -2796,6 +2799,14 @@ impl BlockEditorState {
             self.paste(item, false, cx);
         }
     }
+    pub(crate) fn on_duplicate(
+        &mut self,
+        _: &DuplicateBlocks,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.run(EditorCommand::DuplicateBlocks, cx);
+    }
     pub(crate) fn on_paste_plain(
         &mut self,
         _: &PastePlain,
@@ -3160,6 +3171,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::Indent => "indent",
         EditorCommand::Outdent => "outdent",
         EditorCommand::MoveBlocks { .. } => "move_blocks",
+        EditorCommand::DuplicateBlocks => "duplicate_blocks",
         EditorCommand::InsertBlock(_) => "insert_block",
         EditorCommand::SelectAll => "select_all",
         EditorCommand::DeleteSelection => "delete_selection",

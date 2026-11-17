@@ -37,6 +37,9 @@ pub enum EditorCommand {
     MoveBlocks {
         down: bool,
     },
+    /// Copy the selected blocks, or the caret's block (its list item, or its table or toggle
+    /// whole), right after themselves, and select the copies.
+    DuplicateBlocks,
     InsertBlock(BlockKind),
     /// Make the caret's paragraph a code block (its text becomes the code),
     /// or set the language of the code block holding the caret.
@@ -1690,6 +1693,7 @@ impl BlockEditorModel {
                 self.unwrap_container(container, Some(pos))
             }
             EditorCommand::MoveBlocks { down } => self.move_blocks(down),
+            EditorCommand::DuplicateBlocks => self.duplicate_blocks(),
             EditorCommand::InsertBlock(BlockKind::HorizontalRule) => {
                 let pos = self
                     .caret()
@@ -2141,19 +2145,80 @@ impl BlockEditorModel {
         })
     }
 
+    /// The block the caret's line is, as a whole: the nearest list item, else the caret's block
+    /// among its siblings (in a quote, a callout or a toggle's body too); a table cell's table
+    /// and a toggle's summary's toggle.
+    fn caret_unit(&self) -> Result<BlockId, CommandError> {
+        let doc = &self.doc;
+        let resolved = self.caret_resolved()?;
+        let mut target = resolved
+            .nearest(doc, is_list_item)
+            .unwrap_or(resolved.pos.block);
+        while let Some((parent, index)) = doc.index_in_parent(target)
+            && (matches!(
+                doc.kind(target),
+                Some(BlockKindData::TableCell | BlockKindData::TableRow)
+            ) || (index == 0 && matches!(doc.kind(parent), Some(BlockKindData::Toggle { .. }))))
+        {
+            target = parent;
+        }
+        Ok(target)
+    }
+
+    fn duplicate_blocks(&mut self) -> Result<bool, CommandError> {
+        let doc = &self.doc;
+        let (parent, range) = match self.selected_blocks() {
+            Some(selected) => selected,
+            None => {
+                let target = self.caret_unit()?;
+                let Some((parent, index)) = doc.index_in_parent(target) else {
+                    return Ok(false);
+                };
+                (parent, index..index + 1)
+            }
+        };
+        // Copied through their Markdown, so the copies have ids of their own.
+        let markdown = doc.children(parent)[range.clone()]
+            .iter()
+            .map(|id| super::serialize::block(doc, *id))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let Some(mut copies) = super::import::parse_blocks(&markdown, &doc.ext) else {
+            return Ok(false);
+        };
+        // List items come back as a list of their own: in a list, its items are the copies.
+        if matches!(doc.kind(parent), Some(BlockKindData::List { .. })) {
+            copies = copies
+                .into_iter()
+                .flat_map(|b| match (b.kind, b.content) {
+                    (BlockKindData::List { .. }, DetachedContent::Children(items)) => items,
+                    (kind, content) => vec![DetachedBlock {
+                        id: b.id,
+                        kind,
+                        content,
+                    }],
+                })
+                .collect();
+        }
+        let (Some(first), Some(last)) = (copies.first(), copies.last()) else {
+            return Ok(false);
+        };
+        let selection = BlockSelection::Blocks {
+            anchor: first.id,
+            head: last.id,
+        };
+        self.transact(EditOrigin::Command("duplicate_blocks"), |tx| {
+            tx.insert(parent, range.end, copies)?;
+            Ok(Some(selection))
+        })
+    }
+
     fn move_blocks(&mut self, down: bool) -> Result<bool, CommandError> {
         let doc = &self.doc;
         let mut target = match self.selected_blocks() {
             Some((parent, range)) if range.len() == 1 => doc.children(parent)[range.start],
             Some(_) => return Err(CommandError::Unsupported("move several blocks")),
-            // The nearest list item, else the caret's block among its
-            // siblings (in a quote, a callout or a toggle's body too).
-            None => {
-                let resolved = self.caret_resolved()?;
-                resolved
-                    .nearest(doc, is_list_item)
-                    .unwrap_or(resolved.pos.block)
-            }
+            None => self.caret_unit()?,
         };
         // A table's cell or row, or a toggle's summary, never moves on its
         // own: the table or toggle moves instead.
