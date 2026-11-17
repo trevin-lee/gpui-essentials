@@ -1778,10 +1778,10 @@ impl TableView {
             (None, None) => menu,
         };
         // The highlight moved to an entry here, while the menu's open.
-        if let Some((place, id)) = &self.move_highlight
+        if let Some((place, id, request)) = &self.move_highlight
             && place.as_slice() == at
         {
-            menu = menu.move_highlight(id.clone());
+            menu = menu.move_highlight_request(id.clone(), *request);
         }
         menu.on_select(self.on_pick(actions, cx))
     }
