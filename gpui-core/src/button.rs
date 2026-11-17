@@ -209,6 +209,8 @@ pub struct Button {
     selected: bool,
     disabled: bool,
     on_click: Option<OnClick>,
+    /// Whether what it opens is open, for assistive tech (a menu's trigger).
+    expanded: Option<bool>,
     style: StyleRefinement,
     /// Where it sits in a group, which squares its inner corners.
     joined: Joined,
@@ -235,6 +237,7 @@ impl Button {
             selected: false,
             disabled: false,
             on_click: None,
+            expanded: None,
             style: StyleRefinement::default(),
             joined: Joined::Alone,
         }
@@ -261,6 +264,12 @@ impl Button {
     /// Called on a click, a tap, or Enter or Space while it has the focus.
     pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Rc::new(f));
+        self
+    }
+
+    /// Tells assistive tech whether what it opens (a menu) is open.
+    pub(crate) fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
         self
     }
 }
@@ -373,6 +382,9 @@ impl RenderOnce for Button {
         }
         if let Some(f) = self.on_click {
             press = press.on_click(move |e, w, cx| f(e, w, cx));
+        }
+        if let Some(expanded) = self.expanded {
+            press = press.aria_expanded(expanded);
         }
         press.style().refine(&self.style);
         press

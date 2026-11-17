@@ -51,6 +51,7 @@ mod context_menu;
 mod date_picker;
 mod dialog;
 mod drawer;
+mod dropdown_menu;
 mod empty_state;
 mod field;
 #[cfg(feature = "highlight")]
@@ -112,6 +113,7 @@ pub use date_picker::{
 };
 pub use dialog::{AlertDialog, Dialog};
 pub use drawer::{DRAWER_DISMISS_FRACTION, Drawer, DrawerSide};
+pub use dropdown_menu::{DropdownMenu, DropdownMenuTrigger};
 pub use empty_state::EmptyState;
 pub use field::{Field, FieldGroup, FieldLegend, FieldSet, Label};
 pub use hover_card::{HOVER_CARD_CLOSE_DELAY, HOVER_CARD_OPEN_DELAY, HoverCard};
@@ -128,7 +130,9 @@ pub use pagination::Pagination;
 pub use picker::Picker;
 #[doc(hidden)]
 pub use popover::claim_count;
-pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
+pub use popover::{
+    DismissReason, Popover, PopoverAlign, PopoverAnchor, PopoverColors, PopoverSide,
+};
 pub use press::{Press, focus_ring};
 pub use progress::Progress;
 pub use radio_group::RadioGroup;
@@ -186,6 +190,7 @@ pub fn init(cx: &mut App) {
     menu::init(cx);
     navigation_menu::init(cx);
     context_menu::init(cx);
+    dropdown_menu::init(cx);
     menubar::init(cx);
     picker::init(cx);
     search_list::init(cx);
