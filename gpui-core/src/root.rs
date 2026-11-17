@@ -34,6 +34,9 @@ pub(crate) fn init(cx: &mut App) {
 pub struct Root {
     view: AnyView,
     focus: FocusHandle,
+    /// The toasts shown, each with its place in the order they came.
+    pub(crate) toasts: Vec<(u64, crate::toast::Toast)>,
+    pub(crate) next_toast: u64,
 }
 
 impl Root {
@@ -49,6 +52,8 @@ impl Root {
         Self {
             view: view.into(),
             focus,
+            toasts: Vec::new(),
+            next_toast: 0,
         }
     }
 
@@ -60,8 +65,9 @@ impl Root {
 
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
+        let theme = cx.theme().clone();
         window.set_rem_size(theme.font_size);
+        let toasts = crate::toast::stack(&self.toasts, cx.entity().downgrade(), &theme);
         div()
             .id("gpui-core-root")
             .key_context(CONTEXT)
@@ -73,6 +79,8 @@ impl Render for Root {
             .text_color(theme.foreground)
             .font_family(theme.font_family.clone())
             .text_size(theme.text.base)
+            .relative()
             .child(self.view.clone())
+            .children(toasts)
     }
 }

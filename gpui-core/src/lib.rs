@@ -52,6 +52,7 @@ mod slider;
 mod switch;
 pub mod text;
 pub mod theme;
+mod toast;
 mod tooltip;
 
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
@@ -74,6 +75,7 @@ pub use slider::{Slider, SliderEvent, SliderState};
 pub use switch::Switch;
 pub use text::{TextView, TextViewStyle};
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
+pub use toast::{TOAST_DURATION, TOAST_DURATION_LONG, Toast, ToastKind};
 pub use tooltip::Tooltip;
 
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, WindowOptions};
