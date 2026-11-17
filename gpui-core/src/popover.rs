@@ -163,6 +163,8 @@ pub enum DismissReason {
     ScrolledAway,
     /// Its close button (a dialog's ×).
     CloseButton,
+    /// Dragged away (a drawer pulled down past its threshold).
+    Swiped,
 }
 
 /// A popover's colours. By default they're the theme's `popover`, `popover-foreground` and
