@@ -52,6 +52,7 @@ mod segmented;
 mod sheet;
 mod size;
 mod slider;
+mod split_view;
 mod switch;
 pub mod text;
 pub mod theme;
@@ -78,6 +79,7 @@ pub use segmented::SegmentedControl;
 pub use sheet::Sheet;
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
 pub use slider::{Slider, SliderEvent, SliderState};
+pub use split_view::{Pane, SplitView};
 pub use switch::Switch;
 pub use text::{TextView, TextViewStyle};
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
@@ -102,6 +104,7 @@ pub fn init(cx: &mut App) {
     }
     root::init(cx);
     segmented::init(cx);
+    split_view::init(cx);
     date_picker::init(cx);
     input::init(cx);
     menu::init(cx);
