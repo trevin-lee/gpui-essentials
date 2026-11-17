@@ -392,17 +392,47 @@ impl Popover {
 /// The areas drawn from inside a popover but outside its panel (submenus), by window and
 /// element: a press on one isn't a press outside the popover. Each is a hitbox from the frame
 /// that drew it, so one no longer drawn is never hit.
+///
+/// Each window keeps the [`MAX_CLAIMS`] it was drawn with last: one drawn claims again every
+/// time it's drawn, so those in view are always the latest, and the claims of menus long gone
+/// (a menu per row, opened once each) don't pile up.
 #[derive(Default)]
-struct Claims(HashMap<(WindowId, ElementId), Hitbox>);
+struct Claims(HashMap<WindowId, Vec<(ElementId, Hitbox)>>);
 
 impl gpui::Global for Claims {}
+
+/// More than are ever drawn at once (a submenu's submenus, a few deep).
+const MAX_CLAIMS: usize = 32;
+
+impl Claims {
+    fn claim(&mut self, window: WindowId, key: ElementId, hitbox: Hitbox, open: &[WindowId]) {
+        // A window that's closed has nothing to claim.
+        self.0.retain(|w, _| open.contains(w));
+        let list = self.0.entry(window).or_default();
+        list.retain(|(k, _)| *k != key);
+        list.push((key, hitbox));
+        if list.len() > MAX_CLAIMS {
+            list.remove(0);
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.0.values().map(Vec::len).sum()
+    }
+}
 
 fn claimed(at: Point<Pixels>, window: &Window, cx: &App) -> bool {
     let id = window.window_handle().window_id();
     cx.try_global::<Claims>().is_some_and(|c| {
-        c.0.iter()
-            .any(|((w, _), hitbox)| *w == id && hitbox.is_hovered_at(at, window))
+        c.0.get(&id)
+            .is_some_and(|list| list.iter().any(|(_, h)| h.is_hovered_at(at, window)))
     })
+}
+
+/// How many presses are claimed across every window, for tests.
+#[doc(hidden)]
+pub fn claim_count(cx: &App) -> usize {
+    cx.try_global::<Claims>().map_or(0, Claims::count)
 }
 
 /// Draws `child` and claims the area it covers for the popover it was drawn from inside, so a
@@ -460,9 +490,9 @@ impl Element for ClaimArea {
         self.child.prepaint(window, cx);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let id = window.window_handle().window_id();
+        let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
         cx.default_global::<Claims>()
-            .0
-            .insert((id, self.key.clone()), hitbox);
+            .claim(id, self.key.clone(), hitbox, &open);
     }
 
     fn paint(

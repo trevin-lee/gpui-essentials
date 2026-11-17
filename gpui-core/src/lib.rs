@@ -61,6 +61,8 @@ pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
 pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
 pub use picker::Picker;
+#[doc(hidden)]
+pub use popover::claim_count;
 pub use popover::{DismissReason, Popover, PopoverAnchor, PopoverColors};
 pub use press::{Press, focus_ring};
 pub use root::{FocusNext, FocusPrev, Root};
