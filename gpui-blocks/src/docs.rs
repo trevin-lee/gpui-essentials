@@ -391,7 +391,7 @@ pub fn embed(id: &str, title: &str, view: &str, height: u32) -> String {
 
 /// A mention's document and title read back from its Markdown.
 pub(crate) fn mention_of(markdown: &str) -> Option<(String, String)> {
-    let tree = markdown::to_mdast(markdown, &markdown::ParseOptions::gfm()).ok()?;
+    let tree = markdown_editor::parse_markdown(markdown, &markdown::ParseOptions::gfm()).ok()?;
     let [Node::Paragraph(paragraph)] = tree.children()?.as_slice() else {
         return None;
     };
@@ -404,7 +404,7 @@ pub(crate) fn mention_of(markdown: &str) -> Option<(String, String)> {
 
 /// An embed's document, title, view and height read back from its Markdown.
 pub(crate) fn embed_of(markdown: &str) -> Option<(String, String, String, u32)> {
-    let tree = markdown::to_mdast(markdown, &markdown::ParseOptions::gfm()).ok()?;
+    let tree = markdown_editor::parse_markdown(markdown, &markdown::ParseOptions::gfm()).ok()?;
     let [Node::Paragraph(paragraph)] = tree.children()?.as_slice() else {
         return None;
     };

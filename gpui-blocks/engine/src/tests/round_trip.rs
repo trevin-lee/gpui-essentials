@@ -674,3 +674,87 @@ fn an_extension_reads_and_writes_back_its_blocks_and_inline_pieces() {
     );
     assert_eq!(m.source(), source);
 }
+
+/// Markdown the parser panics on (`markdown` 1.0: a list item opening an unclosed fence, then a
+/// list of the other kind) is read as its text instead of bringing the app down, whether it's
+/// opened or pasted.
+#[test]
+fn markdown_the_parser_fails_on_is_kept_as_text() {
+    for source in ["- a\n  ```\n1. a\n", "x\n- ```\n1. a\n"] {
+        assert!(
+            crate::import::parse(source, &markdown::ParseOptions::gfm()).is_err(),
+            "the parser still fails on {source:?}"
+        );
+        let doc = model(source);
+        let text: String = doc
+            .document()
+            .leaves()
+            .filter_map(|leaf| leaf.text().map(str::to_string))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("```") && text.contains("1. a"), "{text:?}");
+        let blocks = crate::import::parse_blocks(source, &crate::Extensions::default())
+            .expect("pasted as text");
+        assert!(!blocks.is_empty());
+    }
+}
+
+/// Random Markdown made of the pieces the parser trips on (list markers of both kinds, fences,
+/// quotes, tables, HTML, indentation) never brings the app down, opened or pasted. Seeded, so a
+/// failure repeats.
+#[test]
+fn fuzzed_markdown_never_panics() {
+    const PIECES: &[&str] = &[
+        "- ",
+        "* ",
+        "1. ",
+        "2) ",
+        "```",
+        "~~~",
+        "  ",
+        "    ",
+        "\n",
+        "\n\n",
+        "> ",
+        "a",
+        "b c",
+        "|",
+        "| --- |",
+        "**",
+        "_",
+        "[",
+        "](",
+        ")",
+        "#",
+        "## ",
+        "<details>",
+        "</details>",
+        "<summary>",
+        "$$",
+        "$",
+        "\\",
+        "[^1]",
+        "- [ ] ",
+        "---",
+        "\t",
+    ];
+    let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for _ in 0..3_000 {
+        let len = 1 + (next() % 24) as usize;
+        let source: String = (0..len)
+            .map(|_| PIECES[(next() % PIECES.len() as u64) as usize])
+            .collect();
+        let opened = std::panic::catch_unwind(|| model(&source).source());
+        assert!(opened.is_ok(), "opening {source:?} panicked");
+        let pasted = std::panic::catch_unwind(|| {
+            crate::import::parse_blocks(&source, &crate::Extensions::default()).map(|b| b.len())
+        });
+        assert!(pasted.is_ok(), "pasting {source:?} panicked");
+    }
+}

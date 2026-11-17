@@ -27,8 +27,8 @@
 
 use std::ops::Range;
 
+use markdown::ParseOptions;
 use markdown::mdast::Node;
-use markdown::{ParseOptions, to_mdast};
 
 use crate::docs;
 use crate::json::Document;
@@ -120,7 +120,7 @@ fn front_matter_title(front: &str) -> Option<String> {
 /// The `# Title` (or `Title` underlined with `===`) the body opens with, and the body without
 /// it.
 fn opening_heading(body: &str) -> (Option<String>, &str) {
-    let Ok(tree) = to_mdast(body, &ParseOptions::gfm()) else {
+    let Ok(tree) = markdown_editor::parse_markdown(body, &ParseOptions::gfm()) else {
         return (None, body);
     };
     let Some(Node::Heading(h)) = tree.children().and_then(|c| c.first()) else {
@@ -521,7 +521,7 @@ fn destination(url: &str) -> String {
 /// Every link, picture and reference definition pointing into the import, pointed where it
 /// went.
 fn links(body: &str, path: &str, targets: &impl Targets) -> String {
-    let Ok(tree) = to_mdast(body, &ParseOptions::gfm()) else {
+    let Ok(tree) = markdown_editor::parse_markdown(body, &ParseOptions::gfm()) else {
         return body.to_string();
     };
     let mut edits: Vec<(Range<usize>, String)> = Vec::new();
@@ -720,6 +720,19 @@ mod tests {
         }
         fn file(&self, path: &str) -> Option<String> {
             self.files.get(path).map(|s| s.to_string())
+        }
+    }
+
+    /// Markdown the parser panics on (`markdown` 1.0) imports as its text, and its JSON reads
+    /// back, without bringing the app down.
+    #[test]
+    fn markdown_the_parser_fails_on_imports_as_text() {
+        for body in ["- a\n  ```\n1. a\n", "x\n- ```\n1. a\n"] {
+            let note = note("Home/Bad.md", body, &vault());
+            assert!(!note.document.blocks.is_empty(), "{body:?}");
+            let doc = crate::json::Document::from_markdown(body, &[]);
+            assert!(!doc.blocks.is_empty(), "{body:?}");
+            assert!(crate::docs::mention_of(body).is_none());
         }
     }
 
