@@ -53,6 +53,11 @@ item](docs/gallery.png)
   on one line, its label cut short with an ellipsis in a narrow space. It's text until it's
   given `.on_click(…)`; then it's a button that Tab reaches, with the focus ring, and
   `touch(true)` has it take presses 44 points each way around it.
+- **Kbd.** `Kbd::new("⌘")` is a key's cap as shadcn draws it: muted, 20 pixels tall and at
+  least as wide, in the theme's own font (shadcn's isn't monospace), with an optional
+  `.icon(name)` (or `Kbd::icon_only(name)`). `KbdGroup::keys(["⌘", "K"])` or
+  `KbdGroup::new().child(Kbd…)` sets a shortcut's keys four pixels apart. In a narrow space a
+  long key name ends in an ellipsis and a group is clipped at its edge.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
