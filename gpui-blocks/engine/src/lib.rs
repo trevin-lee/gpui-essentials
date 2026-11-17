@@ -86,6 +86,9 @@ pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
 pub use extension::{CustomNode, Extension, Extensions, InlineContext};
+/// The Markdown parser's syntax tree for `source`, or why it has none: a parser panic too (see
+/// its docs), so no input brings the app down.
+pub use import::parse as parse_markdown;
 pub use input_rule::InputRule;
 pub use kind::ColumnAlign;
 pub use state::{
