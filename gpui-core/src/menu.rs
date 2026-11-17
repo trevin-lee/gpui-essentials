@@ -45,15 +45,17 @@
 //! # }
 //! ```
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, Bounds, ClickEvent, ContentMask, Element, ElementId, FocusHandle,
-    GlobalElementId, Hsla, InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding,
-    LayoutId, Modifiers, ParentElement as _, Pixels, Point, Rems, RenderOnce, Role, SharedString,
-    Stateful, StatefulInteractiveElement as _, Styled as _, Window, actions, div, point,
-    prelude::FluentBuilder as _, px, rems,
+    AnyElement, App, Bounds, ClickEvent, ContentMask, CursorStyle, DispatchPhase, Element,
+    ElementId, Entity, FocusHandle, GlobalElementId, HitboxBehavior, Hsla, InspectorElementId,
+    InteractiveElement as _, IntoElement, KeyBinding, LayoutId, LongPressEvent, Modifiers,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Rems, RenderOnce, Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
+    TouchPhase, Window, actions, canvas, div, point, prelude::FluentBuilder as _, px, rems,
 };
 
 use crate::icon::{Icon, IconName};
@@ -73,7 +75,13 @@ actions!(
         ChooseShift,
         ChooseSecondary,
         OpenSubmenu,
-        CloseSubmenu
+        CloseSubmenu,
+        /// Moves the highlighted entry one place up in its reorder group.
+        MoveEntryUp,
+        /// Moves the highlighted entry one place down in its reorder group.
+        MoveEntryDown,
+        /// Drops a drag where it started.
+        CancelReorder
     ]
 );
 
@@ -109,6 +117,10 @@ pub(crate) fn init(cx: &mut App) {
         // Only in a submenu, so in a popover's own menu Escape still closes the popover.
         KeyBinding::new("left", CloseSubmenu, Some(IN_SUBMENU)),
         KeyBinding::new("escape", CloseSubmenu, Some(IN_SUBMENU)),
+        KeyBinding::new("alt-up", MoveEntryUp, c),
+        KeyBinding::new("alt-down", MoveEntryDown, c),
+        // Only taken while an entry is being dragged: otherwise it goes on to the popover.
+        KeyBinding::new("escape", CancelReorder, c),
     ]);
 }
 
@@ -123,6 +135,28 @@ pub struct MenuSelect {
     /// [`PopupMenu`]): a new property's name, with its type picked below it.
     pub query: Option<SharedString>,
 }
+
+/// A move in a reorder group (see [`PopupMenuItem::reorder_group`]): entry `id` of `group`
+/// goes from index `from` to index `to`, both counted within the group, `to` being where it ends
+/// up. The menu moves nothing itself: the host reorders its entries and draws the menu again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuReorder {
+    pub group: SharedString,
+    pub id: SharedString,
+    pub from: usize,
+    pub to: usize,
+}
+
+/// How far the pointer moves with the button down before a press on a reorderable entry
+/// becomes a drag, in pixels.
+const REORDER_THRESHOLD: f32 = 4.;
+
+/// What assistive technology hears after a reorderable entry's name.
+const REORDER_HINT: &str = if cfg!(any(target_os = "macos", target_os = "ios")) {
+    "Reorderable. Option Up or Option Down to move"
+} else {
+    "Reorderable. Alt Up or Alt Down to move"
+};
 
 /// The modifiers a keyboard pick comes with.
 pub(crate) fn shift() -> Modifiers {
@@ -144,9 +178,13 @@ pub struct PopupMenuItem {
     shortcut: Option<SharedString>,
     chip: Option<AnyElement>,
     label_element: Option<AnyElement>,
-    submenu: Option<SubmenuSource>,
+    // The submenu and the group are boxed to keep an entry small: hosts keep entries in enums
+    // beside much smaller variants (gpui-tables' menu entries and their headings).
+    submenu: Option<Box<SubmenuSource>>,
     /// Whether it opens a submenu (kept by `text_copy`, which leaves the submenu out).
     opens: bool,
+    /// The reorder group it's in.
+    group: Option<Box<SharedString>>,
 }
 
 impl PopupMenuItem {
@@ -163,6 +201,7 @@ impl PopupMenuItem {
             label_element: None,
             submenu: None,
             opens: false,
+            group: None,
         }
     }
 
@@ -204,6 +243,7 @@ impl PopupMenuItem {
             label_element: None,
             submenu: None,
             opens: self.opens,
+            group: self.group.clone(),
         }
     }
 
@@ -225,15 +265,26 @@ impl PopupMenuItem {
     /// or Escape closes it again. Its entries are drawn in this menu's row style and colours,
     /// and its picks go to its own [`PopupMenu::on_select`], or else to this menu's.
     pub fn submenu(mut self, menu: PopupMenu) -> Self {
-        self.submenu = Some(SubmenuSource::Built(Box::new(menu)));
+        self.submenu = Some(Box::new(SubmenuSource::Built(Box::new(menu))));
         self.opens = true;
+        self
+    }
+
+    /// Puts it in reorder group `name`: entries next to each other in the same group can be
+    /// put in another order among themselves, by dragging one (a long press first, by touch)
+    /// or with Alt-Up and Alt-Down (Option on the Mac) while it's highlighted. Each finished
+    /// move goes to [`PopupMenu::on_reorder`], which the group needs. A press without a drag
+    /// still picks it, or opens its submenu. A heading, a separator or another group's entry
+    /// ends the run: the same name further down is a group of its own.
+    pub fn reorder_group(mut self, name: impl Into<SharedString>) -> Self {
+        self.group = Some(Box::new(name.into()));
         self
     }
 
     /// A [`submenu`](Self::submenu) made by `build` only when it opens: for a long list where
     /// each entry has one (an option's colour and actions, say).
     pub fn submenu_with(mut self, build: impl Fn() -> PopupMenu + 'static) -> Self {
-        self.submenu = Some(SubmenuSource::Lazy(Rc::new(build)));
+        self.submenu = Some(Box::new(SubmenuSource::Lazy(Rc::new(build))));
         self.opens = true;
         self
     }
@@ -299,6 +350,8 @@ pub(crate) type SetHighlight = Rc<dyn Fn(usize, &mut App)>;
 
 pub(crate) type OnSelect = Rc<dyn Fn(&MenuSelect, &mut Window, &mut App)>;
 
+type OnReorder = Rc<dyn Fn(&MenuReorder, &mut Window, &mut App)>;
+
 /// Told the highlighted entry's id when the keys or the pointer move the highlight.
 pub(crate) type OnHighlight = Rc<dyn Fn(Option<&SharedString>, &mut App)>;
 
@@ -311,6 +364,7 @@ pub struct PopupMenu {
     id: ElementId,
     entries: Vec<Entry>,
     pub(crate) on_select: Option<OnSelect>,
+    on_reorder: Option<OnReorder>,
     on_highlight: Option<OnHighlight>,
     highlight: Option<SharedString>,
     row: RowStyle,
@@ -334,6 +388,7 @@ impl PopupMenu {
             id: id.into(),
             entries: Vec::new(),
             on_select: None,
+            on_reorder: None,
             on_highlight: None,
             highlight: None,
             row: RowStyle::default(),
@@ -424,6 +479,16 @@ impl PopupMenu {
         self
     }
 
+    /// Runs with each finished move in a reorder group ([`PopupMenuItem::reorder_group`]): a
+    /// drop somewhere else in the group, or Alt-Up or Alt-Down. The host puts its entries in
+    /// the new order and draws the menu again; the highlight stays on the moved entry. Nothing
+    /// comes of a drop back in place, outside the group, or after Escape. A submenu without
+    /// its own sends its moves here.
+    pub fn on_reorder(mut self, f: impl Fn(&MenuReorder, &mut Window, &mut App) + 'static) -> Self {
+        self.on_reorder = Some(Rc::new(f));
+        self
+    }
+
     /// The entry highlighted when it opens (the first that can be picked unless given): the
     /// current option, say.
     pub fn highlight(mut self, id: impl Into<SharedString>) -> Self {
@@ -477,6 +542,83 @@ struct MenuState {
     rest: u64,
     /// The last entry the host moved the highlight to, and its request.
     moved_to: Option<(SharedString, u64)>,
+    /// A press on a reorderable entry, or the drag it became.
+    drag: Option<Drag>,
+    /// A drag just ended under the pointer: the click its release makes isn't a pick.
+    swallow_click: bool,
+    /// A drag just dropped: the entry that's under the pointer now isn't hovered (nor its
+    /// submenu opened) until the pointer moves.
+    dropped: bool,
+    /// Where each entry was drawn last, for working out where a drag would drop.
+    bounds: Rc<RefCell<Vec<Bounds<Pixels>>>>,
+}
+
+/// A press on a reorderable entry: a drag once it's moved [`REORDER_THRESHOLD`] (by touch, from
+/// a long press).
+#[derive(Clone, Debug)]
+struct Drag {
+    /// The entry, by its id, and its index this frame.
+    id: SharedString,
+    at: usize,
+    start: Point<Pixels>,
+    /// Past the threshold: the entry is lifted and the drop line shows.
+    live: bool,
+    touch: bool,
+    /// Where it would land, as an index in its group; none outside the group.
+    to: Option<usize>,
+}
+
+/// Each entry's run of its reorder group, as `start..end` in the menu, where the run has more
+/// than one entry: next to each other and in the same group.
+fn reorder_runs(entries: &[Entry]) -> Vec<Option<(usize, usize)>> {
+    let group = |i: usize| match &entries[i] {
+        Entry::Item(item) => item.group.as_ref(),
+        Entry::Separator | Entry::Heading(_) => None,
+    };
+    let mut out = vec![None; entries.len()];
+    let mut i = 0;
+    while i < entries.len() {
+        let Some(g) = group(i) else {
+            i += 1;
+            continue;
+        };
+        let mut end = i + 1;
+        while end < entries.len() && group(end) == Some(g) {
+            end += 1;
+        }
+        if end - i > 1 {
+            out[i..end].fill(Some((i, end)));
+        }
+        i = end;
+    }
+    out
+}
+
+/// Where a drag of entry `at` (in run `start..end`) would land with the pointer at `pos`, as an
+/// index in the group: the gap between rows nearest the pointer, or none outside the group's
+/// rows.
+fn drop_slot(
+    bounds: &[Bounds<Pixels>],
+    (start, end): (usize, usize),
+    at: usize,
+    pos: Point<Pixels>,
+) -> Option<usize> {
+    let rows = bounds.get(start..end)?;
+    let (first, last) = (rows.first()?, rows.last()?);
+    let left = rows
+        .iter()
+        .map(|b| b.left())
+        .fold(first.left(), Pixels::min);
+    let right = rows
+        .iter()
+        .map(|b| b.right())
+        .fold(first.right(), Pixels::max);
+    if pos.y < first.top() || pos.y >= last.bottom() || pos.x < left || pos.x >= right {
+        return None;
+    }
+    let gap = rows.iter().filter(|b| b.center().y <= pos.y).count();
+    let from = at - start;
+    Some(if gap > from { gap - 1 } else { gap })
 }
 
 /// The entry at `at` (clamped to the menu) if it can be picked, else the nearest before it,
@@ -528,6 +670,10 @@ impl RenderOnce for PopupMenu {
             sub_by_pointer: false,
             rest: 0,
             moved_to: None,
+            drag: None,
+            swallow_click: false,
+            dropped: false,
+            bounds: Rc::default(),
         });
         let (focus, focused_once) = {
             let s = state.read(cx);
@@ -557,6 +703,29 @@ impl RenderOnce for PopupMenu {
             self.entries
                 .iter()
                 .map(|e| matches!(e, Entry::Item(i) if i.submenu.is_some()))
+                .collect(),
+        );
+        // Reorder groups: each entry's run, and whether a drag can start on it. Without a
+        // handler there's nothing to reorder.
+        let runs: Rc<Vec<Option<(usize, usize)>>> = Rc::new(if self.on_reorder.is_some() {
+            reorder_runs(&self.entries)
+        } else {
+            vec![None; self.entries.len()]
+        });
+        let draggable: Rc<Vec<bool>> = Rc::new(
+            self.entries
+                .iter()
+                .zip(runs.iter())
+                .map(|(e, run)| run.is_some() && matches!(e, Entry::Item(i) if !i.disabled))
+                .collect(),
+        );
+        let groups: Rc<Vec<Option<SharedString>>> = Rc::new(
+            self.entries
+                .iter()
+                .map(|e| match e {
+                    Entry::Item(i) => i.group.as_deref().cloned(),
+                    Entry::Separator | Entry::Heading(_) => None,
+                })
                 .collect(),
         );
         // An entry's index by its id, if it has a submenu.
@@ -629,6 +798,17 @@ impl RenderOnce for PopupMenu {
                 }
             }
             s.highlighted_id = s.highlighted.and_then(|i| ids.get(i).cloned().flatten());
+            // A drag stays on its entry while entries move; it ends if the entry goes.
+            if let Some(d) = &mut s.drag {
+                match ids
+                    .iter()
+                    .position(|id| id.as_ref() == Some(&d.id))
+                    .filter(|i| draggable[*i])
+                {
+                    Some(i) => d.at = i,
+                    None => s.drag = None,
+                }
+            }
             s.highlighted
         });
         // A submenu that had the keyboard went with its entry: the keyboard comes back here, so
@@ -684,7 +864,10 @@ impl RenderOnce for PopupMenu {
             let ids = ids.clone();
             let set = set.clone();
             move |i, by_pointer, _: &mut Window, cx: &mut App| {
-                if is_sub.get(i) != Some(&true) {
+                // A drag never opens a submenu.
+                if is_sub.get(i) != Some(&true)
+                    || state.read(cx).drag.as_ref().is_some_and(|d| d.live)
+                {
                     return;
                 }
                 set(Some(i), cx);
@@ -756,6 +939,7 @@ impl RenderOnce for PopupMenu {
                 }
             });
             Subs {
+                on_reorder: self.on_reorder.clone(),
                 open_sub,
                 by_pointer,
                 open: open.clone(),
@@ -820,6 +1004,46 @@ impl RenderOnce for PopupMenu {
             }
         };
 
+        // Moving entries in their groups, with the pointer, a finger or the keys.
+        let reorderer = self
+            .on_reorder
+            .clone()
+            .filter(|_| runs.iter().any(Option::is_some))
+            .map(|on_reorder| Reorderer {
+                state: state.clone(),
+                runs: runs.clone(),
+                draggable: draggable.clone(),
+                ids: ids.clone(),
+                groups: groups.clone(),
+                on_reorder,
+                set: set.clone(),
+                close: close.clone(),
+            });
+        let row_reorder = reorderer.as_ref().map(|r| {
+            let drag = state.read(cx).drag.clone().filter(|d| d.live);
+            // The drop line: in the gap the entry would land in, unless that's where it is.
+            let line = drag.as_ref().and_then(|d| {
+                let (start, end) = runs.get(d.at).copied().flatten()?;
+                let (from, to) = (d.at - start, d.to?);
+                if to == from {
+                    return None;
+                }
+                let gap = if to > from { to + 1 } else { to };
+                Some(if start + gap < end {
+                    (start + gap, false)
+                } else {
+                    (end - 1, true)
+                })
+            });
+            RowReorder {
+                reorderer: r.clone(),
+                lifted: drag.map(|d| d.at),
+                line,
+            }
+        });
+        let live = row_reorder.as_ref().is_some_and(|r| r.lifted.is_some());
+        let bounds = state.read(cx).bounds.clone();
+
         let rows = rows_with(
             &self.id,
             self.entries,
@@ -830,11 +1054,17 @@ impl RenderOnce for PopupMenu {
             Rc::new(move |i, cx: &mut App| set(Some(i), cx)),
             on_select,
             subs,
+            row_reorder,
             cx,
         );
 
         let nested = self.nested;
+        let cancel_close = reorderer.clone();
         div()
+            .when(reorderer.is_some(), |d| {
+                d.relative()
+                    .on_children_prepainted(move |b, _, _| *bounds.borrow_mut() = b)
+            })
             .id(self.id)
             .role(Role::Menu)
             .key_context(if nested.is_some() {
@@ -855,10 +1085,311 @@ impl RenderOnce for PopupMenu {
             .on_action(move |_: &ChooseSecondary, w, cx| choose_secondary(secondary(cx), w, cx))
             .on_action(move |_: &OpenSubmenu, w, cx| open_highlighted(w, cx))
             .when_some(nested, |d, close| {
-                d.on_action(move |_: &CloseSubmenu, w, cx| close(w, cx))
+                d.on_action(move |_: &CloseSubmenu, w, cx| {
+                    // Mid-drag, Escape ends the drag and leaves the submenu open.
+                    if cancel_close.as_ref().is_some_and(|r| r.cancel(cx)) {
+                        return;
+                    }
+                    close(w, cx)
+                })
             })
             .children(rows)
+            .when_some(reorderer, |d, r| {
+                let (up, down, cancel) = (r.clone(), r.clone(), r.clone());
+                let (f_up, f_down) = (focus.clone(), focus.clone());
+                d.on_action(move |_: &MoveEntryUp, w, cx| up.step(-1, &f_up, w, cx))
+                    .on_action(move |_: &MoveEntryDown, w, cx| down.step(1, &f_down, w, cx))
+                    .on_action(move |_: &CancelReorder, _, cx| {
+                        if !cancel.cancel(cx) {
+                            cx.propagate();
+                        }
+                    })
+                    .child(drag_listener(r, live))
+            })
     }
+}
+
+/// What drags and the keys use to move a menu's entries in their groups.
+#[derive(Clone)]
+struct Reorderer {
+    state: Entity<MenuState>,
+    runs: Rc<Vec<Option<(usize, usize)>>>,
+    /// The entries a drag can start on: in a group, and not disabled.
+    draggable: Rc<Vec<bool>>,
+    ids: Rc<Vec<Option<SharedString>>>,
+    groups: Rc<Vec<Option<SharedString>>>,
+    on_reorder: OnReorder,
+    set: MoveHighlight,
+    close: CloseFn,
+}
+
+impl Reorderer {
+    fn live(&self, cx: &App) -> bool {
+        self.state.read(cx).drag.as_ref().is_some_and(|d| d.live)
+    }
+
+    /// Whether the pointer hovering an entry is to be ignored: mid-drag, or resting where a
+    /// drag dropped.
+    fn ignore_hover(&self, cx: &App) -> bool {
+        let s = self.state.read(cx);
+        s.dropped || s.drag.as_ref().is_some_and(|d| d.live)
+    }
+
+    fn touching(&self, cx: &App) -> bool {
+        self.state.read(cx).drag.as_ref().is_some_and(|d| d.touch)
+    }
+
+    /// Tells the host entry `at` moves to index `to` in its group, unless it's there already.
+    fn emit(&self, at: usize, to: usize, window: &mut Window, cx: &mut App) {
+        let Some((start, end)) = self.runs.get(at).copied().flatten() else {
+            return;
+        };
+        let (Some(Some(group)), Some(Some(id))) = (self.groups.get(at), self.ids.get(at)) else {
+            return;
+        };
+        let from = at - start;
+        if to == from || to >= end - start {
+            return;
+        }
+        let event = MenuReorder {
+            group: group.clone(),
+            id: id.clone(),
+            from,
+            to,
+        };
+        (self.on_reorder)(&event, window, cx);
+    }
+
+    /// Alt-Up or Alt-Down: the highlighted entry one place up or down, if it has one to go to.
+    fn step(&self, delta: isize, focus: &FocusHandle, window: &mut Window, cx: &mut App) {
+        let at = self
+            .state
+            .read(cx)
+            .highlighted
+            .filter(|i| self.draggable.get(*i) == Some(&true));
+        // Not ours: the keyboard's in a submenu, or the entry doesn't move.
+        let (Some(at), true) = (at, focus.is_focused(window)) else {
+            cx.propagate();
+            return;
+        };
+        let Some((start, end)) = self.runs.get(at).copied().flatten() else {
+            return;
+        };
+        if self.live(cx) {
+            return;
+        }
+        let to = (at - start) as isize + delta;
+        if (0..(end - start) as isize).contains(&to) {
+            self.emit(at, to as usize, window, cx);
+        }
+    }
+
+    /// A press on entry `at`: a drag once it moves far enough.
+    fn press(&self, at: usize, pos: Point<Pixels>, touch: bool, cx: &mut App) {
+        let Some(Some(id)) = self.ids.get(at) else {
+            return;
+        };
+        self.state.update(cx, |s, _| {
+            s.drag = Some(Drag {
+                id: id.clone(),
+                at,
+                start: pos,
+                live: false,
+                touch,
+                to: None,
+            })
+        });
+    }
+
+    /// The pressed entry lifts: it's highlighted, an open submenu closes, and a submenu
+    /// waiting to open on a rest doesn't.
+    fn lift(&self, window: &mut Window, cx: &mut App) {
+        let at = self.state.update(cx, |s, cx| {
+            let d = s.drag.as_mut()?;
+            d.live = true;
+            s.rest += 1;
+            cx.notify();
+            Some(d.at)
+        });
+        if let Some(at) = at {
+            (self.set)(Some(at), cx);
+            (self.close)(window, cx);
+        }
+    }
+
+    /// The pointer at `pos` mid-drag: where it would land, redrawn only when that changes.
+    fn track(&self, pos: Point<Pixels>, cx: &mut App) {
+        let runs = self.runs.clone();
+        self.state.update(cx, |s, cx| {
+            let bounds = s.bounds.clone();
+            let Some(d) = s.drag.as_mut().filter(|d| d.live) else {
+                return;
+            };
+            let to = runs
+                .get(d.at)
+                .copied()
+                .flatten()
+                .and_then(|run| drop_slot(&bounds.borrow(), run, d.at, pos));
+            if d.to != to {
+                d.to = to;
+                cx.notify();
+            }
+        });
+    }
+
+    /// The pointer moving: a press becomes a drag past the threshold, and a drag follows it.
+    fn pointer_moved(&self, e: &MouseMoveEvent, window: &mut Window, cx: &mut App) {
+        if self.state.read(cx).dropped {
+            self.state.update(cx, |s, _| s.dropped = false);
+        }
+        let Some(d) = self.state.read(cx).drag.clone() else {
+            return;
+        };
+        if d.touch {
+            return;
+        }
+        // The button came up where we didn't hear it.
+        if e.pressed_button != Some(MouseButton::Left) {
+            self.cancel(cx);
+            return;
+        }
+        if !d.live {
+            if (e.position - d.start).magnitude() < REORDER_THRESHOLD as f64 {
+                return;
+            }
+            self.lift(window, cx);
+        }
+        self.track(e.position, cx);
+    }
+
+    /// The button or the finger lifted: a drag drops where it is; a press that didn't move is
+    /// left to be a click.
+    fn finish(&self, window: &mut Window, cx: &mut App) {
+        let drag = self.state.update(cx, |s, cx| {
+            let d = s.drag.take()?;
+            if d.live {
+                s.swallow_click = !d.touch;
+                s.dropped = true;
+                cx.notify();
+            }
+            Some(d)
+        });
+        if let Some(d) = drag
+            && d.live
+            && let Some(to) = d.to
+        {
+            self.emit(d.at, to, window, cx);
+        }
+    }
+
+    /// Ends a press or a drag without a move; true if a drag was under way.
+    fn cancel(&self, cx: &mut App) -> bool {
+        self.state.update(cx, |s, cx| {
+            let Some(d) = s.drag.take() else {
+                return false;
+            };
+            if d.live {
+                // The button's still down: its release isn't a click.
+                s.swallow_click = !d.touch;
+                cx.notify();
+            }
+            d.live
+        })
+    }
+
+    /// Whether a click is the end of a drag, and not a pick.
+    fn swallow_click(&self, cx: &mut App) -> bool {
+        self.state
+            .update(cx, |s, _| std::mem::take(&mut s.swallow_click))
+    }
+}
+
+/// Listens for a drag's moves and its end anywhere in the window, and for a long press on the
+/// menu: drawn over the menu, taking no presses of its own.
+fn drag_listener(r: Reorderer, live: bool) -> impl IntoElement {
+    canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |_, hitbox, window, _| {
+            if live {
+                window.set_window_cursor_style(CursorStyle::ClosedHand);
+            }
+            window.on_mouse_event({
+                let state = r.state.clone();
+                move |_: &MouseDownEvent, phase, _, cx| {
+                    let s = state.read(cx);
+                    if phase == DispatchPhase::Capture && (s.swallow_click || s.dropped) {
+                        state.update(cx, |s, _| {
+                            s.swallow_click = false;
+                            s.dropped = false;
+                        });
+                    }
+                }
+            });
+            window.on_mouse_event({
+                let r = r.clone();
+                move |e: &MouseMoveEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture {
+                        r.pointer_moved(e, window, cx);
+                    }
+                }
+            });
+            window.on_mouse_event({
+                let r = r.clone();
+                move |e: &MouseUpEvent, phase, window, cx| {
+                    if phase == DispatchPhase::Capture
+                        && e.button == MouseButton::Left
+                        && !r.touching(cx)
+                    {
+                        r.finish(window, cx);
+                    }
+                }
+            });
+            window.on_mouse_event(move |e: &LongPressEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                match e.phase {
+                    TouchPhase::Started => {
+                        if window.default_prevented() || !hitbox.is_hovered(window) {
+                            return;
+                        }
+                        let at = {
+                            let bounds = r.state.read(cx).bounds.clone();
+                            let bounds = bounds.borrow();
+                            bounds.iter().position(|b| b.contains(&e.start_position))
+                        };
+                        let Some(at) = at.filter(|i| r.draggable.get(*i) == Some(&true)) else {
+                            return;
+                        };
+                        r.press(at, e.start_position, true, cx);
+                        r.lift(window, cx);
+                        r.track(e.position, cx);
+                        // Claimed: the finger follows the drag, and lifting it isn't a tap.
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
+                    TouchPhase::Moved if r.touching(cx) => r.track(e.position, cx),
+                    TouchPhase::Ended if r.touching(cx) => r.finish(window, cx),
+                    TouchPhase::Cancelled if r.touching(cx) => {
+                        r.cancel(cx);
+                    }
+                    _ => {}
+                }
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
+/// A menu's reorder groups, for drawing its rows: the lifted entry, where the drop line goes
+/// (an entry, and whether it's below it rather than above), and what a press starts.
+struct RowReorder {
+    reorderer: Reorderer,
+    lifted: Option<usize>,
+    line: Option<(usize, bool)>,
 }
 
 /// Opens an entry's submenu; `true` when the pointer opened it.
@@ -868,6 +1399,8 @@ type RestFn = Rc<dyn Fn(usize, &mut Window, &mut App)>;
 
 /// A menu's submenus, for drawing its rows: which is open, and what opens and closes them.
 pub(crate) struct Subs {
+    /// Where a submenu without its own handler sends its moves.
+    on_reorder: Option<OnReorder>,
     open_sub: Option<usize>,
     by_pointer: bool,
     open: OpenFn,
@@ -901,6 +1434,7 @@ pub(crate) fn rows(
         set_highlight,
         on_select,
         None,
+        None,
         cx,
     )
 }
@@ -917,6 +1451,7 @@ fn rows_with(
     set_highlight: SetHighlight,
     on_select: Option<OnSelect>,
     subs: Option<Subs>,
+    reorder: Option<RowReorder>,
     cx: &App,
 ) -> Vec<AnyElement> {
     let theme: Theme = cx.theme().clone();
@@ -929,6 +1464,11 @@ fn rows_with(
     let text_size: gpui::AbsoluteLength = row_style.text_size.unwrap_or(theme.text.sm.into());
     let menu_id = std::sync::Arc::new(menu_id.clone());
     let on_select_for_subs = on_select.clone();
+    let on_reorder_for_subs = subs.as_ref().and_then(|s| s.on_reorder.clone());
+    let reorderer = reorder.as_ref().map(|r| r.reorderer.clone());
+    let (lifted, line) = reorder
+        .as_ref()
+        .map_or((None, None), |r| (r.lifted, r.line));
     // A submenu's panel is drawn in the colours of the panel this menu is in.
     let panel_colors = crate::popover::panel_colors(cx);
     entries
@@ -981,6 +1521,19 @@ fn rows_with(
             let disabled = item.disabled;
             let on_select = on_select.clone();
             let rest = subs.as_ref().map(|s| s.rest.clone());
+            // In a reorder group (with a drag starting on it unless it's disabled), lifted, and
+            // with the drop line above or below it.
+            let in_group = reorderer
+                .as_ref()
+                .is_some_and(|r| r.runs.get(i).is_some_and(Option::is_some));
+            let draggable = reorderer
+                .as_ref()
+                .filter(|r| r.draggable.get(i) == Some(&true))
+                .cloned();
+            let is_lifted = lifted == Some(i);
+            let line_here = line.filter(|(at, _)| *at == i).map(|(_, below)| below);
+            let hover_reorder = reorderer.clone();
+            let click_reorder = reorderer.clone();
             let open = subs
                 .as_ref()
                 .filter(|_| submenu.is_some())
@@ -1010,6 +1563,11 @@ fn rows_with(
                 .when(item.disabled, |r| r.text_color(muted).opacity(0.6))
                 .when(opens, |r| r.aria_expanded(open_now))
                 .on_hover(move |hovered, window, cx| {
+                    // Mid-drag, and where a drag dropped until the pointer moves on, the
+                    // highlight stays on the moved entry, and nothing opens.
+                    if hover_reorder.as_ref().is_some_and(|r| r.ignore_hover(cx)) {
+                        return;
+                    }
                     if *hovered && !disabled {
                         set_highlight(i, cx);
                         if let Some(rest) = &rest {
@@ -1018,6 +1576,12 @@ fn rows_with(
                     }
                 })
                 .on_click(move |e: &ClickEvent, window, cx| {
+                    // The release that ends a drag isn't a pick.
+                    if let Some(r) = &click_reorder
+                        && r.swallow_click(cx)
+                    {
+                        return;
+                    }
                     if let Some(open) = &open {
                         open(i, true, window, cx);
                         return;
@@ -1033,6 +1597,54 @@ fn rows_with(
                 });
             if let Some(checked) = item.checked {
                 row = row.selected(checked);
+            }
+            if in_group {
+                row = row
+                    .relative()
+                    .aria_description(REORDER_HINT)
+                    .aria_keyshortcuts("Alt+ArrowUp Alt+ArrowDown")
+                    // Lifted: the highlight's fill, raised a little.
+                    .when(is_lifted, |r| {
+                        r.bg(highlight).text_color(highlight_text).shadow_sm()
+                    })
+                    .when_some(line_here, |r, below| {
+                        let id = item.id.clone();
+                        r.child(
+                            div()
+                                .debug_selector(move || format!("menu-drop-line-{id}"))
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .h(px(2.))
+                                .map(|d| {
+                                    if below {
+                                        d.bottom(px(-1.))
+                                    } else {
+                                        d.top(px(-1.))
+                                    }
+                                })
+                                .rounded_full()
+                                .bg(theme.ring),
+                        )
+                    })
+                    // The grip: a hint that it moves, at the leading edge, shown while it's
+                    // highlighted (the pointer's on it) or lifted.
+                    .child(div().flex_none().w(css(14.)).flex().justify_center().when(
+                        draggable.is_some() && (on || is_lifted),
+                        |d| {
+                            let id = item.id.clone();
+                            d.debug_selector(move || format!("menu-grip-{id}")).child(
+                                Icon::new(IconName::GripVertical)
+                                    .size(css(14.))
+                                    .color(if on { highlight_text } else { muted }),
+                            )
+                        },
+                    ));
+            }
+            if let Some(r) = draggable {
+                row = row.on_mouse_down(MouseButton::Left, move |e, _, cx| {
+                    r.press(i, e.position, false, cx)
+                });
             }
             let id_for_check = item.id.clone();
             let id_for_panel = item.id.clone();
@@ -1115,6 +1727,9 @@ fn rows_with(
                     menu.colors = colors;
                     if menu.on_select.is_none() {
                         menu.on_select = on_select_for_sub.clone();
+                    }
+                    if menu.on_reorder.is_none() {
+                        menu.on_reorder = on_reorder_for_subs.clone();
                     }
                     let entered = subs.entered.clone();
                     let id = id_for_panel.clone();
