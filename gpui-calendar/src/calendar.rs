@@ -1762,14 +1762,31 @@ impl Calendar {
             return;
         };
         match drag {
+            // On touch, a tap on the slot already picked makes an event there, as a second tap
+            // does in a phone's calendar: the first only picks it (a double click on the Mac).
             Drag::Press { target, .. } => match target {
                 Target::Grid { date, minute } => {
                     let slot = self.options.slot_minutes.max(1) as f32;
                     let minute = time::snap_floor(minute, slot) as u32;
-                    self.select(Some(Selection::Slot { date, minute }), cx);
+                    let picked = Selection::Slot { date, minute };
+                    if self.options.touch && self.selection.as_ref() == Some(&picked) {
+                        let tz = self.options.time_zone;
+                        let start = time::at_minutes(date, minute as f32, tz);
+                        self.propose_create(
+                            EventTime::timed(start, start + self.options.default_duration),
+                            cx,
+                        );
+                    } else {
+                        self.select(Some(picked), cx);
+                    }
                 }
                 Target::Day { date, .. } => {
-                    self.select(Some(Selection::Slot { date, minute: 0 }), cx)
+                    let picked = Selection::Slot { date, minute: 0 };
+                    if self.options.touch && self.selection.as_ref() == Some(&picked) {
+                        self.propose_create(time::created_days(date, date), cx);
+                    } else {
+                        self.select(Some(picked), cx)
+                    }
                 }
                 Target::Link { id, index, .. } => {
                     if let Some(e) = self.event(&id)
@@ -2684,7 +2701,7 @@ impl Calendar {
 
     /// The header for a narrow calendar or one taken by touch: the title (a short one when
     /// narrow), Today, the period arrows (not on touch, where a swipe changes the period), and
-    /// the views (Day, Month and List when narrow). Drawn with plain elements, not gpui-core's
+    /// the views (the agenda called List when narrow). Drawn with plain elements, not gpui-core's
     /// buttons; on touch each control is 44 points tall.
     fn render_compact_header(
         &self,
@@ -2717,7 +2734,8 @@ impl Calendar {
                 .justify_center()
                 .h(rems(if touch { 44. } else { 32. } / 15.))
                 .min_w(rems(if touch { 44. } else { 0. } / 15.))
-                .px(rems(8. / 15.))
+                // Tighter when narrow, so four views, Today and the arrows fit a 320-point phone.
+                .px(rems(if narrow { 5. } else { 8. } / 15.))
                 .rounded(rems(8. / 15.))
                 .text_size(rems(13. / 15.))
                 .font_weight(FontWeight::MEDIUM)
@@ -2734,6 +2752,7 @@ impl Calendar {
         let views: &[(CalendarView, &str)] = if narrow {
             &[
                 (CalendarView::Day, "Day"),
+                (CalendarView::Week, "Week"),
                 (CalendarView::Month, "Month"),
                 (CalendarView::AGENDA, "List"),
             ]
@@ -2809,12 +2828,12 @@ impl Calendar {
                             .border_color(colors.line)
                             .children(views.iter().enumerate().map(|(i, &(v, label))| {
                                 let on_view = match (v, view) {
-                                    (CalendarView::Day, CalendarView::Days(_)) => narrow,
                                     (CalendarView::Week, CalendarView::Days(_)) => true,
                                     (CalendarView::Agenda(_), CalendarView::Agenda(_)) => true,
                                     _ => v == view,
                                 };
                                 control(("view", i).into(), label.into(), label, on_view)
+                                    .debug_selector(move || format!("calendar-view-{label}"))
                                     .on_click(on(Rc::new(move |c, cx| c.set_view(v, cx))))
                             })),
                     ),

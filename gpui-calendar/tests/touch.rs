@@ -614,3 +614,79 @@ fn on_touch_columns_stay_a_finger_wide_and_the_rest_open_in_a_sheet(cx: &mut Tes
     let row = cx.debug_bounds("crowd-row-0").expect("a row");
     assert!(row.size.height >= px(44.), "{row:?}");
 }
+
+#[gpui::test]
+fn a_tap_picks_empty_time_and_a_second_tap_makes_an_event_there(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let p = spot(&c, cx, day(1), 14, 5);
+    tap(cx, p);
+    c.read_with(cx, |c, _| {
+        assert_eq!(
+            c.selection(),
+            Some(&Selection::Slot {
+                date: day(1),
+                minute: 14 * 60
+            })
+        )
+    });
+    assert!(
+        !seen
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Create { .. }))
+    );
+    // Past the double-tap window, so it's a second tap and not a double one.
+    wait(cx, 1000);
+    tap(cx, p);
+    assert!(has(
+        &seen,
+        &CalendarEvent::Create {
+            calendar: Some("work".into()),
+            time: EventTime::timed(at(day(1), 14, 0), at(day(1), 15, 0)),
+        }
+    ));
+    unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn a_tap_on_other_empty_time_moves_the_pick_without_making_anything(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    tap(cx, spot(&c, cx, day(1), 14, 5));
+    wait(cx, 1000);
+    tap(cx, spot(&c, cx, day(3), 15, 5));
+    c.read_with(cx, |c, _| {
+        assert_eq!(
+            c.selection(),
+            Some(&Selection::Slot {
+                date: day(3),
+                minute: 15 * 60
+            })
+        )
+    });
+    assert!(
+        !seen
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, CalendarEvent::Create { .. }))
+    );
+}
+
+#[gpui::test]
+fn a_phone_wide_calendar_still_offers_the_week(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    cx.simulate_resize(size(px(390.), px(800.)));
+    c.update(cx, |c, cx| c.set_view(CalendarView::Day, cx));
+    draw(cx);
+    draw(cx);
+    for view in [
+        "calendar-view-Day",
+        "calendar-view-Week",
+        "calendar-view-Month",
+        "calendar-view-List",
+    ] {
+        assert!(cx.debug_bounds(view).is_some(), "no {view}");
+    }
+    let week = cx.debug_bounds("calendar-view-Week").unwrap();
+    tap(cx, week.center());
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Week);
+}
