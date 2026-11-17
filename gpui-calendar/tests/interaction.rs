@@ -1187,6 +1187,35 @@ fn delete_with_the_panel_open_deletes_its_event(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_panel_adds_the_events_own_zone_where_it_differs(cx: &mut TestAppContext) {
+    let (c, _, cx) = open_with(cx, panel_on);
+    c.update(cx, |c, cx| c.open_panel("a".into(), cx));
+    draw(cx);
+    assert!(cx.debug_bounds("panel").is_some());
+    assert!(cx.debug_bounds("panel-zone").is_none());
+    // Made in New York: a second line with its time there, under the first.
+    c.update(cx, |c, cx| {
+        let e = c
+            .event("a")
+            .unwrap()
+            .clone()
+            .time_zone(chrono_tz::America::New_York);
+        c.upsert_event(e, cx);
+    });
+    draw(cx);
+    let zone = cx.debug_bounds("panel-zone").expect("the event's own zone");
+    let title = cx.debug_bounds("panel-title").unwrap();
+    assert!(zone.top() > title.bottom());
+    // In the calendar's own zone: nothing more.
+    c.update(cx, |c, cx| {
+        let e = c.event("a").unwrap().clone().time_zone(TZ);
+        c.upsert_event(e, cx);
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("panel-zone").is_none());
+}
+
+#[gpui::test]
 fn a_read_only_events_panel_has_no_edits(cx: &mut TestAppContext) {
     let (c, _, cx) = open_with(cx, panel_on);
     double_click(cx, spot(&c, cx, day(3), 9, 30));
