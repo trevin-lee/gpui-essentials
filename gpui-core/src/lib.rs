@@ -81,6 +81,7 @@ mod tabs;
 pub mod text;
 pub mod theme;
 mod toast;
+mod toggle;
 mod tooltip;
 
 pub use accordion::{Accordion, AccordionItem};
@@ -134,6 +135,7 @@ pub use tabs::{Tab, Tabs, TabsOverflow, TabsVariant};
 pub use text::{TextView, TextViewStyle};
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
 pub use toast::{TOAST_DURATION, TOAST_DURATION_LONG, Toast, ToastKind};
+pub use toggle::{Toggle, ToggleGroup, ToggleVariant};
 pub use tooltip::Tooltip;
 
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, WindowOptions};
@@ -158,6 +160,7 @@ pub fn init(cx: &mut App) {
     split_view::init(cx);
     tabs::init(cx);
     radio_group::init(cx);
+    toggle::init(cx);
     date_picker::init(cx);
     input::init(cx);
     menu::init(cx);
