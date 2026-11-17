@@ -2,8 +2,8 @@
 //! window's surface in the theme, and moves the focus with Tab and shift-Tab.
 
 use gpui::{
-    AnyView, App, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
-    ParentElement as _, Render, Styled as _, Window, actions, div,
+    AnyView, App, Context, Entity, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
+    KeyBinding, ParentElement as _, Render, Styled as _, Window, actions, div,
 };
 
 use crate::theme::{ActiveTheme as _, Theme};
@@ -42,15 +42,43 @@ pub struct Root {
 impl Root {
     /// Wraps `view`. If nothing in the window has the focus yet, the Root takes it, so the
     /// first Tab has somewhere to start (with no focus at all, GPUI sends keys to no view).
+    ///
+    /// Keys then go to the Root, which is above `view`: a key binding in `view`'s own key
+    /// context (a ⌘K palette, say) does nothing until something inside `view` has the focus.
+    /// A view with key bindings of its own wants [`Root::focusing`] (or
+    /// [`open_window_focusing`](crate::open_window_focusing)) instead.
     pub fn new(view: impl Into<AnyView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_first_focus(view.into(), None, window, cx)
+    }
+
+    /// Wraps `view`, as [`Root::new`] does, but if nothing in the window has the focus yet,
+    /// `view` takes it rather than the Root: its key bindings work from the first key, and Tab
+    /// and shift-Tab still move the focus. `view`'s [`focus_handle`](Focusable::focus_handle)
+    /// must be tracked by an element it draws (`track_focus`), with its key context on that
+    /// element or above it.
+    pub fn focusing<V: Render + Focusable>(
+        view: Entity<V>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let first = view.read(cx).focus_handle(cx);
+        Self::with_first_focus(view.into(), Some(first), window, cx)
+    }
+
+    fn with_first_focus(
+        view: AnyView,
+        first: Option<FocusHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         crate::init(cx);
         cx.observe_global::<Theme>(|_, cx| cx.notify()).detach();
         let focus = cx.focus_handle();
         if window.focused(cx).is_none() {
-            window.focus(&focus, cx);
+            window.focus(first.as_ref().unwrap_or(&focus), cx);
         }
         Self {
-            view: view.into(),
+            view,
             focus,
             toasts: Vec::new(),
             next_toast: 0,

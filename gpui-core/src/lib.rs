@@ -162,7 +162,9 @@ pub use toast::{TOAST_DURATION, TOAST_DURATION_LONG, Toast, ToastKind};
 pub use toggle::{Toggle, ToggleGroup, ToggleVariant};
 pub use tooltip::Tooltip;
 
-use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Render, Window, WindowOptions};
+use gpui::{
+    AnyWindowHandle, App, AppContext as _, Entity, Focusable, Render, Window, WindowOptions,
+};
 
 /// Sets the crate up: the default theme if the host has set none, and the key bindings.
 ///
@@ -218,6 +220,10 @@ struct Initialized;
 impl gpui::Global for Initialized {}
 
 /// Opens a window with `build`'s view inside a [`Root`], and returns the window and the view.
+///
+/// The Root takes the window's first focus, so a key binding in the view's own key context
+/// does nothing until something inside the view has the focus: a view with key bindings of its
+/// own (a ⌘K palette, say) wants [`open_window_focusing`].
 pub fn open_window<V: Render>(
     options: WindowOptions,
     cx: &mut App,
@@ -232,5 +238,25 @@ pub fn open_window<V: Render>(
     Ok((
         window.into(),
         built.expect("open_window ran its build closure"),
+    ))
+}
+
+/// Opens a window with `build`'s view inside a [`Root`], as [`open_window`] does, with the
+/// view taking the window's first focus (see [`Root::focusing`]): its key bindings work from
+/// the first key, and Tab and shift-Tab still move the focus.
+pub fn open_window_focusing<V: Render + Focusable>(
+    options: WindowOptions,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> Entity<V>,
+) -> gpui::Result<(AnyWindowHandle, Entity<V>)> {
+    let mut built = None;
+    let window = cx.open_window(options, |window, cx| {
+        let view = build(window, cx);
+        built = Some(view.clone());
+        cx.new(|cx| Root::focusing(view, window, cx))
+    })?;
+    Ok((
+        window.into(),
+        built.expect("open_window_focusing ran its build closure"),
     ))
 }
