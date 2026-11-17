@@ -782,3 +782,76 @@ fn property_menus_are_44_points_on_touch(cx: &mut TestAppContext) {
     tall(cx, "menu-field".into());
     tall(cx, item("Save"));
 }
+
+#[gpui::test]
+fn a_column_menu_acts_on_its_property_after_the_columns_shift(cx: &mut TestAppContext) {
+    // A two-way relation of People to itself: Mentees, then Mentors, among the columns.
+    const MENTEES: &str = "mentees";
+    const MENTORS: &str = "mentors";
+    let host = TestHost::new();
+    let (mut db, rows) = load("people");
+    let side = |id: &str, name: &str, order: &str, back: &str| {
+        Property::new(id, name, PropertyType::Relation, order).with_config(PropertyConfig {
+            database_id: Some(PEOPLE.into()),
+            two_way: Some(true),
+            back_property_id: Some(back.into()),
+            ..PropertyConfig::default()
+        })
+    };
+    let f = db.database.as_mut().unwrap();
+    f.properties.push(side(MENTEES, "Mentees", "a8m", MENTORS));
+    f.properties.push(side(MENTORS, "Mentors", "a9m", MENTEES));
+    let (table, cx) = open_with(
+        cx,
+        &host,
+        db.clone(),
+        rows.clone(),
+        None,
+        size(px(4000.), px(700.)),
+    );
+    let columns = |table: &Entity<TableView>, cx: &mut VisualTestContext| {
+        table.update(cx, |t, _| {
+            t.columns()
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>()
+        })
+    };
+    let before = columns(&table, cx);
+    let at = before.iter().position(|id| id == MENTORS).unwrap();
+    assert!(at + 1 < before.len(), "a column after Mentors");
+    // One-way from Mentors' menu: Mentees goes, and the columns after it move left, while the
+    // menu stays open.
+    let one_way = |cx: &mut VisualTestContext| {
+        menu(cx, "Mentors");
+        click(cx, item("Relation"));
+        click(cx, item("Show on People"));
+        assert_eq!(
+            last_batch(&host)[1],
+            Edit::PropertyDeleted {
+                database_id: PEOPLE.into(),
+                property_id: MENTEES.into(),
+            }
+        );
+    };
+    one_way(cx);
+    assert_eq!(columns(&table, cx)[at], before[at + 1]);
+    // It still sorts by Mentors.
+    click(cx, item("Sort ascending"));
+    assert_eq!(host.last_view().sort, vec![Sort::ascending(MENTORS)]);
+    // And still deletes Mentors.
+    table.update(cx, |t, cx| t.set_docs(db, rows, cx));
+    draw(cx);
+    one_way(cx);
+    click(cx, item("Delete property"));
+    click(cx, item("Delete property"));
+    assert_eq!(
+        last_batch(&host),
+        vec![Edit::PropertyDeleted {
+            database_id: PEOPLE.into(),
+            property_id: MENTORS.into(),
+        }]
+    );
+    // Its property gone, the menu closes.
+    assert!(!drawn(cx, "menu"));
+}
