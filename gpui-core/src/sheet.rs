@@ -29,7 +29,7 @@ use gpui::{
 };
 
 use crate::popover::{
-    CONTEXT, Dismiss, DismissFn, DismissReason, PRIORITY, PopoverColors, overlay_focus,
+    CONTEXT, Dismiss, DismissFn, DismissReason, InLayer, PopoverColors, overlay_focus,
 };
 use crate::theme::ActiveTheme as _;
 
@@ -275,14 +275,11 @@ impl Element for SheetElement {
             return;
         };
         let view = window.viewport_size();
-        let mut scrim = scrim.w(view.width).h(view.height).into_any_element();
+        let layer = crate::popover::layer(cx);
+        let scrim = scrim.w(view.width).h(view.height).into_any_element();
+        let mut scrim = InLayer::new(layer, scrim).into_any_element();
         scrim.layout_as_root(view.map(gpui::AvailableSpace::Definite), window, cx);
-        window.defer_draw(
-            scrim,
-            Point::default(),
-            PRIORITY,
-            None::<ContentMask<Pixels>>,
-        );
+        window.defer_draw(scrim, Point::default(), layer, None::<ContentMask<Pixels>>);
     }
 
     fn paint(

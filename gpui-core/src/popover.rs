@@ -58,6 +58,99 @@ const GAP: f32 = 4.;
 /// Above other deferred drawing such as tooltips' hosts; the same as the crate's other overlays.
 pub(crate) const PRIORITY: usize = 1;
 
+/// A modal's (a dialog's): over popovers. What's drawn from inside a modal goes in its layer
+/// (see [`layer`]), so a menu in a dialog is over the dialog.
+pub(crate) const MODAL_PRIORITY: usize = PRIORITY + 1;
+
+/// The layer of the overlay whose content is being placed.
+struct Layer(usize);
+
+impl gpui::Global for Layer {}
+
+/// The priority an overlay drawn now is deferred at: [`PRIORITY`], or the layer of the overlay
+/// it's drawn from inside if that's higher (a popover in a dialog).
+pub(crate) fn layer(cx: &App) -> usize {
+    cx.try_global::<Layer>()
+        .map_or(PRIORITY, |l| l.0.max(PRIORITY))
+}
+
+/// Draws `child`, an overlay deferred at `priority`, with that as the [`layer`] of the overlays
+/// drawn from inside it.
+pub(crate) struct InLayer {
+    priority: usize,
+    child: AnyElement,
+}
+
+impl InLayer {
+    pub(crate) fn new(priority: usize, child: AnyElement) -> Self {
+        Self { priority, child }
+    }
+}
+
+impl IntoElement for InLayer {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for InLayer {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let before = cx.try_global::<Layer>().map(|l| l.0);
+        cx.set_global(Layer(self.priority));
+        self.child.prepaint(window, cx);
+        match before {
+            Some(p) => cx.set_global(Layer(p)),
+            None => {
+                cx.remove_global::<Layer>();
+            }
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
 pub(crate) type DismissFn = Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
 
 /// Why a popover asks to close.
@@ -68,6 +161,8 @@ pub enum DismissReason {
     Escape,
     /// What it hangs from scrolled out of view.
     ScrolledAway,
+    /// Its close button (a dialog's ×).
+    CloseButton,
 }
 
 /// A popover's colours. By default they're the theme's `popover`, `popover-foreground` and
@@ -696,11 +791,13 @@ impl Element for PopoverElement {
         } else {
             px(0.)
         };
-        let mut panel = panel
+        let layer = layer(cx);
+        let panel = panel
             .max_h(height)
             .max_w(widest)
             .min_w(narrowest)
             .into_any_element();
+        let mut panel = InLayer::new(layer, panel).into_any_element();
         // Laid out on its own, now that what it hangs from has been placed this frame.
         let size = with_panel_colors(self.colors, window, cx, |window, cx| {
             panel.layout_as_root(
@@ -713,7 +810,7 @@ impl Element for PopoverElement {
             )
         });
         let origin = place(anchor, size, view, edge, gap);
-        window.defer_draw(panel, origin, PRIORITY, None::<ContentMask<Pixels>>);
+        window.defer_draw(panel, origin, layer, None::<ContentMask<Pixels>>);
     }
 
     fn paint(
