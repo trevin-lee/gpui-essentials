@@ -12,6 +12,7 @@
 pub mod filter;
 pub mod group;
 pub mod relation;
+pub mod search;
 pub mod sort;
 pub mod time;
 

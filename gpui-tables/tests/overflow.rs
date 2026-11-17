@@ -5,7 +5,8 @@
 //! columns at their widths and at their narrowest, grouped and not, with a menu and a picker
 //! open, with each typed value's field open in place, and with a row's handle, the rows' menu
 //! and a row carried; and on a board's cards and a list's
-//! lines, with every property on them; and in the bar of views and its menus, with the views'
+//! lines, with every property on them; and in the bar of views and its menus (and its search
+//! field, with "No results" under it), with the views'
 //! names at their worst, by a table, a board and a list, with a finger's sizes too. Any glyph or icon drawn past what clips it, past the table
 //! or past the window fails the test with where it is. The places a glyph may cross its clip are
 //! the edges of the strip the columns after the title scroll in (and the strip the bar's tabs
@@ -161,6 +162,7 @@ fn overflows_with(cx: &mut VisualTestContext, field: Option<Bounds<Pixels>>) -> 
         .debug_bounds("table")
         .or_else(|| cx.debug_bounds("board"))
         .or_else(|| cx.debug_bounds("list"))
+        .or_else(|| cx.debug_bounds("no-results"))
         .expect("the table, board or list is drawn");
     // The columns after the title scroll sideways in a strip that cuts them off at its edges
     // (a board's columns scroll in the board itself).
@@ -716,6 +718,45 @@ fn no_view_tab_or_view_menu_lets_its_text_out() {
                 }
                 for o in overflows(cx) {
                     found.push(format!("{case}: {o}"));
+                }
+                // The search open in the bar, with a long query found (the rows narrowed) and
+                // with the worst one found nowhere ("No results for" it): the field stays in the
+                // bar, the tabs keep room beside it, and the message keeps to the window.
+                for (query, nothing) in [(WORD.to_owned(), false), (format!("{}0", worst()), true)]
+                {
+                    cx.update(|window, cx| table.update(cx, |t, cx| t.open_search(window, cx)));
+                    draw(cx);
+                    type_text(cx, &query);
+                    let what = if nothing {
+                        "nothing found"
+                    } else {
+                        "rows found"
+                    };
+                    assert_eq!(drawn(cx, "no-results"), nothing, "{case}, {what}");
+                    let field = rect(cx, "view-search-field");
+                    let tabs = rect(cx, "view-tabs");
+                    if field.right() > bar.right() + px(1.) || field.left() < bar.left() {
+                        found.push(format!(
+                            "{case}, {what}: the field {field:?} leaves the bar"
+                        ));
+                    }
+                    if tabs.size.width < px(60.) {
+                        found.push(format!(
+                            "{case}, {what}: the field leaves the tabs {tabs:?}"
+                        ));
+                    }
+                    for c in ["add-view", "view-settings", "view-search-clear"] {
+                        let b = rect(cx, c);
+                        if b.right() > bar.right() + px(1.) || b.left() < bar.left() {
+                            found.push(format!("{case}, {what}: {c} at {b:?} leaves the bar"));
+                        }
+                    }
+                    for o in overflows_with(cx, Some(field)) {
+                        found.push(format!("{case}, the search open, {what}: {o}"));
+                    }
+                    keys(cx, "escape");
+                    keys(cx, "escape");
+                    assert!(!drawn(cx, "view-search-field"), "{case}: the search closed");
                 }
                 // The + menu with the worst name typed.
                 cx.update(|window, cx| table.update(cx, |t, cx| t.open_add_view_menu(window, cx)));
