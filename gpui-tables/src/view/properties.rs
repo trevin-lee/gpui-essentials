@@ -301,6 +301,7 @@ impl TableView {
         self.new_relation = None;
         self.new_view = None;
         self.reopen = Reopen::default();
+        self.move_highlight = None;
     }
 
     /// The property the open menu is about: the column's, or a property page's.

@@ -589,8 +589,8 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     table or list (a board always groups). A pick is a `viewChanged` with `groupBy`, its folded
     groups let go and its `groupDate` kept only for a date.
   - **Date grouping**, while it groups by a date: Relative, Day, Week, Month or Year
-    (`groupDate`, absent for relative). Grouping by a date adds it under Group by, and the
-    settings open again on it, so → opens it.
+    (`groupDate`, absent for relative). Grouping by a date adds it under Group by and moves
+    the settings' highlight to it, so → opens it.
   - **Card properties** (a board) and **Properties** (a list) list the properties shown on cards
     or lines, in order, then the hidden ones. A hidden one pressed is shown after the others; a
     shown one opens its own submenu, to hide it or move it up or down (the list then in its new
