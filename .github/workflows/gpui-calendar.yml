@@ -12,10 +12,11 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/gpui-calendar.yml"
+  # A gpui-core change alone doesn't run this on a pull request: gpui-core's own workflow
+  # lints every crate and builds its tests then, and main's nightly run tests them all.
   pull_request:
     paths:
       - "gpui-calendar/**"
-      - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
