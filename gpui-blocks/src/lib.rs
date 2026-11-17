@@ -41,6 +41,7 @@
 //! ```
 
 mod block_menu;
+mod comments;
 pub mod docs;
 mod editor;
 mod find;

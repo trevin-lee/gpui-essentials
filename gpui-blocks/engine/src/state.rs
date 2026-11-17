@@ -452,6 +452,8 @@ pub struct BlockEditorState {
     pub(crate) reveal: std::cell::Cell<bool>,
     /// Finding on the page: the query, its matches, and the one shown (see [`Self::find`]).
     find: Option<Find>,
+    /// Text the host tints (see [`Self::set_tints`]).
+    tints: Vec<(BlockId, std::ops::Range<usize>)>,
     marked: Option<Marked>,
     /// An IME composition opened an undo group that is not committed yet.
     composition_open: bool,
@@ -531,6 +533,7 @@ impl BlockEditorState {
             scroll_handle: Some(gpui::ScrollHandle::new()),
             reveal: Default::default(),
             find: None,
+            tints: Vec::new(),
             marked: None,
             composition_open: false,
             goal_x: None,
@@ -949,6 +952,27 @@ impl BlockEditorState {
         if self.find.take().is_some() {
             cx.notify();
         }
+    }
+
+    /// Tints text, as a comment marks the words it's about: byte ranges of text leaves, drawn
+    /// under the find matches and the selection. Replaces the ranges set before; an empty list
+    /// clears them. They don't follow edits: set them again when the document changes. A range
+    /// past its leaf's end is cut at the end, and one of a block the document no longer has is
+    /// left out.
+    pub fn set_tints(
+        &mut self,
+        ranges: Vec<(BlockId, std::ops::Range<usize>)>,
+        cx: &mut Context<Self>,
+    ) {
+        if ranges != self.tints {
+            self.tints = ranges;
+            cx.notify();
+        }
+    }
+
+    /// The tinted text (see [`Self::set_tints`]).
+    pub fn tints(&self) -> &[(BlockId, std::ops::Range<usize>)] {
+        &self.tints
     }
 
     /// The matches being shown, in document order, and which is selected.
