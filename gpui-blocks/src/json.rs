@@ -344,6 +344,14 @@ impl Ids {
             .map(|(block, _)| *block)
     }
 
+    /// Gives `to` the lasting id `from` has (a block replaced by another in its place keeps its
+    /// id). `from` keeps it too, for undo, which brings it back.
+    pub(crate) fn carry(&mut self, from: BlockId, to: BlockId) {
+        if let Some(id) = self.0.get(&from).cloned() {
+            self.0.insert(to, id);
+        }
+    }
+
     fn get_or_new(&mut self, block: BlockId) -> String {
         self.0.entry(block).or_insert_with(new_id).clone()
     }
