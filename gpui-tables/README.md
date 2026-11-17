@@ -155,7 +155,8 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
 | ![Interactions grouped by month, each group with its count and a New row](docs/table-grouped.png) | ![A column's menu: its property (rename, change type, edit options), then sort, filter by an option, move, hide, with room for checks before the labels; its types open in a submenu beside Change type](docs/table-menu.png) |
 | ![A select's options as pills under a search field, the current one checked and highlighted; the event log on the right](docs/table-picker.png) | ![A date's month under its cell, the day it holds picked and today ringed, with Today and Clear](docs/table-date.png) |
 | ![Scrolled sideways: the names stay in place while the other columns move](docs/table-scrolled.png) | ![Worst-case text in every cell, each ending in an ellipsis](docs/table-worst.png) |
-| ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | |
+| ![A role typed in place: the field over its cell, grown to a second line over the row below](docs/table-edit.png) | ![Two selected rows carried by their handles: they fade where they were, a picture of the row says 2 rows, and a line shows where they'll land](docs/table-rows-drag.png) |
+| ![A row's menu under its handle: Open, Duplicate, Move up, Move down and Delete, each with its key](docs/table-rows.png) | |
 
 ![The Companies table in the light theme, sorted by two columns](docs/table-light.png)
 
@@ -220,7 +221,8 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
   place and hosts that did keep their field.
 - **Keys.** The arrows move the focused cell, Tab and shift-Tab move along a row and on to the
   next, Enter edits a cell, opens a row from its title, folds a group or makes a row; Escape
-  closes a menu and then lets go of the cell; ⌥↓ opens the column's menu. While a value is
+  closes a menu, then lets go of selected rows, then of the cell; ⌥↓ opens the column's menu
+  (the rows' while rows are selected); rows have keys of their own (below). While a value is
   typed in place the keys are the field's: the arrows move its caret, never the focused cell,
   and Delete and Backspace delete text, not the cell's value. Menus take the keyboard while
   open and open on their first entry (a column's menu on Sort ascending, under its property's
@@ -255,13 +257,57 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
   an order key after every row's (`order::between`) and the values that keep the row where it was
   made: the group's value, and what the filter's conditions ask for. When the host hands the row
   back, its title is focused.
+- **A row's handle.** Each row has a handle (⋮⋮) at its left edge, in its title cell's padding:
+  shown while a pointer is over the row, on the focused row and on selected rows, and always on
+  touch. A press on it selects the row and opens the rows' menu under it; ⌘-press adds the row to
+  the selection (or takes it out) and Shift-press selects every row from the last one picked,
+  without the menu. A right-click anywhere on a row opens the menu at the pointer, for the
+  selected rows when it's one of them.
+- **Selecting rows.** Selected rows are drawn in the selection colour. Space selects the focused
+  row (and again lets go of it), Shift-Up and Shift-Down run the selection on, and Up and Down
+  carry it to the next row. Left, Right, Tab, a press on a cell, editing a cell and Escape let go
+  of it (Escape first lets go of the rows, then of the cell). `TableView::select_row` and
+  `selected_rows` do the same for a host. Selected rows drag, duplicate, move and delete
+  together.
+- **Dragging rows.** Dragging a handle moves its row, and the selected rows with it when it's
+  one of them (dragging a row that isn't selected lets go of the others). It's the board's and
+  the list's drag, by their rules and their code: with a mouse, GPUI's drag and drop; with a
+  finger, a long press on the handle picks the row up while a pan (from the handle too) scrolls.
+  The rows fade where they were, a picture of the row (and how many rows) follows the pointer,
+  and a line shows where they'll land: above a row over its upper half, below it over its lower
+  half, a group's top over its header, its end over its New row. Near the top or bottom each
+  move scrolls a step. Escape puts them back. Dropping is one batch, as on a board:
+  - Within a group, a `rowsMoved` with keys between the new neighbours' (`order::n_between`,
+    the rows in the view's order).
+  - In another group of a grouped table, that and a `rowValueChanged` setting the group property
+    for each row that changes group (a multi-select or person swapping the group left for the
+    one joined).
+  - In a **sorted** view the sort places rows: a drop within a group does nothing, no line is
+    drawn, the group a row would join is marked instead, and a note at the table's foot says
+    which sort. A drop in another group is the `rowValueChanged` alone.
+  - Neighbours whose keys can't be put between renumber the manual order with `order::spread`,
+    in the same `rowsMoved`.
+  - `TableView::move_rows` does the same for a host's own control, by the groups in
+    `TableView::row_lanes`.
+- **The rows' menu** (gpui-core's `PopupMenu` in a `Popover`, as the column's): Open (for one
+  row), Duplicate, Move up, Move down and Delete, with their keys beside them, under a heading
+  with the count when there are several. Move up and Move down move the rows a place within
+  their group (for the keyboard and touch); they're off in a sorted view (the menu says why),
+  for rows in different groups, and at the group's ends. Delete removes one row at once, as
+  Notion does (the host can undo it); several, it asks first: "Delete 3 rows?", with Cancel
+  where it opens. The edits are in [Edits and events](#edits-and-events).
+- **Keys for rows.** Delete and Backspace empty the focused cell, as before, unless whole rows
+  are selected: then they delete those rows. ⌘⌫ deletes the selected rows, or the focused cell's
+  row. ⌘D duplicates them, ⌘/ opens their menu (as ⌥↓ does while rows are selected; with none,
+  ⌥↓ is still the column's menu), and ⌘⇧↑ and ⌘⇧↓ move them. While a value is typed in place
+  all of these are the field's.
 - **Touch.** With `TableTheme::with_touch(true)` (the default on iOS) rows, headers, the Open
-  button, group headers, New rows, menu entries and the month's days are at least 44 points
-  each way, column edges take a finger's drag across 44 points while their line stays thin, and
-  a finger's swipe scrolls either way.
+  button, a row's handle, group headers, New rows, menu entries and the month's days are at
+  least 44 points each way, column edges take a finger's drag across 44 points while their line
+  stays thin, and a finger's swipe scrolls either way.
 - **Nothing redraws while nothing changes,** and the table keeps no timers.
 
-Not in this first table: dragging rows to reorder them, deleting rows, picking ranges and times in the month
+Not in this first table: picking ranges and times in the month
 (it shows a range, and keeps a value's time of day and the length of its range), long-press column drags on touch (the menu's Move left and Move right do
 it), and showing the engine's `Issue`s beside the view.
 
@@ -777,6 +823,21 @@ How the host writes them to the server:
     deleting it): its `propertyChanged` (or `propertyDeleted`) and the other side's
     `propertyDeleted`.
   - Deleting one: `propertyDeleted`.
+- **Rows changed from the table** ([Table view](#table-view)):
+  - Dragging rows: `rowsMoved`, and a `rowValueChanged` for each one that changes group, in one
+    batch (as a board's drop). Move up and Move down: the same `rowsMoved`.
+  - Duplicating rows: for each, a `rowCreated` with a new id, the row's title and its values
+    (derived ones aside), ordered between the row and the next one (`order::between`; a
+    `rowsMoved` renumbering the manual order comes first when those can't be put between). A
+    relation's values are copied, and each two-way relation the row lists rows in adds a
+    `relationChanged` (`added` the rows it lists, made with `relation::set`), so the rows on the
+    other side list the copy too: the host writes them with `relation::back_edits`, as for any
+    relation edit. All the copies' edits are one batch. A row's icon and page content aren't in
+    a `rowCreated`; a host that copies them does so itself.
+  - Deleting rows: one `rowsDeleted` with every row. The other side of a two-way relation isn't
+    touched: it keeps the deleted row's id, which the views leave out while the row is
+    tombstoned, so undoing the delete (setting `deleted` back to null) brings the row back
+    whole, its relations included.
 - **Views changed from the bar** ([Changing views](#changing-views)):
   - Adding one, or duplicating one: `viewCreated` with the whole view.
   - Renaming, changing type, grouping, `groupDate`, card properties, removing sorts, clearing
@@ -811,7 +872,8 @@ the other as `backPropertyId`: People's Company lists companies, and Companies' 
 people back.
 
 When one side changes, the batch has the change on that side and a `relationChanged` saying which
-rows on the other side gain this row (`added`) and which lose it (`removed`). The host writes the
+rows on the other side gain this row (`added`) and which lose it (`removed`). A duplicated row's
+`rowCreated` comes with one too, for each two-way relation it lists rows in. The host writes the
 other side in the same batch; `engine::relation::back_edits` turns the `relationChanged` into
 those rows' `rowValueChanged`s from the host's current values, and says which rows it couldn't
 find or that are already full. `relation::set` makes the pair of edits, `relation::two_way_pair`
@@ -986,7 +1048,8 @@ nothing draws while nothing changes.
 The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`gpui-pre-ios`
 0.3.12). The crate builds for `aarch64-apple-ios-sim`, and CI checks it.
 
-- Every control is at least 44 points on touch (in the table view, `TableTheme::with_touch`): cell targets, header menus, the Open button,
+- Every control is at least 44 points on touch (in the table view, `TableTheme::with_touch`):
+  cell targets, header menus, the Open button, rows' handles,
   group headers, column resize handles (whose visible line stays thin), and the bar of views'
   tabs, + and settings.
 - Nothing is hover-only. What a pointer finds by hovering (the Open button, a column's menu, a
@@ -994,7 +1057,10 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
 - A tap selects a cell and a second tap edits it: a typed value's field takes the focus, so the
   keyboard comes up (gpui-core's `Input` is the platform's text input client, input methods and
   dictation included), with suggestions and capitals for titles and text and none for numbers,
-  links, addresses and phones. Pickers open as popovers on iPad and sheets on iPhone. A long press picks up a card or row to drag. Tables scroll both ways with momentum, and
+  links, addresses and phones. Pickers open as popovers on iPad and sheets on iPhone. A long
+  press picks up a card or row to drag (a table's row by its handle), and a tap on a table row's
+  handle opens its menu, whose Move up and Move down move it without dragging. Tables scroll both
+  ways with momentum, and
   the title column stays put.
 
 ## Not in v1
@@ -1019,6 +1085,7 @@ cargo test -p gpui-tables --no-default-features        # the same, with no GPUI 
 cargo test -p gpui-tables --release --test performance -- --nocapture
 cargo test -p gpui-tables --release --test view_performance -- --nocapture
 cargo run --release -p gpui-tables --features shots --example crm -- --shot out.png --scene menu
+cargo run --release -p gpui-tables --features shots --example crm -- --shot out.png --scene rows
 ```
 
 - `tests/model.rs`: every fixture reads into the typed model and writes back as the same JSON;
@@ -1059,6 +1126,18 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   on headers and New lines, sorted lists refusing reorder, multi-select swaps, new rows with
   their group's and filter's values, a long press carrying a row while a pan scrolls, 44-point
   targets on touch, no frames while idle, and no icon drawn for an `asset:` or invalid one.
+- `tests/rows.rs`: a table's rows as wholes: a row dragged by its handle within its group (its
+  key between its neighbours', a line where it lands, Escape putting it back) and into another
+  (the value and the key in one batch, onto a header, onto an empty group's New row), keys that
+  renumber, sorted tables refusing to reorder with a note (and a sorted grouped one changing only
+  the group), scrolling at the edge, selected rows (⌘- and Shift-presses, Space, Shift-arrows,
+  Escape) dragged together within and across groups, the rows' menu from the handle, a
+  right-click, ⌘/ and ⌥↓, Move up and down within a group, duplicating (title, values, order and
+  each two-way relation's `relationChanged`, which `relation::back_edits` writes back; keys that
+  renumber), deleting one row at once and several after asking (Cancel and Escape keeping them),
+  Delete emptying a cell but deleting selected rows and leaving a field's keys alone, a long
+  press on the handle carrying a row while a pan scrolls, the handle's 44 points on touch, and no
+  frames while idle.
 - `tests/properties.rs`: properties changed from the table: a column added of each type (its
   `propertyCreated` and `viewChanged` in one batch), from the keyboard, named for its type when
   nothing's typed; renaming; changing type (rows untouched, a select and a multi-select reading
@@ -1077,7 +1156,8 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   summary; every limit refused with a note; the keyboard (Up to the bar, Left, Right, Enter, ⌥↓,
   Down back, the + menu's field); 44-point targets on touch.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu (the property
-  menus too: the + menu, options, an option's page, number format, relation, delete, rename)
+  menus too: the + menu, options, an option's page, number format, relation, delete, rename; a
+  row's handle, the rows' menu and its delete confirm, and a row carried with the sort's note)
   at 360, 700 and 1400 wide (and in each typed value's field open in place, which stays in its cell, a text
   value's in the window), columns at their widths and their narrowest, on a board's cards, columns and
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers

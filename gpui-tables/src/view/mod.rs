@@ -47,6 +47,7 @@ mod list_render;
 pub mod ops;
 mod properties;
 mod render;
+mod rows;
 mod table;
 mod theme;
 mod view_bar;
@@ -55,6 +56,7 @@ mod views;
 pub use board::{BoardColumn, BoardSpot, CardGhost};
 pub use host::{RelatedDatabase, RelatedRow, TableHost, TextEdit, TextReply, TextTarget};
 pub use properties::PropertyMenu;
+pub use rows::Select;
 pub use table::{CellRef, Item, TableView};
 pub use theme::{ChipColors, OptionColors, TableColors, TableFonts, TableSizes, TableTheme};
 pub use views::ViewMenu;
@@ -96,6 +98,22 @@ actions!(
         PageDown,
         /// In the bar of views: opens the focused tab's menu (⌥↓).
         TabMenu,
+        /// Space: selects the focused row, or lets go of it.
+        SelectRow,
+        /// Shift-Up: the selection runs up a row.
+        SelectUp,
+        /// Shift-Down: the selection runs down a row.
+        SelectDown,
+        /// ⌘⌫: deletes the selected rows, or the focused row (several after asking).
+        DeleteRows,
+        /// ⌘D: duplicates the selected rows, or the focused row.
+        DuplicateRows,
+        /// ⌘/: opens the menu of the selected rows, or the focused row.
+        RowMenu,
+        /// ⌘⇧↑: moves the selected rows (or the focused row) up a place.
+        MoveRowsUp,
+        /// ⌘⇧↓: moves the selected rows (or the focused row) down a place.
+        MoveRowsDown,
     ]
 );
 
@@ -107,8 +125,9 @@ pub const CONTEXT: &str = "GpuiTablesTable";
 pub const VIEW_BAR: &str = "GpuiTablesViewBar";
 
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
-/// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; and the bar of views'
-/// ([`VIEW_BAR`]).
+/// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; a table's rows' (Space and
+/// Shift-arrows to select, ⌘⌫ to delete, ⌘D to duplicate, ⌘/ for their menu, ⌘⇧↑ and ⌘⇧↓ to
+/// move); and the bar of views' ([`VIEW_BAR`]).
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -127,6 +146,14 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("alt-down", ColumnMenu, c),
         KeyBinding::new("pageup", PageUp, c),
         KeyBinding::new("pagedown", PageDown, c),
+        KeyBinding::new("space", SelectRow, c),
+        KeyBinding::new("shift-up", SelectUp, c),
+        KeyBinding::new("shift-down", SelectDown, c),
+        KeyBinding::new("cmd-backspace", DeleteRows, c),
+        KeyBinding::new("cmd-d", DuplicateRows, c),
+        KeyBinding::new("cmd-/", RowMenu, c),
+        KeyBinding::new("cmd-shift-up", MoveRowsUp, c),
+        KeyBinding::new("cmd-shift-down", MoveRowsDown, c),
     ]);
     let b = Some(VIEW_BAR);
     cx.bind_keys([

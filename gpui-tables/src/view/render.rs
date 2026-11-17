@@ -8,11 +8,11 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, Entity, FontWeight,
-    Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Render, Role, ScrollEvent, SharedString,
-    StatefulInteractiveElement, Styled, TextAlign, TouchDragEvent, TouchPhase, Window, anchored,
-    canvas, deferred, div, point, px, uniform_list,
+    AnyElement, App, BoxShadow, ClickEvent, Context, DispatchPhase, DragMoveEvent, ElementId,
+    Entity, FontWeight, Hsla, InteractiveElement, IntoElement, LongPressEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, Role, ScrollEvent,
+    SharedString, StatefulInteractiveElement, Styled, TextAlign, TouchDragEvent, TouchPhase,
+    Window, anchored, canvas, deferred, div, point, px, uniform_list,
 };
 use gpui_core::{
     DatePickerColors, DismissReason, Icon, IconName, Input, InputState, MenuSelect, MonthGrid,
@@ -20,8 +20,10 @@ use gpui_core::{
     Press, Selectable as _,
 };
 
+use super::board::DraggedCard;
 use super::format;
 use super::host::person_label;
+use super::list_render::Landing;
 use super::table::{Action, Drag, Entry, Item, Popover, TableView, naive_day, type_icon};
 use crate::engine::{GroupKey, time};
 use crate::model::{Color, Doc, Person, Property, PropertyType, Value};
@@ -52,6 +54,10 @@ impl Render for TableView {
 impl TableView {
     fn render_table(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.clamp_scroll();
+        // A mouse drag of rows GPUI ended somewhere else (let go outside the table) is over.
+        if self.board.drag.as_ref().is_some_and(|d| !d.touch) && !cx.has_active_drag() {
+            self.board.drag = None;
+        }
         let t = self.theme.clone();
         let n = self.shown.items.len();
         let mut list = uniform_list(
@@ -79,6 +85,21 @@ impl TableView {
         let probe = canvas(
             move |b, _, _| bounds.set(b),
             move |_, _, window, _| {
+                // A finger's long press on a row's handle picks the row up (and the selected
+                // rows with it); the finger then drags it. A plain pan scrolls.
+                let e = entity.clone();
+                window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    let claimed = e
+                        .update(cx, |this, cx| this.long_press(ev, window, cx))
+                        .unwrap_or(false);
+                    if claimed {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
+                });
                 if dragging {
                     let e = entity.clone();
                     window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
@@ -129,6 +150,13 @@ impl TableView {
         .size_full();
 
         let popover = self.render_popover(window, cx);
+        // A finger's row follows it (the mouse's is drawn by GPUI).
+        let origin = self.bounds.get().origin;
+        let ghost = self.board.drag.as_ref().filter(|d| d.touch).map(|d| {
+            let at = d.at - origin - d.offset;
+            div().absolute().left(at.x).top(at.y).child(d.ghost.clone())
+        });
+        let note = self.render_drag_note();
         div()
             .id("gpui-tables")
             .debug_selector(|| "table".into())
@@ -168,9 +196,57 @@ impl TableView {
                 }
             }))
             .on_action(cx.listener(|this, _: &super::Cancel, window, cx| this.cancel(window, cx)))
+            // Delete and Backspace delete selected rows, and otherwise empty the focused cell.
             .on_action(cx.listener(|this, _: &super::Clear, window, cx| {
                 if this.popover.is_none() && !this.is_editing() {
-                    this.clear_cell(window, cx)
+                    this.ensure();
+                    if this.selected.is_empty() {
+                        this.clear_cell(window, cx)
+                    } else {
+                        let rows = this.acted_rows();
+                        this.ask_delete(rows, window, cx)
+                    }
+                }
+            }))
+            .on_action(cx.listener(|this, _: &super::DeleteRows, window, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.ensure();
+                    let rows = this.acted_rows();
+                    this.ask_delete(rows, window, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &super::DuplicateRows, window, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.ensure();
+                    let rows = this.acted_rows();
+                    let ids: Vec<&str> = rows.iter().map(String::as_str).collect();
+                    this.duplicate_rows(&ids, window, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &super::RowMenu, _, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.open_row_menu(cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &super::MoveRowsUp, window, cx| {
+                this.on_move_rows(-1, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &super::MoveRowsDown, window, cx| {
+                this.on_move_rows(1, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &super::SelectRow, _, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.toggle_focused_row(cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &super::SelectUp, _, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.extend_selection(-1, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &super::SelectDown, _, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.extend_selection(1, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &super::Edit, window, cx| {
@@ -181,15 +257,23 @@ impl TableView {
                     this.edit_cell(c, window, cx)
                 }
             }))
+            // ⌥↓: the selected rows' menu while rows are selected, else the column's.
             .on_action(cx.listener(|this, _: &super::ColumnMenu, _, cx| {
-                if !this.is_editing()
-                    && let Some(c) = this.cell
-                {
+                if this.is_editing() {
+                    return;
+                }
+                if !this.selected.is_empty() {
+                    this.open_row_menu(cx)
+                } else if let Some(c) = this.cell {
                     this.open_header_menu(c.column, cx)
                 }
             }))
             .on_action(cx.listener(|this, _: &super::PageUp, _, cx| this.on_page(-1, cx)))
             .on_action(cx.listener(|this, _: &super::PageDown, _, cx| this.on_page(1, cx)))
+            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<DraggedCard>, _, cx| {
+                this.drag_card_to(e.event.position, cx)
+            }))
+            .on_drop(cx.listener(|this, _: &DraggedCard, window, cx| this.drop_card(window, cx)))
             .on_scroll(cx.listener(|this, e: &ScrollEvent, window, cx| {
                 let d = e.delta.pixel_delta(window.line_height());
                 if d.x == px(0.) || d.y.abs() > d.x.abs() {
@@ -213,6 +297,8 @@ impl TableView {
             .child(self.render_header(cx))
             .child(list)
             .child(probe)
+            .children(note)
+            .children(ghost)
             .child(popover)
             .into_any_element()
     }
@@ -234,15 +320,29 @@ impl TableView {
     // while a menu or month is open they're its own (gpui-core's PopupMenu and MonthGrid): they
     // never move the focused cell.
 
+    // Selected rows follow Up and Down; Left, Right and Tab go back to cells, letting go of
+    // them.
+
     fn on_vertical(&mut self, d: isize, cx: &mut Context<Self>) {
         if !self.is_editing() && self.popover.is_none() {
-            self.move_cell(d, 0, cx)
+            self.move_cell(d, 0, cx);
+            self.selection_follows_focus();
         }
     }
 
     fn on_horizontal(&mut self, d: isize, cx: &mut Context<Self>) {
         if !self.is_editing() && self.popover.is_none() {
+            self.clear_selection();
             self.move_cell(0, d, cx)
+        }
+    }
+
+    fn on_move_rows(&mut self, d: isize, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_editing() && self.popover.is_none() {
+            self.ensure();
+            let rows = self.acted_rows();
+            let ids: Vec<&str> = rows.iter().map(String::as_str).collect();
+            self.move_rows_by(&ids, d, window, cx)
         }
     }
 
@@ -267,6 +367,7 @@ impl TableView {
             return;
         }
         if self.popover.is_none() {
+            self.clear_selection();
             self.tab(back, cx)
         }
     }
@@ -553,6 +654,8 @@ impl TableView {
             .items_center()
             .gap(t.px(6.))
             .px(t.px(t.sizes.cell_padding))
+            // The title's name over the rows' titles, after their handles (when there's room).
+            .when(column == 0 && roomy, |d| d.pl(self.handle_width()))
             .overflow_hidden()
             .border_r_1()
             .border_color(t.colors.line)
@@ -606,34 +709,97 @@ impl TableView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        // While rows are dragged: where they'd land, and each row's place in its group.
+        let landing = self
+            .board
+            .drag
+            .as_ref()
+            .and_then(|d| d.target)
+            .map(|(lane, slot)| Landing {
+                lane,
+                slot,
+                sorted: self.is_sorted(),
+            });
+        let mut slot = match (&self.board.drag, range.clone().next()) {
+            (Some(_), Some(start)) => self.slot_of(start),
+            _ => 0,
+        };
         range
             .filter_map(|ix| {
                 let item = *self.shown.items.get(ix)?;
                 Some(match item {
-                    Item::Row { row, .. } => self.render_row(ix, row, cx),
-                    Item::Group(g) => self.render_group(ix, g, cx),
-                    Item::New(g) => self.render_new(ix, g, cx),
+                    Item::Row { row, group } => {
+                        let lane = group.unwrap_or(0);
+                        let el = self.render_row(ix, row, lane, slot, landing, cx);
+                        slot += 1;
+                        el
+                    }
+                    Item::Group(g) => {
+                        slot = 0;
+                        self.render_group(ix, g, landing, cx)
+                    }
+                    Item::New(g) => self.render_new(ix, g, landing, cx),
                 })
             })
             .collect()
     }
 
-    fn render_row(&self, ix: usize, row: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_row(
+        &self,
+        ix: usize,
+        row: usize,
+        lane: usize,
+        slot: usize,
+        landing: Option<Landing>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = &self.theme;
         let cols = self.shown.columns.len();
         let cells: Vec<AnyElement> = (1..cols)
             .map(|c| self.render_cell(ix, row, c, cx))
             .collect();
+        let rid = self.rows[row].id.clone();
+        let selected = self.selected.contains(&rid);
+        let lifted = self
+            .board
+            .drag
+            .as_ref()
+            .is_some_and(|d| d.row_id == rid || d.others.iter().any(|(id, _)| *id == rid));
+        let count = self
+            .move_lanes()
+            .and_then(|l| l.get(lane))
+            .map_or(0, |l| l.rows.len());
+        let bar = Landing::bar(landing, lane, slot, count);
+        let pressed = rid.clone();
+        let hovered = rid.clone();
+        let shown = self.shown_serial;
+        let sel = format!("row:{rid}");
         div()
             .id(("row", ix))
+            .debug_selector(move || sel)
             .group("gpui-tables-row")
             .role(Role::Row)
+            .relative()
             .h(self.row_height())
             .w_full()
             .flex()
             .border_b_1()
             .border_color(t.colors.line)
             .hover(|s| s.bg(t.colors.hover))
+            .when(selected, |d| d.bg(t.colors.selection))
+            .when(lifted, |d| d.opacity(0.35))
+            .on_hover(
+                cx.listener(move |this, over: &bool, _, cx| this.hover_row(&hovered, *over, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    if this.still_shown(shown) {
+                        this.context_menu(ix, &pressed, e.position, window, cx);
+                    }
+                }),
+            )
             .when(cols > 0, |d| d.child(self.render_cell(ix, row, 0, cx)))
             .child(
                 div()
@@ -652,6 +818,7 @@ impl TableView {
                             .children(cells),
                     ),
             )
+            .when_some(bar, |d, top| d.child(self.landing_bar(top)))
             .into_any_element()
     }
 
@@ -682,6 +849,34 @@ impl TableView {
             None => self.cell_content(ix, row, r, p, row_focused, cx),
         };
         let label = format!("{}: {}", p.name, self.cell_text(r, p));
+        // The first column starts with the row's handle, in its padding's place.
+        let handle = (column == 0).then(|| {
+            let lane = self.lane_of(ix).unwrap_or(0);
+            let key = self
+                .move_lanes()
+                .and_then(|l| l.get(lane))
+                .map_or_else(|| "all".to_owned(), |l| l.key_string());
+            // With a pointer the handle is only made for the row under it, the focused row,
+            // selected rows and dragged ones: the others keep its room empty.
+            let dragged =
+                self.board.drag.as_ref().is_some_and(|d| {
+                    d.row_id == r.id || d.others.iter().any(|(id, _)| *id == r.id)
+                });
+            let built = t.touch
+                || row_focused
+                || dragged
+                || self.hovered_row.as_deref() == Some(r.id.as_str())
+                || self.selected.contains(&r.id);
+            if built {
+                self.render_handle(ix, row, key, cx)
+            } else {
+                div()
+                    .flex_none()
+                    .w(self.handle_width())
+                    .h_full()
+                    .into_any_element()
+            }
+        });
         div()
             .id(("cell", column))
             .debug_selector(move || format!("cell:{rid}:{pid}"))
@@ -692,6 +887,8 @@ impl TableView {
             .w(self.column_px(column))
             .h_full()
             .px(t.px(t.sizes.cell_padding))
+            .when(handle.is_some(), |d| d.pl_0())
+            .children(handle)
             .flex()
             .items_center()
             .when(numeric && !editing, |d| d.justify_end())
@@ -720,6 +917,7 @@ impl TableView {
                 let cell = super::CellRef { item: ix, column };
                 window.focus(&this.focus, cx);
                 this.popover = None;
+                this.clear_selection();
                 if is_check || this.cell == Some(cell) {
                     this.edit_cell(cell, window, cx);
                 } else {
@@ -1076,11 +1274,20 @@ impl TableView {
         }
     }
 
-    fn render_group(&self, ix: usize, g: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn render_group(
+        &self,
+        ix: usize,
+        g: usize,
+        landing: Option<Landing>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = &self.theme;
         let Some(group) = self.shown.groups.get(g) else {
             return div().into_any_element();
         };
+        // In a sorted view rows dropped in another group go where the sort puts them: the
+        // group is marked rather than a place in it.
+        let target = landing.is_some_and(|l| l.sorted && l.lane == g);
         let folded = self.shown.collapsed.get(g).copied().unwrap_or(false);
         let focused = self.cell.is_some_and(|c| c.item == ix);
         let key = group.key.to_string();
@@ -1110,6 +1317,11 @@ impl TableView {
             .border_color(t.colors.line)
             .hover(|s| s.bg(t.colors.hover))
             .when(focused, |d| d.border_2().border_color(t.colors.focus))
+            .when(target, |d| {
+                d.bg(t.colors.selection)
+                    .border_2()
+                    .border_color(t.colors.accent)
+            })
             .child(icon(
                 if folded {
                     IconName::ChevronRight
@@ -1141,9 +1353,22 @@ impl TableView {
             .into_any_element()
     }
 
-    fn render_new(&self, ix: usize, g: Option<usize>, cx: &mut Context<Self>) -> AnyElement {
+    fn render_new(
+        &self,
+        ix: usize,
+        g: Option<usize>,
+        landing: Option<Landing>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = &self.theme;
         let focused = self.cell.is_some_and(|c| c.item == ix);
+        // An empty group's place to land is above its New row.
+        let lane = g.unwrap_or(0);
+        let empty = self
+            .move_lanes()
+            .and_then(|l| l.get(lane))
+            .is_some_and(|l| l.rows.is_empty());
+        let bar = empty && landing.is_some_and(|l| !l.sorted && l.lane == lane && l.slot == 0);
         let key = g
             .and_then(|g| self.shown.groups.get(g))
             .map_or_else(|| "table".to_owned(), |g| g.key.to_string());
@@ -1155,6 +1380,7 @@ impl TableView {
             .focus_ring(false)
             .accessibility_label("New row")
             .debug_selector(move || format!("new:{key}"))
+            .relative()
             .h(self.row_height())
             .w_full()
             .flex()
@@ -1172,6 +1398,7 @@ impl TableView {
                 t.colors.text_faint,
             ))
             .child(line("New"))
+            .when(bar, |d| d.child(self.landing_bar(true)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 if !this.still_shown(shown) {
                     return;
@@ -1233,6 +1460,18 @@ impl TableView {
             Popover::AddView | Popover::NewBoard | Popover::View { .. } => {
                 return popover.into_any_element();
             }
+            // From the point a right-click pressed, else the first row's handle (or the top of
+            // the table, while it's scrolled away).
+            Popover::Row { rows, at, .. } => match at {
+                Some(at) => gpui::Bounds::new(*at, gpui::size(px(1.), px(1.))),
+                None => rows
+                    .first()
+                    .and_then(|id| self.handle_bounds(id))
+                    .unwrap_or_else(|| {
+                        let b = self.bounds.get();
+                        gpui::Bounds::new(b.origin, gpui::size(px(1.), self.header_height()))
+                    }),
+            },
         };
         // A menu's width, or what's seen of its anchor if that's wider (gpui-core's Popover
         // hangs it from the part of a header that's in the window), inside the window (its
@@ -1309,6 +1548,20 @@ impl TableView {
                     )
                     .into_any_element()
             }
+            Popover::Row { rows, .. } => popover
+                .accessibility_label(if rows.len() == 1 {
+                    "Row".to_owned()
+                } else {
+                    format!("{} rows", rows.len())
+                })
+                .match_trigger_width(false)
+                .p(t.px(4.))
+                .child(
+                    body.w(t.pixels(t.sizes.menu_width, self.rem).min(room))
+                        .children(self.render_note(cx))
+                        .child(self.popup_menu(cx)),
+                )
+                .into_any_element(),
             Popover::AddRelation => popover
                 .accessibility_label("Add a relation")
                 .p(t.px(4.))

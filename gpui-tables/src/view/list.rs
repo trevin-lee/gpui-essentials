@@ -114,14 +114,25 @@ impl TableView {
         self.list.0.borrow().base_handle.offset().y
     }
 
-    /// A line's bounds in the window, as the list is scrolled now.
+    /// A line's height and the room left and right of the lines: a list's, or a table's rows
+    /// (their lower borders included, and no room).
+    fn line_geometry(&self) -> (Pixels, Pixels) {
+        if self.shown.list.is_some() {
+            let m = self.list_metrics();
+            (m.line, m.pad)
+        } else {
+            (self.row_height(), px(0.))
+        }
+    }
+
+    /// A line's bounds in the window, as the list (or a table's rows) is scrolled now.
     pub(crate) fn item_bounds(&self, ix: usize) -> Option<Bounds<Pixels>> {
         let list = self.lines_bounds()?;
-        let m = self.list_metrics();
-        let top = list.top() + self.list_offset() + m.line * ix as f32;
+        let (line, pad) = self.line_geometry();
+        let top = list.top() + self.list_offset() + line * ix as f32;
         Some(Bounds::new(
-            point(list.left() + m.pad, top),
-            size(list.size.width - m.pad * 2., m.line),
+            point(list.left() + pad, top),
+            size(list.size.width - pad * 2., line),
         ))
     }
 
@@ -132,8 +143,8 @@ impl TableView {
         if !list.contains(&at) {
             return None;
         }
-        let m = self.list_metrics();
-        let y = (at.y - list.top() - self.list_offset()) / m.line;
+        let (line, _) = self.line_geometry();
+        let y = (at.y - list.top() - self.list_offset()) / line;
         let ix = y.floor();
         if ix < 0. || ix as usize >= self.shown.items.len() {
             return None;
@@ -148,7 +159,7 @@ impl TableView {
             return None;
         };
         let lane = self.lane_of(ix)?;
-        let key = self.shown.list.as_ref()?.get(lane)?.key_string();
+        let key = self.move_lanes()?.get(lane)?.key_string();
         let b = self.item_bounds(ix)?;
         let id = self.shown_row(row)?.id.clone();
         b.contains(&at).then_some((id, key, b))
@@ -175,10 +186,11 @@ impl TableView {
 
     // --- Keys -------------------------------------------------------------------------------
 
-    /// Focuses a row's line in the group `key`, and keeps it there when the rows are worked out
-    /// again (a row in several groups is focused in this one).
+    /// Focuses a row's line (a table's row, in the focused column) in the group `key`, and keeps
+    /// it there when the rows are worked out again (a row in several groups is focused in this
+    /// one).
     pub(crate) fn focus_line(&mut self, row_id: &str, key: &str) {
-        let Some(lanes) = self.shown.list.as_ref() else {
+        let Some(lanes) = self.move_lanes() else {
             return;
         };
         let item = self.shown.items.iter().position(|i| {
@@ -193,7 +205,8 @@ impl TableView {
             })
         });
         if let Some(item) = item {
-            self.cell = Some(CellRef { item, column: 0 });
+            let column = self.cell.map_or(0, |c| c.column);
+            self.cell = Some(CellRef { item, column });
         }
         self.focus_group = Some((row_id.to_owned(), key.to_owned()));
     }
@@ -222,35 +235,41 @@ impl TableView {
 
     // --- Dragging ---------------------------------------------------------------------------
 
-    /// Where a row dragged to `at` would land: a group it can go to and a slot among its rows
-    /// (0 is above the first; the count, below the last). Over a row's upper half it's above
-    /// that row, over its lower half below; over a group's header it's the group's top, over
-    /// its New line its end. Near the list's top or bottom each move scrolls it a step.
+    /// Where a row dragged to `at` would land, in a list or a table: a group it can go to and
+    /// a slot among its rows (0 is above the first; the count, below the last). Over a row's
+    /// upper half it's above that row, over its lower half below; over a group's header it's
+    /// the group's top, over its New line its end. Near the top or bottom each move scrolls a
+    /// step.
     pub(crate) fn drag_row_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(drag) = &self.board.drag else {
             return;
         };
-        let (row_id, from_key, was) = (drag.row_id.clone(), drag.from.clone(), drag.at);
+        let was = drag.at;
         self.auto_scroll_list(at, was);
+        let moving = self.dragged_rows();
         let target = (|| {
-            let lanes = self.shown.list.as_ref()?;
-            let row = self.rows.iter().position(|r| r.id == row_id)?;
-            let from = lanes.iter().position(|c| c.key_string() == from_key)?;
-            if !self.bounds.get().contains(&at) {
+            let lanes = self.move_lanes()?;
+            if moving.is_empty() || !self.bounds.get().contains(&at) {
                 return None;
             }
             let list = self.lines_bounds()?;
             let n = self.shown.items.len();
-            // Past the last line is the end of the last group.
+            // Above the first line (over a table's header) is the top of the first group; past
+            // the last, the end of the last.
             let probe = point(at.x.clamp(list.left(), list.right() - px(1.)), at.y);
-            let (ix, frac) = self.item_at(probe).unwrap_or((n.checked_sub(1)?, 1.));
+            let last = n.checked_sub(1)?;
+            let (ix, frac) = if at.y < list.top() {
+                (0, 0.)
+            } else {
+                self.item_at(probe).unwrap_or((last, 1.))
+            };
             let lane = self.lane_of(ix)?;
             let slot = match self.shown.items[ix] {
                 Item::Row { .. } => self.slot_of(ix) + usize::from(frac >= 0.5),
                 Item::Group(_) => 0,
                 Item::New(_) => lanes.get(lane)?.rows.len(),
             };
-            self.can_move(row, from, lane).then_some((lane, slot))
+            self.can_move_all(&moving, lane).then_some((lane, slot))
         })();
         if let Some(d) = &mut self.board.drag {
             d.at = at;
@@ -259,7 +278,7 @@ impl TableView {
         cx.notify();
     }
 
-    /// Scrolls the list a step while a dragged row is near its top or bottom (a step for each
+    /// Scrolls the list (or a table's rows) a step while a dragged row is near its top or bottom (a step for each
     /// move of the pointer; there's no timer, so it stops when the pointer does).
     fn auto_scroll_list(&mut self, at: Point<Pixels>, was: Point<Pixels>) {
         let Some(list) = self.lines_bounds() else {

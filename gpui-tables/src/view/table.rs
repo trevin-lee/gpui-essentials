@@ -60,6 +60,8 @@ pub(crate) enum Action {
     Prop(super::properties::PropAction),
     /// Something done to a view: its pages, and the edits they make.
     View(super::views::ViewAction),
+    /// Something done to rows from their menu.
+    Row(super::rows::RowAction),
 }
 
 /// One entry of a menu or picker.
@@ -178,6 +180,14 @@ pub(crate) enum Popover {
         page: super::views::ViewPage,
         anchor: super::views::ViewAnchor,
     },
+    /// The menu of rows (the selected ones, or the one pressed): open, duplicate, move,
+    /// delete. It hangs from the first row's handle, or from the point a right-click pressed.
+    Row {
+        rows: Vec<String>,
+        at: Option<gpui::Point<Pixels>>,
+        /// Asking whether to delete them (more than one row).
+        confirm: bool,
+    },
 }
 
 impl Popover {
@@ -263,6 +273,9 @@ pub(crate) struct Shown {
     /// A list's groups (or its one group of every row, when it doesn't group), when the view
     /// is a list: what a drag moves rows between, as a board's columns.
     pub list: Option<Vec<super::board::BoardColumn>>,
+    /// A table's groups (or its one group of every row, when it doesn't group), when the view
+    /// is a table: what a dragged row moves between, as a list's groups.
+    pub table: Option<Vec<super::board::BoardColumn>>,
     /// The properties a board's cards and a list's lines show beside the title (places in
     /// `properties`).
     pub card_properties: Vec<usize>,
@@ -306,7 +319,7 @@ pub struct TableView {
     /// The typed value being edited in place.
     pub(crate) editor: Option<Editor>,
     /// A row asked for with `rowCreated`, focused when the host hands it back.
-    pending_row: Option<String>,
+    pub(crate) pending_row: Option<String>,
     /// The focused line's row, read when the rows were first replaced since they were last
     /// worked out (later the lines' places name other rows): what the focus follows then.
     focus_before_rows: Option<Option<String>>,
@@ -334,6 +347,12 @@ pub struct TableView {
     pub(crate) bar: super::views::Bar,
     /// A board being added that waits for what it groups by.
     pub(crate) new_view: Option<super::views::NewView>,
+    /// The table's selected rows, by id, in the order they were selected.
+    pub(crate) selected: Vec<String>,
+    /// The row a Shift-click or Shift-arrow extends the selection from.
+    pub(crate) anchor: Option<String>,
+    /// The row a pointer is over: its handle is made, the others' aren't.
+    pub(crate) hovered_row: Option<String>,
 }
 
 impl Focusable for TableView {
@@ -386,6 +405,9 @@ impl TableView {
             pending_column: None,
             bar: super::views::Bar::default(),
             new_view: None,
+            selected: Vec::new(),
+            anchor: None,
+            hovered_row: None,
         }
     }
 
@@ -469,6 +491,8 @@ impl TableView {
         self.list.scroll_to_item(0, ScrollStrategy::Top);
         self.board = super::board::Board::default();
         self.focus_group = None;
+        self.selected.clear();
+        self.anchor = None;
         self.invalidate(cx);
     }
 
@@ -692,6 +716,8 @@ impl TableView {
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let list = (view.kind == ViewType::List)
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
+        let table = (board.is_none() && list.is_none())
+            .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let mut card_properties: Vec<usize> = Vec::new();
         for id in &view.card_properties {
             if let Some(i) = fields.properties.iter().position(|p| p.id == *id)
@@ -734,6 +760,7 @@ impl TableView {
             today,
             board,
             list,
+            table,
             card_properties,
         };
         // The focus follows its row (or a pending new row), or stays on the same kind of line.
@@ -799,6 +826,9 @@ impl TableView {
             self.popover = None;
             self.close_property_menu();
         }
+        // Selected rows the view no longer shows (deleted, filtered out) are let go, and the
+        // rows' menu closes when one of its rows is gone.
+        self.prune_selection();
         if let Some(id) = self.pending_column.clone()
             && let Some(c) = self.shown.columns.iter().position(|c| c.property_id == id)
         {
@@ -1066,6 +1096,7 @@ impl TableView {
         };
         let p = p.clone();
         self.cell = Some(cell);
+        self.clear_selection();
         match p.kind {
             PropertyType::Checkbox => {
                 let on = self.rows[row]
@@ -1465,9 +1496,22 @@ impl TableView {
             self.finish_editor(false, true, window, cx);
             return;
         }
+        // A dragged row goes back where it was.
+        if let Some(d) = self.board.drag.take() {
+            if !d.touch {
+                cx.stop_active_drag(window);
+            }
+            cx.notify();
+            return;
+        }
         self.date = None;
         if self.popover.take().is_none() && self.drag.take().is_none() {
-            self.cell = None;
+            // Selected rows are let go first, then the focused cell.
+            if self.selected.is_empty() {
+                self.cell = None;
+            } else {
+                self.clear_selection();
+            }
         }
         cx.notify();
     }
@@ -1601,6 +1645,7 @@ impl TableView {
             }
             Some(Popover::Property { .. } | Popover::AddRelation) => self.property_entries(),
             Some(Popover::View { .. } | Popover::NewBoard) => self.view_entries(),
+            Some(Popover::Row { .. }) => self.row_entries(),
             Some(Popover::Columns) => {
                 let shown: Vec<&str> = self
                     .shown
@@ -1870,6 +1915,10 @@ impl TableView {
             self.activate_view(a, window, cx);
             return;
         }
+        if let Action::Row(a) = action {
+            self.activate_row(a, window, cx);
+            return;
+        }
         let Some(fields) = self.database.database.clone() else {
             return;
         };
@@ -2022,7 +2071,7 @@ impl TableView {
                     self.emit_edits(edits, window, cx);
                 }
             }
-            Action::Prop(_) | Action::View(_) => {}
+            Action::Prop(_) | Action::View(_) | Action::Row(_) => {}
             Action::ClearValue => {
                 if let Some((row, p)) = self.picker_target() {
                     if p.kind == PropertyType::Relation {

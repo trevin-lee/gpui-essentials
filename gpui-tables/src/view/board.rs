@@ -6,9 +6,10 @@
 //! keeps one entity and one [`TableHost`](super::TableHost) whatever the view's type, and
 //! [`TableView::set_view`] switches between them.
 //!
-//! A list moves its rows by the same rules: its groups are [`BoardColumn`]s too, and the drag
-//! state, [`TableView::move_card`], the drop and the finger's long press here serve both. Only
-//! where a pointer is (which column and slot, or which line) is each view's own.
+//! A list and a table move their rows by the same rules: their groups are [`BoardColumn`]s too,
+//! and the drag state, [`TableView::move_rows`], the drop and the finger's long press here serve
+//! all three. Only where a pointer is (which column and slot, or which line) and what picks a row
+//! up (a card, a line, a table row's handle) are each view's own.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -89,6 +90,9 @@ pub(crate) struct CardDrag {
     pub row_id: String,
     /// The column it was picked up from, by key.
     pub from: String,
+    /// The other rows carried with it (a table's selected rows), each with the key of the
+    /// group it's in, in the view's order.
+    pub others: Vec<(String, String)>,
     /// Where in the card it was taken, from its top left corner.
     pub offset: Point<Pixels>,
     /// The pointer or finger, in the window.
@@ -593,14 +597,26 @@ impl TableView {
         cx.notify();
     }
 
-    /// What rows move between: a board's columns or a list's groups.
+    /// What rows move between: a board's columns, a list's groups or a table's.
     pub(crate) fn move_lanes(&self) -> Option<&Vec<BoardColumn>> {
-        self.shown.board.as_ref().or(self.shown.list.as_ref())
+        self.shown
+            .board
+            .as_ref()
+            .or(self.shown.list.as_ref())
+            .or(self.shown.table.as_ref())
     }
 
-    /// Whether a card (or a list's row) can go from column (or group) `from` to `to`: within
-    /// one only when the view has no sort (the sort places it), and across only when the group
-    /// property can take the other's value.
+    /// The groups rows move between, in order: a board's columns, a list's groups or a table's
+    /// (one of every row when the view doesn't group). Their places are what
+    /// [`TableView::move_card`] and [`TableView::move_rows`] take.
+    pub fn row_lanes(&mut self) -> &[BoardColumn] {
+        self.ensure();
+        self.move_lanes().map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether a card (or a list's or table's row) can go from column (or group) `from` to
+    /// `to`: within one only when the view has no sort (the sort places it), and across only
+    /// when the group property can take the other's value.
     pub(crate) fn can_move(&self, row: usize, from: usize, to: usize) -> bool {
         let Some(cols) = self.move_lanes() else {
             return false;
@@ -611,12 +627,31 @@ impl TableView {
         if t.folded {
             return false;
         }
-        let sorted = self.shown.view.as_ref().is_some_and(|v| !v.sort.is_empty());
         if from == to {
-            return !sorted;
+            return !self.is_sorted();
         }
         self.moved_value(row, f.key.as_ref(), t.key.as_ref())
             .is_some()
+    }
+
+    /// Whether the view has a sort, which places its rows: then none are ordered by hand.
+    pub(crate) fn is_sorted(&self) -> bool {
+        self.shown.view.as_ref().is_some_and(|v| !v.sort.is_empty())
+    }
+
+    /// Whether rows (each with the group it's in) can go to `to` together: each one can, or
+    /// in a sorted view is already there (the sort places it), and at least one moves.
+    pub(crate) fn can_move_all(&self, rows: &[(usize, usize)], to: usize) -> bool {
+        let sorted = self.is_sorted();
+        let mut any = false;
+        for &(row, from) in rows {
+            if self.can_move(row, from, to) {
+                any = true;
+            } else if !(sorted && from == to) {
+                return false;
+            }
+        }
+        any
     }
 
     /// The group property's value for a row moved between columns (see [`ops::moved_value`]).
@@ -647,8 +682,8 @@ impl TableView {
     /// the column changes. Keys that can't be put between (an older scheme's, two the same)
     /// renumber the whole manual order.
     ///
-    /// In a list it moves a row between its groups, by their places in
-    /// [`TableView::list_groups`] (0 and 0 for a list that doesn't group), by the same rules.
+    /// In a list or a table it moves a row between its groups, by their places in
+    /// [`TableView::row_lanes`] (0 and 0 for one that doesn't group), by the same rules.
     pub fn move_card(
         &mut self,
         row_id: &str,
@@ -658,77 +693,126 @@ impl TableView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.move_rows(&[(row_id, from)], to, index, window, cx);
+    }
+
+    /// Moves several rows, each from the group it's in (by its place in
+    /// [`TableView::row_lanes`]), to group `to`, together and in the view's order, to be the
+    /// `index`th of that group's other rows: [`TableView::move_card`] for a table's selected
+    /// rows. One batch: a `rowsMoved` with keys between their new neighbours'
+    /// (`order::n_between`, or the manual order renumbered when those can't be put between),
+    /// and a `rowValueChanged` for each row that changes group. In a sorted view only the
+    /// group values change, and rows already in `to` stay where the sort puts them.
+    pub fn move_rows(
+        &mut self,
+        rows: &[(&str, usize)],
+        to: usize,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.ensure();
-        let Some(row) = self.rows.iter().position(|r| r.id == row_id) else {
-            return;
-        };
-        if !self.can_move(row, from, to) {
+        let moving = self.moving_rows(rows);
+        if moving.is_empty() || !self.can_move_all(&moving, to) {
             return;
         }
         let list = self.shown.board.is_none();
         let Some(cols) = self.move_lanes() else {
             return;
         };
-        let sorted = self.shown.view.as_ref().is_some_and(|v| !v.sort.is_empty());
+        let sorted = self.is_sorted();
+        let ids: Vec<usize> = moving.iter().map(|&(r, _)| r).collect();
         let others: Vec<usize> = cols[to]
             .rows
             .iter()
             .copied()
-            .filter(|&r| r != row)
+            .filter(|r| !ids.contains(r))
             .collect();
         let index = index.min(others.len());
         let mut edits = Vec::new();
-        let unmoved = from == to && cols[from].rows.iter().position(|&r| r == row) == Some(index);
+        // Where they'd be is where they are: nothing to order.
+        let mut after: Vec<usize> = others[..index].to_vec();
+        after.extend(&ids);
+        after.extend(&others[index..]);
+        let unmoved = after == cols[to].rows;
         if !sorted && !unmoved && !others.is_empty() {
             let prev = index.checked_sub(1).map(|i| others[i]);
             let next = others.get(index).copied();
-            let key = order::between(
+            let keys = order::n_between(
                 prev.map(|i| self.rows[i].order.as_str()),
                 next.map(|i| self.rows[i].order.as_str()),
+                ids.len(),
             );
-            match key {
-                Ok(key) => {
-                    if key != self.rows[row].order {
-                        edits.push(Edit::RowsMoved {
-                            row_ids: vec![row_id.to_owned()],
-                            orders: vec![key],
-                        });
+            match keys {
+                Ok(keys) => {
+                    let (mut row_ids, mut orders) = (Vec::new(), Vec::new());
+                    for (&row, key) in ids.iter().zip(keys) {
+                        if key != self.rows[row].order {
+                            row_ids.push(self.rows[row].id.clone());
+                            orders.push(key);
+                        }
+                    }
+                    if !row_ids.is_empty() {
+                        edits.push(Edit::RowsMoved { row_ids, orders });
                     }
                 }
-                Err(_) => edits.extend(self.renumber(row, prev, next)),
+                Err(_) => edits.extend(self.renumber(&ids, prev, next)),
             }
         }
-        if from != to {
+        for &(row, from) in &moving {
+            if from == to {
+                continue;
+            }
             let (f, t) = (cols[from].key.clone(), cols[to].key.clone());
             if let Some((property_id, value)) = self.moved_value(row, f.as_ref(), t.as_ref())
                 && self.rows[row].value(&property_id) != value.as_ref()
             {
                 edits.push(Edit::RowValueChanged {
-                    row_id: row_id.to_owned(),
+                    row_id: self.rows[row].id.clone(),
                     property_id,
                     value,
                 });
             }
         }
         let key = cols[to].key_string();
+        let first = self.rows[moving[0].0].id.clone();
+        let moved_across = moving[0].1 != to;
         if list {
             // The focus goes with the row, to the group it went to.
-            self.focus_line(row_id, &key);
-        } else if from != to {
+            self.focus_line(&first, &key);
+        } else if moved_across {
             self.board.focus = Some(BoardFocus {
                 column: key,
-                spot: SpotId::Card(row_id.to_owned()),
+                spot: SpotId::Card(first),
             });
         }
         self.emit_edits(edits, window, cx);
         cx.notify();
     }
 
-    /// The whole manual order renumbered (`order::spread`) with `row` after `prev` (or before
-    /// `next`): a `rowsMoved` of every row whose key changes.
-    fn renumber(&self, row: usize, prev: Option<usize>, next: Option<usize>) -> Vec<Edit> {
+    /// Rows by id, each with the group it's in, in the view's order (the first given first
+    /// among equals); those the view hasn't are left out.
+    pub(crate) fn moving_rows(&self, rows: &[(&str, usize)]) -> Vec<(usize, usize)> {
+        let mut out: Vec<(usize, usize)> = Vec::new();
+        for &(id, from) in rows {
+            if let Some(row) = self.rows.iter().position(|r| r.id == id)
+                && !out.iter().any(|&(r, _)| r == row)
+            {
+                out.push((row, from));
+            }
+        }
+        if out.len() > 1 {
+            let place = |row: usize| self.shown.rows.iter().position(|&r| r == row);
+            out.sort_by_key(|&(row, _)| place(row));
+        }
+        out
+    }
+
+    /// The whole manual order renumbered (`order::spread`) with `rows` after `prev` (or
+    /// before `next`): a `rowsMoved` of every row whose key changes.
+    fn renumber(&self, rows: &[usize], prev: Option<usize>, next: Option<usize>) -> Vec<Edit> {
         let mut all: Vec<usize> = (0..self.rows.len())
-            .filter(|&i| !self.rows[i].is_deleted() && i != row)
+            .filter(|&i| !self.rows[i].is_deleted() && !rows.contains(&i))
             .collect();
         engine::sort::manual(&self.rows, &mut all);
         let at = match (prev, next) {
@@ -739,7 +823,7 @@ impl TableView {
             (None, Some(n)) => all.iter().position(|&i| i == n).unwrap_or(0),
             (None, None) => all.len(),
         };
-        all.insert(at, row);
+        all.splice(at..at, rows.iter().copied());
         let keys = order::spread(all.len());
         let (mut row_ids, mut orders) = (Vec::new(), Vec::new());
         for (i, k) in all.into_iter().zip(keys) {
@@ -757,24 +841,34 @@ impl TableView {
 
     // --- Dragging ---------------------------------------------------------------------------
 
-    /// Picks a card (or a list's row) up: by the mouse (GPUI's drag has begun) or a finger (a
-    /// long press). Returns the picture to draw under the pointer.
+    /// Picks a card (or a list's or table's row) up, with `others` (a table's other selected
+    /// rows, each with its group's key) carried along: by the mouse (GPUI's drag has begun) or
+    /// a finger (a long press). Returns the picture to draw under the pointer.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin_card_drag(
         &mut self,
         row_id: &str,
         from: &str,
+        others: Vec<(String, String)>,
         offset: Point<Pixels>,
         at: Point<Pixels>,
         touch: bool,
         cx: &mut Context<Self>,
     ) -> Entity<CardGhost> {
         self.ensure();
-        let (title, lines) = match self.rows.iter().find(|r| r.id == row_id) {
+        let (title, mut lines) = match self.rows.iter().find(|r| r.id == row_id) {
             Some(r) => (self.card_title(r), self.card_lines(r)),
             None => (String::new(), Vec::new()),
         };
-        let inline = self.shown.list.is_some();
-        let (width, height) = if inline {
+        if !others.is_empty() {
+            lines = vec![format!("{} rows", others.len() + 1)];
+        }
+        let inline = self.shown.board.is_none();
+        let (width, height) = if self.shown.table.is_some() {
+            // A table's row: as wide as its title column, or a menu if that's narrower.
+            let menu = self.theme.pixels(self.theme.sizes.menu_width, self.rem);
+            (self.column_px(0).max(menu), self.row_height())
+        } else if inline {
             self.line_size()
         } else {
             let m = self.board_metrics();
@@ -792,6 +886,7 @@ impl TableView {
         self.board.drag = Some(CardDrag {
             row_id: row_id.to_owned(),
             from: from.to_owned(),
+            others,
             offset,
             at,
             target: None,
@@ -800,6 +895,22 @@ impl TableView {
         });
         self.drag_card_to(at, cx);
         ghost
+    }
+
+    /// The rows a drag carries, each with the group it was picked up from (by place), the
+    /// picked one first.
+    pub(crate) fn dragged_rows(&self) -> Vec<(usize, usize)> {
+        let (Some(drag), Some(cols)) = (&self.board.drag, self.move_lanes()) else {
+            return Vec::new();
+        };
+        std::iter::once((&drag.row_id, &drag.from))
+            .chain(drag.others.iter().map(|(r, k)| (r, k)))
+            .filter_map(|(id, key)| {
+                let row = self.rows.iter().position(|r| r.id == *id)?;
+                let from = cols.iter().position(|c| c.key_string() == *key)?;
+                Some((row, from))
+            })
+            .collect()
     }
 
     /// The card's title as a card shows it.
@@ -879,21 +990,19 @@ impl TableView {
     pub(crate) fn drag_card_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         // The rows may have changed during the drag: their places are worked out again first.
         self.ensure();
-        if self.shown.list.is_some() {
+        if self.shown.board.is_none() {
             self.drag_row_to(at, cx);
             return;
         }
         let Some(drag) = &self.board.drag else {
             return;
         };
-        let (row_id, from_key) = (drag.row_id.clone(), drag.from.clone());
         self.auto_scroll(at, drag.at);
+        let moving = self.dragged_rows();
         let target = (|| {
             let cols = self.shown.board.as_ref()?;
-            let row = self.rows.iter().position(|r| r.id == row_id)?;
-            let from = cols.iter().position(|c| c.key_string() == from_key)?;
             let to = self.column_at(at)?;
-            if !self.can_move(row, from, to) {
+            if moving.is_empty() || !self.can_move_all(&moving, to) {
                 return None;
             }
             let n = cols[to].rows.len();
@@ -975,6 +1084,9 @@ impl TableView {
     /// Lets go of a dragged card (or list's row) where it is: a move, if it's over somewhere it
     /// can go.
     pub(crate) fn drop_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The rows may have changed during the drag: their places are worked out again first.
+        self.ensure();
+        let moving = self.dragged_rows();
         let Some(drag) = self.board.drag.take() else {
             return;
         };
@@ -982,28 +1094,33 @@ impl TableView {
         let Some((to, slot)) = drag.target else {
             return;
         };
-        self.ensure();
         let list = self.shown.board.is_none();
         let Some(cols) = self.move_lanes() else {
-            return;
-        };
-        let Some(from) = cols.iter().position(|c| c.key_string() == drag.from) else {
-            return;
-        };
-        let Some(row) = self.rows.iter().position(|r| r.id == drag.row_id) else {
             return;
         };
         // The column it was over may be gone, if the rows changed during the drag.
         let Some(dest) = cols.get(to) else {
             return;
         };
-        // The slot counts the card itself when it's in that column; the index doesn't.
-        let index = match dest.rows.iter().position(|&r| r == row) {
-            Some(p) if p < slot => slot - 1,
-            _ => slot,
-        };
+        if moving.is_empty() {
+            return;
+        }
+        // The slot counts the moving rows above it when they're in that column; the index
+        // doesn't.
+        let above = dest
+            .rows
+            .iter()
+            .take(slot)
+            .filter(|r| moving.iter().any(|(m, _)| m == *r))
+            .count();
+        let index = slot.saturating_sub(above);
         let key = dest.key_string();
-        self.move_card(&drag.row_id, from, to, index, window, cx);
+        let ids: Vec<(String, usize)> = moving
+            .iter()
+            .map(|&(r, from)| (self.rows[r].id.clone(), from))
+            .collect();
+        let refs: Vec<(&str, usize)> = ids.iter().map(|(id, f)| (id.as_str(), *f)).collect();
+        self.move_rows(&refs, to, index, window, cx);
         if list {
             self.focus_line(&drag.row_id, &key);
         } else {
