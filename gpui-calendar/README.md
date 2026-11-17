@@ -109,7 +109,7 @@ their look.
   an event: `Edit`, `Delete`, `ChangeCalendar` and `Rsvp`, the last three asking "this event,
   following or all?" first for a repeating event. A read-only event's panel has no Edit,
   Delete or Change. `open_panel(id)`, `close_panel()` and `panel_event()` drive it from your
-  app; Escape or a click outside closes it.
+  app; Escape or a click outside closes it, and Delete or Backspace is its Delete.
 - **The mini month** (`mini_month`, off by default): gpui-core's `MonthGrid` to jump to a date.
   Where the calendar is wide (its days still at least 600 pixels with the month beside them),
   it's a column at the calendar's left; narrower, or on touch, it's behind the title: a click
