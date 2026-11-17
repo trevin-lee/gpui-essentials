@@ -50,6 +50,7 @@ mod draw;
 mod editor;
 mod element;
 pub mod extension;
+mod find;
 mod frame;
 mod host;
 mod id;
@@ -86,6 +87,7 @@ pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
 pub use extension::{CustomNode, Extension, Extensions, InlineContext};
+pub use find::FindMatch;
 /// The Markdown parser's syntax tree for `source`, or why it has none: a parser panic too (see
 /// its docs), so no input brings the app down.
 pub use import::parse as parse_markdown;

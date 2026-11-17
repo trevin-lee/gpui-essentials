@@ -100,6 +100,14 @@ impl RenderOnce for BlockEditor {
         let (focus, snapshot, backgrounds, keep, list_items) = self.state.update(cx, |state, _| {
             let snapshot = state.snapshot();
             let mut backgrounds: HashMap<u64, Vec<(Range<usize>, Hsla)>> = HashMap::new();
+            // Found text first, so the selected match's selection draws over it.
+            let found = look.attention.opacity(0.35);
+            for m in state.find_matches().0 {
+                backgrounds
+                    .entry(m.block.as_u64())
+                    .or_default()
+                    .push((m.range.clone(), found));
+            }
             for (block, range) in state.selection_ranges() {
                 // Atoms paint whole (O(1) lookup, not a scan of the leaves).
                 let range = match state.model.doc.get(block).map(|e| &e.content) {

@@ -436,6 +436,8 @@ pub struct BlockEditorState {
     pub(crate) scroll_handle: Option<gpui::ScrollHandle>,
     /// The caret moved and should be scrolled into view after layout.
     pub(crate) reveal: std::cell::Cell<bool>,
+    /// Finding on the page: the query, its matches, and the one shown (see [`Self::find`]).
+    find: Option<Find>,
     marked: Option<Marked>,
     /// An IME composition opened an undo group that is not committed yet.
     composition_open: bool,
@@ -514,6 +516,7 @@ impl BlockEditorState {
             a11y_value: RefCell::default(),
             scroll_handle: Some(gpui::ScrollHandle::new()),
             reveal: Default::default(),
+            find: None,
             marked: None,
             composition_open: false,
             goal_x: None,
@@ -893,6 +896,208 @@ impl BlockEditorState {
         Ok(changed)
     }
 
+    /// Finds `query` on the page: every match is highlighted, and the first at or after the
+    /// selection's start is selected and scrolled to. Letters match whatever their case unless `case_sensitive`.
+    /// The matches follow edits until [`Self::clear_find`].
+    pub fn find(&mut self, query: &str, case_sensitive: bool, cx: &mut Context<Self>) {
+        let matches = self.model.find(query, case_sensitive);
+        // From where the selection starts, so a selected word is its own first match.
+        let current = self
+            .model
+            .doc
+            .resolve_selection(self.model.selection())
+            .ok()
+            .and_then(|range| {
+                self.first_match_from(&matches, range.start.block, range.start.offset)
+            })
+            .or((!matches.is_empty()).then_some(0));
+        self.find = Some(Find {
+            query: query.to_string(),
+            case_sensitive,
+            matches,
+            current,
+        });
+        self.show_match(cx);
+    }
+
+    /// Selects the next match, after the last back to the first.
+    pub fn find_next(&mut self, cx: &mut Context<Self>) {
+        self.step_match(true, cx);
+    }
+
+    /// Selects the previous match, before the first back to the last.
+    pub fn find_previous(&mut self, cx: &mut Context<Self>) {
+        self.step_match(false, cx);
+    }
+
+    /// Stops finding: nothing is highlighted any more. The selection stays.
+    pub fn clear_find(&mut self, cx: &mut Context<Self>) {
+        if self.find.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The matches being shown, in document order, and which is selected.
+    pub fn find_matches(&self) -> (&[super::FindMatch], Option<usize>) {
+        match &self.find {
+            Some(find) => (&find.matches, find.current),
+            None => (&[], None),
+        }
+    }
+
+    /// Replaces the selected match with `text`, keeping the marks it had, and selects the next.
+    /// `false` when there's no match or the editor is read-only.
+    pub fn replace_match(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        let Some(m) = self.current_match() else {
+            return false;
+        };
+        if self.readonly {
+            return false;
+        }
+        if self.select_to_replace(&m).is_err()
+            || self
+                .model
+                .insert_text(text, EditOrigin::Command("replace"))
+                .is_err()
+        {
+            return false;
+        }
+        self.after_edit(EditOrigin::Command("replace"), cx);
+        if let Some(find) = &mut self.find {
+            find.current = Self::match_from(
+                &self.model,
+                &find.matches,
+                m.block,
+                m.range.start + text.len(),
+            )
+            .or((!find.matches.is_empty()).then_some(0));
+        }
+        self.show_match(cx);
+        true
+    }
+
+    /// Replaces every match with `text`, as one undo step, and returns how many.
+    pub fn replace_all_matches(&mut self, text: &str, cx: &mut Context<Self>) -> usize {
+        let matches = match &self.find {
+            Some(find) if !self.readonly => find.matches.clone(),
+            _ => return 0,
+        };
+        let replaced = self.group_edits(cx, |state, _| {
+            // Last first, so the ranges before each stay where they were.
+            let mut replaced = 0;
+            for m in matches.iter().rev() {
+                if state.select_to_replace(m).is_ok()
+                    && state
+                        .model
+                        .insert_text(text, EditOrigin::Command("replace_all"))
+                        .is_ok()
+                {
+                    replaced += 1;
+                }
+            }
+            replaced
+        });
+        if replaced > 0 {
+            self.after_edit(EditOrigin::Command("replace_all"), cx);
+        }
+        replaced
+    }
+
+    fn current_match(&self) -> Option<super::FindMatch> {
+        let find = self.find.as_ref()?;
+        find.matches.get(find.current?).cloned()
+    }
+
+    fn select_match(&mut self, m: &super::FindMatch) -> Result<(), super::SelectionError> {
+        self.model.set_selection(BlockSelection::Text {
+            anchor: BlockPosition::new(m.block, m.range.start),
+            head: BlockPosition::new(m.block, m.range.end),
+        })
+    }
+
+    /// Selects `m` so typing replaces it with text marked as its first character is.
+    fn select_to_replace(&mut self, m: &super::FindMatch) -> Result<(), super::SelectionError> {
+        self.select_match(m)?;
+        self.model.stored_marks = self
+            .model
+            .doc
+            .inline(m.block)
+            .and_then(|inline| inline.mark_after(m.range.start))
+            .cloned();
+        Ok(())
+    }
+
+    /// Selects the current match and scrolls to it.
+    fn show_match(&mut self, cx: &mut Context<Self>) {
+        if let Some(m) = self.current_match()
+            && self.select_match(&m).is_ok()
+        {
+            self.reveal.set(true);
+            self.selection_changed(cx);
+        }
+        cx.notify();
+    }
+
+    fn step_match(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let n = find.matches.len();
+        if n == 0 {
+            return;
+        }
+        find.current = Some(match find.current {
+            Some(i) if forward => (i + 1) % n,
+            Some(i) => (i + n - 1) % n,
+            None => 0,
+        });
+        self.show_match(cx);
+    }
+
+    /// Finds the query again after an edit, keeping the place among the matches.
+    fn refind(&mut self) {
+        let Some(find) = &self.find else {
+            return;
+        };
+        let matches = self.model.find(&find.query, find.case_sensitive);
+        let current = find
+            .current
+            .map(|i| i.min(matches.len().saturating_sub(1)))
+            .filter(|_| !matches.is_empty());
+        if let Some(find) = &mut self.find {
+            find.matches = matches;
+            find.current = current;
+        }
+    }
+
+    fn first_match_from(
+        &self,
+        matches: &[super::FindMatch],
+        block: BlockId,
+        offset: usize,
+    ) -> Option<usize> {
+        Self::match_from(&self.model, matches, block, offset)
+    }
+
+    /// The first of `matches` at or after `offset` in `block`, in document order.
+    fn match_from(
+        model: &BlockEditorModel,
+        matches: &[super::FindMatch],
+        block: BlockId,
+        offset: usize,
+    ) -> Option<usize> {
+        let order: std::collections::HashMap<BlockId, usize> = model
+            .document()
+            .leaves()
+            .enumerate()
+            .map(|(i, leaf)| (leaf.id(), i))
+            .collect();
+        let at = (order.get(&block).copied()?, offset);
+        matches
+            .iter()
+            .position(|m| (order.get(&m.block).copied().unwrap_or(0), m.range.start) >= at)
+    }
+
     /// Run `f`, and keep every edit it makes as one undo step: a host's change made of several
     /// calls (taking back a typed `/…`, then running a command) undoes in one go. Each edit
     /// still sends its own `Changed`.
@@ -1005,6 +1210,7 @@ impl BlockEditorState {
     // ---- internal edit plumbing -------------------------------------------
 
     fn after_edit(&mut self, origin: EditOrigin, cx: &mut Context<Self>) {
+        self.refind();
         self.goal_x = None;
         self.reveal.set(true);
         self.pause_blink(cx);
@@ -3336,4 +3542,12 @@ pub(crate) fn highlights(
         },
     );
     styles
+}
+
+/// Finding on the page.
+struct Find {
+    query: String,
+    case_sensitive: bool,
+    matches: Vec<super::FindMatch>,
+    current: Option<usize>,
 }

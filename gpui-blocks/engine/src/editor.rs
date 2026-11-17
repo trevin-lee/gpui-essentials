@@ -81,6 +81,13 @@ impl BlockEditorModel {
     }
 
     /// Read-only view of the block tree.
+    /// Every place `query` occurs in the document's text, in document order (see
+    /// [`FindMatch`](crate::FindMatch)). Letters match whatever their case unless
+    /// `case_sensitive`.
+    pub fn find(&self, query: &str, case_sensitive: bool) -> Vec<crate::FindMatch> {
+        super::find::find(self.document(), query, case_sensitive)
+    }
+
     pub fn document(&self) -> DocumentRef<'_> {
         DocumentRef { doc: &self.doc }
     }
