@@ -10,15 +10,15 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Autocapitalize, AvailableSpace, Bounds, ClipboardItem, Context, CursorStyle,
-    DispatchPhase, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId,
-    InteractiveElement as _, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Refineable as _, RenderOnce,
-    Role, ScrollEvent, ShapedLine, SharedString, StatefulInteractiveElement as _, Style,
-    StyleRefinement, Styled, Subscription, TextAlign, TextInputAction, TextInputConfiguration,
-    TextRun, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div, fill, point,
-    prelude::FluentBuilder as _, px, relative, rems, size,
+    App, AppContext as _, Autocapitalize, AvailableSpace, Bounds, ClipboardItem, Context,
+    CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla,
+    InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Refineable as _, RenderOnce, Role, ScrollEvent, ShapedLine, SharedString,
+    StatefulInteractiveElement as _, Style, StyleRefinement, Styled, Subscription, TextAlign,
+    TextInputAction, TextInputConfiguration, TextRun, UTF16Selection, UnderlineStyle, Window,
+    WrappedLine, actions, div, fill, point, prelude::FluentBuilder as _, px, relative, rems, size,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -69,8 +69,33 @@ actions!(
         Indent,
         /// Shift-Tab in a code editor: the line, or every selected line, moved out.
         Outdent,
+        /// ⌘F in a code editor: its find bar, the query selected.
+        FindOpen,
+        /// ⌘G (or Enter in the find bar): the next match.
+        FindNext,
+        /// ⌘⇧G (or Shift-Enter in the find bar): the match before.
+        FindPrevious,
+        /// Escape in the find bar: closes it, and the keyboard goes back to the text.
+        FindClose,
     ]
 );
+
+/// The find bar's context.
+const FIND_CONTEXT: &str = "GpuiCoreFind";
+
+/// The most matches a find marks.
+const MAX_MATCHES: usize = 10_000;
+
+/// A code editor's find bar: its field, and the matches for what's typed in it.
+struct Find {
+    query: Entity<InputState>,
+    open: bool,
+    matches: Vec<Range<usize>>,
+    /// The text and the query the matches were found for.
+    for_text: String,
+    for_query: String,
+    _events: Subscription,
+}
 
 const CONTEXT: &str = "GpuiCoreInput";
 /// A code editor's context: the field's, and `code`.
@@ -172,6 +197,10 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("shift-tab", Outdent, code),
         KeyBinding::new("ctrl-tab", crate::FocusNext, code),
         KeyBinding::new("ctrl-shift-tab", crate::FocusPrev, code),
+        KeyBinding::new(cmd!("f"), FindOpen, code),
+        KeyBinding::new(cmd!("g"), FindNext, code),
+        KeyBinding::new(cmd!("shift-g"), FindPrevious, code),
+        KeyBinding::new("escape", FindClose, Some(FIND_CONTEXT)),
     ]);
 }
 
@@ -237,6 +266,8 @@ pub struct InputState {
     highlighter: Option<(crate::text::HighlightFn, SharedString)>,
     /// The colours worked out last, and the text they're for.
     highlights: Option<(String, crate::text::Highlights)>,
+    /// A code editor's find bar, once it's been opened.
+    find: Option<Find>,
     rows: (usize, usize),
     submit_on_enter: bool,
     /// What the platform keyboard is told, over what the field works out for itself.
@@ -290,6 +321,7 @@ impl InputState {
             error: None,
             highlighter: None,
             highlights: None,
+            find: None,
             rows: (1, 1),
             submit_on_enter: false,
             keyboard: None,
@@ -1057,7 +1089,8 @@ impl InputState {
     }
 
     fn indent(&mut self, _: &Indent, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.code {
+        // Not while the find bar has the keyboard.
+        if !self.code || !self.focus.is_focused(window) {
             cx.propagate();
         } else if self.selected.is_empty() {
             self.replace(self.selected.clone(), INDENT, EditKind::Other, window, cx);
@@ -1067,7 +1100,7 @@ impl InputState {
     }
 
     fn outdent(&mut self, _: &Outdent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.code {
+        if self.code && self.focus.is_focused(window) {
             self.reindent(false, window, cx);
         } else {
             cx.propagate();
@@ -1131,6 +1164,148 @@ impl InputState {
         window.notify_text_input_changed(&self.focus);
         cx.emit(InputEvent::Change);
         cx.notify();
+    }
+
+    // ---- Find.
+
+    fn find_open(&mut self, _: &FindOpen, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.code {
+            cx.propagate();
+            return;
+        }
+        if self.find.is_none() {
+            let query = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+            let events = cx.subscribe_in(
+                &query,
+                window,
+                |this: &mut Self, _, e: &InputEvent, _, cx| match e {
+                    InputEvent::Change => {
+                        // From where the selection starts: what's typed is found as it grows.
+                        let from = this.selected.start;
+                        this.refind(cx);
+                        this.go_to_match(from, 1, cx);
+                    }
+                    InputEvent::PressEnter { secondary } => {
+                        let from = if *secondary {
+                            this.selected.start
+                        } else {
+                            this.selected.end
+                        };
+                        this.go_to_match(from, if *secondary { -1 } else { 1 }, cx);
+                    }
+                    _ => {}
+                },
+            );
+            self.find = Some(Find {
+                query,
+                open: false,
+                matches: Vec::new(),
+                for_text: String::new(),
+                for_query: String::new(),
+                _events: events,
+            });
+        }
+        let Some(f) = self.find.as_mut() else { return };
+        f.open = true;
+        let query = f.query.clone();
+        // A selection on one line is what's looked for.
+        if !self.selected.is_empty() && !self.text[self.selected.clone()].contains('\n') {
+            let text = self.text[self.selected.clone()].to_string();
+            query.update(cx, |q, cx| q.set_value(text, window, cx));
+        }
+        query.update(cx, |q, cx| {
+            q.select_all(window, cx);
+            q.focus(window, cx);
+        });
+        self.refind(cx);
+        cx.notify();
+    }
+
+    fn find_next(&mut self, _: &FindNext, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.code || self.find.is_none() {
+            cx.propagate();
+            return;
+        }
+        self.refind(cx);
+        self.go_to_match(self.selected.end, 1, cx);
+    }
+
+    fn find_previous(&mut self, _: &FindPrevious, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.code || self.find.is_none() {
+            cx.propagate();
+            return;
+        }
+        self.refind(cx);
+        self.go_to_match(self.selected.start, -1, cx);
+    }
+
+    fn find_close(&mut self, _: &FindClose, window: &mut Window, cx: &mut Context<Self>) {
+        match self.find.as_mut() {
+            Some(f) if f.open => {
+                f.open = false;
+                window.focus(&self.focus, cx);
+                cx.notify();
+            }
+            _ => cx.propagate(),
+        }
+    }
+
+    /// Finds the query in the text again if either changed: case aside where that keeps every
+    /// character's place, as written otherwise.
+    fn refind(&mut self, cx: &App) {
+        let Some(f) = self.find.as_mut() else { return };
+        let query = f.query.read(cx).value().to_string();
+        if f.for_text == self.text && f.for_query == query {
+            return;
+        }
+        f.matches.clear();
+        if !query.is_empty() {
+            let (hay, needle) = (self.text.to_lowercase(), query.to_lowercase());
+            let folded = hay.len() == self.text.len() && needle.len() == query.len();
+            let found: Vec<usize> = if folded {
+                hay.match_indices(&needle).map(|(i, _)| i).collect()
+            } else {
+                self.text.match_indices(&query).map(|(i, _)| i).collect()
+            };
+            f.matches = found
+                .into_iter()
+                .map(|i| i..i + query.len())
+                .filter(|r| {
+                    self.text.is_char_boundary(r.start) && self.text.is_char_boundary(r.end)
+                })
+                .take(MAX_MATCHES)
+                .collect();
+        }
+        f.for_text = self.text.clone();
+        f.for_query = query;
+    }
+
+    /// Selects the first match at or after `from` (`dir` 1), or the last before it (-1),
+    /// round the ends.
+    fn go_to_match(&mut self, from: usize, dir: isize, cx: &mut Context<Self>) {
+        let Some(f) = self.find.as_ref() else { return };
+        let m = &f.matches;
+        let pick = if dir > 0 {
+            m.iter().find(|r| r.start >= from).or(m.first())
+        } else {
+            m.iter()
+                .rev()
+                .find(|r| r.end <= from && r.start < from)
+                .or(m.last())
+        };
+        if let Some(r) = pick.cloned() {
+            self.selected = r;
+            self.reversed = false;
+            self.goal_x = None;
+            cx.notify();
+        }
+    }
+
+    /// The find bar, while it's open: its field, the current match's place and how many.
+    fn find_bar(&self) -> Option<(Entity<InputState>, Option<usize>, usize)> {
+        let f = self.find.as_ref().filter(|f| f.open)?;
+        let at = f.matches.iter().position(|r| *r == self.selected);
+        Some((f.query.clone(), at, f.matches.len()))
     }
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
@@ -1705,6 +1880,7 @@ impl Styled for Input {
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme().clone();
+        let bar_theme = theme.clone();
         let s = self.state.clone();
         let error = s.read(cx).error_line();
         let (focus, multiline, code, masked, empty, value, placeholder) = {
@@ -1782,6 +1958,10 @@ impl RenderOnce for Input {
             .on_action(window.listener_for(&s, InputState::show_character_palette))
             .on_action(window.listener_for(&s, InputState::indent))
             .on_action(window.listener_for(&s, InputState::outdent))
+            .on_action(window.listener_for(&s, InputState::find_open))
+            .on_action(window.listener_for(&s, InputState::find_next))
+            .on_action(window.listener_for(&s, InputState::find_previous))
+            .on_action(window.listener_for(&s, InputState::find_close))
             .on_mouse_down(
                 MouseButton::Left,
                 window.listener_for(&s, InputState::mouse_down),
@@ -1803,6 +1983,69 @@ impl RenderOnce for Input {
                     .focus_visible(move |s| s.border_color(theme.ring).shadow(vec![ring]))
             });
         el.style().refine(&self.style);
+        // A code editor's find bar, over its top right while it's open.
+        let find = s.read(cx).find_bar();
+        let el = el.when_some(find, |el, (query, at, count)| {
+            let close = s.clone();
+            let found = match (at, count) {
+                (_, 0) => "No matches".to_string(),
+                (Some(i), n) => format!("{} of {n}", i + 1),
+                (None, n) => format!("{n} found"),
+            };
+            el.relative().child(
+                div()
+                    .id("gpui-core-find")
+                    .key_context(FIND_CONTEXT)
+                    .debug_selector(|| "code-find".into())
+                    .absolute()
+                    .top(css(6.))
+                    .right(css(10.))
+                    .w(css(280.))
+                    .flex()
+                    .items_center()
+                    .gap(css(6.))
+                    .px(css(8.))
+                    .py(css(4.))
+                    .rounded(bar_theme.radius_md())
+                    .border_1()
+                    .border_color(bar_theme.border)
+                    .bg(bar_theme.popover)
+                    .text_color(bar_theme.popover_foreground)
+                    .font_family(bar_theme.font_family.clone())
+                    .text_size(bar_theme.text.sm)
+                    .shadow_md()
+                    // A press in it is its own, not the text's.
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(&query)
+                                .appearance(false)
+                                .accessibility_label("Find in the text"),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(bar_theme.muted_foreground)
+                            .child(found),
+                    )
+                    .child(
+                        crate::Press::new("gpui-core-find-close")
+                            .accessibility_label("Close find")
+                            .debug_selector(|| "code-find-close".into())
+                            .flex_none()
+                            .rounded(bar_theme.radius_sm())
+                            .child(
+                                crate::Icon::new(crate::IconName::X)
+                                    .color(bar_theme.muted_foreground),
+                            )
+                            .on_click(move |_, window, cx| {
+                                close.update(cx, |c, cx| c.find_close(&FindClose, window, cx))
+                            }),
+                    ),
+            )
+        });
         el.child(TextBox {
             state: s,
             colors: self.colors,
@@ -1839,6 +2082,8 @@ struct Prepaint {
     numbers: Vec<(Point<Pixels>, ShapedLine, bool)>,
     /// The line marked wrong, in view: its band, and its message and where that's drawn.
     error: Option<(Bounds<Pixels>, Point<Pixels>, ShapedLine)>,
+    /// The find bar's matches in view (the current one is the selection).
+    matches: Vec<Bounds<Pixels>>,
     selection: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
 }
@@ -2154,6 +2399,33 @@ impl Element for TextBox {
         }
         let shown = if first <= last { first..last } else { 0..0 };
         let error_line = s.error_line();
+        // The find bar's matches on the lines in view.
+        let mut matches = Vec::new();
+        if let Some(f) = s.find.as_ref().filter(|f| f.open && f.for_text == s.text) {
+            let from = s
+                .layout
+                .lines
+                .get(shown.start)
+                .map_or(0, |(start, _)| *start);
+            let to = s
+                .layout
+                .lines
+                .get(shown.end.saturating_sub(1))
+                .map_or(0, |(start, l)| start + l.len());
+            for r in f.matches.iter().filter(|r| r.end >= from && r.start <= to) {
+                if *r == s.selected {
+                    continue;
+                }
+                if let (Some(a), Some(b)) = (s.position_for(r.start), s.position_for(r.end))
+                    && (a.y - b.y).abs() < px(0.5)
+                {
+                    matches.push(Bounds::from_corners(
+                        origin + point(a.x, a.y),
+                        origin + point(b.x, a.y + lh),
+                    ));
+                }
+            }
+        }
         // The line marked wrong, if it's in view: a band across it, and its message a little
         // after its text, drawn but not laid out.
         let error = error_line.as_ref().and_then(|(line, message)| {
@@ -2255,6 +2527,7 @@ impl Element for TextBox {
             text_bounds: bounds,
             numbers,
             error,
+            matches,
             selection,
             caret,
         }
@@ -2304,6 +2577,9 @@ impl Element for TextBox {
         window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
             if let Some((band, _, _)) = &p.error {
                 window.paint_quad(fill(*band, theme.destructive.opacity(0.14)));
+            }
+            for m in p.matches.drain(..) {
+                window.paint_quad(fill(m, theme.attention.opacity(0.3)));
             }
             for b in p.selection.drain(..) {
                 window.paint_quad(fill(b, self.colors.selection.unwrap_or(theme.selection())));
