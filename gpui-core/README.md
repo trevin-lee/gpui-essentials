@@ -1,8 +1,12 @@
 # gpui-core
 
 Components for [GPUI](https://www.gpui.rs) apps on macOS and iOS, drawn in the host's theme.
-It replaces GPUI Kit in this workspace's crates, covering what they use. See
+It replaced GPUI Kit in this workspace's crates, covering what they use. See
 [PLAN.md](PLAN.md) for the inventory and the build order.
+
+![gpui-core's gallery in the dark theme: buttons in four sizes and five variants, a segmented
+control, toggles, a slider and an open menu with a check, a submenu, a shortcut and a disabled
+item](docs/gallery.png)
 
 - **Theme.** `Theme` holds the colours, fonts and sizes. Its colour names are the web app's
   CSS variables in snake case (`background`, `muted_foreground`, `ring`, …). The host sets it
@@ -89,7 +93,7 @@ Depend on GPUI under its own name, at the same version as this crate:
 ```toml
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.12" }
-gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials" }
+gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 # The app's window. Without `font-kit`, GPUI draws no text on macOS (GPUI Kit turned it on
 # for you).
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
@@ -113,6 +117,20 @@ fn run(cx: &mut App) {
     gpui_core::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Hello)).unwrap();
 }
 ```
+
+Components draw Lucide icons from gpui-core's assets, so the app serves them:
+`gpui_platform::application().with_assets(gpui_core::Icons)`.
+
+## The gallery
+
+Every component in one window, from the repository's root:
+
+```sh
+cargo run -p gpui-core --example gallery              # dark; --light for the light theme
+cargo run -p gpui-core --features shots --example gallery -- --shot out.png
+```
+
+`--shot` draws the window offscreen into a PNG without showing it, as the picture above was made.
 
 ## Licence
 

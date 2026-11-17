@@ -316,7 +316,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         );
         design.attendees = vec![
             Attendee::new("Priya Raman", Response::Accepted).organizer(true),
-            Attendee::new("Trevin Lee", Response::NeedsAction).me(true),
+            Attendee::new("Alex Morgan", Response::NeedsAction).me(true),
             Attendee::new("Maya Chen", Response::Tentative),
             Attendee::new("Jordan Alvarez-Whitfield", Response::Declined),
         ];

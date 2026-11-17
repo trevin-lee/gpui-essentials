@@ -65,6 +65,11 @@ pub use theme::{FlowColors, Palette, Pencil};
 pub use tree::{Layout, Tree, TreeDirection, TreeLayout};
 pub use types::*;
 
+// The README's example, compiled as a doctest.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 /// Sets the flow up: its key bindings. Call once, after `gpui_core::init`.
 pub fn init(cx: &mut gpui::App) {
     bind_keys(cx);

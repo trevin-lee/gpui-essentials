@@ -5,7 +5,7 @@ members = ["gpui-blocks", "gpui-blocks/engine", "gpui-calendar", "gpui-chatwidge
 
 [workspace.package]
 edition = "2024"
-# GPUI Kit 0.9 needs it.
+# The Rust the crates are built and tested with (rust-toolchain.toml).
 rust-version = "1.100"
 license = "Apache-2.0"
 repository = "https://github.com/trevin-lee/gpui-essentials"
