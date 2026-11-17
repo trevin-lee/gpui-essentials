@@ -137,6 +137,12 @@ fn extensions_with(
         .fold(ext, |ext, widget| ext.with(WidgetPlugin(widget.clone())))
 }
 
+/// Reads the system clipboard's HTML (see [`Options::html_clipboard`]).
+type HtmlClipboard = Arc<dyn Fn(&App) -> Option<String>>;
+
+/// The most HTML a paste converts; a larger clipboard pastes as its plain text.
+const MAX_PASTED_HTML: usize = 4 << 20;
+
 /// Turns a picture picked from the slash menu's Image item into the Markdown destination to
 /// write, or `None` to insert nothing.
 type ImageLink = Arc<dyn Fn(&Path) -> Option<String>>;
@@ -152,6 +158,7 @@ pub struct Options {
     docs: Option<Arc<dyn Docs>>,
     embeds: Option<Arc<EmbedFn>>,
     mentions: Option<Arc<dyn Mentions>>,
+    html_clipboard: Option<HtmlClipboard>,
     gutter: Pixels,
     top: Pixels,
     compact_below: Pixels,
@@ -168,6 +175,7 @@ impl Default for Options {
             docs: None,
             embeds: None,
             mentions: None,
+            html_clipboard: None,
             gutter: px(GUTTER),
             top: px(TOP),
             compact_below: px(COMPACT_BELOW),
@@ -193,6 +201,7 @@ impl std::fmt::Debug for Options {
             .field("docs", &self.docs.is_some())
             .field("embeds", &self.embeds.is_some())
             .field("mentions", &self.mentions.is_some())
+            .field("html_clipboard", &self.html_clipboard.is_some())
             .field("gutter", &self.gutter)
             .field("top", &self.top)
             .field("compact_below", &self.compact_below)
@@ -272,6 +281,16 @@ impl Options {
     /// [`crate::mentions`]). Without it, `@` is an ordinary character.
     pub fn mentions(mut self, mentions: impl Mentions) -> Self {
         self.mentions = Some(Arc::new(mentions));
+        self
+    }
+
+    /// Reads the HTML the system clipboard holds, if any, so a paste from a web page or Google
+    /// Docs keeps its headings, lists, code, tables, links and marks (see [`crate::html`]).
+    /// GPUI's clipboard has only the plain text, so the app reads the HTML itself: on macOS the
+    /// general pasteboard's `public.html`, on iOS `UIPasteboard`'s `public.html`. Without it, or
+    /// when it returns `None`, a paste is the plain text, as before. ⇧⌘V always pastes plain text.
+    pub fn html_clipboard(mut self, read: impl Fn(&App) -> Option<String> + 'static) -> Self {
+        self.html_clipboard = Some(Arc::new(read));
         self
     }
 
@@ -397,6 +416,8 @@ pub struct Editor {
     pub(crate) slash: Option<Slash>,
     /// The app's people, agents and pages, for the @ menu.
     pub(crate) mentions: Option<Arc<dyn Mentions>>,
+    /// Reads the system clipboard's HTML, for pastes that keep their structure.
+    html_clipboard: Option<HtmlClipboard>,
     /// The open @ menu.
     pub(crate) mention: Option<MentionMenu>,
     /// The `@` closed with Esc. It stays closed until the caret leaves it.
@@ -554,6 +575,7 @@ impl Editor {
             front_matter,
             slash: None,
             mentions: options.mentions.clone(),
+            html_clipboard: options.html_clipboard.clone(),
             mention: None,
             mention_dismissed: None,
             dismissed: None,
@@ -784,6 +806,30 @@ impl Editor {
     /// Whether the document can be edited.
     pub fn is_readonly(&self, cx: &App) -> bool {
         self.state.read(cx).is_readonly()
+    }
+
+    /// Pastes the clipboard's HTML as Markdown (see [`Options::html_clipboard`]) into the focused
+    /// document. Returns false, and pastes nothing, when there's no HTML, it holds no text, or
+    /// the document can't take it: the document's own paste then pastes the plain text.
+    fn paste_html(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(read) = self.html_clipboard.clone() else {
+            return false;
+        };
+        {
+            let state = self.state.read(cx);
+            if state.is_readonly() || !state.focus_handle(cx).is_focused(window) {
+                return false;
+            }
+        }
+        let Some(markdown) = read(cx)
+            .filter(|html| html.len() <= MAX_PASTED_HTML)
+            .and_then(|html| crate::html::to_markdown(&html))
+        else {
+            return false;
+        };
+        self.state
+            .update(cx, |state, cx| state.paste_markdown(&markdown, cx));
+        true
     }
 
     /// Blocks or allows edits. A read-only document can still be selected and copied, and shows
@@ -2159,6 +2205,14 @@ impl Render for Editor {
         div()
             .relative()
             .size_full()
+            // Before the document's own paste: the clipboard's HTML, when the app reads it.
+            .capture_action(
+                cx.listener(|this, _: &markdown_editor::actions::Paste, window, cx| {
+                    if this.paste_html(window, cx) {
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .on_action(
                 cx.listener(|this, _: &FindOpen, window, cx| this.open_find(false, window, cx)),
             )
@@ -2997,6 +3051,90 @@ mod tests {
         draw(cx);
         drag_select(&editor, cx, 0, 5);
         assert!(cx.debug_bounds("blocks-format-bar").is_none());
+    }
+
+    /// An editor whose app reads the clipboard's HTML from `html`.
+    fn open_with_html<'a>(
+        cx: &'a mut TestAppContext,
+        source: &str,
+        html: std::rc::Rc<std::cell::RefCell<Option<String>>>,
+    ) -> (Entity<Editor>, &'a mut VisualTestContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let source = source.to_string();
+        let (editor, cx) = cx.add_window_view(move |window, cx| {
+            let options = super::Options::default().html_clipboard(move |_| html.borrow().clone());
+            Editor::with_options(&source, options, window, cx)
+        });
+        cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
+        draw(cx);
+        (editor, cx)
+    }
+
+    fn paste_key(cx: &mut VisualTestContext, plain: bool) {
+        let key = match (cfg!(target_os = "macos"), plain) {
+            (true, false) => "cmd-v",
+            (true, true) => "cmd-shift-v",
+            (false, false) => "ctrl-v",
+            (false, true) => "ctrl-shift-v",
+        };
+        cx.simulate_keystrokes(key);
+        draw(cx);
+    }
+
+    /// A paste with HTML on the clipboard keeps its structure and marks; without HTML, or with
+    /// ⇧⌘V, it's the plain text as before.
+    #[gpui::test]
+    fn pasted_html_keeps_its_structure(cx: &mut TestAppContext) {
+        let html = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let (editor, cx) = open_with_html(cx, "Notes", html.clone());
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_keystrokes("enter");
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+            "Setup\nRun it\nOne\nTwo".into(),
+        ));
+        *html.borrow_mut() = Some(
+            "<meta charset='utf-8'><h2>Setup</h2><p>Run <b>it</b> now</p><ul><li>One</li><li>Two</li></ul>"
+                .into(),
+        );
+        paste_key(cx, false);
+        assert_eq!(
+            markdown(&editor, cx),
+            "Notes\n\n## Setup\n\nRun **it** now\n\n- One\n- Two"
+        );
+        // One line of HTML goes in at the caret with its marks.
+        cx.simulate_keystrokes("enter enter");
+        cx.simulate_input("See ");
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("the docs".into()));
+        *html.borrow_mut() = Some(r#"<a href="https://example.com">the <i>docs</i></a>"#.into());
+        paste_key(cx, false);
+        assert!(
+            markdown(&editor, cx).ends_with("See [the *docs*](https://example.com)"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        // ⇧⌘V and a clipboard without HTML paste the plain text.
+        cx.simulate_keystrokes("enter");
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("**plain**".into()));
+        *html.borrow_mut() = Some("<b>rich</b>".into());
+        paste_key(cx, true);
+        *html.borrow_mut() = None;
+        paste_key(cx, false);
+        let text = markdown(&editor, cx);
+        assert!(text.ends_with(r"\*\*plain\*\*\*\*plain\*\*"), "{text}");
+    }
+
+    /// A read-only document takes no paste, HTML or not.
+    #[gpui::test]
+    fn a_read_only_document_takes_no_html_paste(cx: &mut TestAppContext) {
+        let html = std::rc::Rc::new(std::cell::RefCell::new(Some("<h1>No</h1>".to_string())));
+        let (editor, cx) = open_with_html(cx, "Kept", html);
+        editor.update(cx, |e, cx| e.set_readonly(true, cx));
+        caret_at_end(&editor, cx, 0);
+        paste_key(cx, false);
+        assert_eq!(markdown(&editor, cx), "Kept");
     }
 
     #[gpui::test]

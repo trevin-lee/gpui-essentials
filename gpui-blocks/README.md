@@ -33,6 +33,9 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   `~~strike~~`, `` `code` `` and `[text](url)`, and three backticks, `---` or `| a | b |`
   followed by Enter.
 - **Editing:** undo and redo, selection across blocks, IME, and copy and paste as Markdown.
+  Pasting from a web page or Google Docs keeps headings, lists, quotes, code, tables, links and
+  marks when your app reads the clipboard's HTML (`Options::html_clipboard`); ⇧⌘V pastes plain
+  text.
 - **Find and replace:** ⌘F (Ctrl+F) finds on the page, the selected word to start with, and
   highlights every match: Enter and ⇧Enter (or ⌘G and ⇧⌘G) step through them, and Esc closes the
   bar. ⌘⌥F (Ctrl+H) adds a replace row: Enter or Replace replaces the selected match, All
@@ -111,6 +114,16 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   code. gpui-core's `highlight` feature makes one. It's asked again only when a block's code or
   language changes; pass a new one when the theme changes. Without it, code blocks are drawn
   uncoloured.
+- **Pasting HTML:** GPUI's clipboard has only plain text, so give the editor a way to read the
+  system clipboard's HTML, and it turns it into Markdown (`gpui_blocks::html::to_markdown`):
+
+  ```rust,no_run
+  # fn read_pasteboard_html() -> Option<String> { None }
+  // On macOS, NSPasteboard.generalPasteboard's "public.html"; on iOS, UIPasteboard's.
+  let options = gpui_blocks::Options::default().html_clipboard(|_cx| read_pasteboard_html());
+  ```
+
+  Without it, or when there's no HTML, a paste is the plain text.
 - **Layout:** the text column is 720 wide, with 64 each side (`Options::gutter`; the left one
   holds the side menu) and 72 above (`Options::top`). Narrower than 600 (`Options::compact_below`;
   `px(0.)` turns it off), the editor lays itself out for a phone: 16 each side and above, and no
