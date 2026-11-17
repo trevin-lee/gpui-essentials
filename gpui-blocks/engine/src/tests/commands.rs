@@ -811,6 +811,125 @@ fn move_block_to_refuses_nested_blocks() {
     assert!(m.source().starts_with("| x |"));
 }
 
+fn select_run(m: &mut BlockEditorModel, anchor: crate::BlockId, head: crate::BlockId) {
+    m.set_selection(BlockSelection::Blocks { anchor, head })
+        .unwrap();
+}
+
+#[test]
+fn move_blocks_moves_a_selected_run_down_and_up() {
+    let mut m = model("a\n\nb\n\nc\n\nd");
+    let (b, c) = (top(&m, 1), top(&m, 2));
+    select_run(&mut m, b, c);
+    assert!(m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    assert_eq!(m.source(), "a\n\nd\n\nb\n\nc");
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::Blocks { anchor: b, head: c }
+    );
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), "b\n\nc\n\na\n\nd");
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::Blocks { anchor: b, head: c }
+    );
+    assert_invariants(&m);
+}
+
+#[test]
+fn move_blocks_with_a_run_at_an_edge_is_a_no_op() {
+    let src = "a\n\nb\n\nc";
+    let mut m = model(src);
+    let (a, b, c) = (top(&m, 0), top(&m, 1), top(&m, 2));
+    select_run(&mut m, b, a);
+    assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    select_run(&mut m, b, c);
+    assert!(!m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    select_run(&mut m, a, c);
+    assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert!(!m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    assert_eq!(m.source(), src);
+    assert!(!m.undo(), "nothing was recorded");
+}
+
+#[test]
+fn move_blocks_moves_a_run_inside_a_quote() {
+    let mut m = model("before\n\n> a\n>\n> b\n>\n> c\n\nafter");
+    let leaves = m.doc.leaves().to_vec();
+    let (a, b) = (leaves[1], leaves[2]);
+    select_run(&mut m, a, b);
+    assert!(m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    assert_eq!(m.source(), "before\n\n> c\n>\n> a\n>\n> b\n\nafter");
+    // The run stays in its quote: at the quote's end it goes no further.
+    assert!(!m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), "before\n\n> a\n>\n> b\n>\n> c\n\nafter");
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::Blocks { anchor: a, head: b }
+    );
+    assert_invariants(&m);
+}
+
+#[test]
+fn move_blocks_never_moves_a_run_into_a_toggle_summary() {
+    let toggle =
+        |body: &str| format!("<details open>\n<summary>T</summary>\n\n{body}\n\n</details>");
+    let mut m = model(&toggle("b1\n\nb2\n\nb3"));
+    let leaves = m.doc.leaves().to_vec();
+    select_run(&mut m, leaves[1], leaves[2]);
+    assert!(!m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert!(m.run(EditorCommand::MoveBlocks { down: true }).unwrap());
+    assert_eq!(m.source(), toggle("b3\n\nb1\n\nb2"));
+    assert_invariants(&m);
+}
+
+#[test]
+fn moving_a_run_is_one_undo_step() {
+    let src = "a\n\nb\n\nc\n\nd";
+    let mut m = model(src);
+    let (b, c) = (top(&m, 1), top(&m, 2));
+    select_run(&mut m, c, b);
+    assert!(m.run(EditorCommand::MoveBlocks { down: false }).unwrap());
+    assert_eq!(m.source(), "b\n\nc\n\na\n\nd");
+    assert!(m.undo());
+    assert_eq!(m.source(), src);
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::Blocks { anchor: c, head: b }
+    );
+    assert!(m.redo());
+    assert_eq!(m.source(), "b\n\nc\n\na\n\nd");
+}
+
+#[test]
+fn move_run_to_drops_a_run_in_one_undo_step() {
+    let src = "a\n\nb\n\nc\n\nd\n\ne";
+    let mut m = model(src);
+    let (b, c) = (top(&m, 1), top(&m, 2));
+    assert!(m.move_run_to(b, 2, 5).unwrap());
+    assert_eq!(m.source(), "a\n\nd\n\ne\n\nb\n\nc");
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::Blocks { anchor: b, head: c }
+    );
+    assert!(m.undo());
+    assert_eq!(m.source(), src);
+    assert!(m.move_run_to(b, 2, 0).unwrap());
+    assert_eq!(m.source(), "b\n\nc\n\na\n\nd\n\ne");
+    assert!(m.undo());
+    assert!(m.move_run_to(b, 2, 4).unwrap());
+    assert_eq!(m.source(), "a\n\nd\n\nb\n\nc\n\ne");
+    assert!(m.undo());
+    // Gaps inside or at the edges of the run are no-ops.
+    for to in 1..=3 {
+        assert!(!m.move_run_to(b, 2, to).unwrap());
+    }
+    assert!(m.move_run_to(b, 9, 0).is_err());
+    assert_eq!(m.source(), src);
+}
+
 #[test]
 fn toggle_blockquote_wraps_and_unwraps_in_place() {
     let mut m = model("a\n\nbc\n\nd");
