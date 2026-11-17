@@ -604,6 +604,58 @@ impl Editor {
         })
     }
 
+    /// Makes every embed of the document `doc` that shows the view `from` show `to` instead,
+    /// keeping its title and height, as one undo step: for remembering, with the page, the view
+    /// someone switched to inside an embedded database. `to` follows [`docs::embed`]'s rule for
+    /// views. Returns how many embeds changed; none in a read-only editor.
+    pub fn set_embed_view(
+        &mut self,
+        doc: &str,
+        from: &str,
+        to: &str,
+        cx: &mut Context<Self>,
+    ) -> usize {
+        self.state.update(cx, |state, cx| {
+            if state.is_readonly() {
+                return 0;
+            }
+            fn walk(block: markdown_editor::BlockRef<'_>, out: &mut Vec<(BlockId, String)>) {
+                if block.kind() == BlockKind::Custom {
+                    out.push((block.id(), block.markdown()));
+                }
+                for child in block.children() {
+                    walk(child, out);
+                }
+            }
+            let mut found = Vec::new();
+            walk(state.model().document().root(), &mut found);
+            let changes: Vec<(BlockId, String)> = found
+                .into_iter()
+                .filter_map(|(block, markdown)| {
+                    let (id, title, view, height) = docs::embed_of(&markdown)?;
+                    (id == doc && view == from)
+                        .then(|| (block, docs::embed(&id, &title, to, height)))
+                })
+                .collect();
+            state.group_edits(cx, |state, cx| {
+                changes
+                    .into_iter()
+                    .filter(|(block, markdown)| {
+                        state
+                            .run(
+                                EditorCommand::ReplaceBlock {
+                                    block: *block,
+                                    markdown: markdown.clone(),
+                                },
+                                cx,
+                            )
+                            .is_ok()
+                    })
+                    .count()
+            })
+        })
+    }
+
     /// Whether the document can be edited.
     pub fn is_readonly(&self, cx: &App) -> bool {
         self.state.read(cx).is_readonly()
@@ -1940,6 +1992,41 @@ mod tests {
             editor
                 .update(cx, |e, cx| e.block_bounds("nope", cx))
                 .is_none()
+        );
+    }
+
+    /// Switching an embedded database's view rewrites its embeds that showed the old view, and
+    /// only those, as one undo step.
+    #[gpui::test]
+    fn an_embeds_view_is_rewritten_in_place(cx: &mut TestAppContext) {
+        let source = format!(
+            "{}\n\n{}\n\n{}",
+            crate::docs::embed("db1", "Tasks", "table", 300),
+            crate::docs::embed("db1", "Tasks", "board", 300),
+            crate::docs::embed("db2", "Other", "table", 200)
+        );
+        let (editor, cx) = open(cx, &source);
+        let n = editor.update(cx, |e, cx| {
+            e.set_embed_view("db1", "table", "view-42_B", cx)
+        });
+        assert_eq!(n, 1);
+        let want = format!(
+            "{}\n\n{}\n\n{}",
+            crate::docs::embed("db1", "Tasks", "view-42_B", 300),
+            crate::docs::embed("db1", "Tasks", "board", 300),
+            crate::docs::embed("db2", "Other", "table", 200)
+        );
+        assert_eq!(editor.update(cx, |e, cx| e.markdown(cx)), want);
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-z"
+        } else {
+            "ctrl-z"
+        });
+        draw(cx);
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            source,
+            "one undo step"
         );
     }
 
