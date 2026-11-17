@@ -199,3 +199,94 @@ fn a_delta_costs_about_the_same_at_the_end_of_a_long_reply() {
     // costs about what streaming does, and either is fine as long as streaming stays flat and
     // under its bound.
 }
+
+/// A code fence 50,000 lines long, then a paragraph, given in one append, a line at a time and
+/// through `replace`: settling reads each new line once and checks only a line that could end
+/// the open block, so the fence costs what reading it once does. (Reading the open block again
+/// at each line, as settling did, took 17 s for 4,000 lines and grew with their square.)
+#[test]
+fn a_long_code_fence_settles_in_linear_time() {
+    let lines = 50_000;
+    let mut text = String::from("```rust\n");
+    for i in 0..lines {
+        text.push_str(&format!("f({});\n", i % 1000));
+    }
+    text.push_str("```\n\nAfter the code.\n\nThe end.\n");
+    let mut app = TestAppContext::build_with_text_system(
+        TestDispatcher::new(0),
+        None,
+        Arc::new(gpui_apple::AppleTextSystem::new()),
+    );
+    setup(&mut app);
+    let new = |app: &mut TestAppContext| {
+        app.update(|cx| cx.new(|_| StreamingMarkdown::new("d").style(style())))
+    };
+    // Settles until there's no more, a frame at a time: the frames' times.
+    let settle = |app: &mut TestAppContext, d: &Entity<StreamingMarkdown>| {
+        let mut frames = Vec::new();
+        loop {
+            let start = Instant::now();
+            let more = d.update(app, |d, _| d.settle_now());
+            frames.push(start.elapsed());
+            if !more {
+                return frames;
+            }
+        }
+    };
+    let settled = |app: &mut TestAppContext, d: &Entity<StreamingMarkdown>| {
+        let stats = d.read_with(app, |d, _| d.stats());
+        assert_eq!(stats.settled, 2, "the fence and the paragraph: {stats:?}");
+        stats
+    };
+
+    // In one append.
+    let d = new(&mut app);
+    d.update(&mut app, |d, cx| d.append(&text, cx));
+    let frames = settle(&mut app, &d);
+    let stats = settled(&mut app, &d);
+    let one = frames.iter().sum::<Duration>();
+    // Only the paragraph after the fence was checked.
+    assert!(stats.reread < 100, "{stats:?}");
+
+    // A line at a time, a frame each.
+    let d = new(&mut app);
+    let mut most = Duration::ZERO;
+    let start = Instant::now();
+    for line in text.split_inclusive('\n') {
+        d.update(&mut app, |d, cx| d.append(line, cx));
+        most = most.max(settle(&mut app, &d).into_iter().max().unwrap());
+    }
+    let by_line = start.elapsed();
+    settled(&mut app, &d);
+
+    // Half the text, then the whole of it in its place (a reconnect), then with a line inside
+    // the fence changed, which opens the fence again.
+    let d = new(&mut app);
+    d.update(&mut app, |d, cx| d.append(&text[..text.len() / 2], cx));
+    settle(&mut app, &d);
+    d.update(&mut app, |d, cx| d.replace(&text, cx));
+    let mut replaced = settle(&mut app, &d);
+    let changed = text.replacen("f(500);", "g(500);", 1);
+    d.update(&mut app, |d, cx| d.replace(&changed, cx));
+    replaced.extend(settle(&mut app, &d));
+    settled(&mut app, &d);
+
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    eprintln!(
+        "a {lines}-line code fence ({} KB): {:.2} ms in one append ({} frames, the longest {:.2} ms); \
+         {:.1} ms a line at a time (the longest frame {:.3} ms); through replace, the longest frame {:.2} ms",
+        text.len() / 1000,
+        ms(one),
+        frames.len(),
+        ms(frames.iter().copied().max().unwrap()),
+        ms(by_line),
+        ms(most),
+        ms(replaced.iter().copied().max().unwrap()),
+    );
+    for f in frames.iter().chain(&replaced) {
+        assert!(*f < bound(5.), "a frame settling took {f:?}");
+    }
+    assert!(most < bound(1.), "a line's frame settling took {most:?}");
+    // Linear: a line at a time costs about what it does in one go, a line's worth of work each.
+    assert!(by_line < bound(60.), "a line at a time took {by_line:?}");
+}
