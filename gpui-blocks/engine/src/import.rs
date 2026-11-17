@@ -12,7 +12,7 @@ use markdown::{ParseOptions, to_mdast};
 
 use super::{
     document::{AtomData, BlockContent, EditorDocument},
-    extension::Extensions,
+    extension::{CustomNode, Extensions},
     inline::{InlineAtom, InlineText},
     kind::BlockKindData,
     step::{DetachedBlock, DetachedContent},
@@ -20,7 +20,6 @@ use super::{
 };
 use crate::kind::ColumnAlign;
 use crate::text_mark::{ImageNode, LinkMark, TextMark};
-use gpui_kit::base::text::{MarkdownExtensions, MarkdownNode};
 
 /// The name of a block kept as the Markdown source it was (raw HTML, a footnote), and of an
 /// inline piece kept so.
@@ -174,7 +173,7 @@ impl<'a> Reader<'a> {
             .map(|custom| {
                 DetachedBlock::leaf(
                     BlockKindData::Custom,
-                    BlockContent::Atom(AtomData::Custom(custom.into_markdown_node())),
+                    BlockContent::Atom(AtomData::Custom(custom)),
                 )
             })
     }
@@ -322,7 +321,7 @@ impl<'a> Reader<'a> {
         Some(DetachedBlock::leaf(
             BlockKindData::Custom,
             BlockContent::Atom(AtomData::Custom(
-                MarkdownNode::new(SOURCE_BLOCK, ())
+                CustomNode::new(SOURCE_BLOCK, ())
                     .text(source.clone())
                     .markdown(source),
             )),
@@ -432,10 +431,7 @@ impl<'a> Reader<'a> {
             } else {
                 custom
             };
-            out.push(InlineText::atom(
-                InlineAtom::Custom(custom.into_markdown_node()),
-                mark.clone(),
-            ));
+            out.push(InlineText::atom(InlineAtom::Custom(custom), mark.clone()));
             return;
         }
         match node {
@@ -521,7 +517,7 @@ impl<'a> Reader<'a> {
                 if let Some(source) = self.node_source(node) {
                     out.push(InlineText::atom(
                         InlineAtom::Custom(
-                            MarkdownNode::new(SOURCE_INLINE, ())
+                            CustomNode::new(SOURCE_INLINE, ())
                                 .text(source.to_string())
                                 .markdown(source.to_string()),
                         ),
@@ -863,25 +859,4 @@ fn scan_attributes(attrs: &str) -> Option<(bool, usize)> {
             }
         }
     }
-}
-
-/// Renderers for the blocks and inline pieces kept as their source: their text, as written.
-pub(crate) fn source_renderers(extensions: MarkdownExtensions) -> MarkdownExtensions {
-    use gpui_kit::base::text::{MarkdownParseContext, MarkdownPlugin};
-
-    struct SourceAtom(bool);
-    impl MarkdownPlugin for SourceAtom {
-        fn name(&self) -> &str {
-            if self.0 { SOURCE_BLOCK } else { SOURCE_INLINE }
-        }
-        fn is_block(&self) -> bool {
-            self.0
-        }
-        fn parse(&self, _: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
-            None
-        }
-    }
-    extensions
-        .plugin(SourceAtom(true))
-        .plugin(SourceAtom(false))
 }

@@ -12,10 +12,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use gpui::{AnyElement, App, Pixels, SharedString, Window};
-use gpui_kit::base::text::{
-    InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
-    MarkdownPlugin,
-};
 use markdown::mdast::Node;
 
 /// A host's block or inline piece in the document.
@@ -35,6 +31,17 @@ impl fmt::Debug for CustomNode {
             .field("text", &self.text)
             .field("markdown", &self.markdown)
             .finish()
+    }
+}
+
+impl PartialEq for CustomNode {
+    /// Nodes are equal when their name, text, label and Markdown are: the data they draw with
+    /// isn't compared.
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.text == other.text
+            && self.label == other.label
+            && self.markdown == other.markdown
     }
 }
 
@@ -83,17 +90,6 @@ impl CustomNode {
     /// The data the node was made with, when it's a `T`.
     pub fn data<T: Any>(&self) -> Option<&T> {
         self.data.downcast_ref::<T>()
-    }
-
-    pub(crate) fn into_markdown_node(self) -> MarkdownNode {
-        let (text, label, markdown) =
-            (self.text.clone(), self.label.clone(), self.markdown.clone());
-        let name = self.name.clone();
-        let mut node = MarkdownNode::new(name, self).text(text).markdown(markdown);
-        if !label.is_empty() {
-            node = node.accessibility_label(label);
-        }
-        node
     }
 }
 
@@ -199,71 +195,5 @@ impl Extensions {
     /// The extensions, in the order they're asked.
     pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn Extension>> {
         self.list.iter()
-    }
-}
-
-/// An extension as GPUI Kit's renderer sees it, until the editor parses and draws on its own.
-struct Bridge(Arc<dyn Extension>);
-
-impl MarkdownPlugin for Bridge {
-    fn is_block(&self) -> bool {
-        self.0.is_block()
-    }
-
-    fn name(&self) -> &str {
-        self.0.name()
-    }
-
-    fn parse(&self, node: &Node, _: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
-        self.0.parse(node).map(CustomNode::into_markdown_node)
-    }
-
-    fn render(
-        &self,
-        node: &MarkdownNode,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> impl gpui::IntoElement {
-        match node.data::<CustomNode>() {
-            Some(custom) => self.0.render(custom, window, cx),
-            None => gpui::IntoElement::into_any_element(node.as_text().to_string()),
-        }
-    }
-
-    fn render_inline(
-        &self,
-        node: &MarkdownNode,
-        context: &InlineRenderContext,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Option<InlineElement> {
-        let custom = node.data::<CustomNode>()?;
-        let line = InlineContext {
-            font_size: context.font_size(),
-            line_height: context.line_height(),
-        };
-        let (element, baseline) = self.0.render_inline(custom, line, window, cx)?;
-        Some(InlineElement::new(element).with_baseline(baseline))
-    }
-}
-
-impl From<&Extensions> for MarkdownExtensions {
-    fn from(extensions: &Extensions) -> Self {
-        let base = crate::import::source_renderers(MarkdownExtensions::default());
-        let base = if extensions.containers {
-            crate::surfaces::with_default_surfaces(base)
-        } else {
-            base
-        };
-        extensions
-            .list
-            .iter()
-            .fold(base, |ext, e| ext.plugin(Bridge(e.clone())))
-    }
-}
-
-impl From<Extensions> for MarkdownExtensions {
-    fn from(extensions: Extensions) -> Self {
-        (&extensions).into()
     }
 }
