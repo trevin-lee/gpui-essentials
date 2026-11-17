@@ -219,49 +219,32 @@ fn measured(sizes: &[usize]) -> &[usize] {
 /// A list that grows an item at a time: it's one block until something after it ends it, so
 /// it's the open block all along. gpui-core keeps each of its items' layouts, so a delta lays
 /// out only the item it changed, but the list is still read whole and placed and painted, which
-/// grows with it; printed at 100, 500 and 1,000 items (the list given in one go up to 600
-/// characters before, then streamed; a debug build streams the last 100 characters of the
-/// 100-item list only), and held to a bound at 100 items and at 1,000 (33,000 characters).
+/// grows with it. A delta at its end is laid out and painted at 100, 500 and 1,000 items
+/// (33,000 characters), and held to a bound at each (the medians).
 #[test]
 fn a_long_list_growing_by_items() {
     let sizes = measured(&[100, 500, 1000]);
-    let mut text = String::new();
-    let mut marks = Vec::new();
-    for i in 1..=*sizes.last().unwrap() {
-        text.push_str(&format!("- item {i}: a few words about it\n"));
-        if sizes.contains(&i) {
-            marks.push(text.len());
-        }
-    }
-    let (runs, lead) = if cfg!(debug_assertions) {
-        (1, 100)
-    } else {
-        (3, 600)
-    };
-    let mut times = Vec::new();
-    for run in 0..runs {
-        for &m in &marks {
-            times.extend(stream(&text[..m], m - lead, false, run));
-        }
-    }
-    let t = at_marks(&times, &marks);
+    let bounds = [1., 1.5, 2.];
+    let (marks, t, parsing) = growing("", |i| format!("- item {i}: a few words about it\n"), sizes);
     for (i, n) in sizes.iter().enumerate() {
         eprintln!(
-            "a delta at the end of a {n}-item list ({} characters): {:.2} ms",
+            "a delta at the end of a {n}-item list ({} characters): {:.2} ms, reading its Markdown alone {:.3} ms",
             marks[i],
-            ms(t[i])
+            ms(t[i]),
+            ms(parsing[i])
         );
-    }
-    assert!(t[0] < bound(1.), "a delta at 100 items took {:?}", t[0]);
-    if let Some(t) = t.get(2) {
-        assert!(*t < bound(20.), "a delta at 1,000 items took {t:?}");
+        assert!(
+            t[i] < bound(bounds[i]),
+            "a delta at {n} items took {:?}",
+            t[i]
+        );
     }
 }
 
-/// A block that grows a row (or a line) at a time, `head` then `row(i)` for i in 1..: the median
-/// time of a delta at the end of it at each of `sizes` rows, over three runs in a release build
-/// (one in a debug one), each streamed four characters a delta for the last 600 characters (100
-/// in a debug build) after the rest in one go. And the time reading the block's Markdown alone
+/// A block that grows a row (a line, an item) at a time, `head` then `row(i)` for i in 1..: the
+/// median time of a delta at the end of it at each of `sizes` rows, over three runs in a release
+/// build (one in a debug one), each streamed four characters a delta for the last 600 characters
+/// (100 in a debug build) after the rest in one go. And the time reading the block's Markdown alone
 /// takes at each size (the fastest of nine, which a loaded machine slows least), part of what a
 /// delta costs: the rest is laying it out and painting it.
 fn growing(
@@ -305,15 +288,15 @@ fn growing(
 }
 
 /// A table that grows a row at a time, four columns of a word or two: one block, the open one,
-/// until something after it ends it, read and laid out whole on each delta. A delta at its end
-/// is laid out and painted at 100, 500 and 1,000 rows, and held to a bound at each (the
-/// medians, which a loaded machine's odd slow frame doesn't move). Reading it grows linearly
-/// and is a small part (pulldown-cmark's tables): most of a delta is laying the table out again
-/// and painting it.
+/// until something after it ends it, read whole on each delta, but laid out a row at a time,
+/// gpui-core keeping the layout of each row that didn't change. A delta at its end is laid out
+/// and painted at 100, 500 and 1,000 rows, and held to a bound at each (the medians, which a
+/// loaded machine's odd slow frame doesn't move). Reading it grows linearly (pulldown-cmark's
+/// tables) and is about two fifths of a delta: the rest is placing and painting the rows.
 #[test]
 fn a_long_table_growing_by_rows() {
     let sizes = measured(&[100, 500, 1000]);
-    let bounds = [7., 24., 50.];
+    let bounds = [1., 2.5, 5.];
     let (marks, t, parsing) = growing(
         "| Name | Kind | Size | Note |\n|---|---|---|---|\n",
         |i| format!("| row {i} | file | {} KB | kept |\n", i % 97),
@@ -336,13 +319,13 @@ fn a_long_table_growing_by_rows() {
 
 /// A code fence that grows a line at a time: one block, the open one, until its closing fence,
 /// read whole on each delta, but laid out a line at a time, gpui-core keeping the layout of each
-/// line that didn't change. A delta at its end is laid out and painted at 200, 1,000 and 2,000
-/// lines, and held to a bound at each (the medians). Reading it is a tiny part: most of a delta
-/// is placing and painting the code.
+/// line that didn't change and finding it at its place. A delta at its end is laid out and
+/// painted at 200, 1,000 and 2,000 lines, and held to a bound at each (the medians). Reading it
+/// is a tiny part: most of a delta is placing and painting the code.
 #[test]
 fn a_long_code_fence_growing_by_lines() {
     let sizes = measured(&[200, 1000, 2000]);
-    let bounds = [1., 4., 12.];
+    let bounds = [1., 1.5, 2.];
     let (marks, t, parsing) = growing(
         "```rust\n",
         |i| format!("let v{i} = f({}, \"x\");\n", i % 97),
