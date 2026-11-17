@@ -383,6 +383,10 @@ pub struct TableView {
     /// Where the next menu opens: on the entry a step of it (a name typed, a delete confirmed)
     /// came from when it goes back, or on what a change moves the keyboard to.
     pub(crate) reopen: Reopen,
+    /// Where an open menu's highlight is moved (gpui-core's `move_highlight`): the place of the
+    /// menu (the entries whose submenus lead to it) and the entry, as Date grouping after
+    /// grouping by a date.
+    pub(crate) move_highlight: Option<(Vec<String>, String)>,
     /// A relation being added: its name, database and whether it's two-way.
     pub(crate) new_relation: Option<super::properties::NewRelation>,
     /// A property just added, whose column is scrolled into view once the host hands it back.
@@ -446,6 +450,7 @@ impl TableView {
             field: None,
             note: None,
             reopen: Reopen::default(),
+            move_highlight: None,
             new_relation: None,
             pending_column: None,
             bar: super::views::Bar::default(),

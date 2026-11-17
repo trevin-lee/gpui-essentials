@@ -1727,7 +1727,8 @@ impl TableView {
     /// It opens with the submenus of `open`'s entries open, one in another, and on `on` in the
     /// last of them (in the menu itself when `open` is empty), else on its highlighted entry.
     ///
-    /// `at` is the menu's place: the entries whose submenus lead to it from the top menu.
+    /// `at` is the menu's place: the entries whose submenus lead to it from the top menu. The
+    /// open menu at [`TableView::move_highlight`]'s place has its highlight moved there.
     pub(crate) fn menu_of(
         &self,
         key: &str,
@@ -1776,83 +1777,28 @@ impl TableView {
             (None, Some(id)) => menu.highlight(id),
             (None, None) => menu,
         };
-        menu.on_select(self.on_pick(actions, at.to_vec(), cx))
+        // The highlight moved to an entry here, while the menu's open.
+        if let Some((place, id)) = &self.move_highlight
+            && place.as_slice() == at
+        {
+            menu = menu.move_highlight(id.clone());
+        }
+        menu.on_select(self.on_pick(actions, cx))
     }
 
     /// Runs a picked entry's action. Shift (Shift-Enter, or a Shift-click) adds a sort to the
-    /// others rather than replacing them. `at` is the place of the menu it was picked in
-    /// ([`TableView::menu_of`]).
+    /// others rather than replacing them. (A change that takes away the submenu with the
+    /// keyboard, an option deleted, say, gives it back to the menu around it: gpui-core's.)
     pub(crate) fn on_pick(
         &self,
         actions: PickActions,
-        at: Vec<String>,
         cx: &mut Context<Self>,
     ) -> impl Fn(&MenuSelect, &mut Window, &mut gpui::App) + 'static {
         cx.listener(move |this, pick: &MenuSelect, window, cx| {
             if let Some((_, action)) = actions.iter().find(|(id, _)| *id == pick.id) {
-                let before = (this.submenus_along(&at), this.menu_serial);
                 this.activate(action.clone(), pick.modifiers.shift, window, cx);
-                this.keep_keyboard(&at, &pick.id, before);
             }
         })
-    }
-
-    /// The ids of the entries that open submenus in each menu along `at` (the top menu's, then
-    /// those of the submenu of each of `at`'s entries), as far as `at` leads.
-    fn submenus_along(&self, at: &[String]) -> Vec<Vec<SharedString>> {
-        let mut out = Vec::new();
-        let mut entries = self.entries();
-        for depth in 0..=at.len() {
-            let ids = entry_ids(&entries);
-            let mut next = None;
-            let mut subs = Vec::new();
-            for (e, id) in entries.into_iter().zip(ids) {
-                if let (Some(id), Some(sub)) = (id, e.submenu) {
-                    if at.get(depth).is_some_and(|a| *a == *id) {
-                        next = Some(sub);
-                    }
-                    subs.push(id);
-                }
-            }
-            out.push(subs);
-            match next {
-                Some(sub) => entries = sub,
-                None => break,
-            }
-        }
-        out
-    }
-
-    /// After a pick that leaves the menu open: where the change took away the submenu that had
-    /// the keyboard (the one picked in, or one open beside the pick, as Currency code when the
-    /// format goes back to Number), the menu opens again on the nearest place that's left,
-    /// keyboard and all. gpui-core closes a submenu whose entry goes but leaves the keyboard
-    /// with it, so the keys would do nothing.
-    fn keep_keyboard(
-        &mut self,
-        at: &[String],
-        picked: &SharedString,
-        (before, serial): (Vec<Vec<SharedString>>, u64),
-    ) {
-        // Closed, or opened anew by the action itself.
-        if self.popover.is_none() || self.menu_serial != serial {
-            return;
-        }
-        let after = self.submenus_along(at);
-        let reopen = if after.len() < before.len() {
-            // A menu on the way went: on its entry, in the menu that's left.
-            let depth = after.len() - 1;
-            Some(Reopen::at(at[..depth].to_vec(), Some(at[depth].clone())))
-        } else {
-            let (was, is) = (before.last(), after.last());
-            let gone =
-                was.is_some_and(|was| was.iter().any(|id| !is.is_some_and(|is| is.contains(id))));
-            gone.then(|| Reopen::at(at.to_vec(), Some(picked.to_string())))
-        };
-        if let Some(reopen) = reopen {
-            self.menu_serial += 1;
-            self.reopen = reopen;
-        }
     }
 
     /// A menu's and a picker's colours, from the table's theme: the hover fill for the
@@ -1921,7 +1867,7 @@ impl TableView {
         .selection_color(field.selection)
         .placeholder_color(field.placeholder)
         .colors(self.menu_colors())
-        .on_select(self.on_pick(actions, Vec::new(), cx));
+        .on_select(self.on_pick(actions, cx));
         if self.can_create_option() {
             // What's typed may name a new option: at most an option name's length.
             picker

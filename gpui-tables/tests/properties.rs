@@ -379,10 +379,16 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     click(cx, item("Delete option"));
     assert!(!drawn(cx, "menu-submenu-Cold lead"));
     assert!(drawn(cx, "menu-submenu-Edit options"));
+    // On the option now in its place; the arrows move and open from there.
     keys(cx, "right");
     assert!(
+        drawn(cx, format!("menu-submenu-{}", start[2])),
+        "the keys open the next option's submenu"
+    );
+    keys(cx, "left up right");
+    assert!(
         drawn(cx, format!("menu-submenu-{}", start[1])),
-        "the keys open the first option's submenu"
+        "and the one before it"
     );
     keys(cx, "left");
     let batch = last_batch(&host);
@@ -442,10 +448,16 @@ fn a_numbers_format_and_a_dates_time(cx: &mut TestAppContext) {
         .update(cx, |t, _| t.cell_words(IMANI, WARMTH))
         .unwrap();
     assert!(words.starts_with('€') && words.ends_with(".00"), "{words}");
+    // Number picked while Currency code's submenu has the keyboard: the submenu goes with its
+    // entry, and the keyboard is back in the format's.
+    click(cx, item("Currency code"));
+    assert!(drawn(cx, "menu-submenu-Currency code"));
     click(cx, item("Number"));
     let p = property(&table, cx, WARMTH);
     assert_eq!(p.config.format, Some(NumberFormat::Plain));
     assert_eq!(p.config.currency, None, "a currency only with its format");
+    assert!(!drawn(cx, "menu-submenu-Currency code"));
+    keys(cx, "down up");
     // Escape closes the submenu, then the menu.
     keys(cx, "escape");
     assert!(table.read_with(cx, |t, _| t.has_popover()));

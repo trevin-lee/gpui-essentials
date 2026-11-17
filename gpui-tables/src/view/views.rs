@@ -932,14 +932,17 @@ impl TableView {
                     .as_deref()
                     .and_then(|g| fields.property(g))
                     .is_some_and(|p| p.kind.is_date());
-                // Grouped by a date, its buckets are the next question: the settings open again
-                // with Date grouping beside Group by, highlighted.
-                if date
-                    && !self.groups_by_date(&v)
-                    && let Some(path) = self.settings_path()
-                {
-                    self.menu_serial += 1;
-                    self.reopen = Reopen::at(path, Some(DATE_GROUPING.into()));
+                // Grouped by a date, its buckets are the next question: the settings' highlight
+                // moves to Date grouping, beside Group by, so → opens it. Any other grouping
+                // leaves it on Group by, so a date picked again moves it once more (gpui-core
+                // moves it each time it's given another entry).
+                if let Some(path) = self.settings_path() {
+                    let to = if date && !self.groups_by_date(&v) {
+                        DATE_GROUPING
+                    } else {
+                        "Group by"
+                    };
+                    self.move_highlight = Some((path, to.into()));
                 }
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
             }
