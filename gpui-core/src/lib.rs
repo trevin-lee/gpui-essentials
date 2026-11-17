@@ -45,6 +45,7 @@ mod card;
 mod carousel;
 mod checkbox;
 mod collapsible;
+mod command;
 mod context_menu;
 mod date_picker;
 mod dialog;
@@ -102,6 +103,7 @@ pub use card::Card;
 pub use carousel::Carousel;
 pub use checkbox::Checkbox;
 pub use collapsible::Collapsible;
+pub use command::CommandDialog;
 pub use context_menu::ContextMenu;
 pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
