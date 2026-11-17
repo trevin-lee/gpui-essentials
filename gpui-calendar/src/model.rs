@@ -423,6 +423,12 @@ pub struct CalendarOptions {
     /// things take taps in a 44-point square, and the header's arrows give way to the swipe.
     /// On by default on iOS and Android.
     pub touch: bool,
+    /// The answers a repeating event's edit can be given, for a host that can't carry out all
+    /// three (say, one whose server can't split a series, so has no "This and following").
+    /// The question offers only these, in [`EditScope::ALL`]'s order; with just one, it isn't
+    /// asked and the edit goes with that one. Empty counts as `[EditScope::This]`. All three
+    /// by default.
+    pub scopes: &'static [EditScope],
 }
 
 impl Default for CalendarOptions {
@@ -443,6 +449,7 @@ impl Default for CalendarOptions {
             mini_month: false,
             all_day_rows: 3,
             touch: cfg!(any(target_os = "ios", target_os = "android")),
+            scopes: &EditScope::ALL,
         }
     }
 }
@@ -451,6 +458,20 @@ impl CalendarOptions {
     /// The snap step, never less than a minute.
     pub fn snap(&self) -> f32 {
         self.snap_minutes.max(1) as f32
+    }
+
+    /// The answers the recurring question offers: [`Self::scopes`] in [`EditScope::ALL`]'s
+    /// order, or only [`EditScope::This`] when it allows none.
+    pub fn edit_scopes(&self) -> Vec<EditScope> {
+        let scopes: Vec<EditScope> = EditScope::ALL
+            .into_iter()
+            .filter(|s| self.scopes.contains(s))
+            .collect();
+        if scopes.is_empty() {
+            vec![EditScope::This]
+        } else {
+            scopes
+        }
     }
 }
 
