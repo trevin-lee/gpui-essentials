@@ -35,8 +35,14 @@ const CONTEXT_WITH_MENU: &str = "BlocksEditor BlocksSlashMenu";
 
 /// The text column's width.
 const COLUMN: f32 = 720.;
-/// Room left of the column for the side menu.
+/// Room each side of the column, the left one holding the side menu ([`Options::gutter`]).
 const GUTTER: f32 = 64.;
+/// Room above the first block ([`Options::top`]).
+const TOP: f32 = 72.;
+/// Below this width the editor lays itself out for a phone ([`Options::compact_below`]).
+const COMPACT_BELOW: f32 = 600.;
+/// The compact layout's room each side of the column and above it.
+const COMPACT_INSET: f32 = 16.;
 
 /// Binds the slash menu's keys and the keys that move blocks. They match only inside this view
 /// (key context `BlocksEditor`, or `BlocksSlashMenu` while the menu is open), and are bound
@@ -141,6 +147,9 @@ pub struct Options {
     highlighter: Option<markdown_editor::CodeHighlightFn>,
     docs: Option<Arc<dyn Docs>>,
     embeds: Option<Arc<EmbedFn>>,
+    gutter: Pixels,
+    top: Pixels,
+    compact_below: Pixels,
 }
 
 impl Default for Options {
@@ -153,6 +162,9 @@ impl Default for Options {
             highlighter: None,
             docs: None,
             embeds: None,
+            gutter: px(GUTTER),
+            top: px(TOP),
+            compact_below: px(COMPACT_BELOW),
         }
     }
 }
@@ -174,6 +186,9 @@ impl std::fmt::Debug for Options {
             .field("highlighter", &self.highlighter.is_some())
             .field("docs", &self.docs.is_some())
             .field("embeds", &self.embeds.is_some())
+            .field("gutter", &self.gutter)
+            .field("top", &self.top)
+            .field("compact_below", &self.compact_below)
             .finish()
     }
 }
@@ -257,6 +272,27 @@ impl Options {
         self.items = items;
         self
     }
+
+    /// The room each side of the text column, 64 by default. The left one holds the side menu
+    /// (the + and the grip), which needs about 56.
+    pub fn gutter(mut self, gutter: Pixels) -> Self {
+        self.gutter = gutter;
+        self
+    }
+
+    /// The room above the first block, 72 by default.
+    pub fn top(mut self, top: Pixels) -> Self {
+        self.top = top;
+        self
+    }
+
+    /// Below this width (600 by default) the editor lays itself out for a phone: 16 each side
+    /// of the column and above it, in place of [`Options::gutter`] and [`Options::top`], and no
+    /// side menu, which has no room there. `px(0.)` keeps the wide layout at any width.
+    pub fn compact_below(mut self, width: Pixels) -> Self {
+        self.compact_below = width;
+        self
+    }
 }
 
 /// What the view tells its owner.
@@ -329,6 +365,10 @@ pub struct Editor {
     pub(crate) block_menu: Option<BlockId>,
     scroll: ScrollHandle,
     menu_scroll: ScrollHandle,
+    /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
+    gutter: Pixels,
+    top: Pixels,
+    compact_below: Pixels,
     items: Vec<SlashItem>,
     image_link: Option<ImageLink>,
     /// The document's front matter, kept aside (see [`split_front_matter`]).
@@ -463,6 +503,9 @@ impl Editor {
             state,
             scroll,
             menu_scroll: ScrollHandle::new(),
+            gutter: options.gutter,
+            top: options.top,
+            compact_below: options.compact_below,
             items: options.items,
             image_link: options.image_link,
             front_matter,
@@ -1196,9 +1239,33 @@ impl Editor {
         .detach();
     }
 
+    /// Whether the editor is laid out for a phone: narrower than [`Options::compact_below`], by
+    /// its width when it was last drawn (the window's before that).
+    pub(crate) fn compact(&self, window: &Window) -> bool {
+        let width = self.scroll.bounds().size.width;
+        let width = if width > px(0.) {
+            width
+        } else {
+            window.viewport_size().width
+        };
+        width < self.compact_below
+    }
+
+    /// Whether the side menu (the + and the grip) shows: not in the compact layout, which has
+    /// no room for it, nor by touch, where nothing hovers; the long press's menu is there.
+    fn shows_side_menu(&self, window: &Window) -> bool {
+        !self.compact(window) && !window.last_input_was_touch()
+    }
+
     /// The pointer moved: the side menu goes beside the top-level block level with it.
-    fn hover(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn hover(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
         if event.pressed_button.is_some() || self.state.read(cx).is_readonly() {
+            return;
+        }
+        if !self.shows_side_menu(window) {
+            if self.hovered.take().is_some() {
+                cx.notify();
+            }
             return;
         }
         let y = event.position.y;
@@ -1875,7 +1942,17 @@ impl Editor {
 
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let side_menu = self.side_menu(cx);
+        let compact = self.compact(window);
+        let side_menu = if self.shows_side_menu(window) {
+            self.side_menu(cx)
+        } else {
+            None
+        };
+        let (gutter, top) = if compact {
+            (px(COMPACT_INSET), px(COMPACT_INSET))
+        } else {
+            (self.gutter, self.top)
+        };
         let slash_menu = self.slash_menu(cx);
         let handles = self.selection_handles(window, cx);
         let paste_menu = self.paste_menu(cx);
@@ -1903,7 +1980,7 @@ impl Render for Editor {
             .size_0()
         });
         let edit_menu = self.edit_menu(window, cx);
-        let find_bar = self.find_bar(cx);
+        let find_bar = self.find_bar(compact, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
         let grip_watch = self.grip_down.is_some().then(|| {
             let this = cx.entity().downgrade();
@@ -1946,7 +2023,7 @@ impl Render for Editor {
             .track_scroll(&self.scroll)
             .child(
                 div()
-                    .w(px(COLUMN + GUTTER * 2.))
+                    .w(px(COLUMN) + gutter * 2.)
                     .max_w_full()
                     .mx_auto()
                     .min_h_full()
@@ -1956,8 +2033,8 @@ impl Render for Editor {
                         BlockEditor::new(&self.state)
                             .w_full()
                             .min_h_full()
-                            .px(px(GUTTER))
-                            .pt(px(72.))
+                            .px(gutter)
+                            .pt(top)
                             .pb(px(240.)),
                     ),
             )
@@ -1991,7 +2068,7 @@ impl Render for Editor {
 
 #[cfg(test)]
 mod tests {
-    use super::Editor;
+    use super::{COMPACT_INSET, Editor, GUTTER, Options, TOP};
     use gpui::{Entity, TestAppContext, VisualTestContext};
     use markdown_editor::{BlockKind, BlockPosition, BlockSelection};
     use std::prelude::rust_2024::test;
@@ -2096,6 +2173,73 @@ mod tests {
             source,
             "one undo step"
         );
+    }
+
+    /// Wide, the text starts the gutter in and a hover shows the side menu; at a phone's width
+    /// the editor lays itself out compact: 16 in, 16 from the top, and no side menu.
+    #[gpui::test]
+    fn a_narrow_editor_lays_itself_out_for_a_phone(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "first\n\nsecond");
+        // The text's inset from the editor's left edge and top, and whether a hover over the
+        // first block shows the side menu.
+        let layout = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            draw(cx);
+            draw(cx);
+            let (view, block) = editor.update(cx, |e, cx| {
+                let view = e.scroll.bounds();
+                let blocks = e.state().read(cx).top_level_blocks();
+                (view, blocks[0].1)
+            });
+            cx.simulate_mouse_move(block.center(), None, gpui::Modifiers::none());
+            draw(cx);
+            let hovered = editor.read_with(cx, |e, _| e.hovered.is_some());
+            (
+                block.left() - view.left(),
+                block.top() - view.top(),
+                hovered,
+            )
+        };
+        cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(800.)));
+        let (left, top, hovered) = layout(&editor, cx);
+        assert!(left >= gpui::px(GUTTER), "wide: {left:?} in");
+        assert!(top >= gpui::px(TOP), "wide: {top:?} down");
+        assert!(hovered, "wide: the side menu shows");
+        assert!(!editor.update_in(cx, |e, window, _| e.compact(window)));
+
+        cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(800.)));
+        let (left, top, hovered) = layout(&editor, cx);
+        assert!(editor.update_in(cx, |e, window, _| e.compact(window)));
+        assert_eq!(left, gpui::px(COMPACT_INSET), "compact: 16 in");
+        assert!(top < gpui::px(COMPACT_INSET * 2.), "compact: {top:?} down");
+        assert!(!hovered, "compact: no side menu");
+    }
+
+    /// `compact_below(px(0.))` keeps the wide layout on a narrow editor, with the host's own
+    /// insets.
+    #[gpui::test]
+    fn a_host_can_keep_the_wide_layout_with_its_own_insets(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let options = Options::default()
+                .gutter(gpui::px(24.))
+                .top(gpui::px(8.))
+                .compact_below(gpui::px(0.));
+            Editor::with_options("first", options, window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(800.)));
+        draw(cx);
+        draw(cx);
+        let (view, block) = editor.update(cx, |e, cx| {
+            (
+                e.scroll.bounds(),
+                e.state().read(cx).top_level_blocks()[0].1,
+            )
+        });
+        assert!(!editor.update_in(cx, |e, window, _| e.compact(window)));
+        assert_eq!(block.left() - view.left(), gpui::px(24.));
     }
 
     /// ⌘F opens the find bar with the selected word, Enter steps on, Esc closes it and stops

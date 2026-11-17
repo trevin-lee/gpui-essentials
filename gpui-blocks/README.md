@@ -105,6 +105,10 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   code. gpui-core's `highlight` feature makes one. It's asked again only when a block's code or
   language changes; pass a new one when the theme changes. Without it, code blocks are drawn
   uncoloured.
+- **Layout:** the text column is 720 wide, with 64 each side (`Options::gutter`; the left one
+  holds the side menu) and 72 above (`Options::top`). Narrower than 600 (`Options::compact_below`;
+  `px(0.)` turns it off), the editor lays itself out for a phone: 16 each side and above, and no
+  side menu. By touch the side menu never shows; the long press's edit menu is there instead.
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor

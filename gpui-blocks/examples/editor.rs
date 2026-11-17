@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -14,7 +14,8 @@
 //! scrolling, the memory in use, and what the window drew while nothing changed. `--shot` takes
 //! a picture of the window without showing it: `doc` (the sample), `slash` (the slash menu
 //! open), `hover` (the side menu beside a block), `drag` (a block carried mid-drag) or `end`
-//! (the sample's end).
+//! (the sample's end). `phone` is the find bar open in a phone-sized window, where the editor lays
+//! itself out compact.
 
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
@@ -297,7 +298,13 @@ fn main() {
             apply_theme(cx);
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.on_action(|_: &Quit, cx| cx.quit());
-            let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
+            // An iPhone's size for the phone scene; the editor goes compact below 600 wide.
+            let window_size = if args.scene == "phone" {
+                size(px(402.), px(874.))
+            } else {
+                size(px(1280.), px(820.))
+            };
+            let bounds = Bounds::centered(None, window_size, cx);
             let options = WindowOptions {
                 titlebar: Some(TitlebarOptions {
                     title: Some("Editor".into()),
@@ -666,7 +673,7 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                 settle(window, cx).await;
             }
             // The find bar with its replace row, finding "the".
-            "find" => {
+            "find" | "phone" => {
                 let _ = cx.update_window(window, |_, window, cx| {
                     root.update(cx, |root, cx| {
                         root.editor.update(cx, |e, cx| e.focus(window, cx));
