@@ -5,7 +5,8 @@
 //! ```
 //!
 //! Hover or scroll an area to see its bars; Tab to one and the arrows, Page Up and Page Down,
-//! Space, Home and End scroll it. ⌘+ and ⌘− zoom.
+//! Space, Home and End scroll it. Tab into a carousel and Left and Right move it; swipe
+//! sideways on a trackpad to drag it. The page itself is a scroll area. ⌘+ and ⌘− zoom.
 
 use gpui::*;
 use gpui_core::*;
@@ -15,6 +16,8 @@ actions!(scrolling, [ZoomIn, ZoomOut, Quit]);
 struct Scrolling {
     /// The long list's scroll, for the buttons that move it.
     tags: ScrollAreaHandle,
+    /// The first carousel's slide, as it says.
+    slide: usize,
 }
 
 fn heading(text: &'static str, theme: &Theme) -> Div {
@@ -22,6 +25,23 @@ fn heading(text: &'static str, theme: &Theme) -> Div {
         .text_size(theme.text.sm)
         .text_color(theme.muted_foreground)
         .child(text)
+}
+
+/// A slide: a card with its number in the middle.
+fn card(i: usize, height: Rems, theme: &Theme) -> Div {
+    div()
+        .h(height)
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(theme.radius_lg())
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.card)
+        .text_color(theme.card_foreground)
+        .text_size(theme.text.xl)
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(format!("{i}"))
 }
 
 impl Render for Scrolling {
@@ -121,9 +141,9 @@ impl Render for Scrolling {
             );
         let handle = self.tags.clone();
         let handle2 = self.tags.clone();
-        div()
-            .size_full()
+        let page = div()
             .p(rems(2.))
+            .px(rems(5.))
             .flex()
             .flex_col()
             .gap(rems(1.5))
@@ -163,6 +183,38 @@ impl Render for Scrolling {
             .child(artworks)
             .child(heading("Both ways", &theme))
             .child(grid)
+            .child(heading("Carousel", &theme))
+            .child(
+                Carousel::new("one")
+                    .accessibility_label("Numbers")
+                    .w(rems(18.))
+                    .dots(true)
+                    .on_slide(cx.listener(|this, i: &usize, _, cx| {
+                        this.slide = *i;
+                        cx.notify();
+                    }))
+                    .children((1..=5).map(|i| card(i, rems(14.), &theme))),
+            )
+            .child(
+                div()
+                    .text_size(theme.text.sm)
+                    .text_color(theme.muted_foreground)
+                    .child(format!("Slide {} of 5", self.slide + 1)),
+            )
+            .child(heading("Three in view, looping", &theme))
+            .child(
+                Carousel::new("three")
+                    .accessibility_label("More numbers")
+                    .w(rems(28.))
+                    .slides_per_view(3)
+                    .looping(true)
+                    .children((1..=8).map(|i| card(i, rems(8.), &theme))),
+            );
+        ScrollArea::new("page")
+            .accessibility_label("Scrolling")
+            .tab_stop(false)
+            .size_full()
+            .child(page)
     }
 }
 
@@ -195,6 +247,7 @@ fn main() {
             gpui_core::open_window(options, cx, |_, cx| {
                 cx.new(|_| Scrolling {
                     tags: ScrollAreaHandle::new(),
+                    slide: 0,
                 })
             })
             .expect("the window");
