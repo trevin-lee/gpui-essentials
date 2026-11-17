@@ -285,7 +285,11 @@ struct PickerState {
     opened: bool,
     /// The query the highlight was set for.
     seen: Option<SharedString>,
+    /// The highlighted entry's index among those shown this frame, worked out from its id.
     highlighted: Option<usize>,
+    /// The highlighted entry, by its id: it stays that entry's while the host's entries come, go
+    /// and move, so Enter picks the entry that's shown highlighted.
+    highlighted_id: Option<SharedString>,
 }
 
 /// Whether `label` matches `query`: every word of the query is in it, case aside.
@@ -321,6 +325,7 @@ impl RenderOnce for Picker {
                 opened: false,
                 seen: None,
                 highlighted: None,
+                highlighted_id: None,
             }
         });
         let query = state.read(cx).query.clone();
@@ -381,9 +386,11 @@ impl RenderOnce for Picker {
         // the keys move it from there.
         let (highlighted, requeried) = state.update(cx, |s, _| {
             let mut requeried = false;
+            let mut placed = false;
             if s.seen.is_none() {
                 s.seen = Some(text.clone());
                 s.highlighted = current.or_else(|| step(&pickable, None, 1));
+                placed = true;
             } else if s.seen.as_ref() != Some(&text) {
                 s.seen = Some(text.clone());
                 // A filtering field's new matches start from the first; a naming field's list
@@ -391,8 +398,20 @@ impl RenderOnce for Picker {
                 if filter {
                     s.highlighted = step(&pickable, None, 1);
                     requeried = true;
+                    placed = true;
                 }
             }
+            if !placed {
+                // The same entry as before, wherever it is now; if it's gone (or there was none,
+                // the entries coming after it opened), the current option or the first.
+                s.highlighted = s
+                    .highlighted_id
+                    .as_ref()
+                    .and_then(|want| ids.iter().position(|id| id == want))
+                    .filter(|i| pickable[*i])
+                    .or_else(|| current.or_else(|| step(&pickable, None, 1)));
+            }
+            s.highlighted_id = s.highlighted.and_then(|i| ids.get(i).cloned());
             if (requeried || !s.opened)
                 && let Some(i) = s.highlighted
             {
@@ -416,6 +435,7 @@ impl RenderOnce for Picker {
                     let moved = to != s.highlighted;
                     if moved {
                         s.highlighted = to;
+                        s.highlighted_id = to.and_then(|i| ids.get(i).cloned());
                         if let Some(i) = to {
                             s.scroll.scroll_to_item(i, gpui::ScrollStrategy::Nearest);
                         }
