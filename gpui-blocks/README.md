@@ -18,7 +18,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   pick with ↑ ↓ and Enter, and close it with Esc.
 - **Side menu:** hover a block for its handles. "+" adds a line below with the menu open, and the
   grip drags the block. A click on the grip opens the block's menu: Turn into (the slash menu's
-  blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete.
+  blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips to select several blocks
+  whole: Delete, ⌘D and ⌘⇧↑ or ↓ act on them all.
 - **Motion:** while you drag, the blocks you pass slide aside to open a gap, and the block
   springs into it when you let go. Moving a top-level block with ⌘⇧↑ or ↓ (Ctrl on Linux and
   Windows), or undoing a move, slides the blocks to their new places. List items move within
