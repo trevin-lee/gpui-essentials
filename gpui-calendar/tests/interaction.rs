@@ -613,6 +613,77 @@ fn the_keys_answer_and_escape_puts_the_event_back(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_question_offers_only_the_scopes_the_host_allows(cx: &mut TestAppContext) {
+    // A host that can't split a series: "This and following" isn't offered.
+    let (c, seen, cx) = open_with(cx, |c| {
+        c.with_options(|o| o.scopes = &[EditScope::This, EditScope::All])
+    });
+    drag_gym(&c, cx);
+    assert!(asking(&c, cx));
+    assert!(cx.debug_bounds("scope-0").is_some());
+    assert!(cx.debug_bounds("scope-1").is_some());
+    assert!(cx.debug_bounds("scope-2").is_none());
+    // The second answer is now "All events", by a click and by the keys.
+    let row = cx.debug_bounds("scope-1").expect("the answers");
+    cx.simulate_click(row.center(), Modifiers::none());
+    draw(cx);
+    assert!(!asking(&c, cx));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: gym4(),
+            time: EventTime::timed(at(day(4), 19, 0), at(day(4), 20, 0)),
+            scope: EditScope::All,
+        }
+    ));
+    c.update(cx, |c, cx| {
+        c.select(Some(Selection::Event("gym@4".into())), cx)
+    });
+    cx.simulate_keystrokes("delete");
+    assert!(asking(&c, cx));
+    // Down twice wraps round the two answers to "This event".
+    cx.simulate_keystrokes("down down enter");
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: gym4(),
+            scope: EditScope::This
+        }
+    ));
+    unchanged(&c, cx);
+}
+
+#[gpui::test]
+fn one_allowed_scope_skips_the_question(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, |c| c.with_options(|o| o.scopes = &[EditScope::All]));
+    drag_gym(&c, cx);
+    assert!(!asking(&c, cx));
+    assert!(cx.debug_bounds("gpui-core-popover").is_none());
+    assert!(has(
+        &seen,
+        &CalendarEvent::Move {
+            event: gym4(),
+            time: EventTime::timed(at(day(4), 19, 0), at(day(4), 20, 0)),
+            scope: EditScope::All,
+        }
+    ));
+    // None allowed counts as "This event", also without asking.
+    c.update(cx, |c, cx| {
+        c.set_options(|o| o.scopes = &[], cx);
+        c.select(Some(Selection::Event("gym@4".into())), cx)
+    });
+    cx.simulate_keystrokes("delete");
+    assert!(!asking(&c, cx));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: gym4(),
+            scope: EditScope::This
+        }
+    ));
+}
+
+#[gpui::test]
 fn a_click_outside_the_question_drops_the_edit(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     drag_gym(&c, cx);

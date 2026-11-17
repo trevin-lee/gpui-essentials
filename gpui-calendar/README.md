@@ -259,13 +259,17 @@ fn main() {
   answers on touch), and puts the answer in the edit's `scope` (`EditScope`). The ghost stays
   where it was dropped while it asks; Escape, a click outside or Cancel drops the edit and the
   event stays put. The arrow keys and Enter answer too. An event that doesn't repeat isn't asked
-  about: its edits carry `EditScope::This`. `is_asking()`, `answer(scope)` and
+  about: its edits carry `EditScope::This`. A host that can't carry out every answer sets
+  `scopes` (say, `&[EditScope::This, EditScope::All]` where its server can't split a series):
+  the question offers only those, and with just one it isn't asked and the edit carries that
+  one. `is_asking()`, `answer(scope)` and
   `dismiss_question()` let a host drive the question itself. The popover and the sheet are
   gpui-core's `Popover` and `Sheet`, opened without taking the keyboard: it stays with the
   calendar, which handles Escape.
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
-  `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows` and `touch`.
+  `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows`, `touch`,
+  `event_panel`, `mini_month` and `scopes`.
 - **The header:** the title, Today, previous and next, and Day / Week / Month / Agenda are
   gpui-core's buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
