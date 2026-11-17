@@ -495,6 +495,45 @@ fn the_panel_can_be_a_sheet_whatever_takes_it(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn on_touch_a_month_days_more_lists_its_events_in_a_sheet(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    c.update(cx, |c, cx| {
+        for i in 0..6 {
+            c.upsert_event(
+                Event::timed(
+                    format!("busy-{i}"),
+                    format!("Busy {i}"),
+                    at(day(3), 13, 0),
+                    at(day(3), 14, 0),
+                )
+                .calendar("work"),
+                cx,
+            );
+        }
+        c.set_view(CalendarView::Month, cx);
+    });
+    draw(cx);
+    draw(cx);
+    let more = c
+        .read_with(cx, |c, _| c.accessibility_items())
+        .into_iter()
+        .find(|i| i.target == A11yTarget::More(day(3)))
+        .expect("Thursday's +N more")
+        .bounds;
+    tap(cx, more.center());
+    assert_eq!(c.read_with(cx, |c, _| c.more_day()), Some(day(3)));
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Month);
+    assert!(cx.debug_bounds("gpui-core-sheet").is_some());
+    assert!(cx.debug_bounds("gpui-core-popover").is_none());
+    let row = cx.debug_bounds("crowd-row-0").expect("a row");
+    assert!(row.size.height >= px(44.), "{:?}", row.size);
+    // A tap on a row opens its event.
+    tap(cx, row.center());
+    assert!(has(&seen, &CalendarEvent::Open("ro".into())));
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+}
+
+#[gpui::test]
 fn on_touch_the_mini_month_is_a_sheet_of_44_point_days(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     c.update(cx, |c, cx| c.set_options(|o| o.mini_month = true, cx));

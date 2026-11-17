@@ -1,8 +1,9 @@
-//! The list behind "+N": the side-by-side events that didn't fit their day's width, in a
-//! popover beside the "+N" (a sheet on touch). Each row is the event's colour, title and time;
-//! a click opens the event, as a double click on its chip does, and a drag carries it into the
-//! grid as a drag of the chip would.
+//! The list behind "+N": the side-by-side events that didn't fit their day's width, or a month
+//! day's events behind its "+N more", in a popover beside the "+N" (a sheet on touch). Each row
+//! is the event's colour, title and time; a click opens the event, as a double click on its
+//! chip does, and on the time grid a drag carries it into the grid as a drag of the chip would.
 
+use chrono::{Datelike, NaiveDate};
 use gpui::*;
 use gpui_core::{DismissReason, Popover, PopoverAnchor, Press, Sheet, Theme};
 
@@ -14,11 +15,13 @@ use crate::time;
 /// How wide the list's rows are, in CSS pixels.
 const LIST_WIDTH: f32 = 260.;
 
-/// The list open from a "+N": the events it stands for, and where the "+N" was drawn.
+/// The list open from a "+N": the events it stands for, where the "+N" was drawn, and the
+/// day, for a month day's "+N more" (which lists all of that day's events).
 #[derive(Clone, Debug)]
 pub(crate) struct Crowd {
     pub ids: Vec<EventId>,
     pub anchor: Bounds<Pixels>,
+    pub day: Option<NaiveDate>,
 }
 
 impl Calendar {
@@ -28,8 +31,58 @@ impl Calendar {
         anchor: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.crowd = Some(Crowd { ids, anchor });
+        self.crowd = Some(Crowd {
+            ids,
+            anchor,
+            day: None,
+        });
         cx.notify();
+    }
+
+    /// Lists a month day's events (the shown ones the query finds, all-day first) in a popover
+    /// beside its "+N more", as Google Calendar does, or a sheet on touch.
+    pub(crate) fn open_day_list(
+        &mut self,
+        date: NaiveDate,
+        anchor: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let ids = self
+            .events_on(date)
+            .into_iter()
+            .filter(|e| self.is_shown(e) && self.is_found(e))
+            .map(|e| e.id.clone())
+            .collect();
+        self.crowd = Some(Crowd {
+            ids,
+            anchor,
+            day: Some(date),
+        });
+        cx.notify();
+    }
+
+    /// Opens the list behind a month day's "+N more", as a click on it does. False if the last
+    /// frame drew no "+N more" for that day.
+    pub fn open_more(&mut self, date: NaiveDate, cx: &mut Context<Self>) -> bool {
+        let anchor = self
+            .shared
+            .mores
+            .borrow()
+            .iter()
+            .find(|(_, d)| *d == date)
+            .map(|(b, _)| *b);
+        match anchor {
+            Some(anchor) => {
+                self.open_day_list(date, anchor, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The day whose events the open list shows, for a month day's "+N more".
+    pub fn more_day(&self) -> Option<NaiveDate> {
+        self.crowd.as_ref().and_then(|c| c.day)
     }
 
     pub(crate) fn close_crowd(&mut self, cx: &mut Context<Self>) {
@@ -77,6 +130,11 @@ impl Calendar {
     /// event, held by its start, as if its chip had been pressed there.
     fn press_crowd_row(&mut self, id: EventId, at: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(e) = self.event(&id) else { return };
+        // A month day's list only selects: its rows are opened, not dragged.
+        if self.crowd.as_ref().is_some_and(|c| c.day.is_some()) {
+            self.select(Some(Selection::Event(id)), cx);
+            return;
+        }
         let read_only = self.is_read_only(e);
         let start = match e.time {
             EventTime::Timed { start, .. } => Some(time::local(start, self.options.time_zone)),
@@ -123,6 +181,22 @@ impl Calendar {
                     hour12,
                 ),
                 EventTime::AllDay { .. } => "All day".into(),
+            };
+            // A month day's list says when on that day: "Until 2 PM" for one from before it.
+            let when = match (crowd.day, e.time) {
+                (Some(day), EventTime::Timed { start, end }) => {
+                    let (s, f) = (start.with_timezone(&tz), end.with_timezone(&tz));
+                    if s.date_naive() < day && f.date_naive() > day {
+                        "All day".into()
+                    } else if s.date_naive() < day {
+                        format!("Until {}", time::format_time(f.time(), hour12))
+                    } else if f.date_naive() > day {
+                        format!("From {}", time::format_time(s.time(), hour12))
+                    } else {
+                        when
+                    }
+                }
+                _ => when,
             };
             let (press, open) = (this.clone(), this.clone());
             let (id_press, id_open) = (id.clone(), id.clone());
@@ -193,10 +267,15 @@ impl Calendar {
             .text_size(rems(12. / 15.))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(c.muted_foreground)
-            .child(SharedString::from(if count == 1 {
-                "1 more event".to_string()
-            } else {
-                format!("{count} more events")
+            .child(SharedString::from(match crowd.day {
+                Some(d) => format!(
+                    "{}, {} {}",
+                    time::weekday_name(d.weekday(), false),
+                    time::month_name(d.month()),
+                    d.day()
+                ),
+                None if count == 1 => "1 more event".to_string(),
+                None => format!("{count} more events"),
             }));
         let list = div()
             .flex()
@@ -207,13 +286,22 @@ impl Calendar {
         // Where the "+N" is this frame, if it's still there; else where it was. The list
         // hangs beside it (it's as tall as the events it stands for), or below or above it
         // where neither side has room.
-        let anchor = self
-            .shared
-            .crowds
-            .borrow()
-            .iter()
-            .find(|(_, ids)| ids == &crowd.ids)
-            .map_or(crowd.anchor, |(b, _)| *b);
+        let anchor = match crowd.day {
+            Some(day) => self
+                .shared
+                .mores
+                .borrow()
+                .iter()
+                .find(|(_, d)| *d == day)
+                .map_or(crowd.anchor, |(b, _)| *b),
+            None => self
+                .shared
+                .crowds
+                .borrow()
+                .iter()
+                .find(|(_, ids)| ids == &crowd.ids)
+                .map_or(crowd.anchor, |(b, _)| *b),
+        };
         // A press on the "+N" itself is the calendar's to toggle the list with, not one outside.
         let dismiss = {
             let this = this.clone();
@@ -240,11 +328,21 @@ impl Calendar {
                 )
                 .into(),
             };
+        let label: SharedString = match crowd.day {
+            Some(d) => format!(
+                "Events on {}, {} {}",
+                time::weekday_name(d.weekday(), false),
+                time::month_name(d.month()),
+                d.day()
+            )
+            .into(),
+            None => "More events".into(),
+        };
         Some(if touch {
             Sheet::new("calendar-crowd")
                 .open(true)
                 .take_focus(false)
-                .accessibility_label("More events")
+                .accessibility_label(label.clone())
                 .on_dismiss(dismiss)
                 .child(list)
                 .into_any_element()
@@ -253,7 +351,7 @@ impl Calendar {
                 .open(true)
                 .anchor(anchor)
                 .take_focus(false)
-                .accessibility_label("More events")
+                .accessibility_label(label)
                 .on_dismiss(dismiss)
                 .p(rems(pad / 15.))
                 .child(div().w(rems(LIST_WIDTH / 15.)).child(list))
