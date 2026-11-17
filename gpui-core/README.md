@@ -42,6 +42,14 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A
   single-choice host closes its popover on a pick; a several-choice one keeps it open.
+- **TextView.** `TextView::markdown(id, source)` draws GitHub Markdown natively: selectable
+  with `selectable(true)`, links as `on_link_click` events, and `[text][label]` links
+  resolved to their definitions. `TextView::blocks(id, [(key, source), …])` draws several
+  keyed sources as one document (a streamed reply's settled blocks and its live tail): spaced,
+  selected and copied as one view, with each source read again only when its text changes and
+  each top-level block laid out again only when it changes. A selection in unchanged sources
+  stays while later ones change. `trailing_caret(Some(colour))` draws a caret after the last
+  source's text, painted only, so it never moves a line.
 - **Syntax highlighting** (the `highlight` feature, off by default for the grammars' size).
   `Highlighter::new()` knows Rust, Swift, Go, TypeScript/TSX, JavaScript/JSX, Python, JSON,
   TOML, YAML, Bash, SQL, Markdown, HTML, CSS, C and C++ by the names code fences use (case
