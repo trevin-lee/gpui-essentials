@@ -96,6 +96,13 @@ item](docs/gallery.png)
   the tabs don't fit, their labels are cut short, or with `overflow(TabsOverflow::Scroll)` the
   list scrolls, keeping the focused tab in view. `stretch(true)` fills the width; `touch(true)`
   makes tabs 44 points.
+- **Item.** `Item::new(id).icon(IconName::User).title(…).description(…).action(element)`: a
+  row with media at the start (`icon`, or the host's own with `media`), a title cut short on one
+  line, a description cut short after two, and actions at the end; `outline()` and `muted()`
+  variants, and `small()`. With `on_click` the whole row is a `Press` (a button named by its
+  title, lit under the pointer, at least 44 points tall with `touch()`), and `disabled(true)`
+  dims it. `ItemGroup::new(id)` stacks items as a list, with `ItemSeparator::new()` rules
+  between them.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
