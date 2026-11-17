@@ -88,7 +88,7 @@ fn sample_nodes() -> Vec<Node> {
         Node::new("school", xy(560., 180.))
             .kind("agent")
             .data(json!({ "name": "School", "role": "Deadlines and forms", "mark": "🎓" })),
-        Node::new("ask", xy(0., 130.)).label("Ask Trevin").source_position(Side::Right),
+        Node::new("ask", xy(0., 130.)).label("Ask the owner").source_position(Side::Right),
         Node::new("note", xy(-10., 300.))
             .kind("note")
             .size(190., 84.)
