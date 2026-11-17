@@ -382,6 +382,8 @@ pub struct Editor {
     pub(crate) block_menu: Option<BlockId>,
     /// The block whose menu is open in a sheet, from the touch edit menu's Block….
     pub(crate) block_sheet: Option<BlockId>,
+    /// Whether the format bar's Turn into menu is open.
+    pub(crate) format_turn: bool,
     scroll: ScrollHandle,
     pub(crate) menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
@@ -568,6 +570,7 @@ impl Editor {
             grip_down: None,
             block_menu: None,
             block_sheet: None,
+            format_turn: false,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -1872,6 +1875,8 @@ impl Editor {
         };
         let at = point(x, first.top() - px(18.));
         let readonly = state.is_readonly();
+        // The format bar's marks and Link, as a second row.
+        let format_row = (!readonly).then(|| self.format_buttons(px(44.), cx));
         let theme = cx.theme();
         let (bg, fg, border) = (theme.popover, theme.popover_foreground, theme.border);
         let this = cx.entity().downgrade();
@@ -1933,6 +1938,7 @@ impl Editor {
                     .child(
                         div()
                             .flex()
+                            .flex_col()
                             .rounded(px(10.))
                             .border_1()
                             .border_color(border)
@@ -1941,7 +1947,17 @@ impl Editor {
                             .shadow_md()
                             .overflow_hidden()
                             .debug_selector(|| "blocks-edit-menu".into())
-                            .children(items),
+                            .child(div().flex().children(items))
+                            .when_some(format_row, |menu, row| {
+                                menu.child(
+                                    div()
+                                        .flex()
+                                        .justify_center()
+                                        .border_t_1()
+                                        .border_color(border)
+                                        .children(row),
+                                )
+                            }),
                     ),
             )
             .with_priority(3),
@@ -2068,6 +2084,7 @@ impl Render for Editor {
             .size_0()
         });
         let edit_menu = self.edit_menu(window, cx);
+        let format_bar = self.format_bar(window, cx);
         let block_sheet = self.block_sheet(cx);
         let find_bar = self.find_bar(compact, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
@@ -2134,6 +2151,7 @@ impl Render for Editor {
             .children(paste_menu)
             .children(resize)
             .children(edit_menu)
+            .children(format_bar)
             .child(block_sheet)
             .children(grip_watch)
             .child(self.long_press_watch(cx));
@@ -2872,6 +2890,113 @@ mod tests {
         cx.simulate_click(delete, gpui::Modifiers::none());
         draw(cx);
         assert_eq!(markdown(&editor, cx), "# intro words");
+    }
+
+    /// Drags out a selection with the pointer from `from` to `to` (byte offsets in the first
+    /// line), checking the bar waits for the button to come up.
+    fn drag_select(editor: &Entity<Editor>, cx: &mut VisualTestContext, from: usize, to: usize) {
+        let (a, b) = (point_at(editor, cx, from), point_at(editor, cx, to));
+        cx.simulate_mouse_down(a, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+        cx.simulate_mouse_move(b, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+        draw(cx);
+        assert!(
+            cx.debug_bounds("blocks-format-bar").is_none(),
+            "no bar while the selection is being dragged out"
+        );
+        cx.simulate_mouse_up(b, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+    }
+
+    fn press(cx: &mut VisualTestContext, name: &'static str) {
+        let at = cx
+            .debug_bounds(name)
+            .unwrap_or_else(|| panic!("{name} isn't drawn"))
+            .center();
+        cx.simulate_mouse_down(at, gpui::MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_up(at, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+    }
+
+    /// A selection made with the pointer shows the format bar once the button is up; its
+    /// buttons toggle marks over the selection and show which are on.
+    #[gpui::test]
+    fn the_format_bar_toggles_marks_on_a_pointer_selection(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world again");
+        assert!(cx.debug_bounds("blocks-format-bar").is_none());
+        drag_select(&editor, cx, 6, 11);
+        assert!(
+            cx.debug_bounds("blocks-format-bar").is_some(),
+            "the bar shows"
+        );
+        press(cx, "blocks-format-Bold");
+        assert_eq!(markdown(&editor, cx), "hello **world** again");
+        let bold = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .mark_state(markdown_editor::MarkKind::Bold)
+        });
+        assert_eq!(bold, markdown_editor::MarkState::On, "the selection stays");
+        press(cx, "blocks-format-Italic");
+        press(cx, "blocks-format-Bold");
+        assert_eq!(markdown(&editor, cx), "hello *world* again");
+        press(cx, "blocks-format-Code");
+        assert!(markdown(&editor, cx).contains('`'));
+        // A click elsewhere collapses the selection, and the bar goes.
+        let start = point_at(&editor, cx, 1);
+        cx.simulate_click(start, gpui::Modifiers::none());
+        draw(cx);
+        assert!(cx.debug_bounds("blocks-format-bar").is_none());
+    }
+
+    /// Link asks the app for the link, as ⌘K does; Turn into turns the selection's block.
+    #[gpui::test]
+    fn the_format_bar_asks_for_links_and_turns_blocks(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world");
+        let asked = std::rc::Rc::new(std::cell::Cell::new(false));
+        let seen = asked.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&editor, move |_, event: &super::EditorEvent, _| {
+                if let super::EditorEvent::EditLinkRequested { .. } = event {
+                    seen.set(true);
+                }
+            })
+            .detach()
+        });
+        drag_select(&editor, cx, 0, 5);
+        press(cx, "blocks-format-Link");
+        assert!(asked.get(), "the app is asked for the link");
+        press(cx, "blocks-format-turn");
+        let heading = cx
+            .debug_bounds("menu-item-turn-1")
+            .expect("Turn into's menu is open")
+            .center();
+        cx.simulate_click(heading, gpui::Modifiers::none());
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "# hello world");
+    }
+
+    /// No bar in a read-only document; on touch the marks are the edit menu's second row.
+    #[gpui::test]
+    fn touch_formats_from_the_edit_menu_and_read_only_has_no_bar(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world again");
+        let at = point_at(&editor, cx, 8);
+        long_press(cx, at);
+        assert!(
+            cx.debug_bounds("blocks-format-bar").is_none(),
+            "no bar on touch"
+        );
+        tap(cx, "blocks-format-Bold");
+        assert_eq!(markdown(&editor, cx), "hello **world** again");
+        assert!(
+            cx.debug_bounds("blocks-edit-menu").is_some(),
+            "the menu stays for another mark"
+        );
+        editor.update(cx, |e, cx| e.set_readonly(true, cx));
+        draw(cx);
+        drag_select(&editor, cx, 0, 5);
+        assert!(cx.debug_bounds("blocks-format-bar").is_none());
     }
 
     #[gpui::test]
