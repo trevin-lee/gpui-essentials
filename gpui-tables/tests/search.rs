@@ -2,8 +2,9 @@
 //! the field, typing narrowing a table, a board and a list to the rows found by what their
 //! cells show (never by ids, never by hidden properties), on top of the view's own filter, with
 //! empty groups left out and "No results" when nothing's found; Escape clearing then closing;
-//! the view as it was once cleared; the host's `set_search`; nothing ever saved or emitted; and
-//! 44-point targets on touch.
+//! the view as it was once cleared; the host's `set_search`; nothing ever saved or emitted;
+//! 44-point targets on touch; and the rows' words folded as the field opens, off the main thread,
+//! so the first key only searches, never stale and never while the field's closed.
 
 #![cfg(all(target_os = "macos", feature = "gpui"))]
 
@@ -316,4 +317,198 @@ fn keys_typed_between_frames_all_count(cx: &mut TestAppContext) {
         table.read_with(cx, |t, _| t.search().map(str::to_owned)),
         Some("kes".into())
     );
+}
+
+/// How many times the rows' words were folded.
+fn folds(table: &Entity<TableView>, cx: &mut VisualTestContext) -> usize {
+    table.read_with(cx, |t, _| t.search_folds())
+}
+
+/// Opens the field as its button does, without letting the background run (a test runs it only
+/// when parked).
+fn open_unparked(table: &Entity<TableView>, cx: &mut VisualTestContext) {
+    cx.update(|window, cx| table.update(cx, |t, cx| t.open_search(window, cx)));
+}
+
+/// The rows with `row`'s title changed to `title`.
+fn retitled(
+    table: &Entity<TableView>,
+    cx: &mut VisualTestContext,
+    row: &str,
+    title: &str,
+) -> Vec<gpui_tables::Doc> {
+    let mut rows = table.read_with(cx, |t, _| t.rows().to_vec());
+    rows.iter_mut().find(|r| r.id == row).unwrap().title = title.into();
+    rows
+}
+
+#[gpui::test]
+fn the_rows_are_folded_as_the_field_opens_so_the_first_key_only_searches(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_bar(cx, &host, None, size(px(1400.), px(700.)));
+    assert_eq!(folds(&table, cx), 0, "nothing folded before a search");
+    click(cx, "view-search");
+    assert_eq!(folds(&table, cx), 1, "folded as the field opened");
+    // By a related company's title and a person's name, which the host gives.
+    type_text(cx, "kestrel");
+    assert_eq!(
+        titles(&table, cx),
+        [DURAN, "Jonah Whitfield-Arce", "Rowan Pike"]
+    );
+    keys(cx, "escape");
+    type_text(cx, "avery");
+    assert_eq!(titles(&table, cx).len(), 5, "the rows Avery Lin owns");
+    assert_eq!(folds(&table, cx), 1, "no key folded again");
+
+    // ⌘F and the host's open_search do the same, for another view.
+    keys(cx, "escape");
+    keys(cx, "escape");
+    table.update(cx, |t, cx| t.set_view(PIPELINE, cx));
+    draw(cx);
+    keys(cx, "cmd-f");
+    assert_eq!(folds(&table, cx), 2, "the board's words, as it shows them");
+    type_text(cx, "bluefin");
+    assert_eq!(titles(&table, cx), ["Imani Castell", "Theo Brandt"]);
+    assert_eq!(folds(&table, cx), 2);
+}
+
+#[gpui::test]
+fn a_key_typed_before_the_fold_is_done_still_finds_the_right_rows(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_bar(cx, &host, None, size(px(1400.), px(700.)));
+    open_unparked(&table, cx);
+    assert_eq!(folds(&table, cx), 1, "folding in the background");
+    // The first key comes before the background's done: folded then, on the main thread.
+    table.update(cx, |t, cx| t.set_search(Some("kestrel".into()), cx));
+    assert_eq!(folds(&table, cx), 2);
+    assert_eq!(
+        titles(&table, cx),
+        [DURAN, "Jonah Whitfield-Arce", "Rowan Pike"]
+    );
+    // The background's fold, done now, changes nothing.
+    draw(cx);
+    assert_eq!(
+        titles(&table, cx),
+        [DURAN, "Jonah Whitfield-Arce", "Rowan Pike"]
+    );
+    table.update(cx, |t, cx| t.set_search(Some("kestrel ".into()), cx));
+    assert_eq!(folds(&table, cx), 2);
+
+    // The docs change while the field's open and empty: folded again in the background, for
+    // the new docs, and a key typed before it's done finds by them too.
+    table.update(cx, |t, cx| t.set_search(None, cx));
+    open_unparked(&table, cx);
+    assert_eq!(folds(&table, cx), 2, "the same docs: nothing to fold");
+    let rows = retitled(&table, cx, THEO, "Theo Kestrel");
+    // (A test's update ends in a draw, which begins the fold for the new docs.)
+    table.update(cx, |t, cx| t.set_rows(rows, cx));
+    assert_eq!(
+        folds(&table, cx),
+        3,
+        "folding the new docs in the background"
+    );
+    table.update(cx, |t, cx| t.set_search(Some("kestrel".into()), cx));
+    assert_eq!(
+        folds(&table, cx),
+        4,
+        "the key came first: folded on the main thread"
+    );
+    assert_eq!(
+        titles(&table, cx),
+        [DURAN, "Jonah Whitfield-Arce", "Rowan Pike", "Theo Kestrel"]
+    );
+    draw(cx);
+    assert_eq!(titles(&table, cx).len(), 4);
+    assert_eq!(folds(&table, cx), 4);
+}
+
+#[gpui::test]
+fn closing_the_search_keeps_its_words_and_folds_nothing_while_closed(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_bar(cx, &host, None, size(px(1400.), px(700.)));
+    let all = titles(&table, cx);
+    click(cx, "view-search");
+    type_text(cx, "kestrel");
+    keys(cx, "escape");
+    keys(cx, "escape");
+    assert!(!drawn(cx, "view-search-field"), "closed");
+    assert_eq!(titles(&table, cx), all);
+    // Opened again over the same docs: what was folded is kept.
+    click(cx, "view-search");
+    type_text(cx, "bluefin");
+    assert_eq!(titles(&table, cx), ["Imani Castell", "Theo Brandt"]);
+    assert_eq!(folds(&table, cx), 1);
+    keys(cx, "escape");
+    keys(cx, "escape");
+
+    // The docs change while it's closed: what was folded is dropped, and nothing is folded
+    // until it opens.
+    let rows = retitled(&table, cx, THEO, "Theo Kestrel");
+    table.update(cx, |t, cx| t.set_rows(rows, cx));
+    draw(cx);
+    assert_eq!(folds(&table, cx), 1, "nothing folded while closed");
+    click(cx, "view-search");
+    assert_eq!(folds(&table, cx), 2);
+    type_text(cx, "kestrel");
+    assert_eq!(
+        titles(&table, cx),
+        [DURAN, "Jonah Whitfield-Arce", "Rowan Pike", "Theo Kestrel"]
+    );
+    assert_eq!(folds(&table, cx), 2);
+    keys(cx, "escape");
+    keys(cx, "escape");
+
+    // Closed before its fold is done: the fold stops, and the field folds again when it opens.
+    let rows = retitled(&table, cx, THEO, "Theo Brandt");
+    table.update(cx, |t, cx| t.set_rows(rows, cx));
+    draw(cx);
+    open_unparked(&table, cx);
+    assert_eq!(folds(&table, cx), 3);
+    table.update(cx, |t, cx| t.set_search(None, cx));
+    draw(cx);
+    assert!(!drawn(cx, "view-search-field"));
+    assert_eq!(titles(&table, cx), all, "the view whole");
+    click(cx, "view-search");
+    assert_eq!(folds(&table, cx), 4, "the stopped fold left nothing behind");
+    type_text(cx, "kestrel");
+    assert_eq!(
+        titles(&table, cx),
+        [DURAN, "Jonah Whitfield-Arce", "Rowan Pike"]
+    );
+}
+
+#[gpui::test]
+fn nothing_redraws_while_the_field_waits_for_a_key(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_bar(cx, &host, None, size(px(1400.), px(700.)));
+    let notified = std::rc::Rc::new(std::cell::Cell::new(0));
+    let _watch = cx.update(|_, cx| {
+        let notified = notified.clone();
+        cx.observe(&table, move |_, _| notified.set(notified.get() + 1))
+    });
+    let idle = |cx: &mut VisualTestContext, what: &str| {
+        notified.set(0);
+        for _ in 0..30 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            let asked = cx.update(|window, cx| window.simulate_next_frame(cx));
+            cx.run_until_parked();
+            assert_eq!(asked, 0, "asked for a frame {what}");
+        }
+        assert_eq!(notified.get(), 0, "redrew {what}");
+    };
+    idle(cx, "before a search");
+    // The fold, done in the background, asks for no frame.
+    open_unparked(&table, cx);
+    idle(cx, "as the rows were folded");
+    assert_eq!(folds(&table, cx), 1);
+    // Nor once the docs change while the field's open.
+    let rows = retitled(&table, cx, THEO, "Theo Kestrel");
+    table.update(cx, |t, cx| t.set_rows(rows, cx));
+    idle(cx, "as the new docs were folded");
+    assert_eq!(folds(&table, cx), 2);
+    type_text(cx, "kestrel");
+    assert_eq!(titles(&table, cx).len(), 4);
+    idle(cx, "with a search shown");
+    assert_eq!(folds(&table, cx), 2);
 }

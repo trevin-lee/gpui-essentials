@@ -615,7 +615,10 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   so a narrow bar keeps room for the tabs. `TableView::set_search(Option<String>)` and `search()` let a host drive it
   (and `open_search` opens the field), and `engine::search` is the same without the UI: rows'
   words folded once into a `SearchText`, then `search(&view_rows, &text, &Query::new(..))` for
-  each query.
+  each query. The view folds them off the main thread as the field opens (asking the host for
+  people's names and related rows' titles on it), so the first key only searches; a key typed
+  before that's done folds them then. Nothing is folded while the field is closed, and what was
+  folded is kept until the docs or the view change.
 
   ![People searched for “kestrel”: the field open at the bar's right end, and the three people whose company or role say Kestrel, in the view's order; the sort's summary is its icon alone while the field is open](docs/view-search.png)
 - **Limits** are kept in the menus, each refused with a note: no view past `views` (+ shows its
@@ -1103,11 +1106,14 @@ nothing draws while nothing changes.
   | A sort, a filter and a group by select, worked out and drawn | 18 ms |
   | A value changed, regrouped by select / multi-select / date / person | 1.4 / 1.9 / 1.4 / 2.1 ms |
   | The same, regrouped and drawn | 4.0 / 4.2 / 4.2 / 4.8 ms |
-  | A search's first key (every row's words folded) | 14 ms |
-  | Each key after it / with its frame | 0.2 / 6.3 ms |
+  | Opening the search field, drawn (the rows' words then folded off the main thread, 11 ms) | 7.1 ms |
+  | A search's first key / with its frame | 0.2 / 7.2 ms |
+  | Each key after it / with its frame | 0.2 / 5.9 ms |
+  | A first key typed before the fold is done (folded then) | 15 ms |
 
   The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one), a
-  regroup past 10 ms worked out and 25 ms drawn, and a search's keys past 50, 3 and 12 ms.
+  regroup past 10 ms worked out and 25 ms drawn, opening the search past 25 ms, and a search's
+  keys, the first one included, past 3 ms and 12 ms drawn.
 - **The board view** draws only the cards on screen in each column (a `uniform_list` each).
   Measured the same way, the same 10,000 rows as a board of seven columns, each card showing four
   values:
