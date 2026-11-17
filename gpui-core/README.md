@@ -188,6 +188,13 @@ item](docs/gallery.png)
   made only while open. A pick runs its `on_select` (its submenus' picks too) and closes it;
   Escape, a press outside and the element scrolling out of view close it as well, and the
   focus goes back to what had it. A plain click, a tap and selecting text stay the element's.
+- **Menubar.** `Menubar::new(id).menu(MenubarMenu::new(id, title, PopupMenu::new(…)…))…
+  .on_select(…)`: a row of menus, as shadcn's Menubar, each a PopupMenu (submenus and all) in a
+  Popover under its title, its picks going to `on_select` with the menu's id. The bar is one Tab
+  stop; Left and Right move along it, and Down, Enter or Space opens a menu. While one is open,
+  Left and Right open the menu beside it (Right opens a highlighted submenu first), the pointer
+  moving onto another title opens that one, and Escape or a press outside closes it, giving the
+  keyboard back to its title. `touch(true)` makes titles and entries 44 points.
 - **Picker.** `Picker::new(id).items(…).on_select(…)` is a PopupMenu with a field at the top:
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A
