@@ -70,6 +70,16 @@ item](docs/gallery.png)
   under its id (`default_open`). Enter, Space, a click or a tap toggles it, the trigger says
   whether it's expanded, `touch(true)` makes the label trigger 44 points tall, and it doesn't
   animate.
+- **SplitView.** `SplitView::new(id).pane(Pane::new(child).width(w).min(w).max(w))…` puts two
+  or three panes side by side (a sidebar, a list, a detail) with a handle between each two. A
+  drag on a handle resizes the pane before it within its minimum and maximum, the last pane
+  taking the rest; a focused handle moves with Left and Right (Shift for bigger steps), Home and
+  End, and a double press puts its pane back at its default width. `on_resize` tells the host
+  the widths to keep and `widths(…)` passes them back. `Pane::collapsed(true)` hides a pane and
+  gives its room to the others. Below `narrow_below(w)` it shows one pane, the one
+  `narrow_shows(i)` says, and `on_narrow_change` tells the host so it can draw a back button.
+  Panes clip their content; handles are splitters to assistive tech, and `touch(true)` makes
+  them take presses 44 points wide.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be

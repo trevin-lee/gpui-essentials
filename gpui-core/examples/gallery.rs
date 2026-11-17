@@ -66,6 +66,8 @@ struct Gallery {
     look: SharedString,
     /// What the list is grouped by: the sort menu's submenu.
     group: SharedString,
+    /// Whether the split view's sidebar shows.
+    sidebar: bool,
 }
 
 const VARIANTS: [(ButtonVariant, &str); 6] = [
@@ -89,6 +91,27 @@ fn heading(text: &'static str, theme: &Theme) -> Div {
         .text_size(theme.text.sm)
         .text_color(theme.muted_foreground)
         .child(text)
+}
+
+fn split_pane(title: &'static str, text: &'static str, theme: &Theme) -> Div {
+    div()
+        .size_full()
+        .p(rems(0.75))
+        .flex()
+        .flex_col()
+        .gap(rems(0.25))
+        .child(
+            div()
+                .text_size(theme.text.sm)
+                .font_weight(FontWeight::MEDIUM)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(theme.text.xs)
+                .text_color(theme.muted_foreground)
+                .child(text),
+        )
 }
 
 fn pressed(
@@ -391,6 +414,53 @@ impl Render for Gallery {
                         })),
                 ),
             )
+            .child(heading("A split view (drag or focus a handle; the button collapses the sidebar)", &theme))
+            .child(
+                Button::new("sidebar-toggle")
+                    .icon(IconName::PanelLeft)
+                    .label(if self.sidebar { "Hide sidebar" } else { "Show sidebar" })
+                    .outline()
+                    .small()
+                    .on_click(cx.listener(|g, _, _, cx| {
+                        g.sidebar = !g.sidebar;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(rems(37.))
+                    .h(rems(8.))
+                    .rounded(theme.radius_lg())
+                    .border_1()
+                    .border_color(theme.border)
+                    .overflow_hidden()
+                    .child(
+                        SplitView::new("split")
+                            .pane(
+                                Pane::new(split_pane("Mailboxes", "Inbox, Sent, Archive", &theme))
+                                    .width(px(130.))
+                                    .min(px(100.))
+                                    .max(px(200.))
+                                    .collapsed(!self.sidebar)
+                                    .accessibility_label("Mailboxes"),
+                            )
+                            .pane(
+                                Pane::new(split_pane("Messages", "Three unread", &theme))
+                                    .width(px(170.))
+                                    .min(px(120.))
+                                    .max(px(260.))
+                                    .accessibility_label("Messages"),
+                            )
+                            .pane(
+                                Pane::new(split_pane("Message", "The one selected, filling the rest", &theme))
+                                    .min(px(140.))
+                                    .accessibility_label("Message"),
+                            )
+                            .narrow_below(px(320.))
+                            .narrow_shows(2),
+                    ),
+            )
             .child(heading("Fields", &theme))
             .child(
                 div()
@@ -541,6 +611,7 @@ fn main() {
                     sort: "name".into(),
                     look: "system".into(),
                     group: "none".into(),
+                    sidebar: true,
                 })
             })
             .expect("the window");
