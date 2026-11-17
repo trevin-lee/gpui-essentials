@@ -43,6 +43,7 @@ mod breadcrumb;
 mod button;
 mod card;
 mod carousel;
+pub mod chart;
 mod checkbox;
 mod collapsible;
 mod command;
@@ -101,6 +102,7 @@ pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
 pub use carousel::Carousel;
+pub use chart::BarChart;
 pub use checkbox::Checkbox;
 pub use collapsible::Collapsible;
 pub use command::CommandDialog;
@@ -191,6 +193,7 @@ pub fn init(cx: &mut App) {
     sidebar::init(cx);
     text::init(cx);
     table::init(cx);
+    chart::init(cx);
 }
 
 /// Runs [`init`] after this frame if it hasn't run: for a component with no state of its own to

@@ -230,6 +230,18 @@ item](docs/gallery.png)
   body is a Tab stop where Up, Down, Home, End, Page Up and Page Down ask for another and
   scroll it into view. Rows light up under the pointer. It's a table of rows and cells to
   assistive technology, named by its caption.
+- **BarChart.** `BarChart::new(id).categories(["Jan", …]).series("desktop", "Desktop", values)
+  …`: shadcn's bar chart, drawn natively. Each category is a band, its series' bars side by side
+  (or `stacked(true)`) with rounded ends, and negative values hang below a zero line. Series take
+  the theme's `chart_1` to `chart_5` in turn unless `series_color(key, colour)` gives one. A
+  quiet grid sits at nice tick values, with short y labels (`1.2k`, `3.4M`) and x labels cut
+  with an ellipsis or thinned out when crowded. `legend(true)` adds a legend. Pointing at the
+  chart, or tapping it, shows a tooltip with every series' value at that x. The chart takes the
+  focus, and Left, Right, Home and End move the tooltip while Escape hides it. Nothing animates,
+  and nothing redraws until the tooltip moves to another x. Empty data says "No data". To
+  assistive technology it's a figure labelled with a summary of its data, and its value is the
+  x the tooltip shows. GPUI has no live regions or per-bar nodes, so those aren't announced.
+  The geometry is pure functions (`bars`, `nearest`, `chart::nice_ticks`, `compact_number`).
 - **Checkbox.** `Checkbox::new(id).label(text).checked(on).on_click(…)`: a small rounded box,
   filled with the primary colour and a check when on, or a dash with `indeterminate(true)`. A
   press on the box or its label, or Space, calls `on_click` with the state to take (on, from
