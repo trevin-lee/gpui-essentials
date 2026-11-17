@@ -208,6 +208,15 @@ item](docs/gallery.png)
   everything that should be pressed. It's one Tab stop; the arrows, Home and End move the
   keyboard along, going round, and Space or Enter presses. `touch()` makes them 44 points
   tall; in a narrow space their labels are cut short.
+- **Label and Field.** `Label::new(id, text).for_focus(&handle)` names a control; a press on
+  it focuses the control, or does what `on_click` says (toggles a check box). `Field::new(id)
+  .label(text).for_focus(&handle).description(text).error(Some(text)).child(control)` lays out
+  shadcn's field: label, control, description and error one above the other, or side by side
+  with `horizontal(true)` (`control_first(true)` for a check box's order). An error is drawn in
+  the destructive colour, the label too, and assistive tech hears the field as a group named by
+  its label and described by its error or description. `FieldSet::new(id).legend(text)
+  .description(text)` groups fields under a `FieldLegend`, and `FieldGroup` stacks them. Every
+  text wraps.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
