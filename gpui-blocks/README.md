@@ -124,6 +124,10 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   ```
 
   Without it, or when there's no HTML, a paste is the plain text.
+- **Comments:** `Editor::selection_anchor` gives the selection's block by its lasting id and the
+  words selected, to anchor a comment to; `reveal_block` goes back to it, `block_bounds` says
+  where its block is for a mark in the margin, and `highlight_quotes` tints the quoted words
+  while a thread is shown, following them as the text around them changes.
 - **Layout:** the text column is 720 wide, with 64 each side (`Options::gutter`; the left one
   holds the side menu) and 72 above (`Options::top`). Narrower than 600 (`Options::compact_below`;
   `px(0.)` turns it off), the editor lays itself out for a phone: 16 each side and above, and no
