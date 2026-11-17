@@ -63,6 +63,11 @@ item](docs/gallery.png)
   (nothing to assistive tech) unless `.decorative(false)`, which makes it a separator with its
   orientation (AccessKit's `Role::Splitter`, its name for ARIA's separator); give those an
   `.id(…)` of their own when there are several side by side.
+- **Spinner.** `Spinner::new(id)`: shadcn's loader-circle turning once a second in the text's
+  colour (or `.color(…)`), 16 pixels, or 12, 14 or 20 with `Sizable`, or any size like a `div`.
+  To assistive tech it's a busy indicator (a progress indicator with no value) labelled
+  "Loading", or `.accessibility_label(…)`. It turns only while drawn, and not at all under
+  GPUI's `cx.set_reduce_motion(true)`.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
