@@ -251,7 +251,12 @@ fn main() {
   zone it was made in (`time_zone`, Google's `timeZone`): where that zone's clock differs from
   the display zone's, the panel adds the time there, "Wednesday, November 18 · 2 – 3 PM
   (GMT-5) New York". Build one with `Event::timed`, `Event::all_day` and the builder methods,
-  or a struct literal ending in `..Default::default()`, so fields added later don't break it. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
+  or a struct literal ending in `..Default::default()`, so fields added later don't break it.
+  `url` is the event's page at its provider and `conference` a video call's link
+  (`Event::url(link, label)`, `Event::conference(link, label)`): the panel shows a Join button
+  for the call ("Join video call", or your label, such as "Join with Google Meet") and a link
+  to the page ("Open in browser", or "Open in Google Calendar"), and a click on either sends
+  `CalendarEvent::OpenUrl` for your app to open. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
   iCalendar's DTEND: a one-day event on the 14th ends on the 15th. Your app supplies the events
   for the range it's told about in `RangeChange`.
 - **The calendar never changes an event.** Making, moving, resizing and deleting are proposals,
