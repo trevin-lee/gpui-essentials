@@ -63,6 +63,13 @@ item](docs/gallery.png)
   level with the title and the text beside it, wrapping. Children go under the description. A
   destructive alert is an alert to assistive technology, the default one a status, named by
   its title; `role(Role::Note)` (or another) says otherwise.
+- **Collapsible.** `Collapsible::new(id).label(text).child(…)`: a trigger that shows or
+  hides the content under it (hidden content isn't drawn). `label` draws a trigger with a
+  chevron; `trigger(press)` or `trigger_with(|open| press)` takes the host's own `Press`. The
+  host keeps the state with `open(bool)` and `on_toggle(…)`, or leaves it to the collapsible
+  under its id (`default_open`). Enter, Space, a click or a tap toggles it, the trigger says
+  whether it's expanded, `touch(true)` makes the label trigger 44 points tall, and it doesn't
+  animate.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
