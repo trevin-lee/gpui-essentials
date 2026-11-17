@@ -1085,6 +1085,52 @@ fn the_panel_sends_its_actions_to_the_host(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_web_address_in_the_panel_asks_the_host_to_open_it(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, |c| {
+        let c = panel_on(c);
+        let mut events = events();
+        let a = events.iter_mut().find(|e| e.id == "a").unwrap();
+        a.notes = Some("https://meet.example/abc-defg".into());
+        a.location = Some("Room 4".into());
+        c.with_events(events)
+    });
+    c.update(cx, |c, cx| c.open_panel("a".into(), cx));
+    draw(cx);
+    // A click on the place, which has no address, opens nothing.
+    let place = cx.debug_bounds("panel-place").expect("the place");
+    cx.simulate_click(
+        point(place.left() + px(8.), place.center().y),
+        Modifiers::none(),
+    );
+    draw(cx);
+    let opened = |seen: &Seen| {
+        seen.borrow()
+            .iter()
+            .filter_map(|e| match e {
+                CalendarEvent::OpenUrl { event, url } => Some((event.id.clone(), url.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(opened(&seen).is_empty());
+    // One on the address in the notes asks the host to open it; the panel stays.
+    let notes = cx.debug_bounds("panel-notes").expect("the notes");
+    cx.simulate_click(
+        point(notes.left() + px(12.), notes.center().y),
+        Modifiers::none(),
+    );
+    draw(cx);
+    assert_eq!(
+        opened(&seen),
+        vec![("a".into(), "https://meet.example/abc-defg".into())]
+    );
+    assert_eq!(
+        c.read_with(cx, |c, _| c.panel_event().cloned()),
+        Some("a".into())
+    );
+}
+
+#[gpui::test]
 fn a_read_only_events_panel_has_no_edits(cx: &mut TestAppContext) {
     let (c, _, cx) = open_with(cx, panel_on);
     double_click(cx, spot(&c, cx, day(3), 9, 30));

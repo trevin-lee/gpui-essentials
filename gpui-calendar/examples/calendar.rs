@@ -821,6 +821,9 @@ impl Root {
                     title(&event.id, cx)
                 )
             }
+            CalendarEvent::OpenUrl { event, url } => {
+                format!("Open {url} (from {})", title(&event.id, cx))
+            }
             CalendarEvent::Delete { event, .. } => {
                 let said = format!("Deleted {}", title(&event.id, cx));
                 calendar.update(cx, |c, cx| c.remove_event(&event.id, cx));
