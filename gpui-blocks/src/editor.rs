@@ -958,6 +958,8 @@ impl Editor {
             div()
                 .id(label)
                 .debug_selector(move || format!("blocks-paste-{label}"))
+                .role(Role::Button)
+                .aria_label(format!("Paste as {}", label.to_lowercase()))
                 .px(px(10.))
                 .py(px(5.))
                 .rounded(px(5.))
@@ -1478,6 +1480,10 @@ impl Editor {
         let this_drag = this.clone();
         let state = self.state.clone();
         let grip = button("blocks-side-grip", "⋮⋮")
+            .role(Role::Button)
+            .aria_label("Move block")
+            .aria_description("Drag to move the block; click for its menu")
+            .aria_expanded(self.block_menu == Some(block))
             .cursor_grab()
             .on_mouse_down(MouseButton::Left, move |event, _, cx| {
                 cx.stop_propagation();
@@ -1505,6 +1511,8 @@ impl Editor {
                         .gap(px(2.))
                         .child(
                             button("blocks-side-add", "+")
+                                .role(Role::Button)
+                                .aria_label("Add a block below")
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                     cx.stop_propagation();
@@ -1545,6 +1553,10 @@ impl Editor {
             rows.push(
                 div()
                     .id(("blocks-slash", ix))
+                    .role(Role::ListBoxOption)
+                    .aria_label(item.title.clone())
+                    .aria_description(item.hint.clone())
+                    .aria_selected(selected)
                     .mx_1()
                     .px_2()
                     .py_1()
@@ -1610,6 +1622,8 @@ impl Editor {
                     .child(
                         div()
                             .id("blocks-slash-menu")
+                            .role(Role::ListBox)
+                            .aria_label("Blocks")
                             .w(px(300.))
                             .max_h(px(340.))
                             .overflow_y_scroll()
@@ -1958,6 +1972,8 @@ impl Editor {
                 .whitespace_nowrap()
                 .child(label)
                 .debug_selector(move || format!("blocks-menu-{label}"))
+                .role(Role::MenuItem)
+                .aria_label(label)
                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                     cx.stop_propagation();
                     let _ = this.update(cx, |this, cx| this.used_menu(cx));
@@ -1978,6 +1994,8 @@ impl Editor {
             items.push(
                 div()
                     .id("Block…")
+                    .role(Role::MenuItem)
+                    .aria_label("Block menu")
                     .h(px(44.))
                     .px(px(14.))
                     .flex()
@@ -2003,6 +2021,9 @@ impl Editor {
                     .snap_to_window_with_margin(px(8.))
                     .child(
                         div()
+                            .id("blocks-edit-menu")
+                            .role(Role::Menu)
+                            .aria_label("Edit")
                             .flex()
                             .flex_col()
                             .rounded(px(10.))
