@@ -331,6 +331,22 @@ struct Piece {
     /// A code block's lines laid out on their own, kept while the block changes: a fence
     /// growing as it's streamed lays out only its new or changed lines.
     lines: Vec<LineLaid>,
+    /// A table's rows laid out on their own, kept while the table changes: a table growing
+    /// as it's streamed lays out only its new or changed rows.
+    rows: Vec<RowLaid>,
+}
+
+/// A table row's cells laid out on their own, and what they were laid out for.
+#[derive(Default)]
+struct RowLaid {
+    /// Its cells, as many as the table has columns.
+    cells: Vec<Paragraph>,
+    header: bool,
+    align: Vec<Align>,
+    /// A cell's width inside its padding.
+    width: Pixels,
+    key: StyleKey,
+    laid: Vec<Rc<ParagraphLayout>>,
 }
 
 /// A line of a code block laid out on its own, and what it was laid out for.
@@ -408,6 +424,7 @@ impl KeyState {
                     laid: p.laid,
                     items: p.items,
                     lines: p.lines,
+                    rows: p.rows,
                 },
                 // A code block that changed keeps its lines' layouts, for the lines that didn't.
                 Some(p)
@@ -419,6 +436,7 @@ impl KeyState {
                         laid: None,
                         items: Vec::new(),
                         lines: p.lines,
+                        rows: Vec::new(),
                     }
                 }
                 // A list that changed keeps its items' layouts, for the items that didn't.
@@ -431,6 +449,20 @@ impl KeyState {
                         laid: None,
                         items: p.items,
                         lines: Vec::new(),
+                        rows: Vec::new(),
+                    }
+                }
+                // A table that changed keeps its rows' layouts, for the rows that didn't.
+                Some(p)
+                    if matches!(p.block, Block::Table { .. })
+                        && matches!(block, Block::Table { .. }) =>
+                {
+                    Piece {
+                        block,
+                        laid: None,
+                        items: Vec::new(),
+                        lines: Vec::new(),
+                        rows: p.rows,
                     }
                 }
                 _ => Piece {
@@ -438,6 +470,7 @@ impl KeyState {
                     laid: None,
                     items: Vec::new(),
                     lines: Vec::new(),
+                    rows: Vec::new(),
                 },
             })
             .collect();
@@ -855,113 +888,170 @@ fn lay(
                 y += cx.base.line_height;
             }
             Block::Table { align, rows } => {
-                let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0).max(1);
-                let pad = cx.style.table_cell_padding.unwrap_or(cx.rem * 0.5);
-                let col_w = width / cols as f32;
-                let top = y;
-                let radius = cx
-                    .style
-                    .table_radius
-                    .unwrap_or(cx.theme.radius_md().to_pixels(cx.rem));
-                for (ri, row) in rows.iter().enumerate() {
-                    let row_top = y;
-                    let mut row_bottom = y;
-                    // The header's fill, or a striped body row's.
-                    let row_fill = match ri {
-                        0 => cx.style.colors.table_header,
-                        _ if ri % 2 == 0 => cx.style.colors.table_stripe,
-                        _ => None,
-                    };
-                    let header_ix = row_fill.is_some().then(|| {
-                        out.decos.push(Deco::Box {
-                            bounds: Bounds::default(),
-                            fill: transparent_black(),
-                            border: transparent_black(),
-                            border_width: px(0.),
-                            radius: Corners::all(px(0.)),
-                        });
-                        out.decos.len() - 1
-                    });
-                    let size_ = cx.style.table_text_size.unwrap_or(cx.base.size);
-                    let s = if ri == 0 {
-                        let mut s = cx.with_size(size_, true);
-                        if let Some(w) = cx.style.table_header_weight {
-                            s.font.weight = w;
-                        }
-                        if let Some(c) = cx.style.colors.table_header_text {
-                            s.color = c;
-                        }
-                        s
-                    } else {
-                        cx.with_size(size_, false)
-                    };
-                    for c in 0..cols {
-                        let p = row.get(c).cloned().unwrap_or_default();
-                        let cx0 = x + col_w * c as f32 + pad;
-                        let inner = (col_w - pad * 2.).max(px(8.));
-                        let sep = if out.leaves.is_empty() {
-                            ""
-                        } else if c == 0 {
-                            "\n"
-                        } else {
-                            "\t"
-                        };
-                        // Centred and right-aligned columns lay their text out so.
-                        let mut cs = s.clone();
-                        cs.align = match align.get(c) {
-                            Some(Align::Center) => TextAlign::Center,
-                            Some(Align::Right) => TextAlign::Right,
-                            _ => TextAlign::Left,
-                        };
-                        let l = ParagraphLayout::new(&p, &cs, inner, window);
-                        let h = l.height;
-                        out.leaves.push(Leaf {
-                            origin: point(cx0, row_top + pad),
-                            layout: Rc::new(l),
-                            paragraph: Rc::new(p),
-                            separator: sep,
-                        });
-                        row_bottom = row_bottom.max(row_top + pad * 2. + h);
-                    }
-                    y = row_bottom;
-                    if let (Some(ix), Some(fill_)) = (header_ix, row_fill) {
-                        // Inside the table's border, rounded where it meets its corners.
-                        let first = ri == 0;
-                        let last = ri + 1 == rows.len();
-                        let round = |on: bool| if on { radius } else { px(0.) };
-                        out.decos[ix] = Deco::Box {
-                            bounds: Bounds::new(point(x, row_top), size(width, y - row_top)),
-                            fill: fill_,
-                            border: transparent_black(),
-                            border_width: px(0.),
-                            radius: Corners {
-                                top_left: round(first),
-                                top_right: round(first),
-                                bottom_left: round(last),
-                                bottom_right: round(last),
-                            },
-                        };
-                    }
-                    // Lines between rows; the table's border is the last one's.
-                    if ri + 1 < rows.len() {
-                        out.decos.push(Deco::Box {
-                            bounds: Bounds::new(point(x, y), size(width, px(1.))),
-                            fill: cx.style.colors.table_line.unwrap_or(cx.theme.border),
-                            border: transparent_black(),
-                            border_width: px(0.),
-                            radius: Corners::all(px(0.)),
-                        });
-                    }
-                }
-                out.decos.push(Deco::Box {
-                    bounds: Bounds::new(point(x, top), size(width, y - top)),
-                    fill: transparent_black(),
-                    border: cx.style.colors.table_line.unwrap_or(cx.theme.border),
-                    border_width: px(1.),
-                    radius: Corners::all(radius),
-                });
+                y = lay_table(align, rows, x, width, y, cx, out, window, None);
             }
         }
+    }
+    y
+}
+
+/// A table from `y`: its rows of cells, each cell a paragraph of its own (copied with a tab
+/// between cells and a line end between rows). With `cache` (a top-level block's), a row laid
+/// out before at its place, the same and at the same width and style, isn't laid out again.
+#[allow(clippy::too_many_arguments)]
+fn lay_table(
+    align: &[Align],
+    rows: &[Vec<Paragraph>],
+    x: Pixels,
+    width: Pixels,
+    mut y: Pixels,
+    cx: &Ctx,
+    out: &mut ViewLayout,
+    window: &mut Window,
+    mut cache: Option<&mut Vec<RowLaid>>,
+) -> Pixels {
+    let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0).max(1);
+    let pad = cx.style.table_cell_padding.unwrap_or(cx.rem * 0.5);
+    let col_w = width / cols as f32;
+    let top = y;
+    let radius = cx
+        .style
+        .table_radius
+        .unwrap_or(cx.theme.radius_md().to_pixels(cx.rem));
+    let inner = (col_w - pad * 2.).max(px(8.));
+    let mut previous = cache.as_deref_mut().map(std::mem::take).unwrap_or_default();
+    let mut kept_rows = Vec::new();
+    for (ri, row) in rows.iter().enumerate() {
+        // The row at this place before, if it's the same row laid out the same way.
+        let cells: Vec<Paragraph> = (0..cols)
+            .map(|c| row.get(c).cloned().unwrap_or_default())
+            .collect();
+        let kept = previous.get_mut(ri).map(std::mem::take).filter(|r| {
+            r.header == (ri == 0)
+                && r.width == inner
+                && r.key == out.key
+                && r.align.as_slice() == align
+                && r.cells == cells
+        });
+        let mut laid = Vec::new();
+        let row_top = y;
+        let mut row_bottom = y;
+        // The header's fill, or a striped body row's.
+        let row_fill = match ri {
+            0 => cx.style.colors.table_header,
+            _ if ri % 2 == 0 => cx.style.colors.table_stripe,
+            _ => None,
+        };
+        let header_ix = row_fill.is_some().then(|| {
+            out.decos.push(Deco::Box {
+                bounds: Bounds::default(),
+                fill: transparent_black(),
+                border: transparent_black(),
+                border_width: px(0.),
+                radius: Corners::all(px(0.)),
+            });
+            out.decos.len() - 1
+        });
+        let size_ = cx.style.table_text_size.unwrap_or(cx.base.size);
+        let s = if ri == 0 {
+            let mut s = cx.with_size(size_, true);
+            if let Some(w) = cx.style.table_header_weight {
+                s.font.weight = w;
+            }
+            if let Some(c) = cx.style.colors.table_header_text {
+                s.color = c;
+            }
+            s
+        } else {
+            cx.with_size(size_, false)
+        };
+        for (c, p) in cells.iter().enumerate() {
+            let p = p.clone();
+            let cx0 = x + col_w * c as f32 + pad;
+            let sep = if out.leaves.is_empty() {
+                ""
+            } else if c == 0 {
+                "\n"
+            } else {
+                "\t"
+            };
+            // Centred and right-aligned columns lay their text out so.
+            let mut cs = s.clone();
+            cs.align = match align.get(c) {
+                Some(Align::Center) => TextAlign::Center,
+                Some(Align::Right) => TextAlign::Right,
+                _ => TextAlign::Left,
+            };
+            let l = match kept.as_ref().and_then(|k| k.laid.get(c)) {
+                Some(l) => l.clone(),
+                None => {
+                    #[cfg(test)]
+                    tests::CELLS_LAID.with(|k| k.set(k.get() + 1));
+                    Rc::new(ParagraphLayout::new(&p, &cs, inner, window))
+                }
+            };
+            let h = l.height;
+            if kept.is_none() {
+                laid.push(l.clone());
+            }
+            out.leaves.push(Leaf {
+                origin: point(cx0, row_top + pad),
+                layout: l,
+                paragraph: Rc::new(p),
+                separator: sep,
+            });
+            row_bottom = row_bottom.max(row_top + pad * 2. + h);
+        }
+        y = row_bottom;
+        kept_rows.push(match kept {
+            Some(r) => r,
+            None => RowLaid {
+                cells,
+                header: ri == 0,
+                align: align.to_vec(),
+                width: inner,
+                key: out.key.clone(),
+                laid,
+            },
+        });
+        if let (Some(ix), Some(fill_)) = (header_ix, row_fill) {
+            // Inside the table's border, rounded where it meets its corners.
+            let first = ri == 0;
+            let last = ri + 1 == rows.len();
+            let round = |on: bool| if on { radius } else { px(0.) };
+            out.decos[ix] = Deco::Box {
+                bounds: Bounds::new(point(x, row_top), size(width, y - row_top)),
+                fill: fill_,
+                border: transparent_black(),
+                border_width: px(0.),
+                radius: Corners {
+                    top_left: round(first),
+                    top_right: round(first),
+                    bottom_left: round(last),
+                    bottom_right: round(last),
+                },
+            };
+        }
+        // Lines between rows; the table's border is the last one's.
+        if ri + 1 < rows.len() {
+            out.decos.push(Deco::Box {
+                bounds: Bounds::new(point(x, y), size(width, px(1.))),
+                fill: cx.style.colors.table_line.unwrap_or(cx.theme.border),
+                border: transparent_black(),
+                border_width: px(0.),
+                radius: Corners::all(px(0.)),
+            });
+        }
+    }
+    out.decos.push(Deco::Box {
+        bounds: Bounds::new(point(x, top), size(width, y - top)),
+        fill: transparent_black(),
+        border: cx.style.colors.table_line.unwrap_or(cx.theme.border),
+        border_width: px(1.),
+        radius: Corners::all(radius),
+    });
+    if let Some(c) = cache {
+        *c = kept_rows;
     }
     y
 }
@@ -1399,6 +1489,18 @@ fn layout_for(
                     &mut out,
                     window,
                     Some(&mut piece.lines),
+                ),
+                // A table keeps its rows' layouts.
+                Block::Table { align, rows } => lay_table(
+                    align,
+                    rows,
+                    px(0.),
+                    width,
+                    px(0.),
+                    &c,
+                    &mut out,
+                    window,
+                    Some(&mut piece.rows),
                 ),
                 // A list keeps its items' layouts.
                 Block::List { start, items } => lay_list(
@@ -2020,6 +2122,8 @@ mod tests {
         pub(super) static ITEMS_LAID: Cell<usize> = const { Cell::new(0) };
         /// How many code lines have been laid out.
         pub(super) static LINES_LAID: Cell<usize> = const { Cell::new(0) };
+        /// How many table cells have been laid out.
+        pub(super) static CELLS_LAID: Cell<usize> = const { Cell::new(0) };
     }
 
     struct Streamed {
@@ -2080,6 +2184,57 @@ mod tests {
         );
         // A new width: every line.
         assert_eq!(laid(vcx, &|s| s.width = 380.), 302);
+    }
+
+    #[gpui::test]
+    fn a_growing_table_lays_out_only_its_new_or_changed_rows(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let table = |n: usize, last: &str| -> gpui::SharedString {
+            let mut s = String::from("| Name | Value |\n| --- | ---: |\n");
+            for i in 0..n {
+                s.push_str(&format!("| row {i} | {i} |\n"));
+            }
+            s.push_str(last);
+            s.into()
+        };
+        let sources = vec![(0u64, "A table:".into()), (1u64, table(300, "| last | 1"))];
+        let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let m = made.clone();
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Streamed {
+                sources,
+                width: 400.,
+            });
+            *m.borrow_mut() = Some(v.clone());
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        let v = made.borrow().clone().unwrap();
+        let laid = |vcx: &mut gpui::VisualTestContext, f: &dyn Fn(&mut Streamed)| {
+            CELLS_LAID.with(|n| n.set(0));
+            vcx.update(|_, cx| {
+                v.update(cx, |s, cx| {
+                    f(s);
+                    cx.notify();
+                })
+            });
+            vcx.run_until_parked();
+            CELLS_LAID.with(|n| n.get())
+        };
+        // The last row grows: its two cells.
+        assert_eq!(
+            laid(vcx, &|s| s.sources[1].1 = table(300, "| last | 12")),
+            2
+        );
+        // A new row: its cells (the row before it is unchanged).
+        assert_eq!(
+            laid(vcx, &|s| s.sources[1].1 =
+                format!("{}\n| more | 3 |", table(300, "| last | 12 |"))
+                    .into()),
+            2
+        );
+        // A new width: every cell, the header's too.
+        assert_eq!(laid(vcx, &|s| s.width = 380.), 2 * 303);
     }
 
     #[gpui::test]
