@@ -323,7 +323,7 @@ pub struct PopupMenu {
     /// Set when it's drawn as another menu's submenu: how it closes.
     nested: Option<CloseFn>,
     /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
-    start_blank: bool,
+    pub(crate) start_blank: bool,
 }
 
 type CloseFn = Rc<dyn Fn(&mut Window, &mut App)>;
