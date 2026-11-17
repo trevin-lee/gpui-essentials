@@ -15,9 +15,9 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId,
     InteractiveElement as _, IntoElement, KeyBinding, LayoutId, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Refineable as _, RenderOnce,
-    Role, ScrollEvent, SharedString, StatefulInteractiveElement as _, Style, StyleRefinement,
-    Styled, Subscription, TextAlign, TextInputAction, TextInputConfiguration, TextRun,
-    UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div, fill, point,
+    Role, ScrollEvent, ShapedLine, SharedString, StatefulInteractiveElement as _, Style,
+    StyleRefinement, Styled, Subscription, TextAlign, TextInputAction, TextInputConfiguration,
+    TextRun, UTF16Selection, UnderlineStyle, Window, WrappedLine, actions, div, fill, point,
     prelude::FluentBuilder as _, px, relative, rems, size,
 };
 use unicode_segmentation::UnicodeSegmentation as _;
@@ -65,10 +65,20 @@ actions!(
         /// Shift-Enter: always a new line in a textarea.
         NewLine,
         ShowCharacterPalette,
+        /// Tab in a code editor: two spaces, or every selected line moved in.
+        Indent,
+        /// Shift-Tab in a code editor: the line, or every selected line, moved out.
+        Outdent,
     ]
 );
 
 const CONTEXT: &str = "GpuiCoreInput";
+/// A code editor's context: the field's, and `code`.
+const CODE_CONTEXT: &str = "GpuiCoreInput code";
+const IN_CODE: &str = "GpuiCoreInput && code";
+
+/// What Tab puts in a code editor, and Shift-Tab takes out.
+const INDENT: &str = "  ";
 
 pub(crate) fn init(cx: &mut App) {
     let c = Some(CONTEXT);
@@ -155,6 +165,14 @@ pub(crate) fn init(cx: &mut App) {
         bindings.push(b!("ctrl-y", Redo));
     }
     cx.bind_keys(bindings);
+    // In a code editor Tab indents, so Ctrl-Tab is how the keyboard moves on: it's never kept.
+    let code = Some(IN_CODE);
+    cx.bind_keys([
+        KeyBinding::new("tab", Indent, code),
+        KeyBinding::new("shift-tab", Outdent, code),
+        KeyBinding::new("ctrl-tab", crate::FocusNext, code),
+        KeyBinding::new("ctrl-shift-tab", crate::FocusPrev, code),
+    ]);
 }
 
 /// What a field tells its host.
@@ -210,6 +228,8 @@ pub struct InputState {
     placeholder: SharedString,
     masked: bool,
     multiline: bool,
+    /// A code editor: lines that don't wrap, in the monospace font, Tab indenting.
+    code: bool,
     rows: (usize, usize),
     submit_on_enter: bool,
     /// What the platform keyboard is told, over what the field works out for itself.
@@ -223,6 +243,9 @@ pub struct InputState {
     goal_x: Option<Pixels>,
     selecting: bool,
     scroll: Point<Pixels>,
+    /// The selection, text length and size the scroll last followed the caret for: it follows
+    /// again when one changes, and otherwise stays where the wheel put it.
+    followed: Option<(Range<usize>, usize, gpui::Size<Pixels>)>,
     layout: Layout,
     _subscriptions: Vec<Subscription>,
 }
@@ -256,6 +279,7 @@ impl InputState {
             placeholder: SharedString::default(),
             masked: false,
             multiline: false,
+            code: false,
             rows: (1, 1),
             submit_on_enter: false,
             keyboard: None,
@@ -266,6 +290,7 @@ impl InputState {
             goal_x: None,
             selecting: false,
             scroll: Point::default(),
+            followed: None,
             layout: Layout::default(),
             _subscriptions: subscriptions,
         }
@@ -277,6 +302,20 @@ impl InputState {
         Self {
             multiline: true,
             rows: (2, 10),
+            ..Self::new(window, cx)
+        }
+    }
+
+    /// A code editor: lines that don't wrap (it scrolls sideways to the caret), in the theme's
+    /// monospace font, with line numbers beside them ([`Input::line_numbers`]). It fills the
+    /// height its host gives it, and draws only the rows in view, so a long file costs what
+    /// shows. Tab puts in two spaces (or moves every selected line in), Shift-Tab moves the line
+    /// out, Enter keeps the line's indent, and Ctrl-Tab and Ctrl-Shift-Tab move the keyboard on.
+    pub fn code(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self {
+            multiline: true,
+            code: true,
+            rows: (1, usize::MAX),
             ..Self::new(window, cx)
         }
     }
@@ -310,11 +349,12 @@ impl InputState {
         cx.notify();
     }
 
-    /// The text it starts with.
+    /// The text it starts with, the caret at its end (a code editor's at its start, so it
+    /// opens on the top of the file).
     pub fn default_value(mut self, text: impl Into<String>) -> Self {
         self.text = sanitize(text.into(), self.multiline);
-        let end = self.text.len();
-        self.selected = end..end;
+        let at = if self.code { 0 } else { self.text.len() };
+        self.selected = at..at;
         self
     }
 
@@ -933,9 +973,101 @@ impl InputState {
         }
     }
 
+    /// A new line, keeping a code editor's indent.
+    fn break_line(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut text = String::from("\n");
+        if self.code {
+            let at = self.selected.start;
+            let start = self.text[..at].rfind('\n').map_or(0, |i| i + 1);
+            text.extend(
+                self.text[start..at]
+                    .chars()
+                    .take_while(|c| *c == ' ' || *c == '\t'),
+            );
+        }
+        self.replace(self.selected.clone(), &text, EditKind::Other, window, cx);
+    }
+
+    fn indent(&mut self, _: &Indent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.code {
+            cx.propagate();
+        } else if self.selected.is_empty() {
+            self.replace(self.selected.clone(), INDENT, EditKind::Other, window, cx);
+        } else {
+            self.reindent(true, window, cx);
+        }
+    }
+
+    fn outdent(&mut self, _: &Outdent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.code {
+            self.reindent(false, window, cx);
+        } else {
+            cx.propagate();
+        }
+    }
+
+    /// Moves every line the selection touches in (`more`) or out by one indent. A selection
+    /// stays on the lines; a caret stays where it was in its line.
+    fn reindent(&mut self, more: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (a, b) = (self.selected.start, self.selected.end);
+        let first = self.text[..a].rfind('\n').map_or(0, |i| i + 1);
+        // A selection ending at a line's start doesn't take that line.
+        let b = if b > a && self.text[..b].ends_with('\n') {
+            b - 1
+        } else {
+            b
+        };
+        let end = self.text[b..].find('\n').map_or(self.text.len(), |i| b + i);
+        let block = &self.text[first..end];
+        let mut moved = 0isize;
+        let new = block
+            .split('\n')
+            .enumerate()
+            .map(|(i, line)| {
+                let out = if more {
+                    format!("{INDENT}{line}")
+                } else {
+                    line.strip_prefix(INDENT)
+                        .or_else(|| line.strip_prefix([' ', '\t']))
+                        .unwrap_or(line)
+                        .to_string()
+                };
+                if i == 0 {
+                    moved = out.len() as isize - line.len() as isize;
+                }
+                out
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if new == block {
+            return;
+        }
+        if let Some(max) = self.max_chars
+            && self.text.chars().count() - block.chars().count() + new.chars().count() > max
+        {
+            return;
+        }
+        let caret = self.selected.is_empty();
+        self.checkpoint(EditKind::Other);
+        self.text.replace_range(first..end, &new);
+        self.selected = if caret {
+            let at = (a as isize + moved).max(first as isize) as usize;
+            at..at
+        } else {
+            first..first + new.len()
+        };
+        self.reversed = false;
+        self.marked = None;
+        self.goal_x = None;
+        self.last_edit = None;
+        window.notify_text_input_changed(&self.focus);
+        cx.emit(InputEvent::Change);
+        cx.notify();
+    }
+
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
         if self.multiline && !self.submit_on_enter {
-            self.replace(self.selected.clone(), "\n", EditKind::Other, window, cx);
+            self.break_line(window, cx);
         } else {
             cx.emit(InputEvent::PressEnter { secondary: false });
         }
@@ -943,7 +1075,7 @@ impl InputState {
 
     fn new_line(&mut self, _: &NewLine, window: &mut Window, cx: &mut Context<Self>) {
         if self.multiline {
-            self.replace(self.selected.clone(), "\n", EditKind::Other, window, cx);
+            self.break_line(window, cx);
         } else {
             cx.emit(InputEvent::PressEnter { secondary: true });
         }
@@ -1003,14 +1135,45 @@ impl InputState {
         let delta = e.delta.pixel_delta(self.layout.line_height);
         let visible = self.layout.bounds.size.height;
         let max = (self.content_height() - visible).max(px(0.));
+        let mut moved = false;
         if self.multiline && max > px(0.) {
             let y = (self.scroll.y - delta.y).clamp(px(0.), max);
-            if y != self.scroll.y {
-                self.scroll.y = y;
-                cx.stop_propagation();
-                cx.notify();
-            }
+            moved |= y != self.scroll.y;
+            self.scroll.y = y;
         }
+        // A code editor's lines don't wrap: it scrolls sideways too.
+        let max_x = (self.content_width() + CARET_ROOM - self.layout.bounds.size.width).max(px(0.));
+        if self.code && max_x > px(0.) {
+            let x = (self.scroll.x - delta.x).clamp(px(0.), max_x);
+            moved |= x != self.scroll.x;
+            self.scroll.x = x;
+        }
+        if moved {
+            cx.stop_propagation();
+            cx.notify();
+        }
+    }
+
+    /// Keeps a scroll the wheel left inside the text, after the text got shorter.
+    fn keep_scroll_inside(&mut self) {
+        let b = self.layout.bounds.size;
+        let max_y = (self.content_height() - b.height).max(px(0.));
+        self.scroll.y = self.scroll.y.clamp(px(0.), max_y);
+        let max_x = if self.code {
+            (self.content_width() + CARET_ROOM - b.width).max(px(0.))
+        } else {
+            px(0.)
+        };
+        self.scroll.x = self.scroll.x.clamp(px(0.), max_x);
+    }
+
+    /// The widest line's width.
+    fn content_width(&self) -> Pixels {
+        self.layout
+            .lines
+            .iter()
+            .map(|(_, l)| l.width())
+            .fold(px(0.), Pixels::max)
     }
 
     // ---- The layout of the last draw.
@@ -1086,7 +1249,17 @@ impl InputState {
             }
             let max = (self.content_height() - b.height).max(px(0.));
             self.scroll.y = self.scroll.y.clamp(px(0.), max);
-            self.scroll.x = px(0.);
+            if self.code {
+                if c.x < self.scroll.x {
+                    self.scroll.x = c.x;
+                } else if c.x + CARET_ROOM > self.scroll.x + b.width {
+                    self.scroll.x = c.x + CARET_ROOM - b.width;
+                }
+                let max = (self.content_width() + CARET_ROOM - b.width).max(px(0.));
+                self.scroll.x = self.scroll.x.clamp(px(0.), max);
+            } else {
+                self.scroll.x = px(0.);
+            }
         } else {
             let caret = CARET_ROOM;
             if c.x < self.scroll.x {
@@ -1370,6 +1543,8 @@ fn css(v: f32) -> gpui::Rems {
 pub struct Input {
     state: Entity<InputState>,
     appearance: bool,
+    /// A code editor's line numbers.
+    line_numbers: bool,
     label: Option<SharedString>,
     colors: InputColors,
     align: TextAlign,
@@ -1392,6 +1567,7 @@ impl Input {
         Self {
             state: state.clone(),
             appearance: true,
+            line_numbers: true,
             label: None,
             colors: InputColors::default(),
             align: TextAlign::Left,
@@ -1438,6 +1614,13 @@ impl Input {
         self
     }
 
+    /// Whether a code editor ([`InputState::code`]) shows its lines' numbers beside them (it does
+    /// unless told not to).
+    pub fn line_numbers(mut self, show: bool) -> Self {
+        self.line_numbers = show;
+        self
+    }
+
     /// What it's for, to assistive technology (the label beside it, usually).
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
@@ -1455,11 +1638,12 @@ impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme().clone();
         let s = self.state.clone();
-        let (focus, multiline, masked, empty, value, placeholder) = {
+        let (focus, multiline, code, masked, empty, value, placeholder) = {
             let st = s.read(cx);
             (
                 st.focus.clone(),
                 st.multiline,
+                st.code,
                 st.masked,
                 st.text.is_empty(),
                 st.text.clone(),
@@ -1475,7 +1659,8 @@ impl RenderOnce for Input {
         };
         let mut el = div()
             .id(ElementId::Integer(s.entity_id().as_u64()))
-            .key_context(CONTEXT)
+            .key_context(if code { CODE_CONTEXT } else { CONTEXT })
+            .when(code, |d| d.font_family(theme.mono_font_family.clone()))
             .track_focus(&focus)
             .role(if multiline {
                 Role::MultilineTextInput
@@ -1523,6 +1708,8 @@ impl RenderOnce for Input {
             .on_action(window.listener_for(&s, InputState::enter))
             .on_action(window.listener_for(&s, InputState::new_line))
             .on_action(window.listener_for(&s, InputState::show_character_palette))
+            .on_action(window.listener_for(&s, InputState::indent))
+            .on_action(window.listener_for(&s, InputState::outdent))
             .on_mouse_down(
                 MouseButton::Left,
                 window.listener_for(&s, InputState::mouse_down),
@@ -1548,6 +1735,7 @@ impl RenderOnce for Input {
             state: s,
             colors: self.colors,
             align: self.align,
+            gutter: code && self.line_numbers,
         })
     }
 }
@@ -1557,6 +1745,8 @@ struct TextBox {
     state: Entity<InputState>,
     colors: InputColors,
     align: TextAlign,
+    /// A code editor's line numbers, in a column before the text.
+    gutter: bool,
 }
 
 impl IntoElement for TextBox {
@@ -1569,6 +1759,12 @@ impl IntoElement for TextBox {
 struct Prepaint {
     /// Where each line of the layout is drawn.
     origins: Vec<Point<Pixels>>,
+    /// The lines in view: the only ones painted.
+    shown: Range<usize>,
+    /// The text's own bounds (past a code editor's line numbers).
+    text_bounds: Bounds<Pixels>,
+    /// The line numbers in view, where they're drawn, and the caret's line's.
+    numbers: Vec<(Point<Pixels>, ShapedLine, bool)>,
     selection: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
 }
@@ -1678,6 +1874,12 @@ impl Element for TextBox {
             style.size.height = line_height.into();
             return (window.request_layout(style, [], cx), ());
         }
+        // A code editor fills the height its host gives it, at least a line.
+        if state.read(cx).code {
+            style.size.height = relative(1.).into();
+            style.min_size.height = line_height.into();
+            return (window.request_layout(style, [], cx), ());
+        }
         // A textarea is as tall as its wrapped text, from its fewest rows to its most.
         let text_style = window.text_style();
         let id = window.request_measured_layout(style, move |known, available, window, cx| {
@@ -1732,6 +1934,34 @@ impl Element for TextBox {
         let focused = self.state.read(cx).focus.is_focused(window);
         let colors = self.colors;
         let align = self.align;
+        // A code editor's line numbers: a column wide enough for the last one's digits (two at
+        // least), and a little room before the text.
+        let gutter = self.gutter.then(|| {
+            let digits = self.state.read(cx).text.matches('\n').count() + 1;
+            let digits = digits.to_string().len().max(2);
+            let zero = window.text_system().shape_line(
+                "0".into(),
+                font_size,
+                &[TextRun {
+                    len: 1,
+                    font: style.font(),
+                    color: style.color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }],
+                None,
+            );
+            zero.width * digits as f32 + rems(14. / 15.).to_pixels(window.rem_size())
+        });
+        let all = bounds;
+        let bounds = match gutter {
+            Some(w) => Bounds::from_corners(
+                point((bounds.left() + w).min(bounds.right()), bounds.top()),
+                bounds.bottom_right(),
+            ),
+            None => bounds,
+        };
         self.state.update(cx, |s, _| {
             let shown = s.shown();
             let (text, runs) = runs_for(
@@ -1741,7 +1971,8 @@ impl Element for TextBox {
                 colors.placeholder.unwrap_or(theme.muted_foreground),
                 style.font(),
             );
-            let wrap = s.multiline.then_some(bounds.size.width);
+            // A code editor's lines don't wrap.
+            let wrap = (s.multiline && !s.code).then_some(bounds.size.width);
             let mut lines = Vec::new();
             for (start, line, lr) in split_lines(&text, &runs) {
                 if let Ok(mut shaped) =
@@ -1770,16 +2001,64 @@ impl Element for TextBox {
                 bounds,
                 dx,
             };
-            s.scroll_to_cursor();
+            // The caret is followed when it or the text moved, or the field changed size; a
+            // scroll of the wheel is kept, inside the text.
+            let now = (s.selected.clone(), s.text.len(), bounds.size);
+            if !s.multiline || s.followed.as_ref() != Some(&now) {
+                s.scroll_to_cursor();
+                s.followed = Some(now);
+            } else {
+                s.keep_scroll_inside();
+            }
         });
         let s = self.state.read(cx);
         let origin = bounds.origin - s.scroll;
         let mut y = px(0.);
         let mut origins = Vec::new();
-        for (_, l) in &s.layout.lines {
-            origins.push(origin + point(s.layout.dx, y));
-            y += l.size(lh).height;
+        // Only the lines in view are painted: a long file costs what shows.
+        let seen = window.content_mask().bounds.intersect(&all);
+        let (mut first, mut last) = (usize::MAX, 0);
+        for (i, (_, l)) in s.layout.lines.iter().enumerate() {
+            let at = origin + point(s.layout.dx, y);
+            let h = l.size(lh).height;
+            if at.y + h >= seen.top() && at.y <= seen.bottom() {
+                first = first.min(i);
+                last = i + 1;
+            }
+            origins.push(at);
+            y += h;
         }
+        let shown = if first <= last { first..last } else { 0..0 };
+        let numbers = if gutter.is_some() {
+            let caret_line = s.text[..s.cursor().min(s.text.len())].matches('\n').count();
+            let muted = theme.muted_foreground;
+            shown
+                .clone()
+                .map(|i| {
+                    let n = (i + 1).to_string();
+                    let on = i == caret_line;
+                    let shaped = window.text_system().shape_line(
+                        n.clone().into(),
+                        font_size,
+                        &[TextRun {
+                            len: n.len(),
+                            font: style.font(),
+                            color: if on { style.color } else { muted },
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        }],
+                        None,
+                    );
+                    // Right-aligned, a little before the text.
+                    let pad = rems(8. / 15.).to_pixels(window.rem_size());
+                    let x = bounds.left() - pad - shaped.width;
+                    (point(x, origins[i].y), shaped, on)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let empty = s.text.is_empty();
         // The selection: a band per row it covers.
         let mut selection = Vec::new();
@@ -1814,6 +2093,9 @@ impl Element for TextBox {
             .map(|p| Bounds::new(origin + p, size(px(1.5), lh)));
         Prepaint {
             origins,
+            shown,
+            text_bounds: bounds,
+            numbers,
             selection,
             caret,
         }
@@ -1837,11 +2119,27 @@ impl Element for TextBox {
             cx,
         );
         let lh = window.line_height();
+        // A code editor's line numbers, in their column, scrolled with the text.
+        let column =
+            Bounds::from_corners(bounds.origin, point(p.text_bounds.left(), bounds.bottom()));
+        let numbers = std::mem::take(&mut p.numbers);
+        window.with_content_mask(Some(gpui::ContentMask { bounds: column }), |window| {
+            for (at, n, _) in numbers {
+                let _ = n.paint(at, lh, TextAlign::Left, None, window, cx);
+            }
+        });
         // The text is clipped to the field, with three pixels' room either side for ink that
-        // reaches past a glyph's advance (an emoji, a wide character on a narrow row).
+        // reaches past a glyph's advance (an emoji, a wide character on a narrow row); a code
+        // editor's stops at its line numbers.
         let ink = rems(3. / 15.).to_pixels(window.rem_size());
+        let text = p.text_bounds;
+        let left = if self.gutter {
+            text.left()
+        } else {
+            bounds.left() - ink
+        };
         let clip = Bounds::from_corners(
-            point(bounds.left() - ink, bounds.top()),
+            point(left, bounds.top()),
             point(bounds.right() + ink, bounds.bottom()),
         );
         window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
@@ -1853,8 +2151,10 @@ impl Element for TextBox {
             let lines = self
                 .state
                 .update(cx, |s, _| std::mem::take(&mut s.layout.lines));
-            for (origin, (_, line)) in p.origins.iter().zip(&lines) {
-                let _ = line.paint(*origin, lh, TextAlign::Left, None, window, cx);
+            for i in p.shown.clone() {
+                if let (Some(origin), Some((_, line))) = (p.origins.get(i), lines.get(i)) {
+                    let _ = line.paint(*origin, lh, TextAlign::Left, None, window, cx);
+                }
             }
             self.state.update(cx, |s, _| s.layout.lines = lines);
             if let Some(c) = p.caret.take() {
