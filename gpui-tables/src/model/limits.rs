@@ -467,6 +467,13 @@ impl Limits {
 
     /// Problems with one value for a property. Each problem's `at` is empty or a suffix like
     /// `[3]`, for the caller to prefix.
+    ///
+    /// A select and a multi-select each take both shapes, as a property changed from one to the
+    /// other keeps its rows' values: an option id (`"lead"`), or a list of option ids
+    /// (`["lead", "won"]`, a select reading its first). Either way every id names one of the
+    /// property's options and is an id's length at most, and a list holds no id twice and at
+    /// most `multi_select_values`, the select's too (a multi-select's values changed to a
+    /// select stay valid).
     pub fn check_value(&self, p: &Property, value: &Value) -> Vec<Problem> {
         let mut c = Checker {
             limits: self,
@@ -492,10 +499,13 @@ impl Limits {
         }
         match value {
             Value::Text(s) => {
-                if let Some(limit) = self.text_limit(&p.kind) {
+                let options = matches!(p.kind, PropertyType::Select | PropertyType::MultiSelect);
+                if options {
+                    c.id(String::new, s);
+                } else if let Some(limit) = self.text_limit(&p.kind) {
                     c.text(String::new, s, limit);
                 }
-                if p.kind == PropertyType::Select && p.option(s).is_none() {
+                if options && p.option(s).is_none() {
                     c.push("", ProblemKind::UnknownOption(s.clone()));
                 }
             }
@@ -509,7 +519,9 @@ impl Limits {
                 c.unique("", ids.iter().map(String::as_str));
                 for (i, id) in ids.iter().enumerate().take(limit) {
                     c.id(|| format!("[{i}]"), id);
-                    if p.kind == PropertyType::MultiSelect && p.option(id).is_none() {
+                    if matches!(p.kind, PropertyType::Select | PropertyType::MultiSelect)
+                        && p.option(id).is_none()
+                    {
                         c.push(format!("[{i}]"), ProblemKind::UnknownOption(id.clone()));
                     }
                 }
