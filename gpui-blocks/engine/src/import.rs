@@ -10,6 +10,33 @@ use gpui::{Hsla, SharedString};
 use markdown::mdast::{self, Node};
 use markdown::{ParseOptions, to_mdast};
 
+/// `source`'s syntax tree, or why it has none. The parser (`markdown` 1.0) panics on some
+/// input, such as a list item opening an unclosed fence followed by a list of the other kind
+/// (`"- a\n  ```\n1. a\n"`): that's an error here too, so pasted, imported or written Markdown
+/// can't bring the app down.
+pub fn parse(source: &str, options: &ParseOptions) -> Result<Node, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| to_mdast(source, options)))
+        .map_err(|_| "the Markdown parser failed on this text".to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// `source` as Markdown that reads back as its text alone, in paragraphs: every ASCII
+/// punctuation mark escaped and lines' leading space dropped, so no construct forms. For text
+/// the parser fails on, which is kept rather than lost.
+pub(crate) fn literal(source: &str) -> String {
+    let mut out = String::with_capacity(source.len() * 2);
+    for line in source.lines() {
+        for c in line.trim_start().chars() {
+            if c.is_ascii_punctuation() {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('\n');
+    }
+    out
+}
+
 use super::{
     document::{AtomData, BlockContent, EditorDocument},
     extension::{CustomNode, Extensions},
@@ -38,7 +65,16 @@ pub(crate) fn parse_document(
     source: &str,
     extensions: Arc<Extensions>,
 ) -> Result<EditorDocument, SharedString> {
-    let root = to_mdast(source, &options(true)).map_err(|e| SharedString::from(e.to_string()))?;
+    // Text the parser fails on is read as plain text instead.
+    let fallback;
+    let (source, root) = match parse(source, &options(true)) {
+        Ok(root) => (source, root),
+        Err(_) => {
+            fallback = literal(source);
+            let root = parse(&fallback, &options(true)).map_err(SharedString::from)?;
+            (fallback.as_str(), root)
+        }
+    };
     let reader = Reader::new(source, &extensions, &root);
     let nodes = root.children().map(Vec::as_slice).unwrap_or_default();
     let blocks = reader.blocks(nodes);
@@ -117,7 +153,16 @@ pub(crate) fn parse_document(
 /// `markdown` as blocks, toggles grouped, for inserting or pasting: `None` when it doesn't
 /// parse.
 pub(crate) fn parse_blocks(markdown: &str, extensions: &Extensions) -> Option<Vec<DetachedBlock>> {
-    let root = to_mdast(markdown, &options(true)).ok()?;
+    // Text the parser fails on is pasted as plain text instead.
+    let fallback;
+    let (markdown, root) = match parse(markdown, &options(true)) {
+        Ok(root) => (markdown, root),
+        Err(_) => {
+            fallback = literal(markdown);
+            let root = parse(&fallback, &options(true)).ok()?;
+            (fallback.as_str(), root)
+        }
+    };
     let reader = Reader::new(markdown, extensions, &root);
     Some(reader.blocks(root.children().map(Vec::as_slice).unwrap_or_default()))
 }
@@ -228,7 +273,7 @@ impl<'a> Reader<'a> {
                 let Some(text) = self.node_source(node) else {
                     return;
                 };
-                if let Ok(root) = to_mdast(text, &options(false)) {
+                if let Ok(root) = parse(text, &options(false)) {
                     let sub = self.sub(text);
                     for child in root.children().into_iter().flatten() {
                         sub.block(child, out);
@@ -497,7 +542,7 @@ impl<'a> Reader<'a> {
                 let Some(text) = self.node_source(node) else {
                     return;
                 };
-                if let Ok(root) = to_mdast(text, &options(false)) {
+                if let Ok(root) = parse(text, &options(false)) {
                     let sub = self.sub(text);
                     for child in root.children().into_iter().flatten() {
                         if let Some(children) = child.children() {
@@ -554,7 +599,7 @@ impl<'a> Reader<'a> {
                 }
             }
         }
-        let Ok(root) = to_mdast(&source, &options(true)) else {
+        let Ok(root) = parse(&source, &options(true)) else {
             return literal();
         };
         let sub = self.sub(&source);
