@@ -147,8 +147,8 @@ impl Pane {
     }
 }
 
-/// Panes side by side with handles between them, one at a time when narrow. See the
-/// [module](self) docs.
+/// Panes side by side with handles between them, one at a time when narrow: the widths, the
+/// handles' keys and the narrow form are described with each builder method below.
 #[derive(IntoElement)]
 pub struct SplitView {
     id: ElementId,
