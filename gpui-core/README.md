@@ -146,6 +146,14 @@ item](docs/gallery.png)
   title, lit under the pointer, at least 44 points tall with `touch()`), and `disabled(true)`
   dims it. `ItemGroup::new(id)` stacks items as a list, with `ItemSeparator::new()` rules
   between them.
+- **Accordion.** `Accordion::new(id).item(AccordionItem::new(id).title(…).child(…))…`:
+  items with a rule between them, each a header that shows or hides its content (hidden
+  content isn't drawn). One opens at a time, or several with `multiple(true)`. The host keeps
+  which are open with `open(ids)` and `on_change(…)`, or leaves it to the accordion under its id
+  (`default_open(ids)`). Every header is a Tab stop; Enter, Space, a click or a tap toggles it,
+  Up and Down move between headers (going round), Home and End go to the ends, and disabled
+  items are passed over. The chevron points down or up; nothing animates. `touch(true)` makes
+  headers at least 44 points tall.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
