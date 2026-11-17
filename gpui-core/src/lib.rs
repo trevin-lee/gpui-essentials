@@ -69,6 +69,7 @@ mod slider;
 mod spinner;
 mod split_view;
 mod switch;
+mod table;
 mod tabs;
 pub mod text;
 pub mod theme;
@@ -114,6 +115,7 @@ pub use slider::{Slider, SliderEvent, SliderState};
 pub use spinner::Spinner;
 pub use split_view::{Pane, SplitView};
 pub use switch::Switch;
+pub use table::{ColumnAlign, ColumnWidth, Table, TableColumn, TableRow};
 pub use tabs::{Tab, Tabs, TabsOverflow, TabsVariant};
 pub use text::{TextView, TextViewStyle};
 pub use theme::{ActiveTheme, Colors, Theme, ThemeMode, TypeScale};
@@ -151,6 +153,7 @@ pub fn init(cx: &mut App) {
     popover::init(cx);
     sidebar::init(cx);
     text::init(cx);
+    table::init(cx);
 }
 
 /// Runs [`init`] after this frame if it hasn't run: for a component with no state of its own to
