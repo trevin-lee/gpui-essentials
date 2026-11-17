@@ -297,6 +297,20 @@ type Pos = (usize, usize);
 struct Piece {
     block: Block,
     laid: Option<Rc<ViewLayout>>,
+    /// A list's items laid out on their own, kept while the list changes: a list growing as
+    /// it's streamed lays out only its new or changed items.
+    items: Vec<ItemLaid>,
+}
+
+/// A list item laid out on its own, at the list's top left, and what it was laid out for.
+struct ItemLaid {
+    item: super::markdown::Item,
+    /// Its place in the list and the list's start: what its marker says.
+    n: usize,
+    start: Option<u32>,
+    width: Pixels,
+    key: StyleKey,
+    laid: Rc<ViewLayout>,
 }
 
 /// A source of [`TextView::blocks`], read.
@@ -334,12 +348,28 @@ impl KeyState {
         let mut previous = previous.into_iter();
         self.pieces = blocks
             .into_iter()
-            .map(|block| {
-                let laid = previous
-                    .next()
-                    .filter(|p| p.block == block)
-                    .and_then(|p| p.laid);
-                Piece { block, laid }
+            .map(|block| match previous.next() {
+                Some(p) if p.block == block => Piece {
+                    block,
+                    laid: p.laid,
+                    items: p.items,
+                },
+                // A list that changed keeps its items' layouts, for the items that didn't.
+                Some(p)
+                    if matches!(p.block, Block::List { .. })
+                        && matches!(block, Block::List { .. }) =>
+                {
+                    Piece {
+                        block,
+                        laid: None,
+                        items: p.items,
+                    }
+                }
+                _ => Piece {
+                    block,
+                    laid: None,
+                    items: Vec::new(),
+                },
             })
             .collect();
     }
@@ -730,46 +760,7 @@ fn lay(
                 };
             }
             Block::List { start, items } => {
-                let indent = cx
-                    .style
-                    .list_indent
-                    .unwrap_or(cx.rem * if start.is_some() { 1.6 } else { 1.2 })
-                    .min(width * 0.25);
-                let gap = cx.style.list_marker_gap.unwrap_or(indent * 0.3);
-                for (n, item) in items.iter().enumerate() {
-                    if n > 0 {
-                        y += cx.style.list_item_gap.unwrap_or(cx.gap * 0.4);
-                    }
-                    let marker = match (start, item.checked) {
-                        (_, Some(true)) => "☑".to_string(),
-                        (_, Some(false)) => "☐".to_string(),
-                        (Some(s), None) => format!("{}.", *s as usize + n),
-                        (None, None) => "•".to_string(),
-                    };
-                    let mut ms = cx.base.clone();
-                    ms.color = cx
-                        .style
-                        .colors
-                        .list_marker
-                        .unwrap_or(cx.theme.muted_foreground);
-                    let len = marker.len();
-                    let m = ParagraphLayout::new(&Paragraph::plain(marker), &ms, indent, window);
-                    // Its end sits the gap before the text; a marker too wide for that starts
-                    // at the list's edge.
-                    let marker_w = m.position_for(len).x;
-                    let mx = (indent - gap - marker_w).max(px(0.));
-                    out.decos.push(Deco::Text {
-                        origin: point(x + mx, y),
-                        layout: Rc::new(m),
-                    });
-                    let before = out.leaves.len();
-                    y = lay(&item.blocks, x + indent, width - indent, y, cx, out, window);
-                    if let Some(l) = out.leaves.get_mut(before)
-                        && before > 0
-                    {
-                        l.separator = "\n";
-                    }
-                }
+                y = lay_list(*start, items, x, width, y, cx, out, window, None);
             }
             Block::Rule => {
                 let mid = y + cx.base.line_height * 0.5;
@@ -890,6 +881,120 @@ fn lay(
                 });
             }
         }
+    }
+    y
+}
+
+/// A list's items, one after another from `y`: each with its marker, its text set in. With
+/// `cache` (a top-level list's), an item laid out before for the same place, width and style is
+/// taken from it rather than laid out again.
+#[allow(clippy::too_many_arguments)]
+fn lay_list(
+    start: Option<u32>,
+    items: &[super::markdown::Item],
+    x: Pixels,
+    width: Pixels,
+    mut y: Pixels,
+    cx: &Ctx,
+    out: &mut ViewLayout,
+    window: &mut Window,
+    mut cache: Option<&mut Vec<ItemLaid>>,
+) -> Pixels {
+    let width = width.max(px(8.));
+    let indent = cx
+        .style
+        .list_indent
+        .unwrap_or(cx.rem * if start.is_some() { 1.6 } else { 1.2 })
+        .min(width * 0.25);
+    let gap = cx.style.list_marker_gap.unwrap_or(indent * 0.3);
+    let mut kept = Vec::new();
+    for (n, item) in items.iter().enumerate() {
+        if n > 0 {
+            y += cx.style.list_item_gap.unwrap_or(cx.gap * 0.4);
+        }
+        // One item on its own, at the list's top left: from the cache, or laid out now.
+        let cached = cache.as_deref_mut().and_then(|c| {
+            let i = c.iter().position(|l| {
+                l.n == n
+                    && l.start == start
+                    && l.width == width
+                    && l.key == out.key
+                    && l.item == *item
+            })?;
+            Some(c.swap_remove(i))
+        });
+        let laid = match cached {
+            Some(l) => l,
+            None => {
+                let mut one = ViewLayout {
+                    width,
+                    key: out.key.clone(),
+                    generation: 0,
+                    height: px(0.),
+                    leaves: Vec::new(),
+                    decos: Vec::new(),
+                    tail: None,
+                };
+                let marker = match (start, item.checked) {
+                    (_, Some(true)) => "☑".to_string(),
+                    (_, Some(false)) => "☐".to_string(),
+                    (Some(s), None) => format!("{}.", s as usize + n),
+                    (None, None) => "•".to_string(),
+                };
+                let mut ms = cx.base.clone();
+                ms.color = cx
+                    .style
+                    .colors
+                    .list_marker
+                    .unwrap_or(cx.theme.muted_foreground);
+                let len = marker.len();
+                let m = ParagraphLayout::new(&Paragraph::plain(marker), &ms, indent, window);
+                // Its end sits the gap before the text; a marker too wide for that starts at
+                // the list's edge.
+                let marker_w = m.position_for(len).x;
+                let mx = (indent - gap - marker_w).max(px(0.));
+                one.decos.push(Deco::Text {
+                    origin: point(x + mx, px(0.)),
+                    layout: Rc::new(m),
+                });
+                one.height = lay(
+                    &item.blocks,
+                    x + indent,
+                    width - indent,
+                    px(0.),
+                    cx,
+                    &mut one,
+                    window,
+                );
+                #[cfg(test)]
+                tests::ITEMS_LAID.with(|k| k.set(k.get() + 1));
+                ItemLaid {
+                    item: item.clone(),
+                    n,
+                    start,
+                    width,
+                    key: out.key.clone(),
+                    laid: Rc::new(one),
+                }
+            }
+        };
+        let before = out.leaves.len();
+        for (j, leaf) in laid.laid.leaves.iter().enumerate() {
+            let mut leaf = leaf.clone();
+            leaf.origin.y += y;
+            // An item's first paragraph goes on a new line when copied after the one above.
+            if j == 0 && before > 0 {
+                leaf.separator = "\n";
+            }
+            out.leaves.push(leaf);
+        }
+        out.decos
+            .extend(laid.laid.decos.iter().map(|d| d.moved_down(y)));
+        y += laid.laid.height;
+        kept.push(laid);
+    }
+    if let Some(c) = cache {
+        *c = kept;
     }
     y
 }
@@ -1092,15 +1197,29 @@ fn layout_for(
                 decos: Vec::new(),
                 tail: None,
             };
-            out.height = lay(
-                std::slice::from_ref(&piece.block),
-                px(0.),
-                width,
-                px(0.),
-                &c,
-                &mut out,
-                window,
-            );
+            out.height = match &piece.block {
+                // A list keeps its items' layouts.
+                Block::List { start, items } => lay_list(
+                    *start,
+                    items,
+                    px(0.),
+                    width,
+                    px(0.),
+                    &c,
+                    &mut out,
+                    window,
+                    Some(&mut piece.items),
+                ),
+                block => lay(
+                    std::slice::from_ref(block),
+                    px(0.),
+                    width,
+                    px(0.),
+                    &c,
+                    &mut out,
+                    window,
+                ),
+            };
             piece.laid = Some(Rc::new(out));
             #[cfg(test)]
             tests::LAID.with(|n| n.set(n.get() + 1));
@@ -1654,6 +1773,8 @@ mod tests {
         pub(super) static PAINTED: Cell<usize> = const { Cell::new(0) };
         /// How many top-level blocks have been laid out.
         pub(super) static LAID: Cell<usize> = const { Cell::new(0) };
+        /// How many list items have been laid out.
+        pub(super) static ITEMS_LAID: Cell<usize> = const { Cell::new(0) };
     }
 
     struct Streamed {
@@ -1667,6 +1788,54 @@ mod tests {
                 .w(px(self.width))
                 .child(TextView::blocks("streamed", self.sources.clone()))
         }
+    }
+
+    #[gpui::test]
+    fn a_growing_list_lays_out_only_its_new_or_changed_items(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let list = |n: usize, last: &str| -> gpui::SharedString {
+            let mut s: String = (0..n).map(|i| format!("- item number {i}\n")).collect();
+            s.push_str(&format!("- {last}"));
+            s.into()
+        };
+        let sources = vec![(0u64, "A reply:".into()), (1u64, list(300, "the last"))];
+        let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let m = made.clone();
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Streamed {
+                sources,
+                width: 300.,
+            });
+            *m.borrow_mut() = Some(v.clone());
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        let v = made.borrow().clone().unwrap();
+        let laid = |vcx: &mut gpui::VisualTestContext, f: &dyn Fn(&mut Streamed)| {
+            ITEMS_LAID.with(|n| n.set(0));
+            vcx.update(|_, cx| {
+                v.update(cx, |s, cx| {
+                    f(s);
+                    cx.notify();
+                })
+            });
+            vcx.run_until_parked();
+            ITEMS_LAID.with(|n| n.get())
+        };
+        // The last item grows: it alone.
+        assert_eq!(
+            laid(vcx, &|s| s.sources[1].1 = list(300, "the last one")),
+            1
+        );
+        // A new item: it alone.
+        assert_eq!(
+            laid(vcx, &|s| {
+                s.sources[1].1 = format!("{}\n- and another", list(300, "the last one")).into()
+            }),
+            1
+        );
+        // A new width: every item.
+        assert_eq!(laid(vcx, &|s| s.width = 280.), 302);
     }
 
     #[gpui::test]
