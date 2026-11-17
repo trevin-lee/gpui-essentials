@@ -1023,45 +1023,13 @@ impl TableView {
 
     /// A cell's value as words, for assistive technology.
     pub(crate) fn cell_text(&self, r: &Doc, p: &Property) -> String {
-        let offset = i64::from(self.host.utc_offset_minutes()) * 60_000;
         let v = r.value(&p.id);
         match p.kind {
-            PropertyType::Title => r.title.clone(),
-            PropertyType::Number => v
-                .and_then(Value::as_number)
-                .map(|x| format::number(x, &p.config))
-                .unwrap_or_default(),
-            PropertyType::Select => v
-                .and_then(Value::option_id)
-                .and_then(|id| p.option(id))
-                .map(|o| o.name.clone())
-                .unwrap_or_default(),
-            PropertyType::MultiSelect => v
-                .and_then(Value::option_ids)
-                .unwrap_or(&[])
-                .iter()
-                .filter_map(|id| p.option(id).map(|o| o.name.clone()))
-                .collect::<Vec<_>>()
-                .join(", "),
-            PropertyType::Date => v
-                .and_then(Value::as_date)
-                .map(|d| format::date(d, offset))
-                .unwrap_or_default(),
-            PropertyType::Checkbox => if v.and_then(Value::as_bool).unwrap_or(false) {
-                "checked"
-            } else {
-                "unchecked"
-            }
-            .into(),
             PropertyType::Person => self.people_text(v),
             PropertyType::Relation => self.relation_text(p, v),
-            PropertyType::CreatedTime => format::instant(r.created, offset),
-            PropertyType::EditedTime => format::instant(r.updated, offset),
             PropertyType::CreatedBy => self.person_text(r.created_by()),
             PropertyType::EditedBy => self.person_text(r.edited_by()),
-            _ => p
-                .shown_text(v.and_then(Value::as_str).unwrap_or_default())
-                .to_owned(),
+            _ => plain_cell_text(r, p, i64::from(self.host.utc_offset_minutes()) * 60_000),
         }
     }
 
@@ -2232,5 +2200,57 @@ impl TableView {
             .debug_selector(|| "menu-picker".into())
             .child(picker)
             .into_any_element()
+    }
+}
+
+/// Whether a property's cells read through the host: people's names and related rows' titles.
+pub(crate) fn reads_host(kind: &PropertyType) -> bool {
+    matches!(
+        kind,
+        PropertyType::Person
+            | PropertyType::Relation
+            | PropertyType::CreatedBy
+            | PropertyType::EditedBy
+    )
+}
+
+/// A cell's value as words, for a property whose cells don't read through the host
+/// ([`reads_host`]; empty for one that does), its times `offset_ms` from UTC.
+pub(crate) fn plain_cell_text(r: &Doc, p: &Property, offset_ms: i64) -> String {
+    let v = r.value(&p.id);
+    match p.kind {
+        PropertyType::Title => r.title.clone(),
+        PropertyType::Number => v
+            .and_then(Value::as_number)
+            .map(|x| format::number(x, &p.config))
+            .unwrap_or_default(),
+        PropertyType::Select => v
+            .and_then(Value::option_id)
+            .and_then(|id| p.option(id))
+            .map(|o| o.name.clone())
+            .unwrap_or_default(),
+        PropertyType::MultiSelect => v
+            .and_then(Value::option_ids)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|id| p.option(id).map(|o| o.name.clone()))
+            .collect::<Vec<_>>()
+            .join(", "),
+        PropertyType::Date => v
+            .and_then(Value::as_date)
+            .map(|d| format::date(d, offset_ms))
+            .unwrap_or_default(),
+        PropertyType::Checkbox => if v.and_then(Value::as_bool).unwrap_or(false) {
+            "checked"
+        } else {
+            "unchecked"
+        }
+        .into(),
+        PropertyType::CreatedTime => format::instant(r.created, offset_ms),
+        PropertyType::EditedTime => format::instant(r.updated, offset_ms),
+        _ if reads_host(&p.kind) => String::new(),
+        _ => p
+            .shown_text(v.and_then(Value::as_str).unwrap_or_default())
+            .to_owned(),
     }
 }
