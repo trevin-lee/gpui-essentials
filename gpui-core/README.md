@@ -48,6 +48,11 @@ item](docs/gallery.png)
   `highlight(f, "yaml")` colours it (the `highlight` feature's `Highlighter`, or the host's), and
   ⌘F opens a find bar: matches found case aside as you type, Enter and Shift-Enter (⌘G and ⌘⇧G
   from the text) going round them, Escape closing it.
+- **Badge.** `Badge::new(label)` with `.secondary()`, `.destructive()` or `.outline()` (or
+  `variant(BadgeVariant::…)`) and an optional `.icon(name)` before the label: shadcn's pill,
+  on one line, its label cut short with an ellipsis in a narrow space. It's text until it's
+  given `.on_click(…)`; then it's a button that Tab reaches, with the focus ring, and
+  `touch(true)` has it take presses 44 points each way around it.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
