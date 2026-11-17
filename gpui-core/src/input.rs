@@ -230,6 +230,13 @@ pub struct InputState {
     multiline: bool,
     /// A code editor: lines that don't wrap, in the monospace font, Tab indenting.
     code: bool,
+    /// The line marked wrong (from 0), its message, and the text it was marked for: shown while
+    /// the text is that.
+    error: Option<(usize, SharedString, String)>,
+    /// What colours the text as code, and the language.
+    highlighter: Option<(crate::text::HighlightFn, SharedString)>,
+    /// The colours worked out last, and the text they're for.
+    highlights: Option<(String, crate::text::Highlights)>,
     rows: (usize, usize),
     submit_on_enter: bool,
     /// What the platform keyboard is told, over what the field works out for itself.
@@ -280,6 +287,9 @@ impl InputState {
             masked: false,
             multiline: false,
             code: false,
+            error: None,
+            highlighter: None,
+            highlights: None,
             rows: (1, 1),
             submit_on_enter: false,
             keyboard: None,
@@ -318,6 +328,64 @@ impl InputState {
             rows: (1, usize::MAX),
             ..Self::new(window, cx)
         }
+    }
+
+    /// Colours the text as code in `language` with `highlight`: gpui-core's `highlight`
+    /// feature makes one (`Highlighter::new().into_fn(SyntaxTheme::from_theme(theme))`, which
+    /// knows YAML among others), or a host brings its own. It's worked out again only when the
+    /// text changes; ranges out of order, overlapping or off a character's edge are passed over.
+    pub fn highlight(
+        mut self,
+        highlight: crate::text::HighlightFn,
+        language: impl Into<SharedString>,
+    ) -> Self {
+        self.highlighter = Some((highlight, language.into()));
+        self
+    }
+
+    /// Changes the colouring, or takes it away with `None`.
+    pub fn set_highlight(
+        &mut self,
+        highlight: Option<(crate::text::HighlightFn, SharedString)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.highlighter = highlight;
+        self.highlights = None;
+        cx.notify();
+    }
+
+    /// Marks line `line` (counted from 0) as wrong, with `message` drawn after its text and its
+    /// number in the error colour: the server's complaint about the text as it is (a policy that
+    /// didn't parse). It goes by itself when the text changes, or with `None`. Assistive tech
+    /// reads it as the field's description.
+    pub fn set_error_line(&mut self, error: Option<(usize, SharedString)>, cx: &mut Context<Self>) {
+        self.error = error.map(|(line, message)| (line, message, self.text.clone()));
+        cx.notify();
+    }
+
+    /// The line marked wrong and its message, while the text is still what it was marked for.
+    pub fn error_line(&self) -> Option<(usize, SharedString)> {
+        self.error
+            .as_ref()
+            .filter(|(_, _, text)| *text == self.text)
+            .map(|(line, message, _)| (*line, message.clone()))
+    }
+
+    /// The colours for the text as it is: worked out again only when it's changed.
+    fn refresh_highlights(&mut self) -> Option<&crate::text::Highlights> {
+        let (f, lang) = self.highlighter.as_ref()?;
+        if self.masked {
+            return None;
+        }
+        if self
+            .highlights
+            .as_ref()
+            .is_none_or(|(t, _)| *t != self.text)
+        {
+            let spans = f(lang, &self.text);
+            self.highlights = Some((self.text.clone(), spans));
+        }
+        self.highlights.as_ref().map(|(_, h)| h)
     }
 
     /// What it shows while empty.
@@ -1638,6 +1706,7 @@ impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme().clone();
         let s = self.state.clone();
+        let error = s.read(cx).error_line();
         let (focus, multiline, code, masked, empty, value, placeholder) = {
             let st = s.read(cx);
             (
@@ -1672,6 +1741,9 @@ impl RenderOnce for Input {
                 d.aria_placeholder(placeholder)
             })
             .when_some(self.label, |d, l| d.aria_label(l))
+            .when_some(error, |d, (line, message)| {
+                d.aria_description(SharedString::from(format!("Line {}: {message}", line + 1)))
+            })
             .cursor(CursorStyle::IBeam)
             .on_action(window.listener_for(&s, InputState::backspace))
             .on_action(window.listener_for(&s, InputState::delete))
@@ -1765,18 +1837,21 @@ struct Prepaint {
     text_bounds: Bounds<Pixels>,
     /// The line numbers in view, where they're drawn, and the caret's line's.
     numbers: Vec<(Point<Pixels>, ShapedLine, bool)>,
+    /// The line marked wrong, in view: its band, and its message and where that's drawn.
+    error: Option<(Bounds<Pixels>, Point<Pixels>, ShapedLine)>,
     selection: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
 }
 
-/// The shown text's runs: the placeholder, or the text with any marked (composing) part
-/// underlined.
+/// The shown text's runs: the placeholder, or the text in its code colours (if it has them)
+/// with any marked (composing) part underlined.
 fn runs_for(
     state: &InputState,
     shown: &str,
     color: Hsla,
     placeholder: Hsla,
     font: gpui::Font,
+    spans: Option<&crate::text::Highlights>,
 ) -> (String, Vec<TextRun>) {
     let run = |len, color| TextRun {
         len,
@@ -1791,26 +1866,67 @@ fn runs_for(
         let len = p.len();
         return (p, vec![run(len, placeholder)]);
     }
-    let mut runs = Vec::new();
-    match &state.marked {
-        Some(m) if !state.masked => {
-            let (a, b) = (state.to_shown(m.start), state.to_shown(m.end));
-            if a > 0 {
-                runs.push(run(a, color));
-            }
-            runs.push(TextRun {
-                underline: Some(UnderlineStyle {
-                    color: Some(color),
-                    thickness: px(1.),
-                    wavy: false,
-                }),
-                ..run(b - a, color)
-            });
-            if shown.len() > b {
-                runs.push(run(shown.len() - b, color));
+    // The spans that can be taken: in order, apart, inside the text and on characters' edges
+    // (a host's highlighter isn't trusted to be).
+    let mut styled: Vec<(Range<usize>, gpui::HighlightStyle)> = Vec::new();
+    if let Some(spans) = spans.filter(|_| !state.masked) {
+        let mut at = 0;
+        for (r, style) in spans {
+            if r.start >= at
+                && r.start < r.end
+                && r.end <= shown.len()
+                && shown.is_char_boundary(r.start)
+                && shown.is_char_boundary(r.end)
+            {
+                styled.push((r.clone(), *style));
+                at = r.end;
             }
         }
-        _ => runs.push(run(shown.len(), color)),
+    }
+    let marked = state
+        .marked
+        .as_ref()
+        .filter(|_| !state.masked)
+        .map(|m| state.to_shown(m.start)..state.to_shown(m.end));
+    // Where a run starts or ends: a span's edges and the marked part's.
+    let mut cuts: Vec<usize> = vec![0, shown.len()];
+    for (r, _) in &styled {
+        cuts.extend([r.start, r.end]);
+    }
+    if let Some(m) = &marked {
+        cuts.extend([m.start, m.end]);
+    }
+    cuts.retain(|c| *c <= shown.len());
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut runs = Vec::with_capacity(cuts.len());
+    let mut span = styled.iter().peekable();
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        while span.peek().is_some_and(|(r, _)| r.end <= a) {
+            span.next();
+        }
+        let style = span
+            .peek()
+            .filter(|(r, _)| r.start <= a && b <= r.end)
+            .map(|(_, s)| *s);
+        let mut r = run(b - a, style.and_then(|s| s.color).unwrap_or(color));
+        if let Some(s) = style {
+            if let Some(w) = s.font_weight {
+                r.font.weight = w;
+            }
+            if let Some(st) = s.font_style {
+                r.font.style = st;
+            }
+        }
+        if marked.as_ref().is_some_and(|m| m.start <= a && b <= m.end) {
+            r.underline = Some(UnderlineStyle {
+                color: Some(color),
+                thickness: px(1.),
+                wavy: false,
+            });
+        }
+        runs.push(r);
     }
     (shown.to_string(), runs)
 }
@@ -1897,6 +2013,7 @@ impl Element for TextBox {
                 text_style.color,
                 text_style.color,
                 text_style.font(),
+                None,
             );
             let mut n = 0usize;
             for (_, line, lr) in split_lines(&text, &runs) {
@@ -1964,12 +2081,19 @@ impl Element for TextBox {
         };
         self.state.update(cx, |s, _| {
             let shown = s.shown();
+            s.refresh_highlights();
+            let spans = s
+                .highlighter
+                .as_ref()
+                .and(s.highlights.as_ref())
+                .map(|(_, h)| h);
             let (text, runs) = runs_for(
                 s,
                 &shown,
                 style.color,
                 colors.placeholder.unwrap_or(theme.muted_foreground),
                 style.font(),
+                spans,
             );
             // A code editor's lines don't wrap.
             let wrap = (s.multiline && !s.code).then_some(bounds.size.width);
@@ -2029,9 +2153,37 @@ impl Element for TextBox {
             y += h;
         }
         let shown = if first <= last { first..last } else { 0..0 };
+        let error_line = s.error_line();
+        // The line marked wrong, if it's in view: a band across it, and its message a little
+        // after its text, drawn but not laid out.
+        let error = error_line.as_ref().and_then(|(line, message)| {
+            if !shown.contains(line) {
+                return None;
+            }
+            let at = *origins.get(*line)?;
+            let width = s.layout.lines.get(*line).map_or(px(0.), |(_, l)| l.width());
+            let band = Bounds::new(point(bounds.left(), at.y), size(bounds.size.width, lh));
+            let gap = rems(24. / 15.).to_pixels(window.rem_size());
+            let text = message.to_string();
+            let shaped = window.text_system().shape_line(
+                text.clone().into(),
+                font_size,
+                &[TextRun {
+                    len: text.len(),
+                    font: style.font(),
+                    color: theme.destructive,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }],
+                None,
+            );
+            Some((band, point(at.x + width + gap, at.y), shaped))
+        });
         let numbers = if gutter.is_some() {
             let caret_line = s.text[..s.cursor().min(s.text.len())].matches('\n').count();
             let muted = theme.muted_foreground;
+            let wrong = error_line.as_ref().map(|(l, _)| *l);
             shown
                 .clone()
                 .map(|i| {
@@ -2043,7 +2195,13 @@ impl Element for TextBox {
                         &[TextRun {
                             len: n.len(),
                             font: style.font(),
-                            color: if on { style.color } else { muted },
+                            color: if wrong == Some(i) {
+                                theme.destructive
+                            } else if on {
+                                style.color
+                            } else {
+                                muted
+                            },
                             background_color: None,
                             underline: None,
                             strikethrough: None,
@@ -2096,6 +2254,7 @@ impl Element for TextBox {
             shown,
             text_bounds: bounds,
             numbers,
+            error,
             selection,
             caret,
         }
@@ -2143,6 +2302,9 @@ impl Element for TextBox {
             point(bounds.right() + ink, bounds.bottom()),
         );
         window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
+            if let Some((band, _, _)) = &p.error {
+                window.paint_quad(fill(*band, theme.destructive.opacity(0.14)));
+            }
             for b in p.selection.drain(..) {
                 window.paint_quad(fill(b, self.colors.selection.unwrap_or(theme.selection())));
             }
@@ -2157,6 +2319,9 @@ impl Element for TextBox {
                 }
             }
             self.state.update(cx, |s, _| s.layout.lines = lines);
+            if let Some((_, at, message)) = p.error.take() {
+                let _ = message.paint(at, lh, TextAlign::Left, None, window, cx);
+            }
             if let Some(c) = p.caret.take() {
                 window.paint_quad(fill(c, self.colors.caret.unwrap_or(theme.foreground)));
             }
