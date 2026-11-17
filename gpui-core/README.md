@@ -111,6 +111,15 @@ item](docs/gallery.png)
   typing filters the entries (every word, case aside) and highlights the first match, Up and
   Down move through the matches while the field keeps the keyboard, Enter picks. A
   single-choice host closes its popover on a pick; a several-choice one keeps it open.
+- **NavigationMenu.** `NavigationMenu::new(id).item(NavigationMenuItem::panel(id, label)
+  .columns(2).with_link(NavigationMenuLink::new(id, title).description(…)))
+  .item(NavigationMenuItem::link(id, label)).on_navigate(…)`: a site's top navigation, as
+  shadcn's. A trigger opens a Popover of links, each a title over a muted description cut short
+  after two lines, in as many of its columns as the window has room for. A press, Enter, Space
+  or Down opens it, from the keyboard with its first link focused; the arrows, Home and End move
+  between the links, Left and Right along the row (switching panels while one is open), and the
+  pointer moving onto another trigger switches too. Escape or a press outside closes it,
+  following a link calls `on_navigate`, and `touch(true)` makes items 44 points.
 - **TextView.** `TextView::markdown(id, source)` draws GitHub Markdown natively: selectable
   with `selectable(true)`, links as `on_link_click` events, and `[text][label]` links
   resolved to their definitions. `TextView::blocks(id, [(key, source), …])` draws several

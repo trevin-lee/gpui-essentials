@@ -45,6 +45,7 @@ pub mod highlight;
 pub mod icon;
 pub mod input;
 mod menu;
+mod navigation_menu;
 mod picker;
 mod popover;
 mod press;
@@ -72,6 +73,7 @@ pub use date_picker::{
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
 pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
+pub use navigation_menu::{NavigationMenu, NavigationMenuItem, NavigationMenuLink};
 pub use picker::Picker;
 #[doc(hidden)]
 pub use popover::claim_count;
@@ -113,6 +115,7 @@ pub fn init(cx: &mut App) {
     date_picker::init(cx);
     input::init(cx);
     menu::init(cx);
+    navigation_menu::init(cx);
     picker::init(cx);
     popover::init(cx);
     text::init(cx);
