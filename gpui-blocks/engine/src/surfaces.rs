@@ -11,7 +11,10 @@ use gpui::{App, Div, Hsla, ParentElement as _, Styled as _, Window, div, px, rem
 use gpui_kit::base::text::MarkdownExtensions;
 use gpui_kit::component::Icon;
 
-use crate::direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
+/// The surface an open toggle is drawn in.
+pub const TOGGLE_OPEN_SURFACE: &str = "editor-toggle-open";
+/// The surface a closed toggle is drawn in.
+pub const TOGGLE_CLOSED_SURFACE: &str = "editor-toggle-closed";
 
 // Lucide icons (ISC, see assets/icons/LICENSE-LUCIDE).
 const ICON_CHEVRON_RIGHT: &[u8] = include_bytes!("../assets/icons/chevron-right.svg");

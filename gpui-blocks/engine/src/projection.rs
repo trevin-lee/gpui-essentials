@@ -1,29 +1,14 @@
-//! Projection of the editing model into the shared renderer's `BlockNode`s
-//! (design §7.3, D3).
-//!
-//! Each top-level block is projected directly into `BlockNode`s
-//! (`direct.rs`), so the editor renders through the same renderer as
-//! `TextView`. Every text leaf's `InlineState` is tagged with its `BlockId` as the
-//! `editor_key`, which is how the renderer reports layouts back (the seam
-//! in `text::editor_seam`). A top-level block is re-projected only when its
-//! per-block revision changes, so one keystroke re-projects one block.
+//! What the view draws from, per document revision: the top-level blocks in order, the leaves
+//! that get a text layout, and each table's cells. Rebuilt once per revision, so a frame that
+//! changes nothing walks no block.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
 
 use super::{
-    direct::NodeCache,
     document::{BlockContent, EditorDocument},
     id::BlockId,
     kind::BlockKindData,
 };
-use gpui_kit::base::text::editor_host::BlockNode;
-
-/// One projected top-level block.
-pub(crate) struct ProjectedBlock {
-    pub(crate) id: BlockId,
-    revision: u64,
-    pub(crate) nodes: Vec<BlockNode>,
-}
 
 /// Geometry facts the frame needs about a caret leaf.
 #[derive(Clone, Copy, Debug)]
@@ -37,7 +22,8 @@ pub(crate) struct LeafInfo {
 
 #[derive(Default)]
 pub(crate) struct Snapshot {
-    pub(crate) blocks: Vec<Rc<ProjectedBlock>>,
+    /// The top-level blocks, in order.
+    pub(crate) blocks: Rc<[BlockId]>,
     /// Leaves that have a rendered text layout, in document order.
     pub(crate) leaves: Rc<Vec<LeafInfo>>,
     /// Tables and their keyed cells, for node selection (no caret in cells).
@@ -45,38 +31,20 @@ pub(crate) struct Snapshot {
 }
 
 #[derive(Default)]
-pub(crate) struct ProjectionCache {
+pub(crate) struct SnapshotCache {
     revision: Option<u64>,
     snapshot: Rc<Snapshot>,
-    by_id: HashMap<BlockId, Rc<ProjectedBlock>>,
-    pub(crate) nodes: NodeCache,
     /// `cfg(test)`-checked perf counter (D9): snapshot rebuilds.
     pub(crate) rebuilds: usize,
 }
 
-impl ProjectionCache {
+impl SnapshotCache {
     pub(crate) fn snapshot(&mut self, doc: &EditorDocument) -> Rc<Snapshot> {
         if self.revision == Some(doc.revision) {
             return self.snapshot.clone();
         }
         self.rebuilds += 1;
-        let top = doc.children(doc.root);
-        let mut blocks = Vec::with_capacity(top.len());
-        let mut by_id = HashMap::with_capacity(top.len());
-        for id in top {
-            let revision = doc.block_revision(*id);
-            let block = match self.by_id.get(id) {
-                Some(prev) if prev.revision == revision => prev.clone(),
-                _ => Rc::new(ProjectedBlock {
-                    id: *id,
-                    revision,
-                    nodes: self.nodes.node(doc, *id).into_iter().collect(),
-                }),
-            };
-            by_id.insert(*id, block.clone());
-            blocks.push(block);
-        }
-        self.nodes.collect_garbage(doc);
+        let blocks: Rc<[BlockId]> = doc.children(doc.root).into();
         let leaves = doc
             .leaves()
             .iter()
@@ -100,7 +68,6 @@ impl ProjectionCache {
                 _ => tables.push((table, vec![*id])),
             }
         }
-        self.by_id = by_id;
         self.snapshot = Rc::new(Snapshot {
             blocks,
             leaves: Rc::new(leaves),
@@ -110,24 +77,9 @@ impl ProjectionCache {
         self.snapshot.clone()
     }
 
-    /// Whether images are projected as placeholders; a change drops the cache.
-    pub(crate) fn set_placeholders(&mut self, placeholders: bool) {
-        if self.nodes.placeholders != placeholders {
-            self.invalidate();
-            self.nodes.placeholders = placeholders;
-        }
-    }
-
+    /// Drops the snapshot, so the next frame builds it again.
     pub(crate) fn invalidate(&mut self) {
         self.revision = None;
-        self.by_id.clear();
-        self.nodes.clear();
-    }
-
-    /// Nodes and table rows built rather than reused (D9).
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn built(&self) -> usize {
-        self.nodes.built
     }
 }
 

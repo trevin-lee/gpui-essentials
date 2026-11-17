@@ -138,17 +138,18 @@ impl HeightIndex {
 }
 
 /// One cull unit, cached per document revision (Phase 5, step 2) so a
-/// frame does not walk every top-level block: a top-level node, or a chunk
+/// frame does not walk every top-level block: a top-level block, or a chunk
 /// of a long top-level list.
 pub(crate) struct UnitDesc {
     pub(crate) id: BlockId,
-    /// `snapshot.blocks[block].nodes[node]`.
+    /// The top-level block: `snapshot.blocks[block]`.
     pub(crate) block: usize,
-    pub(crate) node: usize,
-    /// Index of the node among all top-level nodes.
-    pub(crate) node_ix: usize,
     /// For a list chunk: its item range and the list's item ids.
     pub(crate) items: Option<(std::ops::Range<usize>, Rc<[BlockId]>)>,
+    /// What the block is, for the gap above the block after it.
+    pub(crate) kind: crate::draw::Prev,
+    /// Its accessible role and heading level.
+    pub(crate) role: Option<(gpui::Role, Option<usize>)>,
 }
 
 #[derive(Default)]
@@ -156,7 +157,7 @@ pub(crate) struct CullState {
     pub(crate) index: HeightIndex,
     /// The cull units of `index`'s revision.
     pub(crate) units: Vec<UnitDesc>,
-    /// Top-level node count of that revision.
+    /// Top-level block count of that revision.
     pub(crate) node_count: usize,
     /// Top-to-next-top distance of each measured top-level block.
     pub(crate) heights: HashMap<BlockId, Pixels>,

@@ -47,7 +47,6 @@ extern crate gpui_kit as gpui;
 
 mod command;
 mod cull;
-mod direct;
 mod document;
 mod draw;
 mod editor;
@@ -85,7 +84,6 @@ mod tests;
 pub mod surfaces;
 
 pub use command::{CommandError, EditorCommand};
-pub use direct::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
 pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
 pub use element::BlockEditor;
@@ -96,6 +94,7 @@ pub use state::{
     BlockEditorEvent, BlockEditorState, ClipboardPolicy, CodeHighlightFn, ImageSourceFn,
     PasteRequest, SubmitPolicy,
 };
+pub use surfaces::{TOGGLE_CLOSED_SURFACE, TOGGLE_OPEN_SURFACE};
 /// The editor's clipboard and selection actions, for a host's own menu (an edit menu over a touch
 /// selection, say) to dispatch to the focused editor.
 pub mod actions {

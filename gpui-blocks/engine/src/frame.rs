@@ -1,34 +1,23 @@
 // Changed in Trevin Lee's fork (2026): it records the rem size and each unit's bounds; a leaf's
-// geometry is GPUI Kit's or the engine's own.
-//! Per-frame geometry, collected through gpui-kit's editor host API.
-//!
-//! During the editor's prepaint every keyed text leaf reports a
-//! [`LeafGeometry`] to `collect_leaf_geometry`, which also paints the
-//! selection ranges handed to it. After prepaint the geometries become the
-//! editor's [`FrameLayout`], which handlers hit-test against until the next
-//! frame. Everything here maps between the model's offsets and the leaf
-//! indices gpui-kit reports.
+// geometry is the engine's own.
+//! Per-frame geometry. During the editor's prepaint every text leaf the engine draws reports
+//! where it laid out (`draw::OwnLeaf`); after prepaint those become the editor's
+//! [`FrameLayout`], which handlers hit-test against until the next frame. Everything here maps
+//! between the model's offsets and the leaves' own indices.
 
 use std::{collections::HashMap, ops::Range, rc::Rc};
 
 use crate::kind::ColumnAlign;
 use gpui::{Bounds, Pixels, Point, point, px, size};
-use gpui_kit::base::text::editor_host::LeafGeometry;
 
-use super::{id::BlockId, position::BlockPosition, projection::LeafInfo};
+use super::{draw::OwnLeaf, id::BlockId, position::BlockPosition, projection::LeafInfo};
 
-/// Builds the frame from what `collect_leaf_geometry` returned.
+/// Builds the frame from the leaves the engine drew.
 pub(crate) fn into_frame(
-    geometries: HashMap<u64, LeafGeometry>,
-    own: HashMap<u64, super::draw::OwnLeaf>,
+    mut geometries: HashMap<u64, OwnLeaf>,
     leaves: Rc<Vec<LeafInfo>>,
     tables: &[(BlockId, Vec<BlockId>)],
 ) -> FrameLayout {
-    let mut geometries: HashMap<u64, Geometry> = geometries
-        .into_iter()
-        .map(|(k, g)| (k, Geometry::Kit(g)))
-        .collect();
-    geometries.extend(own.into_iter().map(|(k, g)| (k, Geometry::Own(g))));
     let mut frame = FrameLayout::default();
     for (table, cells) in tables {
         let bounds = cells
@@ -45,110 +34,18 @@ pub(crate) fn into_frame(
             frame.leaves.push(LeafGeom {
                 info: *info,
                 geometry,
-                align: ColumnAlign::None,
             });
         }
     }
     frame
 }
 
-/// A leaf's geometry: GPUI Kit's, for a block it drew, or the engine's own.
-pub(crate) enum Geometry {
-    Kit(LeafGeometry),
-    Own(super::draw::OwnLeaf),
-}
-
-impl Geometry {
-    fn len(&self) -> usize {
-        match self {
-            Self::Kit(g) => g.len(),
-            Self::Own(g) => g.len(),
-        }
-    }
-
-    fn bounds(&self) -> Bounds<Pixels> {
-        match self {
-            Self::Kit(g) => g.bounds(),
-            Self::Own(g) => g.bounds(),
-        }
-    }
-
-    fn line_height(&self) -> Pixels {
-        match self {
-            Self::Kit(g) => g.line_height(),
-            Self::Own(g) => g.line_height(),
-        }
-    }
-
-    fn caret_height(&self) -> Pixels {
-        match self {
-            Self::Kit(g) => g.caret_height(),
-            Self::Own(g) => g.caret_height(),
-        }
-    }
-
-    fn position_for_index(&self, index: usize) -> Point<Pixels> {
-        match self {
-            Self::Kit(g) => g.position_for_index(index),
-            Self::Own(g) => g.position_for_index(index),
-        }
-    }
-
-    fn index_for_position(&self, at: Point<Pixels>) -> usize {
-        match self {
-            Self::Kit(g) => g.index_for_position(at),
-            Self::Own(g) => g.index_for_position(at),
-        }
-    }
-
-    fn atom_at(&self, at: Point<Pixels>) -> Option<Range<usize>> {
-        match self {
-            Self::Kit(g) => g.atom_at(at),
-            Self::Own(g) => g.atom_at(at),
-        }
-    }
-}
-
 pub(crate) struct LeafGeom {
     pub(crate) info: LeafInfo,
-    geometry: Geometry,
-    /// A table cell's column alignment, for a cell GPUI Kit drew. GPUI Kit
-    /// paints centred and right-aligned cell text shifted inside the text
-    /// element, but `LeafGeometry` positions are unshifted; `row_shift` puts
-    /// it back. The engine's own leaves are laid out aligned, so theirs stays
-    /// `None`.
-    pub(crate) align: ColumnAlign,
+    geometry: OwnLeaf,
 }
 
 impl LeafGeom {
-    /// How far the row at `y` (an unshifted line top) is painted right of
-    /// where `LeafGeometry` reports it, for an aligned table cell.
-    fn row_shift(&self, y: Pixels) -> Pixels {
-        if matches!(self.align, ColumnAlign::None | ColumnAlign::Left) {
-            return px(0.);
-        }
-        let len = self.geometry.len();
-        let b = self.bounds();
-        let (mut lo, mut hi) = (None::<Pixels>, None::<Pixels>);
-        for i in 0..=len {
-            let p = self.geometry.position_for_index(i);
-            if (p.y - y).abs() < px(0.5) {
-                lo = Some(lo.map_or(p.x, |v: Pixels| v.min(p.x)));
-                hi = Some(hi.map_or(p.x, |v: Pixels| v.max(p.x)));
-            }
-        }
-        let (Some(lo), Some(hi)) = (lo, hi) else {
-            return px(0.);
-        };
-        let free = (b.right() - lo) - (hi - lo);
-        let free = free.max(px(0.));
-        match self.align {
-            ColumnAlign::Center => free / 2.,
-            ColumnAlign::Right => free,
-            _ => px(0.),
-        }
-    }
-
     pub(crate) fn bounds(&self) -> Bounds<Pixels> {
         self.geometry.bounds()
     }
@@ -175,20 +72,11 @@ impl LeafGeom {
 
     /// Top of the caret at `offset`, window coordinates.
     pub(crate) fn caret_point(&self, offset: usize) -> Point<Pixels> {
-        let mut p = self.geometry.position_for_index(self.index(offset));
-        p.x += self.row_shift(p.y);
-        p
+        self.geometry.position_for_index(self.index(offset))
     }
 
     /// Closest model offset for a window point.
     pub(crate) fn offset_at(&self, at: Point<Pixels>) -> usize {
-        let mut at = at;
-        if !matches!(self.align, ColumnAlign::None | ColumnAlign::Left) {
-            // The row under `at`, then undo its alignment shift.
-            let row = self.geometry.index_for_position(at);
-            let y = self.geometry.position_for_index(row).y;
-            at.x -= self.row_shift(y);
-        }
         let index = self.geometry.index_for_position(at);
         if self.info.atomic {
             usize::from(index * 2 > self.geometry.len().max(1))
@@ -421,17 +309,6 @@ impl FrameLayout {
         self.grids.clear();
         self.cell_boxes.clear();
         for shape in shapes {
-            for row in &shape.grid {
-                for (c, cell) in row.iter().enumerate() {
-                    let align = shape.aligns.get(c).copied().unwrap_or_default();
-                    // The engine's own leaves are laid out aligned already.
-                    if let Some(ix) = self.index.get(cell)
-                        && matches!(self.leaves[*ix].geometry, Geometry::Kit(_))
-                    {
-                        self.leaves[*ix].align = align;
-                    }
-                }
-            }
             let cols = shape.grid.iter().map(Vec::len).max().unwrap_or(0);
             // Each column's text element (left, width): all cells of a
             // column share it.
