@@ -5,7 +5,7 @@
 
 use std::ops::Range;
 
-use chrono::{Datelike, Duration};
+use chrono::{Datelike, Duration, Offset as _};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
@@ -151,55 +151,83 @@ fn merge_highlights(
     out
 }
 
+/// When an event happens, in words, read in `tz`: "Wednesday, November 18 · 11 AM – 12 PM".
+pub(super) fn when_in(e: &Event, tz: chrono_tz::Tz, hour12: bool) -> String {
+    let day = |d: chrono::NaiveDate| {
+        format!(
+            "{}, {} {}",
+            time::weekday_name(d.weekday(), false),
+            time::month_name(d.month()),
+            d.day()
+        )
+    };
+    let short = |d: chrono::NaiveDate| {
+        format!(
+            "{}, {} {}",
+            time::weekday_name(d.weekday(), true),
+            time::month_short(d.month()),
+            d.day()
+        )
+    };
+    match e.time {
+        EventTime::AllDay { start, end } => {
+            let last = end - Duration::days(1);
+            if last <= start {
+                format!("{} · All day", day(start))
+            } else {
+                format!("{} – {} · All day", short(start), short(last))
+            }
+        }
+        EventTime::Timed { start, end } => {
+            let (s, f) = (start.with_timezone(&tz), end.with_timezone(&tz));
+            if s.date_naive() == f.date_naive() || f == s {
+                format!(
+                    "{} · {}",
+                    day(s.date_naive()),
+                    time::format_range(s.time(), f.time(), hour12)
+                )
+            } else {
+                format!(
+                    "{}, {} – {}, {}",
+                    short(s.date_naive()),
+                    time::format_time(s.time(), hour12),
+                    short(f.date_naive()),
+                    time::format_time(f.time(), hour12)
+                )
+            }
+        }
+    }
+}
+
+/// A timed event's time in its own zone, where it has one whose clock reads differently from
+/// `here` at its start, as Google Calendar adds it: "Wednesday, November 18 · 2 – 3 PM (GMT-5)
+/// New York". None for an all-day event, or one in `here` or a zone the same hours as it.
+pub(super) fn when_there(e: &Event, here: chrono_tz::Tz, hour12: bool) -> Option<String> {
+    let zone = e.time_zone?;
+    let EventTime::Timed { start, .. } = e.time else {
+        return None;
+    };
+    let offset = |tz: chrono_tz::Tz| start.with_timezone(&tz).offset().fix();
+    if zone == here || offset(zone) == offset(here) {
+        return None;
+    }
+    Some(format!(
+        "{} ({}) {}",
+        when_in(e, zone, hour12),
+        time::gmt_offset(start, zone),
+        time::zone_place(zone)
+    ))
+}
+
 impl Calendar {
     /// When an event happens, in words: "Wednesday, November 18 · 11 AM – 12 PM".
     fn when(&self, e: &Event) -> String {
-        let tz = self.options.time_zone;
-        let hour12 = self.options.hour12;
-        let day = |d: chrono::NaiveDate| {
-            format!(
-                "{}, {} {}",
-                time::weekday_name(d.weekday(), false),
-                time::month_name(d.month()),
-                d.day()
-            )
-        };
-        let short = |d: chrono::NaiveDate| {
-            format!(
-                "{}, {} {}",
-                time::weekday_name(d.weekday(), true),
-                time::month_short(d.month()),
-                d.day()
-            )
-        };
-        match e.time {
-            EventTime::AllDay { start, end } => {
-                let last = end - Duration::days(1);
-                if last <= start {
-                    format!("{} · All day", day(start))
-                } else {
-                    format!("{} – {} · All day", short(start), short(last))
-                }
-            }
-            EventTime::Timed { start, end } => {
-                let (s, f) = (start.with_timezone(&tz), end.with_timezone(&tz));
-                if s.date_naive() == f.date_naive() || f == s {
-                    format!(
-                        "{} · {}",
-                        day(s.date_naive()),
-                        time::format_range(s.time(), f.time(), hour12)
-                    )
-                } else {
-                    format!(
-                        "{}, {} – {}, {}",
-                        short(s.date_naive()),
-                        time::format_time(s.time(), hour12),
-                        short(f.date_naive()),
-                        time::format_time(f.time(), hour12)
-                    )
-                }
-            }
-        }
+        when_in(e, self.options.time_zone, self.options.hour12)
+    }
+
+    /// The event's time in its own zone, if it reads differently (see [`when_there`]).
+    fn when_there(&self, e: &Event) -> Option<String> {
+        when_there(e, self.options.time_zone, self.options.hour12)
     }
 
     /// Text with what the find query found in it marked, as the grid marks it.
@@ -412,6 +440,12 @@ impl Calendar {
                 .flex()
                 .flex_col()
                 .child(div().child(self.when(&e)))
+                .children(self.when_there(&e).map(|there| {
+                    div()
+                        .text_color(muted)
+                        .debug_selector(|| "panel-zone".into())
+                        .child(there)
+                }))
                 .when(e.series.is_some(), |d| {
                     d.child(div().text_color(muted).child("Repeats"))
                 })

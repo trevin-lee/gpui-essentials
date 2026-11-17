@@ -193,6 +193,24 @@ pub struct Event {
     /// Who's invited and how they answered, shown in the event panel. Empty when the host
     /// doesn't know or the event has no guests.
     pub attendees: Vec<Attendee>,
+    /// The zone the event was made in (an iCalendar TZID, Google's `timeZone`), if the host
+    /// knows it. Where it isn't the calendar's display zone, the panel also gives the event's
+    /// time in it: "Wednesday, November 18 · 2 – 3 PM (GMT-5) New York". The grid always
+    /// draws in the display zone.
+    pub time_zone: Option<Tz>,
+}
+
+/// An empty event: no id, no title, at no time (the Unix epoch, lasting nothing), in no
+/// calendar. For struct literals that fill in what they need and take the rest with
+/// `..Default::default()`.
+impl Default for Event {
+    fn default() -> Self {
+        Self::new(
+            "",
+            "",
+            EventTime::timed(DateTime::UNIX_EPOCH, DateTime::UNIX_EPOCH),
+        )
+    }
 }
 
 /// Someone invited to an event.
@@ -290,6 +308,7 @@ impl Event {
             links: Vec::new(),
             notes: None,
             attendees: Vec::new(),
+            time_zone: None,
         }
     }
 
@@ -341,6 +360,12 @@ impl Event {
     /// Adds a link to a doc or an agent.
     pub fn link(mut self, link: EventLink) -> Self {
         self.links.push(link);
+        self
+    }
+
+    /// The zone the event was made in (see [`Event::time_zone`]).
+    pub fn time_zone(mut self, zone: Tz) -> Self {
+        self.time_zone = Some(zone);
         self
     }
 }
