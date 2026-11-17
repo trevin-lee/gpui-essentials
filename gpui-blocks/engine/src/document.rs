@@ -11,14 +11,14 @@ use super::{
     position::BlockPosition,
     step::DetachedBlock,
 };
+use crate::extension::CustomNode;
 use crate::kind::ColumnAlign;
-use gpui_kit::base::text::MarkdownNode;
 
 /// Payload of an atomic block.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum AtomData {
     None,
-    Custom(MarkdownNode),
+    Custom(CustomNode),
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use unicode_segmentation::GraphemeCursor;
 
+use crate::extension::CustomNode;
 use crate::text_mark::{ImageNode, TextMark};
-use gpui_kit::base::text::MarkdownNode;
 
 /// The placeholder an inline atom occupies in the flat text.
 pub(crate) const ATOM_CHAR: char = '\u{FFFC}';
@@ -13,7 +13,7 @@ pub(crate) const ATOM_LEN: usize = ATOM_CHAR.len_utf8();
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum InlineAtom {
     Image(ImageNode),
-    Custom(MarkdownNode),
+    Custom(CustomNode),
 }
 
 /// A run of text with one set of marks.

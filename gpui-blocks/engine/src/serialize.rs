@@ -329,7 +329,7 @@ fn escape_line_start(line: &str) -> String {
 
 /// The Markdown a custom node round-trips as: its own Markdown when it has
 /// one, else its text.
-fn custom_markdown(node: &gpui_kit::base::text::MarkdownNode) -> String {
+fn custom_markdown(node: &crate::extension::CustomNode) -> String {
     if node.as_markdown().is_empty() {
         node.as_text().to_string()
     } else {
