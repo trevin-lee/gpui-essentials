@@ -52,6 +52,7 @@ pub mod input;
 mod item;
 mod kbd;
 mod menu;
+mod menubar;
 mod navigation_menu;
 mod picker;
 mod popover;
@@ -95,6 +96,7 @@ pub use input::{Input, InputEvent, InputState};
 pub use item::{Item, ItemGroup, ItemSeparator, ItemVariant};
 pub use kbd::{Kbd, KbdGroup};
 pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
+pub use menubar::{Menubar, MenubarMenu, MenubarSelect};
 pub use navigation_menu::{NavigationMenu, NavigationMenuItem, NavigationMenuLink};
 pub use picker::Picker;
 #[doc(hidden)]
@@ -150,6 +152,7 @@ pub fn init(cx: &mut App) {
     menu::init(cx);
     navigation_menu::init(cx);
     context_menu::init(cx);
+    menubar::init(cx);
     picker::init(cx);
     search_list::init(cx);
     popover::init(cx);
