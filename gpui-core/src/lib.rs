@@ -36,6 +36,7 @@ struct ReadmeDoctests;
 mod a11y;
 mod accordion;
 mod alert;
+mod aspect_ratio;
 mod avatar;
 mod badge;
 mod breadcrumb;
@@ -80,6 +81,7 @@ mod tooltip;
 
 pub use accordion::{Accordion, AccordionItem};
 pub use alert::{Alert, AlertVariant};
+pub use aspect_ratio::AspectRatio;
 pub use avatar::{Avatar, AvatarGroup, AvatarImage};
 pub use badge::{Badge, BadgeVariant};
 pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
