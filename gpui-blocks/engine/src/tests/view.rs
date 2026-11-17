@@ -2273,7 +2273,7 @@ fn host_semantic_paste_intercepts_keyboard_and_native_action_once(cx: &mut TestA
         assert!(!state.apply_paste(&request, Some(" text"), cx));
     });
     assert_eq!(source(&editor, cx), "draft text");
-    cx.update(|window, cx| window.dispatch_action(Box::new(gpui_kit::base::input::Paste), cx));
+    cx.update(|window, cx| window.dispatch_action(Box::new(crate::actions::Paste), cx));
     draw(cx);
     let (request, _) = pending.borrow_mut().pop().unwrap();
     editor.update(cx, |state, cx| {

@@ -2590,14 +2590,6 @@ impl BlockEditorState {
             self.paste(item, false, cx);
         }
     }
-    pub(crate) fn on_native_paste(
-        &mut self,
-        _: &gpui_kit::base::input::Paste,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.on_paste(&Paste, window, cx);
-    }
     pub(crate) fn on_paste_plain(
         &mut self,
         _: &PastePlain,

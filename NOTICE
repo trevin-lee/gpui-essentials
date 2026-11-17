@@ -23,15 +23,10 @@ in a fork of that repository and brought here with its history. Its
 LICENSE-APACHE carries the notice of GPUI Kit, from
 which it derives.
 
-gpui-blocks-engine draws through GPUI Kit
+gpui-blocks-engine derives from GPUI Kit
 (https://github.com/longbridge/gpui-kit), Copyright 2024 - 2026 Longbridge,
-also licensed under the Apache License, Version 2.0.
-
-gpui-blocks-engine includes icons from Lucide (https://lucide.dev), Copyright
-2026 Lucide Icons and Contributors, licensed under the ISC License, some
-derived from Feather (https://feathericons.com), Copyright 2013-2026 Cole
-Bemis, licensed under the MIT License. See
-gpui-blocks/engine/assets/icons/LICENSE-LUCIDE.
+also licensed under the Apache License, Version 2.0. Its icons are gpui-core's
+(below).
 
 gpui-core
 ---------

@@ -22,7 +22,6 @@ use gpui::{
 
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
 use crate::support::secondary_modifier;
-use gpui_kit::base::StyledExt as _;
 
 /// Items per cull unit of a long top-level list.
 const LIST_CHUNK: usize = 32;
@@ -558,28 +557,29 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_copy))
             .on_action(window.listener_for(s, BlockEditorState::on_cut))
             .on_action(window.listener_for(s, BlockEditorState::on_paste))
-            .on_action(window.listener_for(s, BlockEditorState::on_native_paste))
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .children(super::table_ui::render_menu(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
-                    div()
-                        .w_full()
-                        .refine_style(&self.style)
-                        .child(
-                            div().relative().w_full().children(children).child(
-                                canvas(
-                                    move |bounds, _, _| measured_content.set(bounds),
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full(),
-                            ),
-                        )
-                        .into_any_element(),
+                    {
+                        let mut root = div().w_full();
+                        root.style().refine(&self.style);
+                        root
+                    }
+                    .child(
+                        div().relative().w_full().children(children).child(
+                            canvas(
+                                move |bounds, _, _| measured_content.set(bounds),
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size_full(),
+                        ),
+                    )
+                    .into_any_element(),
                 ),
                 content_bounds,
                 padding: root_style.padding,
