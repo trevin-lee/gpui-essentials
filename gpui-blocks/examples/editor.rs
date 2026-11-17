@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -662,6 +662,20 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                     });
                     // Typed, as the menu opens only for a `/` that's typed.
                     window.dispatch_keystroke(Keystroke::parse("/").unwrap(), cx);
+                });
+                settle(window, cx).await;
+            }
+            // The find bar with its replace row, finding "the".
+            "find" => {
+                let _ = cx.update_window(window, |_, window, cx| {
+                    root.update(cx, |root, cx| {
+                        root.editor.update(cx, |e, cx| e.focus(window, cx));
+                    });
+                    let open = if cfg!(target_os = "macos") { "cmd-alt-f" } else { "ctrl-h" };
+                    window.dispatch_keystroke(Keystroke::parse(open).unwrap(), cx);
+                    for key in ["t", "h", "e"] {
+                        window.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx);
+                    }
                 });
                 settle(window, cx).await;
             }
