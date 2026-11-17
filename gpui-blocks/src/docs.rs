@@ -26,8 +26,8 @@
 
 use std::sync::Arc;
 
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::*;
+use gpui::*;
+use gpui_core::ActiveTheme as _;
 use markdown::mdast::{Link, Node};
 use markdown_editor::{CustomNode, Extension, InlineContext};
 
@@ -767,7 +767,7 @@ mod tests {
         &'a mut VisualTestContext,
     ) {
         cx.update(|cx| {
-            gpui_kit::init(cx);
+            gpui_core::init(cx);
             crate::init(cx);
         });
         let (editor, cx) = cx.add_window_view(move |window, cx| {
@@ -803,7 +803,7 @@ mod tests {
             .collect()
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn clicking_a_link_tells_the_app(cx: &mut TestAppContext) {
         let titles = std::sync::Arc::new(Titles(Mutex::new(vec![
             ("4f2a", "Roadmap"),
@@ -829,7 +829,7 @@ mod tests {
         assert_eq!(editor.read_with(cx, |e, cx| e.markdown(cx)), before);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_renamed_doc_is_drawn_with_its_new_title(cx: &mut TestAppContext) {
         let titles = std::sync::Arc::new(Titles(Mutex::new(vec![("4f2a", "Q3")])));
         let (editor, _, cx) = open(cx, "See [Q3](doc:4f2a) here.", titles.clone());
@@ -846,7 +846,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn the_slash_menu_asks_the_app_and_the_app_answers(cx: &mut TestAppContext) {
         let titles = std::sync::Arc::new(Titles(Mutex::new(vec![])));
         let (editor, events, cx) = open(cx, "Intro", titles);
@@ -906,7 +906,7 @@ mod tests {
         &'a mut VisualTestContext,
     ) {
         cx.update(|cx| {
-            gpui_kit::init(cx);
+            gpui_core::init(cx);
             crate::init(cx);
         });
         let (editor, cx) = cx.add_window_view(move |window, cx| {
@@ -938,7 +938,7 @@ mod tests {
         (editor, events, cx)
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn an_embed_is_drawn_by_the_app_in_the_space_it_keeps(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (_, events, cx) = open_with_embeds(
@@ -967,7 +967,7 @@ mod tests {
         assert_eq!(clicked(&events), ["b1"]);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn dragging_an_embeds_edge_sets_its_height(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (editor, _, cx) = open_with_embeds(
@@ -1016,7 +1016,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn the_slash_menu_asks_for_an_embed(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (editor, events, cx) = open_with_embeds(cx, "Intro", drawn);
@@ -1045,7 +1045,7 @@ mod tests {
 
     /// Pastes `text` as the editor's own copy of a line's content would be.
     fn paste(cx: &mut VisualTestContext, text: &str) {
-        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string_with_metadata(
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string_with_metadata(
             text.to_string(),
             "gpui-kit/block-editor/inline-markdown/v1".to_string(),
         ));
@@ -1054,7 +1054,7 @@ mod tests {
 
     /// Pastes `text` as another app's would be.
     fn paste_external(cx: &mut VisualTestContext, text: &str) {
-        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.to_string()));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
         keys_paste(cx);
     }
 
@@ -1077,7 +1077,7 @@ mod tests {
         draw(cx);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_pasted_doc_link_can_become_an_embed(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
@@ -1111,7 +1111,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_pasted_doc_address_can_become_a_page_titled_by_the_app(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
@@ -1127,7 +1127,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_link_pasted_from_another_app_can_become_a_mention(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);
@@ -1145,7 +1145,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn no_offer_for_a_link_among_words_or_after_typing(cx: &mut TestAppContext) {
         let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
         let (editor, _, cx) = open_with_embeds(cx, "Intro", drawn);

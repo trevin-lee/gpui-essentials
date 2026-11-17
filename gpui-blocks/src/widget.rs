@@ -21,7 +21,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::{AnyElement, App, Window};
+use gpui::{AnyElement, App, Window};
 use markdown::mdast::Node;
 use markdown_editor::{CustomNode, Extension};
 

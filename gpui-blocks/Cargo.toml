@@ -15,12 +15,14 @@ include = ["/src", "/examples", "/README.md"]
 name = "gpui_blocks"
 
 [dependencies]
-gpui-kit = { workspace = true }
+# GPUI itself, under its own name, and the theme, components and icons the editor draws with.
+gpui = { workspace = true }
+gpui-core = { path = "../gpui-core" }
 # The document model, input, selection, undo and drawing: the engine, a fork of
 # gpui-kit-markdown-editor in engine/, with callouts, toggles, block motion and the hooks this
 # crate draws its menus with.
 markdown_editor = { package = "gpui-blocks-engine", path = "engine" }
-# The parser's syntax tree, for widget blocks: the version gpui-kit parses with.
+# The parser's syntax tree, for widget blocks: the version the engine parses with.
 markdown = "1.0.0"
 # The JSON form of a document (`json`).
 serde = { version = "1", features = ["derive"] }
@@ -40,6 +42,6 @@ name = "editor"
 
 [dev-dependencies]
 futures = "0.3"
-# The example serves gpui-core's icons, which the editor draws its toggles' chevrons with.
-gpui-core = { path = "../gpui-core" }
-gpui-kit = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+# The example's platform, as gpui-core's gallery opens it.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }

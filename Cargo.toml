@@ -10,11 +10,9 @@ rust-version = "1.100"
 license = "Apache-2.0"
 repository = "https://github.com/trevin-lee/gpui-essentials"
 
-# Pinned exactly, here only: GPUI comes as GPUI Kit, which pins a snapshot of Zed's GPUI
-# (gpui-pre 0.3.12). Every crate takes these, so an app using several of them links one GPUI,
-# and must use the same versions itself.
+# Pinned exactly, here only: a snapshot of Zed's GPUI (gpui-pre 0.3.12). Every crate takes
+# these, so an app using several of them links one GPUI, and must use the same versions itself.
 [workspace.dependencies]
-gpui-kit = "=0.9.1"
 gpui-pre = "=0.3.12"
 gpui-pre-macos = "=0.3.12"
 gpui-pre-apple = "=0.3.12"
