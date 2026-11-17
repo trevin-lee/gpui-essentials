@@ -22,12 +22,12 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use gpui::*;
 use gpui_blocks::docs::{DocInfo, Docs};
 use gpui_blocks::slash::{SlashAction, SlashItem};
 use gpui_blocks::widget::{Widget, fenced};
 use gpui_blocks::{Editor, EditorEvent, Options};
-use gpui_kit::component::{ActiveTheme as _, Theme, ThemeMode};
-use gpui_kit::*;
+use gpui_core::{ActiveTheme as _, Theme};
 
 const SAMPLE: &str = include_str!("sample.md");
 
@@ -92,30 +92,15 @@ fn save(path: &Path, markdown: &str) {
     }
 }
 
-/// A charcoal dark theme.
+/// The charcoal dark theme: gpui-core's, on a 15 px base.
 fn apply_theme(cx: &mut App) {
-    Theme::change(ThemeMode::Dark, None, cx);
-    let t = Theme::global_mut(cx);
-    t.font_size = px(15.);
-    t.radius = px(8.);
-    t.radius_lg = px(10.);
-    let c = &mut t.colors;
-    let hover: Hsla = rgba(0xededef0d).into();
-    c.background = rgb(0x0f0f11).into();
-    c.foreground = rgb(0xededef).into();
-    c.border = rgb(0x28282d).into();
-    c.input = rgb(0x3a3a41).into();
-    c.muted = rgb(0x1f1f23).into();
-    c.muted_foreground = rgb(0x8b8b93).into();
-    c.secondary = rgb(0x1f1f23).into();
-    c.secondary_foreground = rgb(0xededef).into();
-    c.popover = rgb(0x18181b).into();
-    c.popover_foreground = rgb(0xededef).into();
-    c.accent = hover;
-    c.accent_foreground = rgb(0xededef).into();
-    c.list_hover = hover;
-    c.list_active = hover;
-    c.danger = rgb(0xe5665b).into();
+    Theme::set(
+        Theme {
+            font_size: px(15.),
+            ..Theme::dark()
+        },
+        cx,
+    );
 }
 
 /// When frames start and finish, read by `--bench`. Every frame renders the root again, so
@@ -304,50 +289,52 @@ fn main() {
         None => SAMPLE.trim_end().to_string(),
     };
     let quiet = args.bench || args.shot.is_some();
-    gpui_kit::application().with_assets(Assets).run(move |cx| {
-        gpui_kit::init(cx);
-        gpui_blocks::init(cx);
-        apply_theme(cx);
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        cx.on_action(|_: &Quit, cx| cx.quit());
-        let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Editor".into()),
+    gpui_platform::application()
+        .with_assets(gpui_core::Icons)
+        .run(move |cx| {
+            gpui_core::init(cx);
+            gpui_blocks::init(cx);
+            apply_theme(cx);
+            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+            cx.on_action(|_: &Quit, cx| cx.quit());
+            let bounds = Bounds::centered(None, size(px(1280.), px(820.)), cx);
+            let options = WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Editor".into()),
+                    ..Default::default()
+                }),
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // A measurement or a picture doesn't take the keyboard or come forward; a picture
+                // isn't shown at all.
+                focus: !quiet,
+                show: args.shot.is_none(),
+                // GPUI draws a window that isn't active at most 30 times a second. The measurement's
+                // window stays inactive so it doesn't take the keyboard, so it lifts that cap to
+                // measure what the editor does at the display's own rate.
+                inactive_frame_interval: if args.bench {
+                    None
+                } else {
+                    WindowOptions::default().inactive_frame_interval
+                },
                 ..Default::default()
-            }),
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            // A measurement or a picture doesn't take the keyboard or come forward; a picture
-            // isn't shown at all.
-            focus: !quiet,
-            show: args.shot.is_none(),
-            // GPUI draws a window that isn't active at most 30 times a second. The measurement's
-            // window stays inactive so it doesn't take the keyboard, so it lifts that cap to
-            // measure what the editor does at the display's own rate.
-            inactive_frame_interval: if args.bench {
-                None
-            } else {
-                WindowOptions::default().inactive_frame_interval
-            },
-            ..Default::default()
-        };
-        let file = args.file.clone();
-        let (window, root) = gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| Root::new(&source, file, window, cx))
-        })
-        .expect("the window");
-        if !quiet {
-            cx.activate(true);
-        }
-        if args.bench {
-            bench(window, root.clone(), cx);
-        }
-        #[cfg(feature = "shots")]
-        if let Some(path) = args.shot.clone() {
-            shot(window, root.clone(), path, args.scene.clone(), cx);
-        }
-        let _ = root;
-    });
+            };
+            let file = args.file.clone();
+            let (window, root) = gpui_core::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| Root::new(&source, file, window, cx))
+            })
+            .expect("the window");
+            if !quiet {
+                cx.activate(true);
+            }
+            if args.bench {
+                bench(window, root.clone(), cx);
+            }
+            #[cfg(feature = "shots")]
+            if let Some(path) = args.shot.clone() {
+                shot(window, root.clone(), path, args.scene.clone(), cx);
+            }
+            let _ = root;
+        });
 }
 
 actions!(editor_example, [Quit]);
@@ -901,8 +888,8 @@ impl Widget for Answer {
     }
 
     fn render(&self, body: &str, _: &mut Window, cx: &mut App) -> AnyElement {
-        use gpui_kit::component::text::TextView;
-        use gpui_kit::prelude::FluentBuilder as _;
+        use gpui::prelude::FluentBuilder as _;
+        use gpui_core::TextView;
         let (from, asked, answer) = answer_parts(body);
         let theme = cx.theme();
         let initial = from
@@ -995,22 +982,4 @@ fn answer_parts(body: &str) -> (&str, &str, &str) {
         field("asked:"),
         answer.trim_start_matches('\n'),
     )
-}
-
-/// GPUI Kit's assets, and gpui-core's icons, which the editor draws its toggles' chevrons with.
-struct Assets;
-
-impl gpui_kit::AssetSource for Assets {
-    fn load(&self, path: &str) -> gpui_kit::Result<Option<std::borrow::Cow<'static, [u8]>>> {
-        match gpui_core::Icons.load(path)? {
-            Some(icon) => Ok(Some(icon)),
-            None => gpui_kit::assets::AllAssets.load(path),
-        }
-    }
-
-    fn list(&self, path: &str) -> gpui_kit::Result<Vec<gpui_kit::SharedString>> {
-        let mut out = gpui_core::Icons.list(path)?;
-        out.extend(gpui_kit::assets::AllAssets.list(path)?);
-        Ok(out)
-    }
 }

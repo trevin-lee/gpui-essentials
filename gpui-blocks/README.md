@@ -1,11 +1,11 @@
 # gpui-blocks
 
-A Notion-style block editor for [GPUI](https://www.gpui.rs) apps built with
-[GPUI Kit](https://github.com/longbridge/gpui-kit) 0.9. Documents are blocks you can type into,
-turn into other blocks with `/`, and drag around, and they're kept as Markdown.
+A Notion-style block editor for [GPUI](https://www.gpui.rs) apps, drawn with
+[gpui-core](../gpui-core). Documents are blocks you can type into, turn into other blocks with
+`/`, and drag around, and they're kept as Markdown.
 
-It uses GPUI Kit's types throughout (GPUI Kit builds on `gpui-pre`, a snapshot of Zed's GPUI), so
-it works in GPUI Kit apps but not with Zed's own `gpui` crate.
+It uses `gpui-pre`, a snapshot of Zed's GPUI, as `gpui`, the way gpui-core does, so it works in
+apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
 
 ![A document in gpui-blocks: headings, a to-do list, a numbered list, callouts and toggles](docs/doc.png)
 
@@ -39,24 +39,27 @@ it works in GPUI Kit apps but not with Zed's own `gpui` crate.
 
 ## Use it
 
-It needs Rust 1.100 or newer, as GPUI Kit 0.9 does.
+It needs Rust 1.100 or newer.
 
 ```toml
 [dependencies]
-gpui-kit = "0.9.1"
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 gpui-blocks = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 ```
 
 Pin a commit: until it's on crates.io, any commit can change the API.
 
 ```rust,no_run
-use gpui_kit::*;
+use gpui::*;
 
 fn main() {
-    gpui_kit::application().run(|cx| {
-        gpui_kit::init(cx);
+    // gpui-core's icons are served for the toggles' chevrons.
+    gpui_platform::application().with_assets(gpui_core::Icons).run(|cx| {
+        gpui_core::init(cx);
         gpui_blocks::init(cx);
-        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+        gpui_core::open_window(WindowOptions::default(), cx, |window, cx| {
             let editor = cx.new(|cx| gpui_blocks::Editor::new("# Hello\n\nType `/` for blocks.", window, cx));
             editor.update(cx, |editor, cx| editor.focus(window, cx));
             editor
@@ -120,8 +123,8 @@ name, info string and body, inside quotes, callouts and lists too.
 ```rust,no_run
 use gpui_blocks::slash::{SlashAction, SlashItem};
 use gpui_blocks::widget::{Widget, fenced};
+use gpui::*;
 use gpui_blocks::{Editor, Options};
-use gpui_kit::*;
 
 struct Chart;
 
@@ -173,8 +176,8 @@ other `doc:` link stays a plain link.
 
 ```rust,no_run
 use gpui_blocks::docs::{DocInfo, Docs};
+use gpui::*;
 use gpui_blocks::{Editor, EditorEvent, Options};
-use gpui_kit::*;
 
 struct MyDocs;
 

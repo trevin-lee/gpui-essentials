@@ -8,9 +8,9 @@
 //! menu's handle. Nothing here draws on a timer: the menus change on input and pointer moves
 //! only.
 
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::prelude::FluentBuilder as _;
-use gpui_kit::*;
+use gpui::prelude::FluentBuilder as _;
+use gpui::*;
+use gpui_core::ActiveTheme as _;
 use markdown_editor::{
     BlockEditor, BlockEditorEvent, BlockEditorState, BlockId, BlockKind, BlockPosition,
     BlockSelection, EditOrigin, EditorCommand, Extensions,
@@ -1771,7 +1771,7 @@ impl Render for Editor {
 #[cfg(test)]
 mod tests {
     use super::Editor;
-    use gpui_kit::{Entity, TestAppContext, VisualTestContext};
+    use gpui::{Entity, TestAppContext, VisualTestContext};
     use markdown_editor::{BlockKind, BlockPosition, BlockSelection};
     use std::prelude::rust_2024::test;
 
@@ -1780,7 +1780,7 @@ mod tests {
         source: &str,
     ) -> (Entity<Editor>, &'a mut VisualTestContext) {
         cx.update(|cx| {
-            gpui_kit::init(cx);
+            gpui_core::init(cx);
             crate::init(cx);
         });
         let source = source.to_string();
@@ -1824,7 +1824,7 @@ mod tests {
         })
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn slash_opens_narrows_and_picks_with_the_keyboard(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "First line");
         caret_at_end(&editor, cx, 0);
@@ -1850,7 +1850,7 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "First line\n\n## Plans");
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn escape_closes_the_menu_and_keeps_the_text(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "");
         cx.simulate_input("/to");
@@ -1868,7 +1868,7 @@ mod tests {
         assert_eq!(markdown(&editor, cx).lines().next(), Some("/tod"));
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_slash_inside_a_word_or_with_no_match_doesnt_open(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "");
         cx.simulate_input("and/or");
@@ -1879,7 +1879,7 @@ mod tests {
         assert_eq!(menu(&editor, cx), None);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn the_menu_turns_a_line_into_a_toggle_and_a_callout(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "");
         cx.simulate_input("/toggle");
@@ -1899,7 +1899,7 @@ mod tests {
         assert!(markdown(&editor, cx).ends_with("</details>\n\n> [!NOTE]\n> Heads up"));
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn cmd_shift_arrows_move_the_block_at_the_caret(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "one\n\ntwo\n\n- a\n- b");
         caret_at_end(&editor, cx, 0);
@@ -1915,7 +1915,7 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "one\n\ntwo\n\n- a\n- b");
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn blocks_keep_their_ids_through_edits_moves_and_a_reload(cx: &mut TestAppContext) {
         use crate::json::Kind;
         let (editor, cx) = open(cx, "one\n\ntwo");
@@ -1964,7 +1964,7 @@ mod tests {
         editor: &Entity<Editor>,
         cx: &mut VisualTestContext,
         offset: usize,
-    ) -> gpui_kit::Point<gpui_kit::Pixels> {
+    ) -> gpui::Point<gpui::Pixels> {
         editor.update(cx, |e, cx| {
             let state = e.state().read(cx);
             let id = state.model().document().leaves().next().unwrap().id();
@@ -1982,13 +1982,9 @@ mod tests {
         })
     }
 
-    fn touch(
-        cx: &mut VisualTestContext,
-        phase: gpui_kit::TouchPhase,
-        at: gpui_kit::Point<gpui_kit::Pixels>,
-    ) {
-        cx.simulate_event(gpui_kit::TouchEvent {
-            id: gpui_kit::TouchId(7),
+    fn touch(cx: &mut VisualTestContext, phase: gpui::TouchPhase, at: gpui::Point<gpui::Pixels>) {
+        cx.simulate_event(gpui::TouchEvent {
+            id: gpui::TouchId(7),
             phase,
             position: at,
             predicted_position: None,
@@ -1998,36 +1994,32 @@ mod tests {
     }
 
     /// Drags the selection handle `name` by touch to `to`, from its knob.
-    fn drag_handle(
-        cx: &mut VisualTestContext,
-        name: &'static str,
-        to: gpui_kit::Point<gpui_kit::Pixels>,
-    ) {
-        use gpui_kit::TouchPhase::*;
+    fn drag_handle(cx: &mut VisualTestContext, name: &'static str, to: gpui::Point<gpui::Pixels>) {
+        use gpui::TouchPhase::*;
         let handle = cx.debug_bounds(name).expect("the handle is drawn");
         let knob = if name.ends_with("start") {
-            gpui_kit::point(handle.center().x, handle.top() + gpui_kit::px(5.))
+            gpui::point(handle.center().x, handle.top() + gpui::px(5.))
         } else {
-            gpui_kit::point(handle.center().x, handle.bottom() - gpui_kit::px(5.))
+            gpui::point(handle.center().x, handle.bottom() - gpui::px(5.))
         };
         let offset = knob - handle.center();
         touch(cx, Started, knob);
-        let halfway = gpui_kit::point((knob.x + to.x + offset.x) / 2., knob.y);
+        let halfway = gpui::point((knob.x + to.x + offset.x) / 2., knob.y);
         touch(cx, Moved, halfway);
         touch(cx, Moved, to + offset);
         touch(cx, Ended, to + offset);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn touch_handles_move_the_ends_of_a_selection(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "hello world again");
         let word = point_at(&editor, cx, 8);
         // A finger held on a word: GPUI recognizes the long press after a moment.
-        touch(cx, gpui_kit::TouchPhase::Started, word);
+        touch(cx, gpui::TouchPhase::Started, word);
         cx.executor()
             .advance_clock(std::time::Duration::from_secs(1));
         draw(cx);
-        touch(cx, gpui_kit::TouchPhase::Ended, word);
+        touch(cx, gpui::TouchPhase::Ended, word);
         assert_eq!(selected(&editor, cx), (6, 11));
         assert!(cx.debug_bounds("blocks-handle-start").is_some());
         // The end's handle out to the end of the line.
@@ -2041,12 +2033,12 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "hello world again");
     }
 
-    fn long_press(cx: &mut VisualTestContext, at: gpui_kit::Point<gpui_kit::Pixels>) {
-        touch(cx, gpui_kit::TouchPhase::Started, at);
+    fn long_press(cx: &mut VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+        touch(cx, gpui::TouchPhase::Started, at);
         cx.executor()
             .advance_clock(std::time::Duration::from_secs(1));
         draw(cx);
-        touch(cx, gpui_kit::TouchPhase::Ended, at);
+        touch(cx, gpui::TouchPhase::Ended, at);
     }
 
     fn tap(cx: &mut VisualTestContext, name: &'static str) {
@@ -2054,11 +2046,11 @@ mod tests {
             .debug_bounds(name)
             .unwrap_or_else(|| panic!("{name} isn't drawn"))
             .center();
-        touch(cx, gpui_kit::TouchPhase::Started, at);
-        touch(cx, gpui_kit::TouchPhase::Ended, at);
+        touch(cx, gpui::TouchPhase::Started, at);
+        touch(cx, gpui::TouchPhase::Ended, at);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn the_touch_menu_copies_pastes_and_selects_all(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "hello world again");
         let at = point_at(&editor, cx, 8);
@@ -2079,7 +2071,7 @@ mod tests {
             "and closes the menu"
         );
         // Selected again, then pasted over.
-        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("planet".into()));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string("planet".into()));
         let at = point_at(&editor, cx, 8);
         long_press(cx, at);
         tap(cx, "blocks-menu-Paste");
@@ -2090,7 +2082,7 @@ mod tests {
         assert_eq!(selected(&editor, cx), (0, 18));
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_read_only_touch_menu_only_copies(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "hello world");
         editor.update(cx, |e, cx| e.set_readonly(true, cx));
@@ -2102,22 +2094,22 @@ mod tests {
         assert!(cx.debug_bounds("blocks-menu-Paste").is_none());
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_selection_made_with_a_mouse_has_no_handles(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "hello world");
         let word = point_at(&editor, cx, 8);
-        cx.simulate_click(word, gpui_kit::Modifiers::none());
-        cx.simulate_event(gpui_kit::MouseDownEvent {
-            button: gpui_kit::MouseButton::Left,
+        cx.simulate_click(word, gpui::Modifiers::none());
+        cx.simulate_event(gpui::MouseDownEvent {
+            button: gpui::MouseButton::Left,
             position: word,
-            modifiers: gpui_kit::Modifiers::none(),
+            modifiers: gpui::Modifiers::none(),
             click_count: 2,
             first_mouse: false,
         });
-        cx.simulate_event(gpui_kit::MouseUpEvent {
-            button: gpui_kit::MouseButton::Left,
+        cx.simulate_event(gpui::MouseUpEvent {
+            button: gpui::MouseButton::Left,
             position: word,
-            modifiers: gpui_kit::Modifiers::none(),
+            modifiers: gpui::Modifiers::none(),
             click_count: 2,
         });
         draw(cx);
@@ -2125,7 +2117,7 @@ mod tests {
         assert!(cx.debug_bounds("blocks-handle-start").is_none());
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn pictures_load_only_through_the_apps_loader(cx: &mut TestAppContext) {
         use std::sync::{Arc, Mutex};
         let source = "Before ![a picture](https://example.test/p.png) after";
@@ -2138,8 +2130,8 @@ mod tests {
         let seen = asked.clone();
         let options = crate::Options::default().images(move |address| {
             seen.lock().unwrap().push(address.to_string());
-            gpui_kit::ImageSource::Image(Arc::new(gpui_kit::Image::from_bytes(
-                gpui_kit::ImageFormat::Svg,
+            gpui::ImageSource::Image(Arc::new(gpui::Image::from_bytes(
+                gpui::ImageFormat::Svg,
                 b"<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'/>".to_vec(),
             )))
         });
@@ -2155,7 +2147,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn the_table_of_contents_follows_the_headings(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "[TOC]\n\n# One\n\n## Two\n\nText");
         assert!(cx.debug_bounds("blocks-toc").is_some());
@@ -2176,7 +2168,7 @@ mod tests {
         );
         // A click on Two puts the caret at its start.
         let two = cx.debug_bounds("blocks-toc-1").unwrap().center();
-        cx.simulate_click(two, gpui_kit::Modifiers::none());
+        cx.simulate_click(two, gpui::Modifiers::none());
         draw(cx);
         let at = editor.update(cx, |e, cx| {
             let state = e.state().read(cx);
@@ -2198,7 +2190,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_stale_selection_in_the_menu_never_panics(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "");
         cx.simulate_input("/");
@@ -2211,7 +2203,7 @@ mod tests {
         assert_eq!(menu(&editor, cx), None);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn moving_the_caret_next_to_a_slash_doesnt_open_the_menu(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "read / write\n\nnext");
         editor.update(cx, |e, cx| {
@@ -2228,7 +2220,7 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "read /\n\n write\n\nnext");
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_menu_left_over_from_a_replaced_document_does_nothing(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "");
         cx.simulate_input("/h");
@@ -2243,7 +2235,7 @@ mod tests {
         assert!(!markdown(&editor, cx).starts_with('#'));
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn a_pick_undoes_in_one_step(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "");
         cx.simulate_input("/head");
@@ -2256,7 +2248,7 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "/head");
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn picking_a_lists_own_kind_keeps_the_item(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "- item");
         caret_at_end(&editor, cx, 0);
@@ -2267,7 +2259,7 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "- item ");
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn front_matter_is_kept_aside_and_written_back(cx: &mut TestAppContext) {
         let source = "---\ntitle: Notes\ntags: [a]\n---\n\n# Notes";
         let (editor, cx) = open(cx, source);
@@ -2304,14 +2296,14 @@ mod tests {
         assert_eq!(super::image_markdown(path, "a\nb"), None);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn dividers_and_widgets_get_a_side_menu_too(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "a\n\n---\n\nb");
         let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks().len());
         assert_eq!(blocks, 3);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn cmd_shift_arrows_in_a_toggles_body_keep_its_summary(cx: &mut TestAppContext) {
         let (editor, cx) = open(
             cx,
@@ -2323,7 +2315,7 @@ mod tests {
         assert!(markdown(&editor, cx).contains("<summary>Title</summary>"));
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn cmd_shift_arrows_in_a_table_keep_its_columns(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "| h1 | h2 |\n| --- | --- |\n| a | b |");
         caret_at_end(&editor, cx, 3);
@@ -2335,7 +2327,7 @@ mod tests {
         );
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn the_side_menus_plus_adds_a_line_with_the_menu_open(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "# Title\n\nText");
         let first = editor.update(cx, |e, cx| {

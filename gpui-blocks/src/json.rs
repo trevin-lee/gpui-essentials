@@ -872,14 +872,9 @@ mod tests {
             fn name(&self) -> &str {
                 "chart"
             }
-            fn render(
-                &self,
-                _: &str,
-                _: &mut gpui_kit::Window,
-                _: &mut gpui_kit::App,
-            ) -> gpui_kit::AnyElement {
-                use gpui_kit::IntoElement as _;
-                gpui_kit::div().into_any_element()
+            fn render(&self, _: &str, _: &mut gpui::Window, _: &mut gpui::App) -> gpui::AnyElement {
+                use gpui::IntoElement as _;
+                gpui::div().into_any_element()
             }
         }
         vec![Arc::new(Chart)]
