@@ -15,9 +15,9 @@ use gpui::{
     Window, anchored, canvas, deferred, div, point, px, uniform_list,
 };
 use gpui_core::{
-    DatePickerColors, DismissReason, Icon, IconName, Input, InputState, MenuSelect, MonthGrid,
-    Picker, Popover as CorePopover, PopoverColors, PopupMenu, PopupMenuColors, PopupMenuItem,
-    Press, Selectable as _,
+    DatePickerColors, DismissReason, Icon, IconName, Input, InputState, MenuReorder, MenuSelect,
+    MonthGrid, Picker, Popover as CorePopover, PopoverColors, PopupMenu, PopupMenuColors,
+    PopupMenuItem, Press, Selectable as _,
 };
 
 use super::board::DraggedCard;
@@ -1654,6 +1654,7 @@ impl TableView {
                 disabled,
                 highlight,
                 submenu,
+                reorder,
             } = e;
             let Some(id) = id else {
                 out.push(MenuEntry::Heading(label.into()));
@@ -1675,6 +1676,9 @@ impl TableView {
             }
             if disabled {
                 item = item.disabled(true);
+            }
+            if let Some(group) = reorder {
+                item = item.reorder_group(group);
             }
             if highlight && open_on.is_none() {
                 open_on = Some(id.clone());
@@ -1751,7 +1755,26 @@ impl TableView {
         {
             menu = menu.move_highlight_request(id.clone(), *request);
         }
+        // The top menu takes every reorder; its submenus send theirs to it.
+        if at.is_empty() {
+            menu =
+                menu.on_reorder(cx.listener(|this, ev: &MenuReorder, window, cx| {
+                    this.reorder_entry(ev, window, cx)
+                }));
+        }
         menu.on_select(self.on_pick(actions, cx))
+    }
+
+    /// An entry of a reorder group moved: an option among the options, a card property among
+    /// those shown. The table hands the host the change and draws the menu in the new order.
+    fn reorder_entry(&mut self, ev: &MenuReorder, window: &mut Window, cx: &mut Context<Self>) {
+        match ev.group.as_ref() {
+            super::properties::OPTION_ORDER => {
+                self.reorder_option(ev.from, ev.to, &ev.id, window, cx)
+            }
+            super::views::CARD_ORDER => self.reorder_card(ev.from, ev.to, &ev.id, window, cx),
+            _ => {}
+        }
     }
 
     /// Runs a picked entry's action. Shift (Shift-Enter, or a Shift-click) adds a sort to the

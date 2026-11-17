@@ -466,9 +466,10 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
   - **Change type** lists the types, the current one checked: a pick is a `propertyChanged` with
     the new type and `Property::retyped`'s config (below). The title's menu has no Change type.
   - **Edit options** (selects and multi-selects) lists the options as their pills. Each opens its
-    own submenu: Rename option, the ten colours, Move up, Move down, Delete option. Add an option
-    and Rename option open a field. Every change is a `propertyChanged` with the whole property:
-    options are placed by their order in the list. A deleted option's rows keep naming it and
+    own submenu: Rename option, the ten colours, Delete option. The options reorder in place
+    (gpui-core's menu reorder groups): drag one, long-press one by touch, or Alt-Up and Alt-Down
+    on the highlighted one. Add an option and Rename option open a field. Every change is a
+    `propertyChanged` with the whole property: options are placed by their order in the list. A deleted option's rows keep naming it and
     show empty, as any value naming an option the property hasn't does.
   - **Number format**: Number, Percent or Currency, the currency in a submenu of its own (USD,
     EUR, GBP, JPY, CNY, INR, KRW, CAD, AUD, CHF), and decimal places (default, or 0 to 4).
@@ -593,8 +594,9 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     the settings' highlight to it, so → opens it.
   - **Card properties** (a board) and **Properties** (a list) list the properties shown on cards
     or lines, in order, then the hidden ones. A hidden one pressed is shown after the others; a
-    shown one opens its own submenu, to hide it or move it up or down (the list then in its new
-    order, the submenu still open; hidden, the list has the keyboard, on the one hidden). Each is a `viewChanged` with `cardProperties`.
+    shown one opens its own submenu, to hide it (the list then has the keyboard, on the one
+    hidden). The shown ones reorder in place, as options do: a drag, a long press by touch, or
+    Alt-Up and Alt-Down. Each is a `viewChanged` with `cardProperties`.
   - **Properties** (a table) opens the Properties menu the column headers have (Show and hide
     properties).
   - **Remove sorts** and **Clear filter**, while it sorts or filters, each a `viewChanged`.

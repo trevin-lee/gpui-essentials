@@ -127,8 +127,6 @@ pub(crate) enum PropAction {
     TwoWay,
     /// An option (by id) recoloured.
     Color(String, Color),
-    /// An option moved this many places.
-    MoveOption(String, isize),
     DeleteOption(String),
     /// The property deleted (confirmed).
     Delete,
@@ -164,6 +162,9 @@ pub(crate) struct NewRelation {
     pub database_id: String,
     pub two_way: bool,
 }
+
+/// The reorder group of a property's options in its menus.
+pub(crate) const OPTION_ORDER: &str = "options";
 
 /// The currencies the number format offers (ISO 4217), those the cells have symbols for.
 pub(crate) const CURRENCIES: &[&str] = &[
@@ -672,13 +673,16 @@ impl TableView {
         out
     }
 
-    /// A select's options as their pills, each opening its own submenu, and Add an option.
+    /// A select's options as their pills, each opening its own submenu and dragged (or moved
+    /// with Alt-Up and Alt-Down) to put them in another order, and Add an option.
     fn options_entries(&self, p: &Property) -> Vec<Entry> {
         use gpui_core::IconName as I;
         let mut out = vec![Entry::heading("Options")];
         for o in p.options() {
             out.push(
-                Entry::sub(o.name.clone(), self.option_entries(p, &o.id)).chip(o.color.clone()),
+                Entry::sub(o.name.clone(), self.option_entries(p, &o.id))
+                    .chip(o.color.clone())
+                    .reorder(OPTION_ORDER),
             );
         }
         out.push(
@@ -692,7 +696,8 @@ impl TableView {
         out
     }
 
-    /// An option's submenu: rename it, recolour it, move it, delete it.
+    /// An option's submenu: rename it, recolour it, delete it. (It's moved by dragging its entry
+    /// in the options, or with Alt-Up and Alt-Down: [`TableView::reorder_option`].)
     fn option_entries(&self, p: &Property, oid: &str) -> Vec<Entry> {
         use PropAction as A;
         use gpui_core::IconName as I;
@@ -713,12 +718,6 @@ impl TableView {
             );
         }
         out.push(Entry::heading("Option"));
-        if i > 0 {
-            out.push(act("Move up", A::MoveOption(oid.to_owned(), -1)).icon(I::ArrowUp));
-        }
-        if i + 1 < p.options().len() {
-            out.push(act("Move down", A::MoveOption(oid.to_owned(), 1)).icon(I::ArrowDown));
-        }
         out.push(act("Delete option", A::DeleteOption(oid.to_owned())).icon(I::Trash));
         out
     }
@@ -912,18 +911,6 @@ impl TableView {
             PropAction::Color(oid, c) => {
                 self.edit_option(pid, &oid, |options, i| options[i].color = c, window, cx)
             }
-            // The option's submenu stays open beside it in its new place (gpui-core keeps it by
-            // its entry), on the entry that moved it.
-            PropAction::MoveOption(oid, by) => self.edit_option(
-                pid,
-                &oid,
-                |options, i| {
-                    let j = (i as isize + by).clamp(0, options.len() as isize - 1) as usize;
-                    options.swap(i, j);
-                },
-                window,
-                cx,
-            ),
             PropAction::DeleteOption(oid) => self.edit_option(
                 pid,
                 &oid,
@@ -1435,6 +1422,41 @@ impl TableView {
         if *options != before {
             self.change(vec![self.changed(p)], window, cx);
         }
+    }
+
+    /// An option dragged to another place among the options (or moved with Alt-Up or
+    /// Alt-Down): a `propertyChanged` with the options in their new order, the menu open.
+    pub(crate) fn reorder_option(
+        &mut self,
+        from: usize,
+        to: usize,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(p) = self.menu_property() else {
+            return;
+        };
+        // The option the entry was drawn for: at `from`, named as the entry is.
+        let Some(oid) = p
+            .options()
+            .get(from)
+            .filter(|o| o.name == name)
+            .map(|o| o.id.clone())
+        else {
+            return;
+        };
+        let pid = Some(p.id.clone());
+        self.edit_option(
+            pid,
+            &oid,
+            |options, i| {
+                let o = options.remove(i);
+                options.insert(to.min(options.len()), o);
+            },
+            window,
+            cx,
+        );
     }
 
     fn add_option(&mut self, pid: &str, name: &str, window: &mut Window, cx: &mut Context<Self>) {

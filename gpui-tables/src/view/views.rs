@@ -125,8 +125,6 @@ pub(crate) enum ViewAction {
     GroupDate(DateBucket),
     /// Shown on cards or lines, or not.
     ToggleCard(String),
-    /// A card property moved up or down.
-    MoveCard(String, isize),
     /// A table's columns: the Properties menu.
     Columns,
     ClearSorts,
@@ -195,6 +193,9 @@ fn untitled(title: &str) -> String {
         title.to_owned()
     }
 }
+
+/// The reorder group of the properties a board's cards or a list's lines show.
+pub(crate) const CARD_ORDER: &str = "card-properties";
 
 /// The settings' entry for a date grouping's buckets, highlighted as it appears.
 const DATE_GROUPING: &str = "Date grouping";
@@ -744,7 +745,8 @@ impl TableView {
     }
 
     /// The properties a board's cards or a list's lines show, in order, each opening a submenu
-    /// to hide or move it; then the rest, to show.
+    /// to hide it and dragged (or moved with Alt-Up and Alt-Down) to put them in another order;
+    /// then the rest, to show.
     fn card_entries(&self, v: &View) -> Vec<Entry> {
         use ViewAction as A;
         use gpui_core::IconName as I;
@@ -753,22 +755,16 @@ impl TableView {
         };
         let shown = ops::card_properties(fields, v);
         let mut out = vec![Entry::heading("Shown")];
-        for (i, id) in shown.iter().enumerate() {
+        for id in &shown {
             let Some(p) = fields.property(id) else {
                 continue;
             };
-            let act = |label: &str, a: A| Entry::act(label, Action::View(a));
-            let mut sub = vec![act("Hide", A::ToggleCard(id.clone())).icon(I::EyeOff)];
-            if i > 0 {
-                sub.push(act("Move up", A::MoveCard(id.clone(), -1)).icon(I::ArrowUp));
-            }
-            if i + 1 < shown.len() {
-                sub.push(act("Move down", A::MoveCard(id.clone(), 1)).icon(I::ArrowDown));
-            }
+            let hide = Entry::act("Hide", Action::View(A::ToggleCard(id.clone()))).icon(I::EyeOff);
             out.push(
-                Entry::sub(p.name.clone(), sub)
+                Entry::sub(p.name.clone(), vec![hide])
                     .icon(type_icon(&p.kind))
-                    .checked(true),
+                    .checked(true)
+                    .reorder(CARD_ORDER),
             );
         }
         let hidden: Vec<_> = fields
@@ -963,12 +959,6 @@ impl TableView {
                 // (gpui-core keeps the highlight on its entry).
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
             }
-            ViewAction::MoveCard(pid, by) => {
-                let Some(v) = current else { return };
-                // Its submenu stays open beside it in its new place, on the entry that moved it.
-                let changed = ops::move_card_property(&fields, &v, &pid, by);
-                self.emit_views(vec![self.view_changed(changed)], None, window, cx);
-            }
             ViewAction::Columns => {
                 let Some(v) = current else { return };
                 self.show_view(v.id, window, cx);
@@ -1048,6 +1038,34 @@ impl TableView {
                 ..
             }) => Some(Vec::new()),
             _ => None,
+        }
+    }
+
+    /// A shown card property dragged to another place among them (or moved with Alt-Up or
+    /// Alt-Down): a `viewChanged` with `cardProperties` in the new order, the menu open.
+    pub(crate) fn reorder_card(
+        &mut self,
+        from: usize,
+        to: usize,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(fields), Some(v)) = (self.database.database.clone(), self.menu_view().cloned())
+        else {
+            return;
+        };
+        // The property the entry was drawn for: at `from`, named as the entry is.
+        let Some(pid) = ops::card_properties(&fields, &v)
+            .get(from)
+            .filter(|id| fields.property(id).is_some_and(|p| p.name == name))
+            .cloned()
+        else {
+            return;
+        };
+        let changed = ops::move_card_property(&fields, &v, &pid, to as isize - from as isize);
+        if changed != v {
+            self.emit_views(vec![self.view_changed(changed)], None, window, cx);
         }
     }
 
