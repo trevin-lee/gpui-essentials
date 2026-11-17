@@ -770,6 +770,42 @@ impl Editor {
         })
     }
 
+    /// Makes the one embed whose block has the lasting id `block` (as [`docs::Embed::block`] and
+    /// [`Editor::document`] give it) show `view`, keeping its document, title and height, as one
+    /// undo step: for remembering, with the page, the view someone switched to inside that
+    /// embed, leaving other embeds of the same document as they are. `view` follows
+    /// [`docs::embed`]'s rule for views. Returns false, changing nothing, for an id the document
+    /// doesn't have, a block that isn't an embed, the view it already shows, or a read-only
+    /// editor.
+    pub fn set_embed_view_of(&mut self, block: &str, view: &str, cx: &mut Context<Self>) -> bool {
+        let Some(target) = self.lock_ids().block_of(self.state.read(cx).model(), block) else {
+            return false;
+        };
+        let ids = self.ids.clone();
+        self.state.update(cx, |state, cx| {
+            if state.is_readonly() {
+                return false;
+            }
+            let Some(markdown) = state
+                .model()
+                .document()
+                .block(target)
+                .filter(|b| b.kind() == BlockKind::Custom)
+                .map(|b| b.markdown())
+            else {
+                return false;
+            };
+            let Some((id, title, shown, height)) = docs::embed_of(&markdown) else {
+                return false;
+            };
+            let markdown = docs::embed(&id, &title, view, height);
+            if docs::embed_of(&markdown).is_some_and(|(_, _, now, _)| now == shown) {
+                return false;
+            }
+            replace_keeping_id(state, &ids, target, markdown, cx)
+        })
+    }
+
     /// Makes every embed of the document `doc` that shows the view `from` show `to` instead,
     /// keeping its title and height, as one undo step: for remembering, with the page, the view
     /// someone switched to inside an embedded database. `to` follows [`docs::embed`]'s rule for
@@ -781,6 +817,7 @@ impl Editor {
         to: &str,
         cx: &mut Context<Self>,
     ) -> usize {
+        let ids = self.ids.clone();
         self.state.update(cx, |state, cx| {
             if state.is_readonly() {
                 return 0;
@@ -807,15 +844,7 @@ impl Editor {
                 changes
                     .into_iter()
                     .filter(|(block, markdown)| {
-                        state
-                            .run(
-                                EditorCommand::ReplaceBlock {
-                                    block: *block,
-                                    markdown: markdown.clone(),
-                                },
-                                cx,
-                            )
-                            .is_ok()
+                        replace_keeping_id(state, &ids, *block, markdown.clone(), cx)
                     })
                     .count()
             })
@@ -1635,6 +1664,37 @@ impl Editor {
     }
 }
 
+/// Replaces `block` with `markdown`, and gives the block in its place its lasting id.
+fn replace_keeping_id(
+    state: &mut BlockEditorState,
+    ids: &std::sync::Mutex<crate::json::Ids>,
+    block: BlockId,
+    markdown: String,
+    cx: &mut Context<BlockEditorState>,
+) -> bool {
+    let place = state.model().document().block(block).and_then(|b| {
+        let parent = b.parent()?;
+        let index = parent.children().position(|c| c.id() == block)?;
+        Some((parent.id(), index))
+    });
+    if state
+        .run(EditorCommand::ReplaceBlock { block, markdown }, cx)
+        .is_err()
+    {
+        return false;
+    }
+    let now = place.and_then(|(parent, index)| {
+        let doc = state.model().document();
+        doc.block(parent)?.children().nth(index).map(|b| b.id())
+    });
+    if let Some(now) = now {
+        ids.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .carry(block, now);
+    }
+    true
+}
+
 /// `Some(ordered)` when the caret's line is a plain (not to-do) list item's first line.
 /// The block of the embed a resize started on: the one block written as its Markdown, or among
 /// several the one under where the press was.
@@ -2398,6 +2458,51 @@ mod tests {
                 .update(cx, |e, cx| e.block_bounds("nope", cx))
                 .is_none()
         );
+    }
+
+    /// One embed's view changes by its lasting id, leaving another embed of the same database
+    /// showing the same view as it is; the block keeps its lasting id, and undo takes it back.
+    #[gpui::test]
+    fn one_embeds_view_changes_by_its_block(cx: &mut TestAppContext) {
+        let source = format!(
+            "{}\n\n{}",
+            crate::docs::embed("db1", "Tasks", "table", 300),
+            crate::docs::embed("db1", "Tasks", "table", 200)
+        );
+        let (editor, cx) = open(cx, &source);
+        let doc = editor.update(cx, |e, cx| e.document(cx));
+        let second = doc.blocks[1].id.clone();
+        assert!(editor.update(cx, |e, cx| e.set_embed_view_of(&second, "view-42_B", cx)));
+        let want = format!(
+            "{}\n\n{}",
+            crate::docs::embed("db1", "Tasks", "table", 300),
+            crate::docs::embed("db1", "Tasks", "view-42_B", 200)
+        );
+        assert_eq!(editor.update(cx, |e, cx| e.markdown(cx)), want);
+        let after = editor.update(cx, |e, cx| e.document(cx));
+        assert_eq!(after.blocks[1].id, second, "the block keeps its lasting id");
+        assert_eq!(after.blocks[0].id, doc.blocks[0].id);
+        // The view it already shows, an unknown id and a non-embed change nothing.
+        assert!(!editor.update(cx, |e, cx| e.set_embed_view_of(&second, "view-42_B", cx)));
+        assert!(!editor.update(cx, |e, cx| e.set_embed_view_of("nope", "board", cx)));
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-z"
+        } else {
+            "ctrl-z"
+        });
+        draw(cx);
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            source,
+            "one undo step"
+        );
+        // Rewriting every embed of the database by its view keeps their ids too.
+        let n = editor.update(cx, |e, cx| e.set_embed_view("db1", "table", "board", cx));
+        assert_eq!(n, 2);
+        let after = editor.update(cx, |e, cx| e.document(cx));
+        let ids: Vec<_> = after.blocks.iter().map(|b| b.id.clone()).collect();
+        let before: Vec<_> = doc.blocks.iter().map(|b| b.id.clone()).collect();
+        assert_eq!(ids, before);
     }
 
     /// Switching an embedded database's view rewrites its embeds that showed the old view, and
