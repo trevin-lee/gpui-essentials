@@ -113,6 +113,15 @@ item](docs/gallery.png)
 - **AspectRatio.** `AspectRatio::new(16. / 9.).child(…)`: a box as wide as its parent (or
   the width it's given) and as tall as the ratio makes that, its children filling it and
   clipped at its edges, never stretching it. A ratio that isn't a positive number is a square.
+- **InputOtp.** `InputOtpState::new(window, cx)` (six slots; `with_length(n, …)` for others,
+  `digits_only(false)` for letters too) drawn with `InputOtp::new(&state).groups([3, 3])
+  .on_complete(…)`: shadcn's one-time code field, single-character slots joined edge to edge,
+  a dash between groups. It's one hidden InputState with `max_chars`, so the platform's text
+  input works as in any field. Typing fills the slots in turn and rings the next one, Backspace
+  empties the last, a paste fills them all with what it takes of the clipboard (digits only by
+  default), and when every slot is full `on_complete` and `InputOtpEvent::Complete` give the
+  code, once per code. The keyboard is told no corrections, capitals or suggestions (GPUI has
+  no one-time-code content type to ask for yet). `touch()` makes the slots 44 points.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
