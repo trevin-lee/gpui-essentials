@@ -2201,15 +2201,22 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 mark: ink.mark.clone(),
                 dry: ink.dry,
             };
+            // The time now's pill, kept whole inside the grid like the hours.
+            let pill_h = ink.u(16.);
+            let pill_top = (now_y - pill_h / 2.).max(geo.grid_top);
             // The hours, out of the way of the time now.
             for h in 1..24 {
                 let y = geo.y_of(h as f32 * 60.);
-                let top = y - ink.u(SMALL_LEADING / 2.);
-                if top < geo.grid_top || y > b.bottom() + ink.u(10.) {
+                if y < geo.grid_top || y > b.bottom() + ink.u(10.) {
                     continue;
                 }
-                // Far enough that the two labels (the time now's the taller) don't touch.
-                if now_shown && (y - now_y).abs() < ink.u(16.) {
+                // Centred on its line, but never cut by the grid's top: a line at the very top
+                // (the grid scrolled to 8 AM) keeps its label, just below it.
+                let top = (y - ink.u(SMALL_LEADING / 2.)).max(geo.grid_top);
+                // Far enough that the two labels don't touch.
+                let bottom = top + ink.u(SMALL_LEADING);
+                if now_shown && bottom + ink.u(1.) > pill_top && top < pill_top + pill_h + ink.u(1.)
+                {
                     continue;
                 }
                 ink.text_right(
@@ -2238,11 +2245,11 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 let t = scene.now.with_timezone(&scene.options.time_zone).time();
                 let label = time::format_clock(t, scene.options.hour12);
                 let w = ink.measure(&label, 10.5, FontWeight::SEMIBOLD);
-                let (pad, h) = (ink.u(4.), ink.u(16.));
+                let (pad, h) = (ink.u(4.), pill_h);
                 let right = edge - ink.u(4.);
                 let pill = Bounds::from_corners(
-                    point(right - w - pad * 2., now_y - h / 2.),
-                    point(right, now_y + h / 2.),
+                    point(right - w - pad * 2., pill_top),
+                    point(right, pill_top + h),
                 );
                 ink.rounded(pill, h / 2., c.now);
                 ink.text(

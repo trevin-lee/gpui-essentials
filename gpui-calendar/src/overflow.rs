@@ -921,3 +921,71 @@ fn a_crowded_all_day_row_fits_at_every_size() {
     }
     assert!(found.is_empty(), "{}", found.join("\n"));
 }
+
+/// An hour whose line is at (or just under) the grid's top keeps its whole label, the second
+/// zone's too, rather than losing it to the grid's edge: scrolled to 8 AM, "8 AM" is there.
+#[test]
+fn the_top_hour_keeps_its_label() {
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| {
+                o.time_zone = TZ;
+                o.secondary_zone = Some(chrono_tz::Asia::Kolkata);
+            })
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_view(CalendarView::Week)
+            .with_events(worst_week())
+    });
+    let mut found = Vec::new();
+    for (w, h) in [(1280., 820.), (390., 844.)] {
+        vcx.simulate_resize(size(px(w), px(h)));
+        // On the line, a little under it, and with the time now's line at the top (10:40).
+        for minute in [480., 479., 477., 470., 600., 640.] {
+            calendar.update(vcx, |c, cx| {
+                c.scroll_to_minute(minute);
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            drawn::record();
+            vcx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+            let texts = drawn::take();
+            let geo = calendar
+                .read_with(vcx, |c, _| c.shared.geo.get())
+                .expect("drawn");
+            let at = format!("{w}x{h}, scrolled to {minute}");
+            // Everything drawn in the gutter's hours stays whole below the grid's top.
+            let gutter: Vec<_> = texts
+                .iter()
+                .filter(|t| {
+                    t.bounds.right() <= geo.gutter && t.mask.top() >= geo.grid_top - px(0.5)
+                })
+                .collect();
+            for t in &gutter {
+                if t.bounds.top() < t.mask.top() - px(0.5) {
+                    found.push(format!(
+                        "{at}: {:?} is cut by the grid's top: {:?}",
+                        t.text, t.bounds
+                    ));
+                }
+            }
+            for p in problems(&texts, geo.bounds) {
+                found.push(format!("{at}: {p}"));
+            }
+            // The first hour on screen (or the time now, where it's there) has its label.
+            let first = (minute / 60.).ceil() as u32;
+            let label = time::format_hour(first, true);
+            // At 10:40 the time now is the top line, and 11 AM, too close under it, gives way.
+            let now_there = minute == 640.;
+            if !now_there && !gutter.iter().any(|t| t.text == label) {
+                found.push(format!("{at}: no {label:?}"));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}
