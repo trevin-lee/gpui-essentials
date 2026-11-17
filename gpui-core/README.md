@@ -58,6 +58,11 @@ item](docs/gallery.png)
   and description wrap beside the action at the top right; the children are its content; the
   footer is a row along the bottom on a quieter fill. `small()` tightens its spacing. It draws
   only the parts it's given and takes no input of its own.
+- **Alert.** `Alert::new(id).icon(IconName::Info).title(…).description(…)`, `.destructive()`
+  for the variant in the destructive colour: a bordered box on the card colour with the icon
+  level with the title and the text beside it, wrapping. Children go under the description. A
+  destructive alert is an alert to assistive technology, the default one a status, named by
+  its title; `role(Role::Note)` (or another) says otherwise.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
