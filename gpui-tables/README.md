@@ -441,8 +441,8 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
     multi-select's first option as a select (`Value::option_ids`, `Value::option_id`), in
     cells, filters, sorts, groups and pickers. The first edit writes the new shape.
   - A select or multi-select changed to text (or a URL, email or phone) shows its option's name
-    (`Property::shown_text`), and its field opens on it; sorts and filters see the stored id
-    until the value is edited.
+    (`Property::shown_text`), and its field opens on it; sorts and filters see the name too.
+    (The stored id stays until the value is edited.)
   - A value of another shape (text under a number, a number under a date, option ids under a
     relation) shows empty and stays stored, so changing back shows it again. A relation pointed
     at another database keeps its row ids, which show as untitled rows.
@@ -884,7 +884,9 @@ the same files. Its README gives the format and every message.
 | An `order` key | 256 characters |
 
 The checks also catch ids used twice, a database with no title property or two, a value of the
-wrong shape for its type, a select or multi-select value naming an option the property hasn't, a
+wrong shape for its type (a select and a multi-select each take an option id or a list of them,
+as a property changed from one to the other keeps its values; a list holds at most 100, a
+select's too), a select or multi-select value naming an option the property hasn't, a
 person of a kind the property doesn't allow, a date range ending before it starts, and a value
 stored for a derived property (a created or edited time, created by or edited by). A filter
 depth of 4 is three levels of nested groups and their conditions, as Notion allows.

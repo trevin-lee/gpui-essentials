@@ -1348,3 +1348,93 @@ fn hostile_values_never_panic() {
         }
     }
 }
+
+/// People with Stage, a select, changed to text: its rows keep their option ids, and its cells
+/// show the options' names.
+fn people_with_stage_as_text() -> (DatabaseFields, Vec<Doc>, Property) {
+    let docs = docs("people.json");
+    let mut db = docs[0].database.clone().unwrap();
+    let stage = db
+        .properties
+        .iter_mut()
+        .find(|p| p.name == "Stage")
+        .unwrap();
+    *stage = stage.retyped(PropertyType::Text);
+    let stage = stage.clone();
+    (db, docs[1..].to_vec(), stage)
+}
+
+/// What a row's Stage cell shows, as text.
+fn shown(stage: &Property, row: &Doc) -> String {
+    let id = row
+        .value(&stage.id)
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    stage.shown_text(id).to_owned()
+}
+
+#[test]
+fn a_select_changed_to_text_filters_by_the_names_it_shows() {
+    let (db, rows, stage) = people_with_stage_as_text();
+    let live: Vec<&Doc> = rows.iter().filter(|r| !r.is_deleted()).collect();
+    let cx = Context::new(now());
+    for (op, needle, want) in [
+        (
+            FilterOp::Contains,
+            "lea",
+            &(|s: &str| s.contains("Lead")) as &dyn Fn(&str) -> bool,
+        ),
+        (FilterOp::Is, "lead", &|s: &str| s == "Lead"),
+        (FilterOp::StartsWith, "Act", &|s: &str| {
+            s.starts_with("Active")
+        }),
+        (FilterOp::DoesNotContain, "lead", &|s: &str| {
+            !s.contains("Lead")
+        }),
+        (FilterOp::IsNot, "warm", &|s: &str| s != "Warm"),
+    ] {
+        let filter = Filter::condition(&stage.id, op.clone(), json!(needle));
+        let (f, issues) = engine::CompiledFilter::new(Some(&filter), &db, &cx);
+        assert_eq!(issues, []);
+        let got: Vec<&str> = live
+            .iter()
+            .filter(|r| f.matches(r))
+            .map(|r| r.title.as_str())
+            .collect();
+        let expected: Vec<&str> = live
+            .iter()
+            .filter(|r| want(&shown(&stage, r)))
+            .map(|r| r.title.as_str())
+            .collect();
+        assert!(
+            !expected.is_empty() && expected.len() < live.len(),
+            "{op:?}"
+        );
+        assert_eq!(got, expected, "{op:?} {needle}");
+    }
+}
+
+#[test]
+fn a_select_changed_to_text_sorts_by_the_names_it_shows() {
+    let (mut db, rows, stage) = people_with_stage_as_text();
+    let mut v = view(&db, "All people").clone();
+    v.filter = None;
+    for direction in [Direction::Ascending, Direction::Descending] {
+        let descending = direction == Direction::Descending;
+        v.sort = vec![Sort {
+            property_id: stage.id.clone(),
+            direction,
+        }];
+        db.views = vec![v.clone()];
+        let out = query(&db, &v, &rows, &Context::new(now()));
+        assert_eq!(out.issues, []);
+        let names: Vec<String> = out.rows.iter().map(|&i| shown(&stage, &rows[i])).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        if descending {
+            sorted.reverse();
+        }
+        // Active, Dormant, Lead, Warm: the ids' order (Active, Lead, Dormant, Warm) differs.
+        assert_eq!(names, sorted, "descending: {descending}");
+    }
+}
