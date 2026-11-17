@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    AbsoluteLength, App, AvailableSpace, Bounds, ClipboardItem, Corners, CursorStyle,
+    AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, ClipboardItem, Corners, CursorStyle,
     DefiniteLength, DispatchPhase, Element, ElementId, Fill, FocusHandle, FontWeight,
     GlobalElementId, HitboxBehavior, Hsla, InspectorElementId, InteractiveElement as _,
     IntoElement, KeyBinding, LayoutId, Length, Modifiers, MouseButton, MouseDownEvent,
@@ -212,6 +212,20 @@ impl Default for TextViewStyle {
 }
 
 type OnLink = Rc<dyn Fn(&str, &Modifiers, &mut Window, &mut App)>;
+type CodeOverlay = Rc<dyn Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement>;
+
+/// A fenced code block, for [`TextView::code_block_overlay`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeBlock {
+    /// The key of the source it's in ([`TextView::blocks`]; 0 for [`TextView::markdown`]).
+    pub key: u64,
+    /// Its place among its source's code blocks, from 0.
+    pub index: usize,
+    /// Its fence's info string (```` ```rust ````), if any.
+    pub language: Option<SharedString>,
+    /// Its code, without the fences or a trailing line end.
+    pub code: SharedString,
+}
 
 /// Markdown, drawn. Nothing in it fetches or opens anything: a link press goes to
 /// [`on_link_click`](TextView::on_link_click), and an image shows as its description.
@@ -223,6 +237,7 @@ pub struct TextView {
     selectable: bool,
     on_link: Option<OnLink>,
     caret: Option<Hsla>,
+    code_overlay: Option<CodeOverlay>,
 }
 
 impl TextView {
@@ -254,7 +269,20 @@ impl TextView {
             selectable: false,
             on_link: None,
             caret: None,
+            code_overlay: None,
         }
+    }
+
+    /// Draws `f`'s element over each fenced code block, laid out at the block's box and placed
+    /// on it, over the text: a Copy button in its corner, say. It's built for the blocks in
+    /// view as the view is drawn, so it costs no frames of its own. Its listeners run before
+    /// the view's: a press it stops (`cx.stop_propagation()`) doesn't start a selection.
+    pub fn code_block_overlay(
+        mut self,
+        f: impl Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + 'static,
+    ) -> Self {
+        self.code_overlay = Some(Rc::new(f));
+        self
     }
 
     /// A caret in `color` after the text's last character (the last source's, with
@@ -528,6 +556,12 @@ enum Deco {
         origin: Point<Pixels>,
         layout: Rc<ParagraphLayout>,
     },
+    /// Where a fenced code block's box is, and what's in it: for an overlay. Not painted.
+    Code {
+        bounds: Bounds<Pixels>,
+        language: Option<SharedString>,
+        code: SharedString,
+    },
 }
 
 impl Deco {
@@ -536,6 +570,7 @@ impl Deco {
         match &mut d {
             Deco::Box { bounds, .. } => bounds.origin.y += by,
             Deco::Text { origin, .. } => origin.y += by,
+            Deco::Code { bounds, .. } => bounds.origin.y += by,
         }
         d
     }
@@ -552,6 +587,9 @@ struct ViewLayout {
     /// The last source's paragraphs, and where its first line starts (for a trailing caret
     /// when it has none) and that line's height.
     tail: Option<(std::ops::Range<usize>, Point<Pixels>, Pixels)>,
+    /// Every code block's box, in order, with its source's key and its place among that
+    /// source's code blocks.
+    codes: Vec<(CodeBlock, Bounds<Pixels>)>,
 }
 
 /// Everything layout needs from the theme, the window and the host's style.
@@ -736,6 +774,12 @@ fn lay(
                     border_width: bw,
                     radius: Corners::all(radius),
                 };
+                out.decos.push(Deco::Code {
+                    bounds: Bounds::new(point(x, top), size(width, y - top)),
+                    language: lang.clone().map(Into::into),
+                    // Without a trailing line end, whatever the parser kept.
+                    code: text.strip_suffix('\n').unwrap_or(text).to_string().into(),
+                });
             }
             Block::Quote(inner) => {
                 let top = y;
@@ -934,6 +978,7 @@ fn lay_list(
                     leaves: Vec::new(),
                     decos: Vec::new(),
                     tail: None,
+                    codes: Vec::new(),
                 };
                 let marker = match (start, item.checked) {
                     (_, Some(true)) => "☑".to_string(),
@@ -1196,6 +1241,7 @@ fn layout_for(
                 leaves: Vec::new(),
                 decos: Vec::new(),
                 tail: None,
+                codes: Vec::new(),
             };
             out.height = match &piece.block {
                 // A list keeps its items' layouts.
@@ -1233,6 +1279,7 @@ fn layout_for(
         leaves: Vec::new(),
         decos: Vec::new(),
         tail: None,
+        codes: Vec::new(),
     };
     let mut y = px(0.);
     let mut above: Option<&Block> = None;
@@ -1240,6 +1287,7 @@ fn layout_for(
     for (i, k) in state.keys.iter().enumerate() {
         let first_leaf = out.leaves.len();
         let mut top = None;
+        let mut code_ix = 0;
         for piece in &k.pieces {
             let Some(laid) = &piece.laid else { continue };
             if let Some(a) = above {
@@ -1256,6 +1304,25 @@ fn layout_for(
                 out.leaves.push(leaf);
             }
             out.decos.extend(laid.decos.iter().map(|d| d.moved_down(y)));
+            for d in &laid.decos {
+                if let Deco::Code {
+                    bounds,
+                    language,
+                    code,
+                } = d.moved_down(y)
+                {
+                    out.codes.push((
+                        CodeBlock {
+                            key: k.key,
+                            index: code_ix,
+                            language,
+                            code,
+                        },
+                        bounds,
+                    ));
+                    code_ix += 1;
+                }
+            }
             y += laid.height;
             above = Some(&piece.block);
         }
@@ -1339,6 +1406,7 @@ impl RenderOnce for TextView {
                 style: self.style,
                 selectable: self.selectable,
                 on_link: self.on_link,
+                code_overlay: self.code_overlay,
             })
     }
 }
@@ -1348,6 +1416,7 @@ struct Prepainted {
     layout: Rc<ViewLayout>,
     body: Option<gpui::Hitbox>,
     links: Vec<gpui::Hitbox>,
+    overlays: Vec<AnyElement>,
 }
 
 struct ViewElement {
@@ -1359,6 +1428,7 @@ struct ViewElement {
     fingerprint: u64,
     selectable: bool,
     on_link: Option<OnLink>,
+    code_overlay: Option<CodeOverlay>,
 }
 
 impl IntoElement for ViewElement {
@@ -1543,10 +1613,23 @@ impl Element for ViewElement {
                 }
             }
         }
+        let mut overlays = Vec::new();
+        if let Some(f) = &self.code_overlay {
+            for (code, b) in &l.codes {
+                let at = Bounds::new(bounds.origin + b.origin, b.size);
+                if !at.intersects(&seen) {
+                    continue;
+                }
+                let mut el = f(code, window, cx);
+                el.prepaint_as_root(at.origin, at.size.map(AvailableSpace::Definite), window, cx);
+                overlays.push(el);
+            }
+        }
         Prepainted {
             layout: l,
             body,
             links,
+            overlays,
         }
     }
 
@@ -1753,6 +1836,10 @@ impl Element for ViewElement {
                     }
                 }
             });
+        }
+        // Over the text, and after the view's listeners, so theirs run first.
+        for el in &mut prepainted.overlays {
+            el.paint(window, cx);
         }
     }
 }
