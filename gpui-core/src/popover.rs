@@ -233,6 +233,28 @@ impl From<Point<Pixels>> for PopoverAnchor {
     }
 }
 
+/// Which side of what it hangs from a popover is drawn on. It goes to the opposite side where
+/// it doesn't fit and there's more room there.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PopoverSide {
+    Top,
+    Right,
+    #[default]
+    Bottom,
+    Left,
+}
+
+/// Where a popover lines up along the side it's on: its start with the start of what it hangs
+/// from (its left, or its top beside it), centred on it, or its end with the end. It's moved in
+/// to stay in the window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PopoverAlign {
+    #[default]
+    Start,
+    Center,
+    End,
+}
+
 /// A panel below what it hangs from (above it where there's more room there), at least as wide
 /// as that and at most as wide as the window, as tall as its content up to a maximum and then
 /// scrolling. It's drawn only while open.
@@ -252,6 +274,8 @@ pub struct Popover {
     max_height: Rems,
     match_trigger_width: bool,
     close_when_scrolled_away: bool,
+    side: PopoverSide,
+    align: PopoverAlign,
     colors: Option<PopoverColors>,
     role: Role,
     label: Option<gpui::SharedString>,
@@ -272,6 +296,8 @@ impl Popover {
             max_height: rems(24.),
             match_trigger_width: true,
             close_when_scrolled_away: true,
+            side: PopoverSide::Bottom,
+            align: PopoverAlign::Start,
             colors: None,
             role: Role::Dialog,
             label: None,
@@ -341,6 +367,18 @@ impl Popover {
     /// back: for a host that scrolls a table's cell under an open menu.
     pub fn close_when_scrolled_away(mut self, close: bool) -> Self {
         self.close_when_scrolled_away = close;
+        self
+    }
+
+    /// Which side of what it hangs from it's drawn on (below unless given).
+    pub fn side(mut self, side: PopoverSide) -> Self {
+        self.side = side;
+        self
+    }
+
+    /// Where it lines up along that side (its start with the start, unless given).
+    pub fn align(mut self, align: PopoverAlign) -> Self {
+        self.align = align;
         self
     }
 
@@ -452,6 +490,8 @@ impl RenderOnce for Popover {
             max_height: self.max_height,
             match_trigger_width: self.match_trigger_width,
             close_when_scrolled_away: self.close_when_scrolled_away,
+            side: self.side,
+            align: self.align,
             on_dismiss: self.on_dismiss,
         }
     }
@@ -641,28 +681,73 @@ impl Element for ClaimArea {
     }
 }
 
-/// Where a panel of `size` goes: below `anchor`, or above it where it doesn't fit below and
-/// there's more room above; from the anchor's left, moved in to keep `edge` from the window's
-/// sides.
+/// Where a panel of `size` goes: on `side` of `anchor`, or the opposite side where it doesn't
+/// fit there and there's more room on that one; lined up along it by `align`, moved in to keep
+/// `edge` from the window's sides. Below and from the anchor's left unless told otherwise.
 fn place(
     anchor: Bounds<Pixels>,
     size: gpui::Size<Pixels>,
     view: Bounds<Pixels>,
     edge: Pixels,
     gap: Pixels,
+    side: PopoverSide,
+    align: PopoverAlign,
 ) -> Point<Pixels> {
-    let below = view.bottom() - anchor.bottom() - gap - edge;
-    let above = anchor.top() - view.top() - gap - edge;
-    let y = if size.height <= below || below >= above {
-        anchor.bottom() + gap
-    } else {
-        anchor.top() - gap - size.height
+    // Along the side: from `start` to `end` of the anchor, a panel `len` long, in `lo..hi`.
+    let along = |start: Pixels, end: Pixels, len: Pixels, lo: Pixels, hi: Pixels| {
+        let want = match align {
+            PopoverAlign::Start => start,
+            PopoverAlign::Center => (start + end - len) / 2.,
+            PopoverAlign::End => end - len,
+        };
+        want.min(hi - edge - len).max(lo + edge.min(start))
     };
-    let x = anchor
-        .left()
-        .min(view.right() - edge - size.width)
-        .max(view.left() + edge.min(anchor.left()));
-    point(x.round(), y.round())
+    match side {
+        PopoverSide::Top | PopoverSide::Bottom => {
+            let below = view.bottom() - anchor.bottom() - gap - edge;
+            let above = anchor.top() - view.top() - gap - edge;
+            let down = if side == PopoverSide::Bottom {
+                size.height <= below || below >= above
+            } else {
+                !(size.height <= above || above >= below)
+            };
+            let y = if down {
+                anchor.bottom() + gap
+            } else {
+                anchor.top() - gap - size.height
+            };
+            let x = along(
+                anchor.left(),
+                anchor.right(),
+                size.width,
+                view.left(),
+                view.right(),
+            );
+            point(x.round(), y.round())
+        }
+        PopoverSide::Left | PopoverSide::Right => {
+            let after = view.right() - anchor.right() - gap - edge;
+            let before = anchor.left() - view.left() - gap - edge;
+            let right = if side == PopoverSide::Right {
+                size.width <= after || after >= before
+            } else {
+                !(size.width <= before || before >= after)
+            };
+            let x = if right {
+                anchor.right() + gap
+            } else {
+                anchor.left() - gap - size.width
+            };
+            let y = along(
+                anchor.top(),
+                anchor.bottom(),
+                size.height,
+                view.top(),
+                view.bottom(),
+            );
+            point(x.round(), y.round())
+        }
+    }
 }
 
 /// `b` moved the least way that puts it inside `inside` (its own size kept, up to that's).
@@ -687,6 +772,8 @@ struct PopoverElement {
     max_height: Rems,
     match_trigger_width: bool,
     close_when_scrolled_away: bool,
+    side: PopoverSide,
+    align: PopoverAlign,
     on_dismiss: Option<DismissFn>,
 }
 
@@ -783,9 +870,16 @@ impl Element for PopoverElement {
 
         let rem = window.rem_size();
         let (edge, gap) = (rem * (EDGE / 15.), rem * (GAP / 15.));
-        let below = view.bottom() - anchor.bottom() - gap - edge;
-        let above = anchor.top() - view.top() - gap - edge;
-        let room = below.max(above).max(px(0.));
+        let room = match self.side {
+            PopoverSide::Top | PopoverSide::Bottom => {
+                let below = view.bottom() - anchor.bottom() - gap - edge;
+                let above = anchor.top() - view.top() - gap - edge;
+                below.max(above)
+            }
+            // Beside it: the window's height.
+            PopoverSide::Left | PopoverSide::Right => view.size.height - edge * 2.,
+        }
+        .max(px(0.));
         let height = self.max_height.to_pixels(rem).min(room);
         let widest = (view.size.width - edge * 2.).max(px(0.));
         let narrowest = if self.match_trigger_width {
@@ -811,7 +905,7 @@ impl Element for PopoverElement {
                 cx,
             )
         });
-        let origin = place(anchor, size, view, edge, gap);
+        let origin = place(anchor, size, view, edge, gap, self.side, self.align);
         window.defer_draw(panel, origin, layer, None::<ContentMask<Pixels>>);
     }
 

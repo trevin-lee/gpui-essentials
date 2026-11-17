@@ -24,7 +24,9 @@ item](docs/gallery.png)
   `border_color`, `Popover::colors`, `DatePicker::colors` / `MonthGrid::colors`.
 - **Popover.** `Popover::new(id).open(open).on_dismiss(…).trigger(element).child(…)` hangs a
   panel from its trigger, or from a box or point in the window with `anchor`. It goes below, or
-  above where there's more room, stays inside the window and scrolls past `max_height`. A click
+  above where there's more room (`side(PopoverSide::Top)`, `Left` or `Right` for another side,
+  flipping the same way; `align(PopoverAlign::Center)` or `End` to line it up other than by its
+  start), stays inside the window and scrolls past `max_height`. A click
   outside, Escape, or the trigger scrolling away calls `on_dismiss` with the reason; the host
   owns `open`. While open it has the keyboard, and on closing it hands the focus back.
 - **Breadcrumb.** `Breadcrumb::new(id).item(BreadcrumbItem::new(id, label))….on_navigate(…)`:
@@ -291,6 +293,15 @@ item](docs/gallery.png)
   made only while open. A pick runs its `on_select` (its submenus' picks too) and closes it;
   Escape, a press outside and the element scrolling out of view close it as well, and the
   focus goes back to what had it. A plain click, a tap and selecting text stay the element's.
+- **DropdownMenu.** `DropdownMenu::new(id).trigger(button).items([PopupMenuItem::new(id,
+  label), …]).separator().on_select(…)` is shadcn's Dropdown Menu: a PopupMenu (headings,
+  checks, shortcuts, submenus) in a Popover hung from a Button or a Press. A press, a tap, Enter
+  or Space on the trigger opens and closes it, and Down opens it; from the keys its first entry
+  is highlighted, from the pointer none until the keys or the pointer move, and a tap gives it
+  44-point rows (`touch(true)` always does). A pick runs `on_select` and closes it; Escape and a
+  press outside close it too, and the keyboard goes back to the trigger, which assistive tech
+  hears as expanded while it's open. `side(PopoverSide::…)` and `align(PopoverAlign::…)` place
+  it, below and from the trigger's start unless told.
 - **Menubar.** `Menubar::new(id).menu(MenubarMenu::new(id, title, PopupMenu::new(…)…))…
   .on_select(…)`: a row of menus, as shadcn's Menubar, each a PopupMenu (submenus and all) in a
   Popover under its title, its picks going to `on_select` with the menu's id. The bar is one Tab
