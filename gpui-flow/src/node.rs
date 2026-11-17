@@ -273,10 +273,10 @@ pub(crate) struct Shared {
     pub unmeasured: Cell<usize>,
 }
 
-/// An ink node's stroke as read, and what it was read from: the points by where their text is
-/// and a little of it, the rest as it was.
+/// An ink node's stroke as read, and what it was read from: the points by their text's length
+/// and a hash of all of it (not where it is, which a patch can reuse), the rest as it was.
 pub(crate) struct InkCache {
-    points: (usize, usize, [u8; 8], [u8; 8]),
+    points: (usize, u64),
     rest: [Value; 4],
     pub drawn: Rc<crate::ink::Drawn>,
 }
@@ -286,18 +286,9 @@ impl Shared {
     pub fn ink(&self, node: &Node) -> Option<Rc<crate::ink::Drawn>> {
         let ink = node.data.get("ink")?;
         let text = ink.get("points")?.as_str()?;
-        let b = text.as_bytes();
-        let ends = |s: &[u8]| {
-            let mut a = [0u8; 8];
-            let n = s.len().min(8);
-            a[..n].copy_from_slice(&s[..n]);
-            a
-        };
         let points = (
-            text.as_ptr() as usize,
-            b.len(),
-            ends(b),
-            ends(&b[b.len().saturating_sub(8)..]),
+            text.len(),
+            std::hash::BuildHasher::hash_one(&foldhash::fast::FixedState::default(), text),
         );
         let field = |k: &str| ink.get(k).cloned().unwrap_or(Value::Null);
         let rest = [
