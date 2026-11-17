@@ -368,13 +368,17 @@ pub const DEFAULT_HEIGHT: u32 = 320;
 pub const HEIGHTS: std::ops::RangeInclusive<u32> = 80..=1600;
 
 /// A document drawn inside another: which document, how the app shows it (a hint such as
-/// `table`, `board`, `mindmap`, `calendar` or `page`), and how tall it is.
+/// `table`, `board`, `mindmap`, `calendar` or `page`), how tall it is, and which block it is.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Embed {
     pub doc: SharedString,
     pub view: SharedString,
     pub height: u32,
+    /// The embed block's lasting id, as [`Editor::document`](crate::Editor::document) gives it,
+    /// so two embeds of one document (even showing the same view) are told apart, and the app
+    /// can keep what each shows. Empty when drawn without an editor.
+    pub block: SharedString,
 }
 
 /// The Markdown of an embed of the document `id`: a line holding only a link, so other
@@ -473,7 +477,12 @@ pub(crate) struct EmbedHooks {
     /// Heights while a resize is under way, by parse key.
     pub(crate) heights: Heights,
     pub(crate) on_resize: Option<OnResize>,
+    /// A block's lasting id, as [`Editor::document`](crate::Editor::document) gives it.
+    pub(crate) lasting_id: Option<LastingId>,
 }
+
+/// Gives a block its lasting id.
+pub(crate) type LastingId = Arc<dyn Fn(markdown_editor::BlockId) -> String + Send + Sync>;
 
 /// An embed as the document keeps it.
 #[derive(Clone, Debug, PartialEq)]
@@ -518,6 +527,7 @@ impl Extension for EmbedPlugin {
                 doc: doc.id.clone(),
                 view: view.into(),
                 height,
+                block: SharedString::default(),
             },
             title: doc.title.clone(),
             markdown: markdown.clone(),
@@ -532,6 +542,29 @@ impl Extension for EmbedPlugin {
     }
 
     fn render(&self, node: &CustomNode, window: &mut Window, cx: &mut App) -> AnyElement {
+        self.draw(node, None, window, cx)
+    }
+
+    fn render_block(
+        &self,
+        node: &CustomNode,
+        block: markdown_editor::BlockId,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        self.draw(node, Some(block), window, cx)
+    }
+}
+
+impl EmbedPlugin {
+    /// The embed, with its block's lasting id when the editor knows its block.
+    fn draw(
+        &self,
+        node: &CustomNode,
+        block: Option<markdown_editor::BlockId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
         let Some(data) = node.data::<EmbedRef>() else {
             return div().into_any_element();
         };
@@ -544,6 +577,10 @@ impl Extension for EmbedPlugin {
             .unwrap_or(data.embed.height);
         let shown = Embed {
             height,
+            block: block
+                .zip(hooks.lasting_id.as_ref())
+                .map(|(block, id)| id(block).into())
+                .unwrap_or_default(),
             ..data.embed.clone()
         };
         let doc_ref = DocRef {
@@ -937,6 +974,65 @@ mod tests {
         });
         draw(cx);
         (editor, events, cx)
+    }
+
+    /// Each embed tells the app its block's lasting id, the one the document gives it, so two
+    /// embeds of one database showing the same view are told apart; the id lasts while the
+    /// document is edited.
+    #[gpui::test]
+    fn each_embed_tells_its_lasting_block_id(cx: &mut TestAppContext) {
+        let drawn = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let (editor, _, cx) = open_with_embeds(
+            cx,
+            "[Board](doc:b1 \"embed board 300\")\n\nBetween\n\n[Board](doc:b1 \"embed board 300\")",
+            drawn.clone(),
+        );
+        let blocks = |drawn: &Mutex<Vec<Embed>>| -> Vec<String> {
+            let mut ids: Vec<String> = drawn
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|e| e.block.to_string())
+                .collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        let first = blocks(&drawn);
+        assert_eq!(first.len(), 2, "two embeds, two ids: {first:?}");
+        assert!(first.iter().all(|id| !id.is_empty()));
+        // The same ids the document gives those blocks.
+        let doc = editor.update(cx, |e, cx| e.document(cx));
+        let mut doc_ids = vec![doc.blocks[0].id.clone(), doc.blocks[2].id.clone()];
+        doc_ids.sort();
+        assert_eq!(first, doc_ids);
+        // Typing elsewhere keeps them.
+        drawn.lock().unwrap().clear();
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let leaf = s
+                    .model()
+                    .document()
+                    .leaves()
+                    .find(|l| l.text() == Some("Between"))
+                    .unwrap()
+                    .id();
+                let _ = s.set_selection(
+                    markdown_editor::BlockSelection::caret(markdown_editor::BlockPosition::new(
+                        leaf, 7,
+                    )),
+                    cx,
+                );
+            })
+        });
+        cx.simulate_input("!");
+        draw(cx);
+        assert!(
+            editor
+                .update(cx, |e, cx| e.markdown(cx))
+                .contains("Between!")
+        );
+        assert_eq!(blocks(&drawn), first);
     }
 
     #[gpui::test]
