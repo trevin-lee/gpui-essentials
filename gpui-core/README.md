@@ -32,7 +32,11 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab
   indenting a line or every selected line, Enter keeping the indent, and Ctrl-Tab moving the
   keyboard on. Only the rows in view are drawn, so a file of thousands of lines types as fast as
-  a short one. Undo, the input method and the rest are a field's.
+  a short one. Undo, the input method and the rest are a field's. `set_error_line(Some((line,
+  message)))` marks the line a server said is wrong (gone when the text changes),
+  `highlight(f, "yaml")` colours it (the `highlight` feature's `Highlighter`, or the host's), and
+  ⌘F opens a find bar: matches found case aside as you type, Enter and Shift-Enter (⌘G and ⌘⇧G
+  from the text) going round them, Escape closing it.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
