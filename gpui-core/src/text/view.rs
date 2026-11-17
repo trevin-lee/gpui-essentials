@@ -328,6 +328,17 @@ struct Piece {
     /// A list's items laid out on their own, kept while the list changes: a list growing as
     /// it's streamed lays out only its new or changed items.
     items: Vec<ItemLaid>,
+    /// A code block's lines laid out on their own, kept while the block changes: a fence
+    /// growing as it's streamed lays out only its new or changed lines.
+    lines: Vec<LineLaid>,
+}
+
+/// A line of a code block laid out on its own, and what it was laid out for.
+struct LineLaid {
+    line: Paragraph,
+    width: Pixels,
+    key: StyleKey,
+    laid: Rc<ParagraphLayout>,
 }
 
 /// A list item laid out on its own, at the list's top left, and what it was laid out for.
@@ -381,7 +392,20 @@ impl KeyState {
                     block,
                     laid: p.laid,
                     items: p.items,
+                    lines: p.lines,
                 },
+                // A code block that changed keeps its lines' layouts, for the lines that didn't.
+                Some(p)
+                    if matches!(p.block, Block::Code { .. })
+                        && matches!(block, Block::Code { .. }) =>
+                {
+                    Piece {
+                        block,
+                        laid: None,
+                        items: Vec::new(),
+                        lines: p.lines,
+                    }
+                }
                 // A list that changed keeps its items' layouts, for the items that didn't.
                 Some(p)
                     if matches!(p.block, Block::List { .. })
@@ -391,12 +415,14 @@ impl KeyState {
                         block,
                         laid: None,
                         items: p.items,
+                        lines: Vec::new(),
                     }
                 }
                 _ => Piece {
                     block,
                     laid: None,
                     items: Vec::new(),
+                    lines: Vec::new(),
                 },
             })
             .collect();
@@ -750,36 +776,18 @@ fn lay(
                 y = leaf(p, &s, x, width, y, sep, out, window);
             }
             Block::Code { text, lang } => {
-                let (s, fill_, border, bw, radius, [pt, pr, pb, pl]) = cx.code();
-                let top = y;
-                let inner = (width - pl - pr - bw * 2.).max(px(8.));
-                let deco_ix = out.decos.len();
-                out.decos.push(Deco::Box {
-                    bounds: Bounds::default(),
-                    fill: fill_,
-                    border,
-                    border_width: bw,
-                    radius: Corners::all(radius),
-                });
-                let p = match (&cx.style.highlight, lang) {
-                    (Some(f), Some(lang)) => highlighted(text, &f(lang, text)),
-                    _ => Paragraph::plain(text.clone()),
-                };
-                y = leaf(&p, &s, x + pl + bw, inner, y + pt + bw, sep, out, window);
-                y += pb + bw;
-                out.decos[deco_ix] = Deco::Box {
-                    bounds: Bounds::new(point(x, top), size(width, y - top)),
-                    fill: fill_,
-                    border,
-                    border_width: bw,
-                    radius: Corners::all(radius),
-                };
-                out.decos.push(Deco::Code {
-                    bounds: Bounds::new(point(x, top), size(width, y - top)),
-                    language: lang.clone().map(Into::into),
-                    // Without a trailing line end, whatever the parser kept.
-                    code: text.strip_suffix('\n').unwrap_or(text).to_string().into(),
-                });
+                y = lay_code(
+                    text,
+                    lang.as_deref(),
+                    x,
+                    width,
+                    y,
+                    sep,
+                    cx,
+                    out,
+                    window,
+                    None,
+                );
             }
             Block::Quote(inner) => {
                 let top = y;
@@ -927,6 +935,112 @@ fn lay(
         }
     }
     y
+}
+
+/// A fenced code block from `y`: its box, and its code a line at a time, each line a paragraph
+/// of its own (copied with a line end between). With `cache` (a top-level block's), a line laid
+/// out before at the same width and style is taken from it rather than laid out again.
+#[allow(clippy::too_many_arguments)]
+fn lay_code(
+    text: &str,
+    lang: Option<&str>,
+    x: Pixels,
+    width: Pixels,
+    mut y: Pixels,
+    sep: &'static str,
+    cx: &Ctx,
+    out: &mut ViewLayout,
+    window: &mut Window,
+    mut cache: Option<&mut Vec<LineLaid>>,
+) -> Pixels {
+    let (s, fill_, border, bw, radius, [pt, pr, pb, pl]) = cx.code();
+    let top = y;
+    let inner = (width - pl - pr - bw * 2.).max(px(8.));
+    let deco_ix = out.decos.len();
+    out.decos.push(Deco::Box {
+        bounds: Bounds::default(),
+        fill: fill_,
+        border,
+        border_width: bw,
+        radius: Corners::all(radius),
+    });
+    let p = match (&cx.style.highlight, lang) {
+        (Some(f), Some(lang)) => highlighted(text, &f(lang, text)),
+        _ => Paragraph::plain(text.to_string()),
+    };
+    y += pt + bw;
+    let mut kept = Vec::new();
+    for (i, line) in split_lines(&p).into_iter().enumerate() {
+        let cached = cache.as_deref_mut().and_then(|c| {
+            let at = c
+                .iter()
+                .position(|l| l.width == inner && l.key == out.key && l.line == line)?;
+            Some(c.swap_remove(at))
+        });
+        let laid = match cached {
+            Some(l) => l,
+            None => {
+                #[cfg(test)]
+                tests::LINES_LAID.with(|k| k.set(k.get() + 1));
+                LineLaid {
+                    laid: Rc::new(ParagraphLayout::new(&line, &s, inner, window)),
+                    line,
+                    width: inner,
+                    key: out.key.clone(),
+                }
+            }
+        };
+        out.leaves.push(Leaf {
+            origin: point(x + pl + bw, y),
+            layout: laid.laid.clone(),
+            paragraph: Rc::new(laid.line.clone()),
+            // The code's lines join with a line end when copied.
+            separator: if i == 0 { sep } else { "\n" },
+        });
+        y += laid.laid.height;
+        kept.push(laid);
+    }
+    if let Some(c) = cache {
+        *c = kept;
+    }
+    y += pb + bw;
+    out.decos[deco_ix] = Deco::Box {
+        bounds: Bounds::new(point(x, top), size(width, y - top)),
+        fill: fill_,
+        border,
+        border_width: bw,
+        radius: Corners::all(radius),
+    };
+    out.decos.push(Deco::Code {
+        bounds: Bounds::new(point(x, top), size(width, y - top)),
+        language: lang.map(|l| l.to_string().into()),
+        // Without a trailing line end, whatever the parser kept.
+        code: text.strip_suffix('\n').unwrap_or(text).to_string().into(),
+    });
+    y
+}
+
+/// `p` cut at its line ends: a paragraph a line, each with its share of the spans.
+fn split_lines(p: &Paragraph) -> Vec<Paragraph> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for line in p.text.split('\n') {
+        let end = start + line.len();
+        let mut q = Paragraph::default();
+        for (r, m) in &p.spans {
+            let (a, b) = (r.start.max(start), r.end.min(end));
+            if a < b {
+                q.push(&p.text[a..b], m.clone());
+            }
+        }
+        if q.text.len() < line.len() {
+            // Spans don't cover it all (they always do; never mind).
+            q = Paragraph::plain(line.to_string());
+        }
+        out.push(q);
+        start = end + 1;
+    }
+    out
 }
 
 /// A list's items, one after another from `y`: each with its marker, its text set in. With
@@ -1244,6 +1358,19 @@ fn layout_for(
                 codes: Vec::new(),
             };
             out.height = match &piece.block {
+                // A code block keeps its lines' layouts.
+                Block::Code { text, lang } => lay_code(
+                    text,
+                    lang.as_deref(),
+                    px(0.),
+                    width,
+                    px(0.),
+                    "",
+                    &c,
+                    &mut out,
+                    window,
+                    Some(&mut piece.lines),
+                ),
                 // A list keeps its items' layouts.
                 Block::List { start, items } => lay_list(
                     *start,
@@ -1862,6 +1989,8 @@ mod tests {
         pub(super) static LAID: Cell<usize> = const { Cell::new(0) };
         /// How many list items have been laid out.
         pub(super) static ITEMS_LAID: Cell<usize> = const { Cell::new(0) };
+        /// How many code lines have been laid out.
+        pub(super) static LINES_LAID: Cell<usize> = const { Cell::new(0) };
     }
 
     struct Streamed {
@@ -1875,6 +2004,53 @@ mod tests {
                 .w(px(self.width))
                 .child(TextView::blocks("streamed", self.sources.clone()))
         }
+    }
+
+    #[gpui::test]
+    fn a_growing_code_block_lays_out_only_its_new_or_changed_lines(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let fence = |n: usize, last: &str| -> gpui::SharedString {
+            let mut s = String::from("```\n");
+            for i in 0..n {
+                s.push_str(&format!("let line_{i} = {i};\n"));
+            }
+            s.push_str(last);
+            s.into()
+        };
+        let sources = vec![(0u64, "Code:".into()), (1u64, fence(300, "let la"))];
+        let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let m = made.clone();
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Streamed {
+                sources,
+                width: 400.,
+            });
+            *m.borrow_mut() = Some(v.clone());
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        let v = made.borrow().clone().unwrap();
+        let laid = |vcx: &mut gpui::VisualTestContext, f: &dyn Fn(&mut Streamed)| {
+            LINES_LAID.with(|n| n.set(0));
+            vcx.update(|_, cx| {
+                v.update(cx, |s, cx| {
+                    f(s);
+                    cx.notify();
+                })
+            });
+            vcx.run_until_parked();
+            LINES_LAID.with(|n| n.get())
+        };
+        // The last line grows: it alone.
+        assert_eq!(laid(vcx, &|s| s.sources[1].1 = fence(300, "let last")), 1);
+        // A new line: it (the line before it is unchanged).
+        assert_eq!(
+            laid(vcx, &|s| s.sources[1].1 =
+                format!("{}\nlet more", fence(300, "let last")).into()),
+            1
+        );
+        // A new width: every line.
+        assert_eq!(laid(vcx, &|s| s.width = 380.), 302);
     }
 
     #[gpui::test]
