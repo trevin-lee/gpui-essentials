@@ -369,3 +369,34 @@ fn the_trailing_caret_follows_the_last_source_and_never_moves_the_text() {
     o.caret(None);
     assert_eq!(o.vcx.debug_bounds("blocks").unwrap().size.height, px(0.));
 }
+
+#[test]
+fn of_two_definitions_in_different_sources_the_first_wins_and_footnotes_resolve() {
+    let mut cx = app();
+    let mut o = open(
+        &mut cx,
+        &[
+            (1, "See [the docs][x], and a note[^n]."),
+            (2, "[x]: https://first.test\n\n[^n]: The note."),
+            (3, "[x]: https://second.test"),
+        ],
+        false,
+    );
+    let b = o.vcx.debug_bounds("blocks").unwrap();
+    let mut x = b.left() + px(2.);
+    while o.links.borrow().is_empty() && x < b.right() {
+        o.vcx
+            .simulate_click(point(x, b.top() + px(8.)), Modifiers::none());
+        x += px(6.);
+    }
+    assert_eq!(*o.links.borrow(), ["https://first.test"]);
+    // The note once, where it's written; the reference as its number.
+    o.vcx.simulate_click(
+        point(b.left() + px(4.), b.top() + px(4.)),
+        Modifiers::none(),
+    );
+    o.vcx.simulate_keystrokes("cmd-a");
+    let copied = o.copied();
+    assert_eq!(copied.matches("The note.").count(), 1, "{copied:?}");
+    assert!(copied.contains("a note[n]."), "{copied:?}");
+}
