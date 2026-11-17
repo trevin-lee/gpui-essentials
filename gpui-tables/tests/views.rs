@@ -463,7 +463,8 @@ fn the_settings_group_and_bucket_by_date(cx: &mut TestAppContext) {
     // The settings still open beside, no date grouping for a select.
     assert!(drawn(cx, item("Group by")) && !drawn(cx, item("Date grouping")));
 
-    // By a date: its buckets come next, in Date grouping, which the settings draw anew on.
+    // By a date: its buckets come next, in Date grouping, which the settings' highlight moves to
+    // (the keyboard still in Group by's submenu, → opening the highlighted entry's).
     click(cx, item("Last contacted"));
     assert_eq!(
         changed(&last_batch(&host)[0]).group_by.as_deref(),
@@ -482,7 +483,16 @@ fn the_settings_group_and_bucket_by_date(cx: &mut TestAppContext) {
     click(cx, item("None"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!((v.group_by, v.group_date), (None, None));
+    assert!(!drawn(cx, item("Date grouping")));
+    // A date again: the highlight moves to Date grouping once more; Escape closes its submenu,
+    // then the settings.
+    click(cx, item("Last contacted"));
+    keys(cx, "right");
+    assert!(drawn(cx, item("Month")));
     keys(cx, "escape");
+    assert!(!drawn(cx, item("Month")) && drawn(cx, item("Date grouping")));
+    keys(cx, "escape");
+    assert!(!table.read_with(cx, |t, _| t.has_popover()));
 
     // A board can't be ungrouped.
     click(cx, tab("Pipeline"));
@@ -499,7 +509,7 @@ fn the_settings_group_and_bucket_by_date(cx: &mut TestAppContext) {
 #[gpui::test]
 fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext) {
     let host = TestHost::new();
-    let (_table, cx) = open_people_bar(cx, &host);
+    let (table, cx) = open_people_bar(cx, &host);
     click(cx, tab("Pipeline"));
     click(cx, "view-settings");
     click(cx, item("Card properties"));
@@ -530,7 +540,18 @@ fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext
         changed(&last_batch(&host)[0]).card_properties,
         [LAST_CONTACTED, OWNER, TAGS]
     );
-    keys(cx, "escape escape");
+    // Its submenu went with it: the keyboard is back in the list, on Company (now hidden), so
+    // Enter shows it again and Escape closes the list, then the settings.
+    assert!(!drawn(cx, "menu-submenu-Company"));
+    keys(cx, "enter");
+    assert_eq!(
+        changed(&last_batch(&host)[0]).card_properties,
+        [LAST_CONTACTED, OWNER, TAGS, COMPANY]
+    );
+    keys(cx, "escape");
+    assert!(!drawn(cx, "menu-submenu-Card properties"));
+    keys(cx, "escape");
+    assert!(!table.read_with(cx, |t, _| t.has_popover()));
 
     // A list's lines: the same, called Properties.
     click(cx, tab(FOLLOW_UP_VIEW));
