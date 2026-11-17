@@ -1284,9 +1284,14 @@ impl Editor {
         let grip = button("blocks-side-grip", "⋮⋮")
             .cursor_grab()
             .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                cx.stop_propagation();
+                // Shift: the blocks from the selected ones to this one are selected, whole.
+                if event.modifiers.shift {
+                    let _ = this_drag.update(cx, |this, cx| this.extend_block_selection(block, cx));
+                    return;
+                }
                 // The editor follows the pointer from here and drops the block where it's let
                 // go, as one undoable move; let go without moving, it opens the block menu.
-                cx.stop_propagation();
                 state.update(cx, |s, _| s.begin_block_drag(block, event.position));
                 let _ = this_drag.update(cx, |this, cx| {
                     this.hovered = None;
@@ -2226,6 +2231,59 @@ mod tests {
             editor.update(cx, |e, cx| e.markdown(cx)),
             "# first\n\nsecond"
         );
+    }
+
+    /// Shift-clicks on grips select the blocks between, whole; a first one selects its block.
+    #[gpui::test]
+    fn shift_clicks_on_grips_select_blocks(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "a\n\nb\n\nc");
+        let ids: Vec<markdown_editor::BlockId> = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .map(|b| b.id())
+                .collect()
+        });
+        let selection = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| e.state().read(cx).model().selection().clone())
+        };
+        editor.update(cx, |e, cx| e.extend_block_selection(ids[0], cx));
+        assert_eq!(
+            selection(&editor, cx),
+            BlockSelection::Blocks {
+                anchor: ids[0],
+                head: ids[0]
+            }
+        );
+        editor.update(cx, |e, cx| e.extend_block_selection(ids[2], cx));
+        assert_eq!(
+            selection(&editor, cx),
+            BlockSelection::Blocks {
+                anchor: ids[0],
+                head: ids[2]
+            },
+            "from the first to the third"
+        );
+        // A selection of the first two moves down past the third as one run.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                s.set_selection(
+                    BlockSelection::Blocks {
+                        anchor: ids[0],
+                        head: ids[0],
+                    },
+                    cx,
+                )
+                .unwrap();
+            });
+            e.extend_block_selection(ids[1], cx);
+            e.move_block(true, cx);
+        });
+        draw(cx);
+        assert_eq!(editor.update(cx, |e, cx| e.markdown(cx)), "c\n\na\n\nb");
     }
 
     fn draw(cx: &mut VisualTestContext) {
