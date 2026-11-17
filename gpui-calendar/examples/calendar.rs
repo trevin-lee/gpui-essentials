@@ -12,7 +12,7 @@
 //! `dst-spring`, `dense`, `month-drag`, `links`, `agenda`, `compact`, `compact-week`,
 //! `compact-agenda`, `compact-swipe`, `compact-hold`, `zones`, `compact-zones`, `recurring`,
 //! `compact-recurring`, `find`, `compact-find`, `panel`, `compact-panel`, `mini`,
-//! `compact-mini`, `crowd`, `all-day`, `all-day-month`, `all-day-drag`. Pictures and the bench draw a window that's never shown and never takes the
+//! `compact-mini`, `compact-3days`, `crowd`, `all-day`, `all-day-month`, `all-day-drag`. Pictures and the bench draw a window that's never shown and never takes the
 //! keyboard.
 
 use std::path::PathBuf;
@@ -597,6 +597,8 @@ impl Root {
                 view = CalendarView::Day
             }
             "compact-week" => {}
+            // A phone's three days, picked from the header's views menu.
+            "compact-3days" => view = CalendarView::Days(3),
             // Tuesday morning, the day with the most links.
             "agenda" | "compact-agenda" => {
                 view = CalendarView::AGENDA;
