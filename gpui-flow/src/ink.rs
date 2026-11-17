@@ -37,6 +37,19 @@ pub const MAX_COORDINATE: f32 = 20_000.;
 /// The widest a tool may be, in points.
 pub const MAX_WIDTH: f64 = 200.;
 
+/// The narrowest a stroke is drawn: widths are above 0.
+const MIN_WIDTH: f64 = 0.1;
+
+/// A width as a stroke may be drawn at: above 0, at most [`MAX_WIDTH`]; 1 for one that isn't
+/// a number.
+pub fn fit_width(width: f64) -> f64 {
+    if width.is_finite() {
+        width.clamp(MIN_WIDTH, MAX_WIDTH)
+    } else {
+        1.
+    }
+}
+
 /// What drew a stroke, by its name in the JSON.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -226,6 +239,26 @@ impl InkStroke {
             transform: None,
             extra: Map::new(),
         }
+    }
+
+    /// A stroke just drawn, stored as it fits anywhere on the canvas: its points from their
+    /// corner, which goes in the transform (whose numbers have no bound, unlike the points'),
+    /// and its width within what a stroke may be drawn at.
+    pub fn anchored(tool: InkTool, color: u32, width: f64, points: Vec<InkPoint>) -> Self {
+        let (mut x0, mut y0) = (f32::INFINITY, f32::INFINITY);
+        for p in &points {
+            x0 = x0.min(p.x);
+            y0 = y0.min(p.y);
+        }
+        let mut stroke = Self::new(tool, color, fit_width(width), points);
+        if x0.is_finite() && y0.is_finite() {
+            for p in &mut stroke.points {
+                p.x -= x0;
+                p.y -= y0;
+            }
+            stroke.translate(x0 as f64, y0 as f64);
+        }
+        stroke
     }
 
     /// The stroke of an `ink` node, if it has a readable one.

@@ -214,7 +214,10 @@ a PencilKit stroke's payload, so the same strokes show on iPad and Mac:
 `x` and `y` are in the coordinates of the node's parent (the flow's, with none). The node's
 `position`, `width` and `height` are the stroke's bounds once transformed, with its width:
 the iPad's `frame`. **A move changes `transform` and `position`, never `points`**, so moving
-a stroke is a small patch. A stroke that doesn't read draws nothing and is kept. The Mac draws
+a stroke is a small patch. **A stroke drawn on the Mac stores its points from their corner**,
+with the corner in `transform`. That way a stroke drawn anywhere on the board keeps its
+points within the limits' ±20,000, which `transform` doesn't have. Its width is kept above 0
+and at most 200. A stroke that doesn't read draws nothing and is kept. The Mac draws
 strokes itself, so the fountain pen's and the pencil's textures differ a little from
 PencilKit's; the points, colours and widths are the same.
 
