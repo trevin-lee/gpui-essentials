@@ -38,6 +38,13 @@ item](docs/gallery.png)
   panel across the bottom of the window over a scrim, centred and capped at `max_width` on a
   wide window, scrolling past nine tenths of its height. A press on the scrim or Escape calls
   `on_dismiss`; it takes the keyboard while open and hands it back on closing.
+- **Pagination.** `Pagination::new(id).total(n).page(p).on_page(…)`: Previous, the page numbers
+  round the current one (`siblings(n)` either side, one unless given) with ellipses for the
+  rest, and Next. Each is a link in the Tab order, pressed with a click, Enter or Space; the
+  current page tells assistive tech it's the current one, and Previous and Next are disabled at
+  the ends. The row keeps its length as the page moves. When it doesn't fit its width it drops
+  Previous's and Next's words, then shows only "Page 3 of 10" between the arrows (`compact(true)`
+  always). `touch(true)` makes its links 44 points.
 - **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
   the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
   monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab

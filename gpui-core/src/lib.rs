@@ -55,6 +55,7 @@ mod kbd;
 mod menu;
 mod menubar;
 mod navigation_menu;
+mod pagination;
 mod picker;
 mod popover;
 mod press;
@@ -100,6 +101,7 @@ pub use kbd::{Kbd, KbdGroup};
 pub use menu::{MenuSelect, PopupMenu, PopupMenuColors, PopupMenuItem, SUBMENU_DELAY};
 pub use menubar::{Menubar, MenubarMenu, MenubarSelect};
 pub use navigation_menu::{NavigationMenu, NavigationMenuItem, NavigationMenuLink};
+pub use pagination::Pagination;
 pub use picker::Picker;
 #[doc(hidden)]
 pub use popover::claim_count;
