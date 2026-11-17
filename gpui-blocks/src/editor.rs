@@ -503,6 +503,107 @@ impl Editor {
         self.ids.adopt(state.model(), &document.blocks);
     }
 
+    /// What a comment on the selection is anchored to: the lasting id (as in
+    /// [`Editor::document`]) of the block the caret is in, or the selection starts in, and the
+    /// selected text, empty for a caret. Inline pictures and mentions are left out of the text, and
+    /// lines of several blocks are joined with `\n`. `None` for a selection of whole blocks or
+    /// table cells.
+    pub fn selection_anchor(&mut self, cx: &App) -> Option<(String, String)> {
+        let state = self.state.read(cx);
+        let BlockSelection::Text { anchor, head } = state.model().selection().clone() else {
+            return None;
+        };
+        let doc = state.model().document();
+        let leaves: Vec<_> = doc.leaves().collect();
+        let place = |p: &BlockPosition| {
+            leaves
+                .iter()
+                .position(|l| l.id() == p.block)
+                .map(|ix| (ix, p.offset))
+        };
+        let (a, h) = (place(&anchor)?, place(&head)?);
+        let (start, end) = if a <= h { (a, h) } else { (h, a) };
+        let mut lines = Vec::new();
+        for (ix, leaf) in leaves.iter().enumerate().take(end.0 + 1).skip(start.0) {
+            let text = leaf.text().unwrap_or_default();
+            let from = if ix == start.0 {
+                start.1.min(text.len())
+            } else {
+                0
+            };
+            let to = if ix == end.0 {
+                end.1.min(text.len())
+            } else {
+                text.len()
+            };
+            lines.push(
+                text.get(from..to)
+                    .unwrap_or_default()
+                    .replace('\u{FFFC}', ""),
+            );
+        }
+        let block = leaves[start.0].id();
+        Some((self.ids.id_of(block), lines.join("\n")))
+    }
+
+    /// Where the top-level block holding the block `id` (a lasting id, as in
+    /// [`Editor::document`]) was last drawn, in window coordinates: for a mark in the margin
+    /// beside it. `None` for an id the document doesn't have, or a block scrolled out of view.
+    pub fn block_bounds(&self, id: &str, cx: &App) -> Option<Bounds<Pixels>> {
+        let state = self.state.read(cx);
+        let mut block = state
+            .model()
+            .document()
+            .block(self.ids.block_of(state.model(), id)?)?;
+        while let Some(parent) = block.parent()
+            && parent.parent().is_some()
+        {
+            block = parent;
+        }
+        let top = block.id();
+        state
+            .top_level_blocks()
+            .into_iter()
+            .find(|(id, _)| *id == top)
+            .map(|(_, bounds)| bounds)
+    }
+
+    /// Puts the caret at the start of the block `id` (a lasting id, as in [`Editor::document`])
+    /// and scrolls to it, with the editor focused: for going to what a comment is about. `false`
+    /// for an id the document doesn't have.
+    pub fn reveal_block(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let state = self.state.clone();
+        let Some(block) = self.ids.block_of(state.read(cx).model(), id) else {
+            return false;
+        };
+        state.update(cx, |state, cx| {
+            let doc = state.model().document();
+            let inside = |leaf: markdown_editor::BlockRef<'_>| {
+                let mut at = Some(leaf);
+                while let Some(b) = at {
+                    if b.id() == block {
+                        return true;
+                    }
+                    at = b.parent();
+                }
+                false
+            };
+            let Some(leaf) = doc
+                .leaves()
+                .find(|leaf| inside(*leaf))
+                .map(|leaf| leaf.id())
+            else {
+                return false;
+            };
+            let moved = state
+                .set_selection(BlockSelection::caret(BlockPosition::new(leaf, 0)), cx)
+                .is_ok();
+            state.reveal_caret(cx);
+            state.focus(window, cx);
+            moved
+        })
+    }
+
     /// Whether the document can be edited.
     pub fn is_readonly(&self, cx: &App) -> bool {
         self.state.read(cx).is_readonly()
@@ -1788,6 +1889,58 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// A comment's anchor: the selection's block by its lasting id and the selected text; going
+    /// back to it by that id; and where its top-level block is drawn.
+    #[gpui::test]
+    fn comments_anchor_to_blocks_by_their_lasting_ids(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "intro\n\n- an **item** here\n\nlast");
+        // Select "item here" in the list item's paragraph.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let id = s.model().document().leaves().nth(1).unwrap().id();
+                s.set_selection(
+                    BlockSelection::Text {
+                        anchor: BlockPosition::new(id, 3),
+                        head: BlockPosition::new(id, 12),
+                    },
+                    cx,
+                )
+                .unwrap();
+            })
+        });
+        let (id, text) = editor.update(cx, |e, cx| e.selection_anchor(cx)).unwrap();
+        assert_eq!(text, "item here");
+        // The same id the document gives that paragraph.
+        let doc = editor.update(cx, |e, cx| e.document(cx));
+        let item_paragraph = &doc.blocks[1].children[0].children[0];
+        assert_eq!(item_paragraph.id, id);
+        // Going to the last paragraph by its id puts the caret at its start.
+        let last = doc.blocks[2].id.clone();
+        assert!(editor.update_in(cx, |e, window, cx| e.reveal_block(&last, window, cx)));
+        let caret = editor.update(cx, |e, cx| e.state().read(cx).model().caret().unwrap());
+        let last_leaf = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .leaves()
+                .nth(2)
+                .unwrap()
+                .id()
+        });
+        assert_eq!((caret.block, caret.offset), (last_leaf, 0));
+        assert!(!editor.update_in(cx, |e, window, cx| e.reveal_block("nope", window, cx)));
+        // The list's bounds, from its item's paragraph.
+        draw(cx);
+        let bounds = editor.update(cx, |e, cx| e.block_bounds(&id, cx));
+        assert!(bounds.is_some_and(|b| b.size.height > gpui::px(0.)));
+        assert!(
+            editor
+                .update(cx, |e, cx| e.block_bounds("nope", cx))
+                .is_none()
+        );
     }
 
     fn draw(cx: &mut VisualTestContext) {
