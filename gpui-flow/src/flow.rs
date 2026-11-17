@@ -647,6 +647,11 @@ pub struct Flow {
     transition: Option<Transition>,
     /// The padding of a fit that's waiting for the nodes' sizes.
     pending_fit: Option<f32>,
+    /// The viewport the last fit gave, while nothing has moved it since: a pane that changes
+    /// size (a phone's keyboard coming up) fits again rather than leaving the flow off to one
+    /// side. And the pane's size the last frame drew, to see it change.
+    fitted: Option<Viewport>,
+    drawn_pane: Option<(f32, f32)>,
     /// False until a fit asked for before the first frame has happened; nothing shows until then.
     ready: bool,
     /// Runs while an animated edge is on screen, to redraw the dashes.
@@ -864,6 +869,8 @@ impl Flow {
             drag_button: MouseButton::Left,
             transition: None,
             pending_fit: None,
+            fitted: None,
+            drawn_pane: None,
             ready: true,
             ticker: None,
             started: now(cx),
@@ -2768,6 +2775,77 @@ impl Flow {
         cx.notify();
     }
 
+    /// The pane changed size since the last frame (a window resized, a phone's keyboard up or
+    /// down): a flow still as its fit left it fits again, at once; otherwise the selected node,
+    /// or a tree's root, is kept in view by panning, the zoom as it was.
+    fn follow_resize(&mut self, cx: &mut Context<Self>) {
+        let (w, h) = self.pane_size();
+        if w <= 0. || h <= 0. {
+            return;
+        }
+        let Some(was) = self.drawn_pane.replace((w, h)) else {
+            return;
+        };
+        if was == (w, h) || !self.ready || self.pending_fit.is_some() {
+            return;
+        }
+        if self.fitted.is_some_and(|f| f == self.target_viewport()) {
+            let Some(bounds) = self.nodes_bounds() else {
+                return;
+            };
+            let (lo, hi) = self.zoom_limits();
+            let to = self.sane_viewport(graph::viewport_for_bounds(
+                bounds,
+                w,
+                h,
+                lo,
+                hi,
+                self.options.fit_padding,
+            ));
+            self.transition = None;
+            self.fitted = Some(to);
+            self.move_viewport(to, cx);
+            return;
+        }
+        let focus = self.selected_nodes().into_iter().next().or_else(|| {
+            self.tree_layout()
+                .and_then(|_| self.tree.roots.first().cloned())
+        });
+        let Some(rect) = focus.and_then(|id| self.node_rect(&id)) else {
+            return;
+        };
+        // The part of the flow in view, and how far the node is outside it, with a margin.
+        let v = self.target_viewport();
+        let margin = 16. / v.zoom.max(0.01);
+        let (x0, y0) = (-v.x / v.zoom, -v.y / v.zoom);
+        let (x1, y1) = (x0 + w / v.zoom, y0 + h / v.zoom);
+        let shift = |lo: f32, hi: f32, a: f32, b: f32| {
+            if b - a > hi - lo - 2. * margin {
+                // Bigger than the view: its start in view.
+                lo + margin - a
+            } else if a < lo + margin {
+                lo + margin - a
+            } else if b > hi - margin {
+                hi - margin - b
+            } else {
+                0.
+            }
+        };
+        let (dx, dy) = (
+            shift(x0, x1, rect.x, rect.x + rect.w),
+            shift(y0, y1, rect.y, rect.y + rect.h),
+        );
+        if dx != 0. || dy != 0. {
+            self.transition = None;
+            // A point at flow p is drawn at p·zoom + (x, y): moving the node by (dx, dy) on
+            // screen moves the viewport by as much, scaled.
+            self.move_viewport(
+                self.sane_viewport(Viewport::new(v.x + dx * v.zoom, v.y + dy * v.zoom, v.zoom)),
+                cx,
+            );
+        }
+    }
+
     /// Does the fit that's waiting, if the pane and every node now have a size.
     fn try_pending_fit(&mut self, cx: &mut Context<Self>) {
         let Some(padding) = self.pending_fit else {
@@ -2788,6 +2866,7 @@ impl Flow {
         self.pending_fit = None;
         let (lo, hi) = self.zoom_limits();
         let to = graph::viewport_for_bounds(bounds, w, h, lo, hi, padding);
+        self.fitted = Some(self.sane_viewport(to));
         if self.ready {
             self.go_to(to, cx);
         } else {
@@ -5395,6 +5474,7 @@ impl Render for Flow {
         self.frame_time = now(cx);
         self.ask_for_cards(cx);
         self.lay_out_tree(self.frame_time, window);
+        self.follow_resize(cx);
         self.try_pending_fit(cx);
         self.step_transition(window, cx);
         self.keep_ticking(cx);
