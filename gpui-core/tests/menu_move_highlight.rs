@@ -1,5 +1,5 @@
 //! PopupMenu::move_highlight: the host moves an open menu's highlight to an entry, once per new
-//! id, and the keys move it on from there.
+//! id (or, with move_highlight_request, per new request), and the keys move it on from there.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,6 +13,7 @@ use gpui_core::{MenuSelect, PopupMenu, PopupMenuItem, Root};
 
 struct Host {
     moved: Option<&'static str>,
+    request: Option<u64>,
     picked: Rc<RefCell<Vec<SharedString>>>,
 }
 
@@ -22,8 +23,10 @@ impl Render for Host {
         let mut menu = PopupMenu::new("m")
             .items(["none", "day", "week", "month"].map(|t| PopupMenuItem::new(t, t)))
             .on_select(move |p: &MenuSelect, _, _| picked.borrow_mut().push(p.id.clone()));
-        if let Some(id) = self.moved {
-            menu = menu.move_highlight(id);
+        match (self.moved, self.request) {
+            (Some(id), Some(n)) => menu = menu.move_highlight_request(id, n),
+            (Some(id), None) => menu = menu.move_highlight(id),
+            _ => {}
         }
         div().p(px(20.)).w(px(260.)).child(menu)
     }
@@ -36,6 +39,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<Host>, &mut VisualTestContext) {
     let (_, vcx) = cx.add_window_view(move |window, cx| {
         let h = cx.new(|_| Host {
             moved: None,
+            request: None,
             picked: Rc::default(),
         });
         *m.borrow_mut() = Some(h.clone());
@@ -92,4 +96,33 @@ fn the_host_moves_an_open_menus_highlight_and_the_keys_go_on_from_there(cx: &mut
     moved(vcx, &h, "day");
     keys(vcx, "enter");
     assert_eq!(picked(&h, vcx), ["week", "month", "day"]);
+}
+
+fn requested(vcx: &mut VisualTestContext, h: &Entity<Host>, to: &'static str, n: u64) {
+    vcx.update(|_, cx| {
+        h.update(cx, |h, cx| {
+            h.moved = Some(to);
+            h.request = Some(n);
+            cx.notify();
+        })
+    });
+    vcx.run_until_parked();
+}
+
+#[gpui::test]
+fn a_new_request_moves_the_highlight_to_the_same_entry_again(cx: &mut TestAppContext) {
+    let (h, vcx) = open(cx);
+    requested(vcx, &h, "week", 1);
+    keys(vcx, "down");
+    keys(vcx, "enter");
+    assert_eq!(picked(&h, vcx), ["month"]);
+    // The same request again leaves the highlight where the keys put it.
+    keys(vcx, "up up");
+    requested(vcx, &h, "week", 1);
+    keys(vcx, "enter");
+    assert_eq!(picked(&h, vcx), ["month", "day"]);
+    // The next request for the same entry moves it there again.
+    requested(vcx, &h, "week", 2);
+    keys(vcx, "enter");
+    assert_eq!(picked(&h, vcx), ["month", "day", "week"]);
 }
