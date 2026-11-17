@@ -457,6 +457,19 @@ struct MenuState {
     rest: u64,
 }
 
+/// The entry at `at` (clamped to the menu) if it can be picked, else the nearest before it,
+/// else after it.
+fn nearest(pickable: &[bool], at: Option<usize>) -> Option<usize> {
+    let at = at?.min(pickable.len().checked_sub(1)?);
+    if pickable[at] {
+        return Some(at);
+    }
+    (0..at)
+        .rev()
+        .find(|i| pickable[*i])
+        .or_else(|| (at..pickable.len()).find(|i| pickable[*i]))
+}
+
 /// The next entry from `from` in `step`'s direction that can be picked, wrapping.
 pub(crate) fn step(pickable: &[bool], from: Option<usize>, step: isize) -> Option<usize> {
     let n = pickable.len() as isize;
@@ -535,6 +548,9 @@ impl RenderOnce for PopupMenu {
         // Where it opens: the host's entry, else the first that can be picked; with the host's
         // submenu open, on its entry.
         let open_submenu = self.open_submenu.clone();
+        // Whether the keyboard is in an open submenu (inside this menu, but not on it).
+        let in_submenu = focus.contains_focused(window, cx) && !focus.is_focused(window);
+        let mut gone = false;
         let highlighted = state.update(cx, |s, _| {
             // Where the highlighted entry is now: by its id; if it's gone, the first that can be
             // picked.
@@ -544,6 +560,8 @@ impl RenderOnce for PopupMenu {
                     .as_ref()
                     .and_then(|want| ids.iter().position(|id| id.as_ref() == Some(want)))
                     .filter(|i| pickable[*i])
+                    // Gone: the entry now at its place, or the nearest that can be picked.
+                    .or_else(|| nearest(&pickable, s.highlighted))
                     .or_else(|| step(&pickable, None, 1));
             }
             if !s.opened
@@ -558,6 +576,7 @@ impl RenderOnce for PopupMenu {
             // An open submenu whose entry has gone, or lost its submenu, is closed.
             if s.open_sub.as_ref().is_some_and(|id| sub_at(id).is_none()) {
                 s.open_sub = None;
+                gone = true;
             }
             if !s.opened {
                 s.opened = true;
@@ -577,6 +596,12 @@ impl RenderOnce for PopupMenu {
             s.highlighted_id = s.highlighted.and_then(|i| ids.get(i).cloned().flatten());
             s.highlighted
         });
+        // A submenu that had the keyboard went with its entry: the keyboard comes back here, so
+        // the keys (Escape too) still work.
+        if gone && in_submenu {
+            let f = focus.clone();
+            window.defer(cx, move |window, cx| window.focus(&f, cx));
+        }
         let on_select = self.on_select.clone();
         // Moves the highlight to `to`, and tells the host if it moved.
         let set: MoveHighlight = Rc::new({

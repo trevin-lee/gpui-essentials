@@ -1,6 +1,6 @@
 //! A menu's and a picker's highlight stays on its entry while the host's entries come, go and
 //! move: Enter picks the entry shown highlighted, a picker whose entries come after it opens
-//! highlights one, and when the highlighted entry goes the first takes it.
+//! highlights one, and when the highlighted entry goes the nearest left takes it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -102,12 +102,21 @@ fn a_menus_highlight_follows_its_entry_when_one_comes_above_it(cx: &mut TestAppC
 }
 
 #[gpui::test]
-fn when_the_highlighted_entry_goes_the_first_takes_it(cx: &mut TestAppContext) {
+fn when_the_highlighted_entry_goes_the_one_in_its_place_takes_it(cx: &mut TestAppContext) {
     let (h, vcx) = open(cx, false, vec!["a", "b", "c"]);
     keys(vcx, "down");
     set(vcx, &h, vec!["a", "c"]);
     keys(vcx, "enter");
-    assert_eq!(picked(vcx, &h), ["a"]);
+    assert_eq!(picked(vcx, &h), ["c"], "the one now where it was");
+}
+
+#[gpui::test]
+fn when_the_highlighted_last_entry_goes_the_one_before_takes_it(cx: &mut TestAppContext) {
+    let (h, vcx) = open(cx, false, vec!["a", "b", "c"]);
+    keys(vcx, "end");
+    set(vcx, &h, vec!["a", "b"]);
+    keys(vcx, "enter");
+    assert_eq!(picked(vcx, &h), ["b"], "the nearest left");
 }
 
 #[gpui::test]
