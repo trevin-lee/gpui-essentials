@@ -35,6 +35,7 @@ struct ReadmeDoctests;
 
 mod a11y;
 mod button;
+mod card;
 mod date_picker;
 #[cfg(feature = "highlight")]
 pub mod highlight;
@@ -56,6 +57,7 @@ mod toast;
 mod tooltip;
 
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
+pub use card::Card;
 pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
 };
