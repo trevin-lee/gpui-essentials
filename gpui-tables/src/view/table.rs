@@ -147,6 +147,38 @@ impl Entry {
     }
 }
 
+/// Where a menu opens, rather than on its first entry (or the one it highlights): the submenus
+/// open on the way (gpui-core's `open_submenu`, by their entries' ids), the entry highlighted in
+/// the last of them, and for a + menu the name typed before (gpui-core's `Picker::query`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Reopen {
+    /// The entries whose submenus open, from the menu's own down.
+    pub path: Vec<String>,
+    /// The entry highlighted in the last menu of `path` (in the menu itself when it's empty).
+    pub on: Option<String>,
+    /// A + menu's name, as typed before.
+    pub name: Option<String>,
+}
+
+impl Reopen {
+    /// On `on` in the menu itself.
+    pub(crate) fn on(on: impl Into<String>) -> Self {
+        Self {
+            on: Some(on.into()),
+            ..Self::default()
+        }
+    }
+
+    /// On `on` in the submenu reached through `path`.
+    pub(crate) fn at(path: Vec<String>, on: Option<String>) -> Self {
+        Self {
+            path,
+            on,
+            name: None,
+        }
+    }
+}
+
 /// A menu or picker open over the table, in gpui-core's `Popover`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Popover {
@@ -334,12 +366,9 @@ pub struct TableView {
     pub(crate) field: Option<super::properties::MenuField>,
     /// Why the open menu refused what was asked (a name taken, a limit reached).
     pub(crate) note: Option<String>,
-    /// The entry a menu opens on when a step of it (a name typed, a delete confirmed) goes back
-    /// to it: the one the step came from.
-    pub(crate) reopen_on: Option<String>,
-    /// What an open menu's submenu was last changed for (an option moved, a card property shown),
-    /// highlighted when the submenu draws anew in its new order.
-    pub(crate) menu_focus: Option<String>,
+    /// Where the next menu opens: on the entry a step of it (a name typed, a delete confirmed)
+    /// came from when it goes back, or on what a change moves the keyboard to.
+    pub(crate) reopen: Reopen,
     /// A relation being added: its name, database and whether it's two-way.
     pub(crate) new_relation: Option<super::properties::NewRelation>,
     /// A property just added, whose column is scrolled into view once the host hands it back.
@@ -400,8 +429,7 @@ impl TableView {
             board: super::board::Board::default(),
             field: None,
             note: None,
-            reopen_on: None,
-            menu_focus: None,
+            reopen: Reopen::default(),
             new_relation: None,
             pending_column: None,
             bar: super::views::Bar::default(),

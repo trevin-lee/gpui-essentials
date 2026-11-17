@@ -24,7 +24,7 @@ use super::board::DraggedCard;
 use super::format;
 use super::host::person_label;
 use super::list_render::Landing;
-use super::table::{Action, Drag, Entry, Item, Popover, TableView, naive_day, type_icon};
+use super::table::{Action, Drag, Entry, Item, Popover, Reopen, TableView, naive_day, type_icon};
 use crate::engine::{GroupKey, time};
 use crate::model::{Color, Doc, Person, Property, PropertyType, Value};
 
@@ -1659,11 +1659,11 @@ impl TableView {
         &self,
         entries: Vec<Entry>,
     ) -> (Vec<MenuEntry>, PickActions, Option<SharedString>) {
-        let mut used: HashSet<SharedString> = HashSet::new();
+        let ids = entry_ids(&entries);
         let mut actions = Vec::new();
         let mut out = Vec::new();
         let mut open_on = None;
-        for e in entries {
+        for (e, id) in entries.into_iter().zip(ids) {
             let Entry {
                 label,
                 action,
@@ -1675,17 +1675,10 @@ impl TableView {
                 highlight,
                 submenu,
             } = e;
-            if action.is_none() && submenu.is_none() {
+            let Some(id) = id else {
                 out.push(MenuEntry::Heading(label.into()));
                 continue;
-            }
-            let mut id = SharedString::from(label.clone());
-            let mut n = 1;
-            while used.contains(&id) {
-                n += 1;
-                id = format!("{label} ({n})").into();
-            }
-            used.insert(id.clone());
+            };
             let mut item = PopupMenuItem::new(id.clone(), label.clone());
             if let Some(icon) = icon {
                 item = item.icon(icon);
@@ -1715,58 +1708,139 @@ impl TableView {
     }
 
     /// Entries as gpui-core's PopupMenu, their submenus made the same way. A submenu takes its
-    /// rows' size and colours from the menu it opens from.
+    /// rows' size and colours from the menu it opens from. gpui-core keeps the highlight and the
+    /// open submenu on their entries (by id) while entries come, go and move, so a menu keeps
+    /// its place as its entries change (an option moved, Date grouping added).
     ///
-    /// gpui-core keeps which submenu is open by its entry's place, so a menu is keyed by `key`,
-    /// the menus opened so far and where its submenus' entries are: when those move (an option
-    /// moved or deleted, Date grouping added), it draws anew, its submenus closed and on its
-    /// highlighted entry, rather than opening another entry's submenu in their place.
+    /// It opens with the submenus of `open`'s entries open, one in another, and on `on` in the
+    /// last of them (in the menu itself when `open` is empty), else on its highlighted entry.
+    ///
+    /// `at` is the menu's place: the entries whose submenus lead to it from the top menu.
     pub(crate) fn menu_of(
         &self,
         key: &str,
         entries: Vec<Entry>,
+        at: &[String],
+        open: &[String],
+        on: Option<&str>,
         cx: &mut Context<Self>,
     ) -> PopupMenu {
-        let mut shape = std::hash::DefaultHasher::new();
-        for (i, e) in entries.iter().enumerate() {
-            if e.submenu.is_some() {
-                std::hash::Hash::hash(&(i, &e.label), &mut shape);
-            }
-        }
-        let shape = std::hash::Hasher::finish(&shape);
         let (entries, actions, open_on) = self.entries_of(entries);
         let mut menu = PopupMenu::new(ElementId::NamedInteger(
-            format!("{key}-{shape:x}").into(),
+            key.to_owned().into(),
             self.menu_serial,
         ));
+        let mut highlight = open_on;
+        let mut opened = None;
         for e in entries {
             menu = match e {
                 MenuEntry::Heading(title) => menu.heading(title),
-                MenuEntry::Item(_, item, None) => menu.item(item),
-                MenuEntry::Item(id, item, Some(sub)) => {
-                    let sub = self.menu_of(&format!("{key}/{id}"), sub, cx);
-                    menu.item(item.submenu(sub))
+                MenuEntry::Item(id, item, sub) => {
+                    if open.is_empty() && on == Some(id.as_ref()) {
+                        highlight = Some(id.clone());
+                    }
+                    match sub {
+                        None => menu.item(item),
+                        Some(sub) => {
+                            let here = opened.is_none() && open.first().is_some_and(|o| *o == *id);
+                            let (path, deeper) = if here {
+                                opened = Some(id.clone());
+                                (&open[1..], on)
+                            } else {
+                                (&[][..], None)
+                            };
+                            let mut place = at.to_vec();
+                            place.push(id.to_string());
+                            let key = format!("{key}/{id}");
+                            let sub = self.menu_of(&key, sub, &place, path, deeper, cx);
+                            menu.item(item.submenu(sub))
+                        }
+                    }
                 }
             };
         }
-        if let Some(id) = open_on {
-            menu = menu.highlight(id);
-        }
-        menu.on_select(self.on_pick(actions, cx))
+        menu = match (opened, highlight) {
+            (Some(id), _) => menu.open_submenu(id),
+            (None, Some(id)) => menu.highlight(id),
+            (None, None) => menu,
+        };
+        menu.on_select(self.on_pick(actions, at.to_vec(), cx))
     }
 
     /// Runs a picked entry's action. Shift (Shift-Enter, or a Shift-click) adds a sort to the
-    /// others rather than replacing them.
+    /// others rather than replacing them. `at` is the place of the menu it was picked in
+    /// ([`TableView::menu_of`]).
     pub(crate) fn on_pick(
         &self,
         actions: PickActions,
+        at: Vec<String>,
         cx: &mut Context<Self>,
     ) -> impl Fn(&MenuSelect, &mut Window, &mut gpui::App) + 'static {
         cx.listener(move |this, pick: &MenuSelect, window, cx| {
             if let Some((_, action)) = actions.iter().find(|(id, _)| *id == pick.id) {
+                let before = (this.submenus_along(&at), this.menu_serial);
                 this.activate(action.clone(), pick.modifiers.shift, window, cx);
+                this.keep_keyboard(&at, &pick.id, before);
             }
         })
+    }
+
+    /// The ids of the entries that open submenus in each menu along `at` (the top menu's, then
+    /// those of the submenu of each of `at`'s entries), as far as `at` leads.
+    fn submenus_along(&self, at: &[String]) -> Vec<Vec<SharedString>> {
+        let mut out = Vec::new();
+        let mut entries = self.entries();
+        for depth in 0..=at.len() {
+            let ids = entry_ids(&entries);
+            let mut next = None;
+            let mut subs = Vec::new();
+            for (e, id) in entries.into_iter().zip(ids) {
+                if let (Some(id), Some(sub)) = (id, e.submenu) {
+                    if at.get(depth).is_some_and(|a| *a == *id) {
+                        next = Some(sub);
+                    }
+                    subs.push(id);
+                }
+            }
+            out.push(subs);
+            match next {
+                Some(sub) => entries = sub,
+                None => break,
+            }
+        }
+        out
+    }
+
+    /// After a pick that leaves the menu open: where the change took away the submenu that had
+    /// the keyboard (the one picked in, or one open beside the pick, as Currency code when the
+    /// format goes back to Number), the menu opens again on the nearest place that's left,
+    /// keyboard and all. gpui-core closes a submenu whose entry goes but leaves the keyboard
+    /// with it, so the keys would do nothing.
+    fn keep_keyboard(
+        &mut self,
+        at: &[String],
+        picked: &SharedString,
+        (before, serial): (Vec<Vec<SharedString>>, u64),
+    ) {
+        // Closed, or opened anew by the action itself.
+        if self.popover.is_none() || self.menu_serial != serial {
+            return;
+        }
+        let after = self.submenus_along(at);
+        let reopen = if after.len() < before.len() {
+            // A menu on the way went: on its entry, in the menu that's left.
+            let depth = after.len() - 1;
+            Some(Reopen::at(at[..depth].to_vec(), Some(at[depth].clone())))
+        } else {
+            let (was, is) = (before.last(), after.last());
+            let gone =
+                was.is_some_and(|was| was.iter().any(|id| !is.is_some_and(|is| is.contains(id))));
+            gone.then(|| Reopen::at(at.to_vec(), Some(picked.to_string())))
+        };
+        if let Some(reopen) = reopen {
+            self.menu_serial += 1;
+            self.reopen = reopen;
+        }
     }
 
     /// A menu's and a picker's colours, from the table's theme: the hover fill for the
@@ -1789,33 +1863,25 @@ impl TableView {
     /// table's small size), rows 28 points tall at the table's text size (44 on touch), checks
     /// in a column before the labels as Notion's, and the deeper menus (a type, the options, a
     /// number's format) as submenus beside their entries. It opens on its highlighted entry, or
-    /// the one a step of it came back from.
+    /// where [`TableView::reopen`] says (the entry a step of it came back from, in its submenu).
     pub(crate) fn popup_menu(&self, cx: &mut Context<Self>) -> PopupMenu {
         let t = &self.theme;
         let entries = self.entries();
-        let back_to = self
-            .reopen_on
-            .clone()
-            .filter(|on| entries.iter().any(|e| e.label == *on));
-        let menu = self
-            .menu_of("gpui-tables-menu", entries, cx)
+        let Reopen { path, on, .. } = &self.reopen;
+        self.menu_of("gpui-tables-menu", entries, &[], path, on.as_deref(), cx)
             .touch(t.touch)
             .row_height(t.px(28.))
             .text_size(t.px(t.sizes.text))
             .heading_size(t.px(t.sizes.small))
             .check_leading(true)
-            .colors(self.menu_colors());
-        match back_to {
-            Some(on) => menu.highlight(on),
-            None => menu,
-        }
+            .colors(self.menu_colors())
     }
 
     /// A cell's picker as gpui-core's Picker: typing searches the options (people, rows), Enter
     /// picks the first match, and it opens on the current value. Checks lead the labels, as in
     /// the menus, and its search field is drawn as the table's other fields ([`FieldColors`]).
     /// A select's or multi-select's offers to create an option from what's typed
-    /// ([`TableView::create_option`]).
+    /// ([`TableView::create_option`]), its field taking at most an option name's length.
     fn picker(&self, cell: super::CellRef, cx: &mut Context<Self>) -> Picker {
         let t = &self.theme;
         let field = FieldColors::of(t);
@@ -1843,11 +1909,16 @@ impl TableView {
         .selection_color(field.selection)
         .placeholder_color(field.placeholder)
         .colors(self.menu_colors())
-        .on_select(self.on_pick(actions, cx));
+        .on_select(self.on_pick(actions, Vec::new(), cx));
         if self.can_create_option() {
-            picker.on_create(
-                cx.listener(|this, text: &str, window, cx| this.create_option(text, window, cx)),
-            )
+            // What's typed may name a new option: at most an option name's length.
+            picker
+                .max_chars(self.host.limits().option_name_chars)
+                .on_create(
+                    cx.listener(|this, text: &str, window, cx| {
+                        this.create_option(text, window, cx)
+                    }),
+                )
         } else {
             picker
         }
@@ -1986,6 +2057,28 @@ impl FieldColors {
 pub(crate) enum MenuEntry {
     Heading(SharedString),
     Item(SharedString, PopupMenuItem, Option<Vec<Entry>>),
+}
+
+/// Each entry's id, as its menu has it: its label, numbered when two in the same menu are the
+/// same (None for a section's heading).
+pub(crate) fn entry_ids(entries: &[Entry]) -> Vec<Option<SharedString>> {
+    let mut used: HashSet<SharedString> = HashSet::new();
+    entries
+        .iter()
+        .map(|e| {
+            if e.action.is_none() && e.submenu.is_none() {
+                return None;
+            }
+            let mut id = SharedString::from(e.label.clone());
+            let mut n = 1;
+            while used.contains(&id) {
+                n += 1;
+                id = format!("{} ({n})", e.label).into();
+            }
+            used.insert(id.clone());
+            Some(id)
+        })
+        .collect()
 }
 
 /// What each entry's id does.
@@ -2141,8 +2234,9 @@ impl TableView {
         self.naming_picker("gpui-tables-add-property", "Property name", types, pick)
     }
 
-    /// A + menu's Picker: a name typed in its field over what to make (the types), which stay
-    /// whole as it's typed. It opens on the entry a step of it came back from.
+    /// A + menu's Picker: a name typed in its field (at most the limits' name length, 44 points
+    /// tall on touch) over what to make (the types), which stay whole as it's typed. Back from a
+    /// step of it, it opens on the entry the step came from, the name as it was typed.
     pub(crate) fn naming_picker(
         &self,
         id: &'static str,
@@ -2155,6 +2249,7 @@ impl TableView {
         let picker = Picker::new(ElementId::NamedInteger(id.into(), self.menu_serial))
             .filter(false)
             .placeholder(placeholder)
+            .max_chars(self.host.limits().name_chars)
             .items(items)
             .touch(t.touch)
             .row_height(t.px(28.))
@@ -2165,8 +2260,13 @@ impl TableView {
             .placeholder_color(field.placeholder)
             .colors(self.menu_colors())
             .on_select(on_select);
-        let picker = match self.reopen_on.clone() {
+        let Reopen { on, name, .. } = self.reopen.clone();
+        let picker = match on {
             Some(on) => picker.highlight(on),
+            None => picker,
+        };
+        let picker = match name {
+            Some(name) => picker.query(name),
             None => picker,
         };
         div()

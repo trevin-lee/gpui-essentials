@@ -239,6 +239,11 @@ fn a_board_without_a_select_asks_what_to_group_by(cx: &mut TestAppContext) {
     click(cx, "add-view");
     type_text(cx, "Tagged");
     click(cx, item("Board"));
+    // Back (from the keyboard: the pointer would highlight what it's over): the + menu again,
+    // on Board, the name as typed; Enter goes on as before.
+    keys(cx, "end enter");
+    assert!(drawn(cx, "menu-picker"));
+    keys(cx, "enter");
     assert!(host.edits().is_empty(), "nothing made yet");
     assert!(note(cx), "it asks");
     // Only what can group is offered.
@@ -255,6 +260,11 @@ fn a_board_without_a_select_asks_what_to_group_by(cx: &mut TestAppContext) {
     click(cx, item("Change type"));
     click(cx, item("Board"));
     assert!(drawn(cx, item("Owner")), "the group asked for");
+    // Back: Change type open again, the keyboard on Board.
+    keys(cx, "end enter");
+    assert!(drawn(cx, "menu-submenu-Change type"));
+    keys(cx, "enter");
+    assert!(drawn(cx, item("Owner")), "asked again");
     click(cx, item("Owner"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.kind, ViewType::Board);
@@ -501,12 +511,13 @@ fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext
     click(cx, item("Tags"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.card_properties, [COMPANY, LAST_CONTACTED, OWNER, TAGS]);
-    // A shown one's submenu moves and hides it; moved, the list draws anew in its order.
+    // A shown one's submenu moves and hides it; moved, the list is in its new order, the
+    // submenu still open beside it.
     click(cx, item("Company"));
     click(cx, item("Move down"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.card_properties, [LAST_CONTACTED, COMPANY, OWNER, TAGS]);
-    assert!(!drawn(cx, "menu-submenu-Company"));
+    assert!(drawn(cx, "menu-submenu-Company"));
     click(cx, item("Company"));
     click(cx, item("Move up"));
     assert_eq!(

@@ -23,7 +23,7 @@ use gpui_core::{InputEvent, InputState};
 
 use super::host::RelatedDatabase;
 use super::ops;
-use super::table::{Action, Entry, Popover, TableView, type_icon};
+use super::table::{Action, Entry, Popover, Reopen, TableView, type_icon};
 use crate::engine::relation;
 use crate::model::{
     Color, Edit, NumberFormat, PersonKind, Property, PropertyConfig, PropertyType, SelectOption,
@@ -154,11 +154,13 @@ pub(crate) struct MenuField {
     _events: Subscription,
 }
 
-/// A relation being added: its name (typed in the add-property menu), its database and
-/// whether it's two-way.
+/// A relation being added: its name (typed in the add-property menu, or its type's when none
+/// was), its database and whether it's two-way.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct NewRelation {
     pub name: String,
+    /// What was typed, given back to the + menu's field on Back.
+    pub typed: String,
     pub database_id: String,
     pub two_way: bool,
 }
@@ -241,7 +243,7 @@ impl TableView {
     /// filtering). Typing names it; Up and Down move through the types; Enter, or a press on a
     /// type, makes it.
     pub fn open_add_property_menu(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.open_add_property(None, cx);
+        self.open_add_property(Reopen::default(), cx);
     }
 
     /// Opens a part of a property's menu on its own, hanging from its column's header (or the +
@@ -280,14 +282,15 @@ impl TableView {
         self.field.as_ref().map(|f| f.state.clone())
     }
 
-    /// Opens the + menu, on the type `on` when given (a relation, back from its database).
-    fn open_add_property(&mut self, on: Option<String>, cx: &mut Context<Self>) {
+    /// Opens the + menu, where `reopen` says (on Relation with its name as typed, back from a
+    /// new relation's database).
+    fn open_add_property(&mut self, reopen: Reopen, cx: &mut Context<Self>) {
         self.ensure();
         self.date = None;
         self.close_property_menu();
         self.menu_serial += 1;
         self.popover = Some(Popover::AddProperty);
-        self.reopen_on = on;
+        self.reopen = reopen;
         cx.notify();
     }
 
@@ -297,8 +300,7 @@ impl TableView {
         self.note = None;
         self.new_relation = None;
         self.new_view = None;
-        self.reopen_on = None;
-        self.menu_focus = None;
+        self.reopen = Reopen::default();
     }
 
     /// The property the open menu is about: the column's, or a property page's.
@@ -675,9 +677,7 @@ impl TableView {
         let mut out = vec![Entry::heading("Options")];
         for o in p.options() {
             out.push(
-                Entry::sub(o.name.clone(), self.option_entries(p, &o.id))
-                    .chip(o.color.clone())
-                    .highlighted(self.menu_focus.as_deref() == Some(o.id.as_str())),
+                Entry::sub(o.name.clone(), self.option_entries(p, &o.id)).chip(o.color.clone()),
             );
         }
         out.push(
@@ -911,20 +911,18 @@ impl TableView {
             PropAction::Color(oid, c) => {
                 self.edit_option(pid, &oid, |options, i| options[i].color = c, window, cx)
             }
-            // The options draw anew in their new order, on the one moved.
-            PropAction::MoveOption(oid, by) => {
-                self.menu_focus = Some(oid.clone());
-                self.edit_option(
-                    pid,
-                    &oid,
-                    |options, i| {
-                        let j = (i as isize + by).clamp(0, options.len() as isize - 1) as usize;
-                        options.swap(i, j);
-                    },
-                    window,
-                    cx,
-                )
-            }
+            // The option's submenu stays open beside it in its new place (gpui-core keeps it by
+            // its entry), on the entry that moved it.
+            PropAction::MoveOption(oid, by) => self.edit_option(
+                pid,
+                &oid,
+                |options, i| {
+                    let j = (i as isize + by).clamp(0, options.len() as isize - 1) as usize;
+                    options.swap(i, j);
+                },
+                window,
+                cx,
+            ),
             PropAction::DeleteOption(oid) => self.edit_option(
                 pid,
                 &oid,
@@ -943,22 +941,41 @@ impl TableView {
         }
     }
 
-    /// Back from a step to the column's menu, on the entry the step came from (or to the +
-    /// menu, on Relation, from a new relation's database). A part of the menu opened on its own
-    /// closes.
+    /// Back from a step to the column's menu, on the entry the step came from: an option's
+    /// in the submenus it was in, open again (or to the + menu, on Relation with the name as
+    /// typed, from a new relation's database). A part of the menu opened on its own closes.
     fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.new_relation.take().is_some() {
-            self.open_add_property(Some(PropertyType::Relation.label().into()), cx);
+        if let Some(nr) = self.new_relation.take() {
+            let reopen = Reopen {
+                name: Some(nr.typed),
+                ..Reopen::on(PropertyType::Relation.label())
+            };
+            self.open_add_property(reopen, cx);
             return;
         }
         let Some(Popover::Property { property_id, page }) = self.popover.clone() else {
             self.close_menu(window, cx);
             return;
         };
+        let options = || "Edit options".to_owned();
         let from = match page {
-            Page::Rename => "Rename",
-            Page::RenameOption(_) | Page::NewOption => "Edit options",
-            Page::Delete => "Delete property",
+            Page::Rename => Reopen::on("Rename"),
+            Page::Delete => Reopen::on("Delete property"),
+            Page::NewOption => Reopen::at(vec![options()], Some("Add an option".into())),
+            Page::RenameOption(oid) => {
+                // Its name now, which its entry has.
+                let name = self
+                    .database
+                    .database
+                    .as_ref()
+                    .and_then(|f| f.property(&property_id))
+                    .and_then(|p| p.option(&oid))
+                    .map(|o| o.name.clone());
+                match name {
+                    Some(name) => Reopen::at(vec![options(), name], Some("Rename option".into())),
+                    None => Reopen::at(vec![options()], None),
+                }
+            }
             _ => {
                 self.close_menu(window, cx);
                 return;
@@ -974,7 +991,7 @@ impl TableView {
             Some(column) => {
                 window.focus(&self.focus, cx);
                 self.open_header_menu(column, cx);
-                self.reopen_on = Some(from.into());
+                self.reopen = from;
             }
             None => self.close_menu(window, cx),
         }
@@ -1073,7 +1090,7 @@ impl TableView {
         let name = if typed.is_empty() {
             unique_name(&fields.properties, kind.label())
         } else {
-            typed
+            typed.clone()
         };
         if kind == PropertyType::Relation {
             // Its database (another one first, if there is one) and whether it's two-way.
@@ -1088,6 +1105,7 @@ impl TableView {
             self.note = None;
             self.new_relation = Some(NewRelation {
                 name,
+                typed,
                 database_id,
                 two_way: false,
             });

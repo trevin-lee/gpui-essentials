@@ -24,7 +24,7 @@ use gpui::{App, Bounds, Context, FocusHandle, Pixels, ScrollHandle, Window};
 
 use super::ops;
 use super::properties::FieldFor;
-use super::table::{Action, Entry, Popover, TableView, type_icon};
+use super::table::{Action, Entry, Popover, Reopen, TableView, type_icon};
 use crate::model::{DateBucket, Edit, PropertyType, View, ViewType, new_id, truncate_chars};
 
 /// The types a view can be made as or changed to (galleries aren't drawn in v1).
@@ -188,17 +188,6 @@ pub(crate) fn view_icon(kind: &ViewType) -> gpui_core::IconName {
     }
 }
 
-/// A menu entry's hint cut to a few words: gpui-core draws a hint (its shortcut text) whole,
-/// so a long property name would crowd out the entry's label.
-fn hint(text: &str) -> String {
-    const MAX: usize = 16;
-    if text.chars().count() <= MAX {
-        return text.to_owned();
-    }
-    let cut: String = text.chars().take(MAX - 1).collect();
-    format!("{}…", cut.trim_end())
-}
-
 fn untitled(title: &str) -> String {
     if title.trim().is_empty() {
         "Untitled".into()
@@ -257,7 +246,7 @@ impl TableView {
     /// type, makes it and shows it.
     pub fn open_add_view_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.remember_bar_focus(window, cx);
-        self.open_add_view(None, cx);
+        self.open_add_view(Reopen::default(), cx);
     }
 
     /// Opens a view's menu, hanging from its tab, as pressing the shown view's tab (or
@@ -423,14 +412,15 @@ impl TableView {
 
     // --- Pages ----------------------------------------------------------------------------------
 
-    /// Opens the + menu, on the type `on` when given (a board, back from what it groups by).
-    fn open_add_view(&mut self, on: Option<String>, cx: &mut Context<Self>) {
+    /// Opens the + menu, where `reopen` says (on Board with its name as typed, back from what a
+    /// new board groups by).
+    fn open_add_view(&mut self, reopen: Reopen, cx: &mut Context<Self>) {
         self.ensure();
         self.date = None;
         self.close_property_menu();
         self.menu_serial += 1;
         self.popover = Some(Popover::AddView);
-        self.reopen_on = on;
+        self.reopen = reopen;
         cx.notify();
     }
 
@@ -650,7 +640,7 @@ impl TableView {
         out.push(
             Entry::sub("Group by", self.group_entries(v))
                 .icon(I::Group)
-                .hint(hint(group.map_or("None", |p| p.name.as_str()))),
+                .hint(group.map_or("None", |p| p.name.as_str())),
         );
         if group.is_some_and(|p| p.kind.is_date()) {
             out.push(
@@ -658,8 +648,7 @@ impl TableView {
                     .icon(I::CalendarDays)
                     .hint(bucket_label(
                         v.group_date.as_ref().unwrap_or(&DateBucket::Relative),
-                    ))
-                    .highlighted(self.menu_focus.as_deref() == Some(DATE_GROUPING)),
+                    )),
             );
         }
         match v.kind {
@@ -695,14 +684,14 @@ impl TableView {
             out.push(
                 act("Remove sorts", A::ClearSorts)
                     .icon(I::ArrowUpDown)
-                    .hint(hint(&self.sort_summary(v))),
+                    .hint(self.sort_summary(v)),
             );
         }
         if v.filter.is_some() {
             out.push(
                 act("Clear filter", A::ClearFilter)
                     .icon(I::FunnelX)
-                    .hint(hint(&self.filter_summary(v))),
+                    .hint(self.filter_summary(v)),
             );
         }
         out
@@ -762,7 +751,6 @@ impl TableView {
         let Some(fields) = self.database.database.as_ref() else {
             return Vec::new();
         };
-        let focus = |id: &str| self.menu_focus.as_deref() == Some(id);
         let shown = ops::card_properties(fields, v);
         let mut out = vec![Entry::heading("Shown")];
         for (i, id) in shown.iter().enumerate() {
@@ -780,8 +768,7 @@ impl TableView {
             out.push(
                 Entry::sub(p.name.clone(), sub)
                     .icon(type_icon(&p.kind))
-                    .checked(true)
-                    .highlighted(focus(id)),
+                    .checked(true),
             );
         }
         let hidden: Vec<_> = fields
@@ -796,8 +783,7 @@ impl TableView {
             out.push(
                 Entry::act(&p.name, Action::View(A::ToggleCard(p.id.clone())))
                     .icon(type_icon(&p.kind))
-                    .checked(false)
-                    .highlighted(focus(&p.id)),
+                    .checked(false),
             );
         }
         out
@@ -928,9 +914,9 @@ impl TableView {
                     return;
                 };
                 let to = (at as isize + by).max(0) as usize;
+                // The menu stays open, hanging from the view's tab in its new place, on the
+                // entry that moved it (gpui-core keeps the highlight on its entry).
                 self.move_view_to(&v.id, to, window, cx);
-                // The menu stays open, on the view's new place.
-                self.open_view_page(v.id, ViewPage::Menu, anchor, window, cx);
             }
             ViewAction::Delete => {
                 let Some(v) = current else { return };
@@ -946,10 +932,14 @@ impl TableView {
                     .as_deref()
                     .and_then(|g| fields.property(g))
                     .is_some_and(|p| p.kind.is_date());
-                // Grouped by a date, its buckets are the next question: the settings draw anew
+                // Grouped by a date, its buckets are the next question: the settings open again
                 // with Date grouping beside Group by, highlighted.
-                if date && !self.groups_by_date(&v) {
-                    self.menu_focus = Some(DATE_GROUPING.into());
+                if date
+                    && !self.groups_by_date(&v)
+                    && let Some(path) = self.settings_path()
+                {
+                    self.menu_serial += 1;
+                    self.reopen = Reopen::at(path, Some(DATE_GROUPING.into()));
                 }
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
             }
@@ -968,14 +958,14 @@ impl TableView {
                     );
                     return;
                 }
-                // The properties draw anew in their new order, on the one shown or hidden.
-                self.menu_focus = Some(pid);
+                // The properties stay open in their new order, on the one shown or hidden
+                // (gpui-core keeps the highlight on its entry).
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
             }
             ViewAction::MoveCard(pid, by) => {
                 let Some(v) = current else { return };
+                // Its submenu stays open beside it in its new place, on the entry that moved it.
                 let changed = ops::move_card_property(&fields, &v, &pid, by);
-                self.menu_focus = Some(pid);
                 self.emit_views(vec![self.view_changed(changed)], None, window, cx);
             }
             ViewAction::Columns => {
@@ -1002,8 +992,12 @@ impl TableView {
     /// part of it opened on its own, closes.
     fn view_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.popover, Some(Popover::NewBoard)) {
-            self.new_view = None;
-            self.open_add_view(Some(ops::view_type_label(&ViewType::Board).into()), cx);
+            let typed = self.new_view.take().map(|n| n.name);
+            let reopen = Reopen {
+                name: typed,
+                ..Reopen::on(ops::view_type_label(&ViewType::Board))
+            };
+            self.open_add_view(reopen, cx);
             return;
         }
         let Some(Popover::View {
@@ -1015,21 +1009,44 @@ impl TableView {
             self.close_view_menu(window, cx);
             return;
         };
+        // A board's group came from Board in Change type's submenu, open again.
+        let board = || {
+            Reopen::at(
+                vec!["Change type".into()],
+                Some(ops::view_type_label(&ViewType::Board).into()),
+            )
+        };
         let to = match (page, anchor) {
-            (ViewPage::BoardGroup, ViewAnchor::Settings) => {
-                Some((ViewPage::Settings, "Change type"))
+            (ViewPage::BoardGroup, ViewAnchor::Settings) => Some((ViewPage::Settings, board())),
+            (ViewPage::BoardGroup, ViewAnchor::Tab) => Some((ViewPage::Menu, board())),
+            (ViewPage::Rename, ViewAnchor::Tab) => Some((ViewPage::Menu, Reopen::on("Rename"))),
+            (ViewPage::Delete, ViewAnchor::Tab) => {
+                Some((ViewPage::Menu, Reopen::on("Delete view")))
             }
-            (ViewPage::BoardGroup, ViewAnchor::Tab) => Some((ViewPage::Menu, "Change type")),
-            (ViewPage::Rename, ViewAnchor::Tab) => Some((ViewPage::Menu, "Rename")),
-            (ViewPage::Delete, ViewAnchor::Tab) => Some((ViewPage::Menu, "Delete view")),
             _ => None,
         };
         match to {
             Some((page, from)) => {
                 self.open_view_page(view_id, page, anchor, window, cx);
-                self.reopen_on = Some(from.into());
+                self.reopen = from;
             }
             None => self.close_view_menu(window, cx),
+        }
+    }
+
+    /// The submenus from the open view menu down to its settings: View settings in the view's
+    /// menu, none in the settings opened on their own; None for any other part of it.
+    fn settings_path(&self) -> Option<Vec<String>> {
+        match &self.popover {
+            Some(Popover::View {
+                page: ViewPage::Menu,
+                ..
+            }) => Some(vec!["View settings".into()]),
+            Some(Popover::View {
+                page: ViewPage::Settings,
+                ..
+            }) => Some(Vec::new()),
+            _ => None,
         }
     }
 
