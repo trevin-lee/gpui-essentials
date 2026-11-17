@@ -238,13 +238,22 @@ item](docs/gallery.png)
   (or `stacked(true)`) with rounded ends, and negative values hang below a zero line. Series take
   the theme's `chart_1` to `chart_5` in turn unless `series_color(key, colour)` gives one. A
   quiet grid sits at nice tick values, with short y labels (`1.2k`, `3.4M`) and x labels cut
-  with an ellipsis or thinned out when crowded. `legend(true)` adds a legend. Pointing at the
+  with an ellipsis or thinned out when crowded. `format_value(|v| …)` writes the y labels and
+  the tooltip's values the host's way (`$1.2k`). `legend(true)` adds a legend. Pointing at the
   chart, or tapping it, shows a tooltip with every series' value at that x. The chart takes the
   focus, and Left, Right, Home and End move the tooltip while Escape hides it. Nothing animates,
   and nothing redraws until the tooltip moves to another x. Empty data says "No data". To
   assistive technology it's a figure labelled with a summary of its data, and its value is the
   x the tooltip shows. GPUI has no live regions or per-bar nodes, so those aren't announced.
   The geometry is pure functions (`bars`, `nearest`, `chart::nice_ticks`, `compact_number`).
+- **LineChart and AreaChart.** `LineChart::new(id)` and `AreaChart::new(id)` take the same
+  data and options as BarChart. They are shadcn's line and area charts: each series is a two
+  pixel line through points spread across the plot, 12 pixels in from its ends. The line is
+  smooth (`Curve::Monotone`, which never overshoots a value) or `curve(Curve::Linear)`, with
+  optional `dots(true)`, and a gap in the data breaks it. An area fills down to the zero line
+  in its colour at 40%, or with `fill(AreaFill::Gradient)`; `stacked(true)` stacks the areas.
+  The tooltip's x gets a thin line and a ringed dot on each series. The geometry is pure
+  functions too (`lines`, `areas`, `chart::curve_segments`).
 - **Checkbox.** `Checkbox::new(id).label(text).checked(on).on_click(…)`: a small rounded box,
   filled with the primary colour and a check when on, or a dash with `indeterminate(true)`. A
   press on the box or its label, or Space, calls `on_click` with the state to take (on, from

@@ -1,4 +1,5 @@
-//! Charts: shadcn's Chart (its Recharts wrappers) drawn natively. The host passes plain data:
+//! Charts: shadcn's Chart (its Recharts wrappers) drawn natively: [`BarChart`], [`LineChart`]
+//! and [`AreaChart`]. The host passes plain data:
 //! the categories along the x axis and a series of values for each, with a label and,
 //! optionally, a colour (otherwise the theme's `chart_1` to `chart_5` in turn).
 //!
@@ -18,23 +19,25 @@
 //! ```
 //!
 //! Every chart draws a quiet horizontal grid at nice tick values, the y axis's labels short
-//! (`1.2k`, `3.4M`), the x axis's cut with an ellipsis (or every other one left out) when they
+//! (`1.2k`, `3.4M`, or the host's own with `format_value`), the x axis's cut with an ellipsis (or every other one left out) when they
 //! don't fit, an optional legend, and a tooltip with every series' value at the x under the
 //! pointer (or a tap). It takes the focus: Left and Right move the tooltip between x values,
 //! Home and End go to the ends, Escape hides it. Nothing animates, and nothing redraws until
 //! the pointer reaches another x or a key moves it.
 //!
 //! The geometry is plain functions of the data and the plot's bounds ([`BarChart::bars`],
-//! [`BarChart::nearest`], [`nice_ticks`]…), so a host or a test can check it without a window.
+//! [`LineChart::lines`], [`AreaChart::areas`], [`curve_segments`], [`nice_ticks`]…), so a host or
+//! a test can check it without a window.
 
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, Context, Corners, ElementId, FocusHandle, FontWeight, Hsla, InteractiveElement,
-    IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Pixels,
-    Point, Rems, RenderOnce, Role, ShapedLine, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, Subscription, TextAlign, TruncateFrom, Window, actions, canvas,
-    deferred, div, fill, point, prelude::FluentBuilder as _, px, quad, relative, rems, size,
+    App, Background, Bounds, Context, Corners, ElementId, FocusHandle, FontWeight, Hsla,
+    InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
+    PaintQuad, ParentElement, Path, PathBuilder, Pixels, Point, Rems, RenderOnce, Role, ShapedLine,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription,
+    TextAlign, TruncateFrom, Window, actions, canvas, deferred, div, fill, linear_color_stop,
+    linear_gradient, point, prelude::FluentBuilder as _, px, quad, relative, rems, size,
     transparent_black,
 };
 
@@ -80,6 +83,11 @@ const CATEGORY_GAP: f32 = 0.1;
 const BAR_GAP: f32 = 4.;
 /// The space kept between two x labels, in pixels.
 const LABEL_GAP: f32 = 8.;
+/// The space a line or an area chart keeps each side of its first and last points, in pixels
+/// (shadcn's `margin={{ left: 12, right: 12 }}`).
+const POINT_PAD: f32 = 12.;
+/// A line's width, in pixels (Recharts' `strokeWidth={2}`).
+const LINE_WIDTH: f32 = 2.;
 
 // ---------------------------------------------------------------------------------------------
 // Numbers
@@ -345,19 +353,39 @@ impl Data {
         self.series[s].color.unwrap_or_else(|| theme.chart(s))
     }
 
+    /// The top of series `s`'s area at `i` in a stack: its value and those of the series
+    /// before it (a gap counts as zero there).
+    fn cumulative(&self, s: usize, i: usize) -> f64 {
+        (0..=s).map(|s| self.value(s, i).unwrap_or(0.)).sum()
+    }
+
+    /// The lowest and highest a stack of areas reaches.
+    fn cumulative_extent(&self) -> (f64, f64) {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for i in 0..self.len() {
+            for s in 0..self.series.len() {
+                let v = self.cumulative(s, i);
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+        }
+        (lo, hi)
+    }
+
     /// What x value `i` shows, to assistive technology: "Feb: Desktop 305, Mobile 200".
-    fn describe(&self, i: usize) -> String {
+    fn describe(&self, i: usize, options: &Options) -> String {
         let values: Vec<String> = (0..self.series.len())
             .filter_map(|s| {
                 self.value(s, i)
-                    .map(|v| format!("{} {}", self.series[s].label, format_value(v)))
+                    .map(|v| format!("{} {}", self.series[s].label, options.value_text(v)))
             })
             .collect();
         format!("{}: {}", self.category(i), values.join(", "))
     }
 
     /// The chart in a sentence, to assistive technology.
-    fn summary(&self, kind: &str) -> String {
+    fn summary(&self, kind: &str, options: &Options) -> String {
         if self.is_empty() {
             return format!("{kind}, no data");
         }
@@ -380,9 +408,73 @@ impl Data {
         let (lo, hi) = self.extent();
         format!(
             "{kind} of {names}: {span}; values from {} to {}",
-            format_value(lo),
-            format_value(hi)
+            options.value_text(lo),
+            options.value_text(hi)
         )
+    }
+}
+
+/// How x values sit along the plot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum XScale {
+    /// Each in an equal band, at its centre (a bar chart: Recharts' band scale).
+    Band,
+    /// Each at a point, the first and last [`POINT_PAD`] in from the ends (a line or an area:
+    /// Recharts' point scale with shadcn's margins). A single point is in the middle.
+    Point,
+}
+
+impl XScale {
+    /// Where the points run from and to: the plot, less the padding a point scale keeps.
+    fn span(self, plot: Bounds<Pixels>) -> (f32, f32) {
+        let (left, w) = (f32::from(plot.origin.x), f32::from(plot.size.width));
+        let pad = if self == XScale::Point && w > POINT_PAD * 4. {
+            POINT_PAD
+        } else {
+            0.
+        };
+        (left + pad, w - pad * 2.)
+    }
+
+    /// The distance between neighbouring x values.
+    fn spacing(self, plot: Bounds<Pixels>, n: usize) -> Pixels {
+        let (_, w) = self.span(plot);
+        px(match self {
+            XScale::Band => w / n.max(1) as f32,
+            XScale::Point if n > 1 => w / (n - 1) as f32,
+            XScale::Point => w,
+        })
+    }
+
+    /// The x of value `i` of `n`: its band's centre, or its point.
+    fn x(self, plot: Bounds<Pixels>, n: usize, i: usize) -> Pixels {
+        let (left, w) = self.span(plot);
+        let step = f32::from(self.spacing(plot, n));
+        px(match self {
+            XScale::Band => left + step * (i as f32 + 0.5),
+            XScale::Point if n > 1 => left + step * i as f32,
+            XScale::Point => left + w / 2.,
+        })
+    }
+
+    /// The x value nearest `x` (the nearest end's when it's outside the plot).
+    fn nearest(self, plot: Bounds<Pixels>, n: usize, x: Pixels) -> Option<usize> {
+        if n == 0 || plot.size.width <= px(0.) {
+            return None;
+        }
+        let (left, _) = self.span(plot);
+        let step = f32::from(self.spacing(plot, n));
+        let f = (f32::from(x) - left) / step;
+        let i = match self {
+            XScale::Band => f.floor(),
+            XScale::Point if n > 1 => f.round(),
+            XScale::Point => 0.,
+        };
+        Some(if i.is_nan() || i < 0. {
+            0
+        } else {
+            (i as usize).min(n - 1)
+        })
     }
 }
 
@@ -393,20 +485,6 @@ fn band(plot: Bounds<Pixels>, n: usize, i: usize) -> Bounds<Pixels> {
         point(plot.origin.x + w * i as f32, plot.origin.y),
         size(w, plot.size.height),
     )
-}
-
-/// The x value of `n` whose band holds `x` (the nearest end's when it's outside the plot).
-fn nearest_band(plot: Bounds<Pixels>, n: usize, x: Pixels) -> Option<usize> {
-    if n == 0 || plot.size.width <= px(0.) {
-        return None;
-    }
-    let f = (x - plot.origin.x) / plot.size.width;
-    let i = (f * n as f32).floor();
-    Some(if i.is_nan() || i < 0. {
-        0
-    } else {
-        (i as usize).min(n - 1)
-    })
 }
 
 /// A bar chart's bars in `plot`, by Recharts' rules: each category a band, 10% of it empty
@@ -485,8 +563,246 @@ fn bar_layout(
     bars
 }
 
+/// How a line runs between its points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Curve {
+    /// Straight from point to point (Recharts' `type="linear"`).
+    Linear,
+    /// Smooth, and never past a point's value between two points (Recharts' and d3's
+    /// `monotone`): a rise stays a rise, without the bumps a plain spline adds.
+    #[default]
+    Monotone,
+}
+
+/// One piece of a line: a cubic Bézier from `from` to `to`. A straight piece has its control
+/// points on the line, a third and two thirds of the way along.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveSegment {
+    pub from: Point<Pixels>,
+    pub c1: Point<Pixels>,
+    pub c2: Point<Pixels>,
+    pub to: Point<Pixels>,
+}
+
+impl CurveSegment {
+    /// The same piece, the other way round.
+    fn reversed(self) -> Self {
+        Self {
+            from: self.to,
+            c1: self.c2,
+            c2: self.c1,
+            to: self.from,
+        }
+    }
+}
+
+/// The pieces of a line through `points` (in increasing x), straight or monotone. Two points
+/// are joined straight either way; fewer make no line.
+pub fn curve_segments(points: &[Point<Pixels>], curve: Curve) -> Vec<CurveSegment> {
+    let n = points.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let x: Vec<f32> = points.iter().map(|p| f32::from(p.x)).collect();
+    let y: Vec<f32> = points.iter().map(|p| f32::from(p.y)).collect();
+    let at = |x: f32, y: f32| point(px(x), px(y));
+    if curve == Curve::Linear || n == 2 {
+        return points
+            .windows(2)
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                CurveSegment {
+                    from: a,
+                    c1: a + (b - a) / 3.,
+                    c2: a + (b - a) * (2. / 3.),
+                    to: b,
+                }
+            })
+            .collect();
+    }
+    // d3's curveMonotoneX (Steffen's method): a tangent at each point no steeper than its
+    // neighbouring slopes allow, and flat at a peak or a trough.
+    let h: Vec<f32> = (0..n - 1).map(|i| x[i + 1] - x[i]).collect();
+    let slope: Vec<f32> = (0..n - 1)
+        .map(|i| {
+            if h[i] > 0. {
+                (y[i + 1] - y[i]) / h[i]
+            } else {
+                0.
+            }
+        })
+        .collect();
+    let mut t = vec![0f32; n];
+    for i in 1..n - 1 {
+        let (s0, s1, h0, h1) = (slope[i - 1], slope[i], h[i - 1], h[i]);
+        if s0 * s1 > 0. && h0 + h1 > 0. {
+            let p = (s0 * h1 + s1 * h0) / (h0 + h1);
+            t[i] = 2. * s0.signum() * s0.abs().min(s1.abs()).min(0.5 * p.abs());
+        }
+    }
+    t[0] = (3. * slope[0] - t[1]) / 2.;
+    t[n - 1] = (3. * slope[n - 2] - t[n - 2]) / 2.;
+    (0..n - 1)
+        .map(|i| {
+            let dx = h[i] / 3.;
+            CurveSegment {
+                from: points[i],
+                c1: at(x[i] + dx, y[i] + dx * t[i]),
+                c2: at(x[i + 1] - dx, y[i + 1] - dx * t[i + 1]),
+                to: points[i + 1],
+            }
+        })
+        .collect()
+}
+
+/// One unbroken run of a series as drawn: its line's points and, for an area, the points of
+/// its bottom edge (the zero line, or the top of the area under it in a stack) at the same x.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeriesRun {
+    pub series: usize,
+    /// Which x value the run starts at.
+    pub start: usize,
+    pub points: Vec<Point<Pixels>>,
+    /// Empty for a line.
+    pub base: Vec<Point<Pixels>>,
+}
+
+/// Each series' runs of values with no gap between, as points in `plot`.
+fn line_runs(data: &Data, scale: &ValueScale, plot: Bounds<Pixels>) -> Vec<SeriesRun> {
+    let n = data.len();
+    let mut runs = Vec::new();
+    if data.is_empty() {
+        return runs;
+    }
+    for s in 0..data.series.len() {
+        let mut run: Option<SeriesRun> = None;
+        for i in 0..n {
+            match data.value(s, i) {
+                Some(v) => {
+                    let p = point(XScale::Point.x(plot, n, i), scale.y(v, plot));
+                    run.get_or_insert_with(|| SeriesRun {
+                        series: s,
+                        start: i,
+                        points: Vec::new(),
+                        base: Vec::new(),
+                    })
+                    .points
+                    .push(p);
+                }
+                None => runs.extend(run.take()),
+            }
+        }
+        runs.extend(run);
+    }
+    runs
+}
+
+/// Each series' areas in `plot`: from its line down to the zero line, or, stacked, from the
+/// top of the stack under it (gaps count as zero in a stack, so each series is one run).
+fn area_runs(
+    data: &Data,
+    scale: &ValueScale,
+    stacked: bool,
+    plot: Bounds<Pixels>,
+) -> Vec<SeriesRun> {
+    let n = data.len();
+    if !stacked {
+        let zero = scale.y(0., plot);
+        let mut runs = line_runs(data, scale, plot);
+        for r in &mut runs {
+            r.base = r.points.iter().map(|p| point(p.x, zero)).collect();
+        }
+        return runs;
+    }
+    if data.is_empty() {
+        return Vec::new();
+    }
+    (0..data.series.len())
+        .filter(|s| (0..n).any(|i| data.value(*s, i).is_some()))
+        .map(|s| {
+            let at = |i: usize, v: f64| point(XScale::Point.x(plot, n, i), scale.y(v, plot));
+            SeriesRun {
+                series: s,
+                start: 0,
+                points: (0..n).map(|i| at(i, data.cumulative(s, i))).collect(),
+                base: (0..n)
+                    .map(|i| {
+                        at(
+                            i,
+                            if s == 0 {
+                                0.
+                            } else {
+                                data.cumulative(s - 1, i)
+                            },
+                        )
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+/// A line along `segments`, or an area's outline (along `segments`, back along `base`).
+fn build_path(
+    mut builder: PathBuilder,
+    start: Point<Pixels>,
+    segments: &[CurveSegment],
+    base: Option<&[CurveSegment]>,
+) -> Option<Path<Pixels>> {
+    builder.move_to(start);
+    for s in segments {
+        builder.cubic_bezier_to(s.to, s.c1, s.c2);
+    }
+    if let Some(base) = base {
+        if let Some(last) = base.last() {
+            builder.line_to(last.to);
+        }
+        for s in base.iter().rev().map(|s| s.reversed()) {
+            builder.cubic_bezier_to(s.to, s.c1, s.c2);
+        }
+        builder.close();
+    }
+    builder.build().ok()
+}
+
+/// A dot: a circle of radius `r` at `c`.
+fn circle(c: Point<Pixels>, r: Pixels, color: Hsla) -> PaintQuad {
+    quad(
+        Bounds::new(c - point(r, r), size(r * 2., r * 2.)),
+        r,
+        color,
+        px(0.),
+        transparent_black(),
+        Default::default(),
+    )
+}
+
+/// How an area is filled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AreaFill {
+    /// Its colour at 40% (shadcn's `fillOpacity={0.4}`).
+    #[default]
+    Solid,
+    /// Its colour fading down the area, as shadcn's gradient example: 80% to 10% of the 40%.
+    Gradient,
+}
+
+fn area_background(color: Hsla, fill: AreaFill) -> Background {
+    match fill {
+        AreaFill::Solid => color.opacity(0.4).into(),
+        AreaFill::Gradient => linear_gradient(
+            180.,
+            linear_color_stop(color.opacity(0.32), 0.05),
+            linear_color_stop(color.opacity(0.04), 0.95),
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The shared builder
+
+/// Writes a value for the y axis and the tooltip.
+type Format = Rc<dyn Fn(f64) -> SharedString>;
 
 /// What every chart with axes takes besides its data.
 #[derive(Clone)]
@@ -498,6 +814,25 @@ struct Options {
     tooltip: bool,
     label: Option<SharedString>,
     empty_text: SharedString,
+    format: Option<Format>,
+}
+
+impl Options {
+    /// A value in the tooltip (and to assistive technology): the host's way, or in full.
+    fn value_text(&self, v: f64) -> SharedString {
+        match &self.format {
+            Some(f) => f(v),
+            None => format_value(v).into(),
+        }
+    }
+
+    /// A tick's label on the y axis: the host's way, or short.
+    fn tick_text(&self, v: f64) -> SharedString {
+        match &self.format {
+            Some(f) => f(v),
+            None => compact_number(v).into(),
+        }
+    }
 }
 
 impl Default for Options {
@@ -510,14 +845,46 @@ impl Default for Options {
             tooltip: true,
             label: None,
             empty_text: "No data".into(),
+            format: None,
         }
     }
 }
 
 /// The builder methods every chart with axes shares.
 macro_rules! cartesian_builders {
-    ($ty:ty) => {
+    ($ty:ty, $kind:expr, $x:expr) => {
         impl $ty {
+            /// How it writes a value, in the tooltip and on the y axis (`|v| format!("${v}")
+            /// .into()`). Without one, the tooltip has it in full (`1,234,567`) and the axis short
+            /// (`1.2M`).
+            pub fn format_value(mut self, format: impl Fn(f64) -> SharedString + 'static) -> Self {
+                self.options.format = Some(Rc::new(format));
+                self
+            }
+
+            /// The y axis's labels, one for each grid line from the bottom up.
+            pub fn tick_labels(&self) -> Vec<SharedString> {
+                self.scale()
+                    .ticks
+                    .iter()
+                    .map(|t| self.options.tick_text(*t))
+                    .collect()
+            }
+
+            /// The x value nearest `x` in a plot with these bounds (the area inside the axes):
+            /// where the pointer puts the tooltip. None without data.
+            pub fn nearest(&self, plot: Bounds<Pixels>, x: Pixels) -> Option<usize> {
+                if self.data.is_empty() {
+                    return None;
+                }
+                $x.nearest(plot, self.data.len(), x)
+            }
+
+            /// What it tells assistive technology it shows, unless given a label.
+            pub fn accessibility_summary(&self) -> String {
+                self.data.summary($kind, &self.options)
+            }
+
             /// The x values' labels, in order ("Jan", "Feb"…). Labels too long for their space
             /// are cut short with an ellipsis.
             pub fn categories(
@@ -630,7 +997,7 @@ pub struct BarChart {
     style: StyleRefinement,
 }
 
-cartesian_builders!(BarChart);
+cartesian_builders!(BarChart, "Bar chart", XScale::Band);
 
 impl BarChart {
     pub fn new(id: impl Into<ElementId>) -> Self {
@@ -671,20 +1038,6 @@ impl BarChart {
     pub fn bars(&self, plot: Bounds<Pixels>) -> Vec<BarRect> {
         bar_layout(&self.data, &self.scale(), self.stacked, plot)
     }
-
-    /// The x value whose band holds `x` in a plot with these bounds: where the pointer puts the
-    /// tooltip. None without data.
-    pub fn nearest(&self, plot: Bounds<Pixels>, x: Pixels) -> Option<usize> {
-        if self.data.is_empty() {
-            return None;
-        }
-        nearest_band(plot, self.data.len(), x)
-    }
-
-    /// What it tells assistive technology it shows, unless given a label.
-    pub fn accessibility_summary(&self) -> String {
-        self.data.summary("Bar chart")
-    }
 }
 
 impl RenderOnce for BarChart {
@@ -712,12 +1065,221 @@ impl RenderOnce for BarChart {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Line chart
+
+/// shadcn's line chart: each series a two-pixel line through its values, smooth
+/// ([`Curve::Monotone`]) unless told [`Curve::Linear`], with optional dots. A gap in a series
+/// breaks its line. The tooltip's x is marked with a thin line and a dot on each series. Full
+/// width and 250 pixels tall unless styled otherwise.
+#[derive(IntoElement)]
+pub struct LineChart {
+    id: ElementId,
+    data: Data,
+    options: Options,
+    curve: Curve,
+    dots: bool,
+    style: StyleRefinement,
+}
+
+cartesian_builders!(LineChart, "Line chart", XScale::Point);
+
+impl LineChart {
+    pub fn new(id: impl Into<ElementId>) -> Self {
+        Self {
+            id: id.into(),
+            data: Data::default(),
+            options: Options::default(),
+            curve: Curve::Monotone,
+            dots: false,
+            style: StyleRefinement::default(),
+        }
+    }
+
+    /// How the lines run between points (smooth unless told otherwise).
+    pub fn curve(mut self, curve: Curve) -> Self {
+        self.curve = curve;
+        self
+    }
+
+    /// Whether each value gets a dot on its line (a value alone between gaps always has one).
+    pub fn dots(mut self, dots: bool) -> Self {
+        self.dots = dots;
+        self
+    }
+
+    /// The value axis this data gets: its ends and grid lines.
+    pub fn scale(&self) -> ValueScale {
+        let (lo, hi) = self.data.extent();
+        ValueScale::new(lo, hi)
+    }
+
+    /// The lines as drawn in a plot with these bounds: each series' unbroken runs of points.
+    pub fn lines(&self, plot: Bounds<Pixels>) -> Vec<SeriesRun> {
+        line_runs(&self.data, &self.scale(), plot)
+    }
+}
+
+impl RenderOnce for LineChart {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let scale = self.scale();
+        let summary = self.accessibility_summary();
+        let marks = Marks::Lines {
+            curve: self.curve,
+            dots: self.dots,
+        };
+        render_cartesian(
+            Cartesian {
+                id: self.id,
+                data: Rc::new(self.data),
+                options: self.options,
+                scale,
+                summary,
+                marks,
+                style: self.style,
+            },
+            window,
+            cx,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Area chart
+
+/// shadcn's area chart: each series a line, as [`LineChart`] draws it, filled down to the zero
+/// line in its colour at 40% (or with a [`AreaFill::Gradient`]), or [`stacked`](Self::stacked)
+/// one on another. Full width and 250 pixels tall unless styled otherwise.
+#[derive(IntoElement)]
+pub struct AreaChart {
+    id: ElementId,
+    data: Data,
+    options: Options,
+    curve: Curve,
+    dots: bool,
+    stacked: bool,
+    fill: AreaFill,
+    style: StyleRefinement,
+}
+
+cartesian_builders!(AreaChart, "Area chart", XScale::Point);
+
+impl AreaChart {
+    pub fn new(id: impl Into<ElementId>) -> Self {
+        Self {
+            id: id.into(),
+            data: Data::default(),
+            options: Options::default(),
+            curve: Curve::Monotone,
+            dots: false,
+            stacked: false,
+            fill: AreaFill::Solid,
+            style: StyleRefinement::default(),
+        }
+    }
+
+    /// How the lines run between points (smooth unless told otherwise).
+    pub fn curve(mut self, curve: Curve) -> Self {
+        self.curve = curve;
+        self
+    }
+
+    /// Whether each value gets a dot on its line.
+    pub fn dots(mut self, dots: bool) -> Self {
+        self.dots = dots;
+        self
+    }
+
+    /// Stacks each series' area on the ones before it instead of each from zero (a gap counts
+    /// as zero in a stack).
+    pub fn stacked(mut self, stacked: bool) -> Self {
+        self.stacked = stacked;
+        self
+    }
+
+    /// How the areas are filled (flat at 40% unless told otherwise).
+    pub fn fill(mut self, fill: AreaFill) -> Self {
+        self.fill = fill;
+        self
+    }
+
+    /// The value axis this data gets: its ends and grid lines.
+    pub fn scale(&self) -> ValueScale {
+        let (lo, hi) = if self.stacked {
+            self.data.cumulative_extent()
+        } else {
+            self.data.extent()
+        };
+        ValueScale::new(lo, hi)
+    }
+
+    /// The areas as drawn in a plot with these bounds: each series' runs, its line's points
+    /// and its bottom edge's.
+    pub fn areas(&self, plot: Bounds<Pixels>) -> Vec<SeriesRun> {
+        area_runs(&self.data, &self.scale(), self.stacked, plot)
+    }
+}
+
+impl RenderOnce for AreaChart {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let scale = self.scale();
+        let summary = self.accessibility_summary();
+        let marks = Marks::Areas {
+            curve: self.curve,
+            dots: self.dots,
+            stacked: self.stacked,
+            fill: self.fill,
+        };
+        render_cartesian(
+            Cartesian {
+                id: self.id,
+                data: Rc::new(self.data),
+                options: self.options,
+                scale,
+                summary,
+                marks,
+                style: self.style,
+            },
+            window,
+            cx,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Drawing
 
 /// What a chart draws in its plot.
 #[derive(Clone, Copy)]
 enum Marks {
-    Bars { stacked: bool, radius: Rems },
+    Bars {
+        stacked: bool,
+        radius: Rems,
+    },
+    Lines {
+        curve: Curve,
+        dots: bool,
+    },
+    Areas {
+        curve: Curve,
+        dots: bool,
+        stacked: bool,
+        fill: AreaFill,
+    },
+}
+
+impl Marks {
+    fn x_scale(self) -> XScale {
+        match self {
+            Marks::Bars { .. } => XScale::Band,
+            Marks::Lines { .. } | Marks::Areas { .. } => XScale::Point,
+        }
+    }
+}
+
+/// Something painted in the plot, in order.
+enum Paint {
+    Quad(PaintQuad),
+    Path(Path<Pixels>, Background),
 }
 
 /// A chart with axes, ready to draw.
@@ -775,9 +1337,14 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
     });
     let n = data.len();
     let empty = data.is_empty();
-    let (focus, active) = {
+    let xs = marks.x_scale();
+    let (focus, active, last_plot) = {
         let s = state.read(cx);
-        (s.focus.clone(), s.active.filter(|i| *i < n && !empty))
+        (
+            s.focus.clone(),
+            s.active.filter(|i| *i < n && !empty),
+            s.plot,
+        )
     };
     let name = id.to_string();
     let label = options.label.clone().unwrap_or_else(|| summary.into());
@@ -835,7 +1402,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
         .track_focus(&focus.tab_stop(true))
         .focus_visible(move |s| s.shadow(vec![ring]))
         .aria_description("Left and Right move between values; Escape hides them.")
-        .when_some(active, |d, i| d.aria_value(data.describe(i)))
+        .when_some(active, |d, i| d.aria_value(data.describe(i, &options)))
         .on_action(move |_: &NextPoint, w, cx| next(w, cx))
         .on_action(move |_: &PreviousPoint, w, cx| prev(w, cx))
         .on_action(move |_: &FirstPoint, w, cx| first(w, cx))
@@ -862,7 +1429,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
     // widest one.
     let x_axis_h = css(24.);
     let y_axis = options.y_axis.then(|| {
-        let labels: Vec<String> = scale.ticks.iter().map(|t| compact_number(*t)).collect();
+        let labels: Vec<SharedString> = scale.ticks.iter().map(|t| options.tick_text(*t)).collect();
         let rem = window.rem_size();
         let font_size = theme.text.xs.to_pixels(rem);
         let mut style = window.text_style();
@@ -872,7 +1439,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
             .map(|l| {
                 window
                     .text_system()
-                    .shape_line(l.clone().into(), font_size, &[style.to_run(l.len())], None)
+                    .shape_line(l.clone(), font_size, &[style.to_run(l.len())], None)
                     .width
             })
             .fold(px(0.), Pixels::max);
@@ -907,10 +1474,12 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
         let grid = options.grid;
         let border = theme.border;
         let muted = theme.muted;
+        let background = theme.background;
         canvas(
             move |bounds, window, cx| {
                 state.update(cx, |s, _| s.plot = bounds);
-                let mut quads = Vec::new();
+                let rem = window.rem_size();
+                let mut paints = Vec::new();
                 if grid {
                     for t in &scale.ticks {
                         let y = scale.y(*t, bounds);
@@ -920,28 +1489,38 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
                         } else {
                             border.opacity(0.5)
                         };
-                        quads.push(fill(
+                        paints.push(Paint::Quad(fill(
                             Bounds::new(
                                 point(bounds.origin.x, y - px(0.5)),
                                 size(bounds.size.width, px(1.)),
                             ),
                             color,
-                        ));
+                        )));
                     }
                 }
+                // The tooltip's x: a muted band behind bars, a thin line through points.
                 if let Some(i) = active {
-                    quads.push(fill(band(bounds, n, i), muted));
+                    paints.push(Paint::Quad(match xs {
+                        XScale::Band => fill(band(bounds, n, i), muted),
+                        XScale::Point => fill(
+                            Bounds::new(
+                                point(xs.x(bounds, n, i) - px(0.5), bounds.origin.y),
+                                size(px(1.), bounds.size.height),
+                            ),
+                            border,
+                        ),
+                    }));
                 }
-                match marks {
+                let (runs, curve, dots) = match marks {
                     Marks::Bars { stacked, radius } => {
-                        let r = radius.to_pixels(window.rem_size());
+                        let r = radius.to_pixels(rem);
                         for b in bar_layout(&data, &scale, stacked, bounds) {
                             let r = r.min(b.bounds.size.width / 2.).min(b.bounds.size.height);
                             let (top, bottom) = (
                                 if b.round_top { r } else { px(0.) },
                                 if b.round_bottom { r } else { px(0.) },
                             );
-                            quads.push(quad(
+                            paints.push(Paint::Quad(quad(
                                 b.bounds,
                                 Corners {
                                     top_left: top,
@@ -953,15 +1532,71 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
                                 px(0.),
                                 transparent_black(),
                                 Default::default(),
-                            ));
+                            )));
+                        }
+                        (Vec::new(), Curve::Linear, false)
+                    }
+                    Marks::Lines { curve, dots } => (line_runs(&data, &scale, bounds), curve, dots),
+                    Marks::Areas {
+                        curve,
+                        dots,
+                        stacked,
+                        fill,
+                    } => {
+                        let runs = area_runs(&data, &scale, stacked, bounds);
+                        for r in &runs {
+                            let top = curve_segments(&r.points, curve);
+                            let base = curve_segments(&r.base, curve);
+                            if let Some(path) =
+                                build_path(PathBuilder::fill(), r.points[0], &top, Some(&base))
+                            {
+                                paints.push(Paint::Path(
+                                    path,
+                                    area_background(colors[r.series], fill),
+                                ));
+                            }
+                        }
+                        (runs, curve, dots)
+                    }
+                };
+                // Lines over the fills, then dots over the lines.
+                for r in &runs {
+                    let segments = curve_segments(&r.points, curve);
+                    let stroke = PathBuilder::stroke(px(LINE_WIDTH));
+                    if let Some(path) = build_path(stroke, r.points[0], &segments, None) {
+                        paints.push(Paint::Path(path, colors[r.series].into()));
+                    }
+                }
+                let dot = css(3.).to_pixels(rem);
+                for r in &runs {
+                    if dots || r.points.len() == 1 {
+                        for p in &r.points {
+                            paints.push(Paint::Quad(circle(*p, dot, colors[r.series])));
                         }
                     }
                 }
-                quads
+                // The tooltip's x: a bigger dot on each line, ringed in the page's colour.
+                if let Some(i) = active {
+                    let r = css(4.).to_pixels(rem);
+                    for run in &runs {
+                        if let Some(p) = i
+                            .checked_sub(run.start)
+                            .and_then(|k| run.points.get(k))
+                            .filter(|_| data.value(run.series, i).is_some())
+                        {
+                            paints.push(Paint::Quad(circle(*p, r + px(2.), background)));
+                            paints.push(Paint::Quad(circle(*p, r, colors[run.series])));
+                        }
+                    }
+                }
+                paints
             },
-            |_, quads, window, _| {
-                for q in quads {
-                    window.paint_quad(q);
+            |_, paints, window, _| {
+                for p in paints {
+                    match p {
+                        Paint::Quad(q) => window.paint_quad(q),
+                        Paint::Path(path, background) => window.paint_path(path, background),
+                    }
                 }
             },
         )
@@ -971,7 +1606,12 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
 
     let tooltip = (options.tooltip && active.is_some()).then(|| {
         let i = active.unwrap_or(0);
-        let frac = (i as f32 + 0.5) / n as f32;
+        // Where its x is across the plot, as last drawn.
+        let frac = if last_plot.size.width > px(0.) {
+            ((xs.x(last_plot, n, i) - last_plot.origin.x) / last_plot.size.width).clamp(0., 1.)
+        } else {
+            (i as f32 + 0.5) / n as f32
+        };
         let rows = (0..data.series.len()).filter_map(|s| {
             data.value(s, i).map(|v| {
                 div()
@@ -1001,7 +1641,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
                             .font_family(theme.mono_font_family.clone())
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.foreground)
-                            .child(format_value(v)),
+                            .child(options.value_text(v)),
                     )
             })
         });
@@ -1059,7 +1699,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
             let state = state.clone();
             move |e: &MouseMoveEvent, _, cx| {
                 state.update(cx, |s, cx| {
-                    let i = nearest_band(s.plot, n, e.position.x);
+                    let i = xs.nearest(s.plot, n, e.position.x);
                     s.set(i, cx)
                 });
             }
@@ -1077,7 +1717,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
             let state = state.clone();
             move |e: &MouseDownEvent, _, cx| {
                 state.update(cx, |s, cx| {
-                    let i = nearest_band(s.plot, n, e.position.x);
+                    let i = xs.nearest(s.plot, n, e.position.x);
                     s.set(i, cx)
                 });
             }
@@ -1099,7 +1739,7 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
             .text_color(theme.muted_foreground)
             .child(
                 canvas(
-                    move |bounds, window, _| x_labels(&data, bounds, window),
+                    move |bounds, window, _| x_labels(&data, xs, bounds, window),
                     |_, (lines, line_height), window, cx| {
                         for (origin, line) in lines {
                             let _ =
@@ -1159,10 +1799,11 @@ fn render_cartesian(chart: Cartesian, window: &mut Window, cx: &mut App) -> gpui
     .into_any_element()
 }
 
-/// The x labels to paint in `bounds` (the axis under the plot): each under its band's centre,
-/// as many as fit, each cut short with an ellipsis if it's wider than its slot.
+/// The x labels to paint in `bounds` (the axis under the plot): each under its x, as many as
+/// fit, each cut short with an ellipsis if it's wider than its slot.
 fn x_labels(
     data: &Data,
+    xs: XScale,
     bounds: Bounds<Pixels>,
     window: &mut Window,
 ) -> (Vec<(Point<Pixels>, ShapedLine)>, Pixels) {
@@ -1182,13 +1823,13 @@ fn x_labels(
     let labels: Vec<SharedString> = (0..n).map(|i| data.category(i)).collect();
     let lines: Vec<ShapedLine> = labels.iter().map(|l| shape(l.clone())).collect();
     let widest = lines.iter().map(|l| l.width).fold(px(0.), Pixels::max);
-    let band_w = bounds.size.width / n as f32;
+    let band_w = xs.spacing(bounds, n);
     let stride = label_stride(band_w, widest, css(40.).to_pixels(rem));
     let top = bounds.origin.y + css(6.).to_pixels(rem);
     let mut out = Vec::new();
     for i in (0..n).step_by(stride) {
         // Its space: `stride` bands centred on its own, inside the axis, less the gap.
-        let centre = bounds.origin.x + band_w * (i as f32 + 0.5);
+        let centre = xs.x(bounds, n, i);
         let half = band_w * stride as f32 / 2.;
         let from = (centre - half).max(bounds.origin.x);
         let to = (centre + half).min(bounds.right());
