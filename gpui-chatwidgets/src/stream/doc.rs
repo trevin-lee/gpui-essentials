@@ -1442,7 +1442,6 @@ mod tests {
     fn settling_reads_lines_once_and_settles_as_reading_every_line_again_did() {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
         let rounds = if cfg!(debug_assertions) { 400 } else { 2500 };
-        let mut skipped = 0;
         for _ in 0..rounds {
             let n = 1 + rng.below(14);
             let text = rng.text(n);
@@ -1463,12 +1462,6 @@ mod tests {
                     let n = 1 + rng.below(4);
                     other.push_str(&rng.text(n));
                 }
-            }
-            // The parser (markdown 1.0.0) panics on some lists: a code fence left open in an
-            // item, then a list of the other kind. Those texts are left out here.
-            if !parses(&text) || !parses(&other) {
-                skipped += 1;
-                continue;
             }
             let (mut new, mut old) = (Doc::default(), before::Doc::default());
             // Streamed in cuts of a few bytes.
@@ -1496,20 +1489,32 @@ mod tests {
             }
             same(&new, &old, &other);
         }
-        assert!(skipped * 10 < rounds, "{skipped} of {rounds} left out");
     }
 
-    /// Whether every run of whole lines of `text` parses without the parser panicking.
-    fn parses(text: &str) -> bool {
-        let starts: Vec<usize> = std::iter::once(0)
-            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-            .chain(std::iter::once(text.len()))
-            .collect();
-        starts.iter().enumerate().all(|(k, &a)| {
-            starts[k + 1..]
-                .iter()
-                .all(|&b| std::panic::catch_unwind(|| parse_markdown(&text[a..b])).is_ok())
-        })
+    #[test]
+    fn open_fences_in_items_and_tabs_in_quotes_settle_as_reading_every_line_again_does() {
+        // A code fence left open in an item, then a list of the other kind; a quote with a tab
+        // after its marker below a table. Some as the stream ends, some with more after.
+        for text in [
+            "- a\n  ```\n1. a\n",
+            "- a\n  ```\n1. a\n\nAfter\n\nThe end\n",
+            "1. a\n   ```\n- a\n",
+            "1. a\n   ```\n- a\n\nAfter\n\nThe end\n",
+            "- ```\n1. a\n",
+            "1. ```\n- a\n2. b\n",
+            "- a\n  ~~~\n1) a\n",
+            "2) b\n   ```rust\n- n\n  more\n",
+            "> - a\n>   ```\n> 1. a\n\nAfter\n",
+            "- a\n  ```\n  code\n1. a\n- b\n",
+            "| a | b |\n|---|---|\n> \t`",
+            "| a | b |\n|---|---|\n> \t`\n",
+            "| a | b |\n|---|---|\n> \t`\nmore\n\nThe end\n",
+            "| a | b |\n|---|---|\n>\t\tcode\n> q\n",
+            "> \t`\n> \t```\n",
+            "-\tx\n  ```\n1. a\n",
+        ] {
+            agrees(text);
+        }
     }
 
     /// Settles `text` given in `pieces`, settling after each as a frame would: the frames it
