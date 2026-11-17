@@ -989,3 +989,55 @@ fn the_top_hour_keeps_its_label() {
     }
     assert!(found.is_empty(), "{}", found.join("\n"));
 }
+
+/// The agenda draws a line at the current time between today's events that have started and
+/// those that haven't, and none on other days.
+#[test]
+fn the_agenda_marks_the_time_now_among_todays_events() {
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_view(CalendarView::Agenda(1))
+            .with_events(worst_week())
+    });
+    let frame = |vcx: &mut gpui::VisualTestContext| {
+        vcx.run_until_parked();
+        drawn::record();
+        vcx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        let texts = drawn::take();
+        let now = calendar.read_with(vcx, |c, _| c.shared.agenda_now.get());
+        (texts, now)
+    };
+    for (w, h) in [(720., 820.), (390., 844.)] {
+        vcx.simulate_resize(size(px(w), px(h)));
+        let (texts, now) = frame(vcx);
+        let y = now.unwrap_or_else(|| panic!("{w}: no line at the time now"));
+        let top = |what: &str| {
+            texts
+                .iter()
+                .find(|t| t.text == what)
+                .unwrap_or_else(|| panic!("{what:?} isn't drawn"))
+                .bounds
+        };
+        // 10:40: after the 10:30 event, before the 12:30 one, and clear of both.
+        assert!(y > top("10:30 AM").bottom(), "{w}: {y:?}");
+        assert!(y < top("12:30 PM").top(), "{w}: {y:?}");
+        let canvas = calendar
+            .read_with(vcx, |c, _| c.shared.geo.get())
+            .unwrap()
+            .bounds;
+        let found = problems(&texts, canvas);
+        assert!(found.is_empty(), "{w}: {}", found.join("\n"));
+    }
+    // Another day: no line.
+    calendar.update(vcx, |c, cx| c.go_to(day(4), cx));
+    let (_, now) = frame(vcx);
+    assert_eq!(now, None);
+}
