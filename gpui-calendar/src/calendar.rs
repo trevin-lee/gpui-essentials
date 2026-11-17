@@ -155,6 +155,9 @@ pub enum CalendarEvent {
     },
     /// One of an event's links was clicked: the host opens what it points at.
     OpenLink { event: EventRef, link: EventLink },
+    /// A web address in the event panel's place or notes was clicked: the host opens it (in
+    /// the browser, say). The calendar never opens anything itself.
+    OpenUrl { event: EventRef, url: SharedString },
     /// ⌘F (Ctrl-F off the Mac): focus the host's search field, and call
     /// [`Calendar::set_query`] as it changes. The calendar takes no typing itself unless the
     /// host asks it to with [`Calendar::type_query`].
