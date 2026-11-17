@@ -37,6 +37,7 @@ mod a11y;
 mod alert;
 mod button;
 mod card;
+mod collapsible;
 mod date_picker;
 #[cfg(feature = "highlight")]
 pub mod highlight;
@@ -60,6 +61,7 @@ mod tooltip;
 pub use alert::{Alert, AlertVariant};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
+pub use collapsible::Collapsible;
 pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
 };
