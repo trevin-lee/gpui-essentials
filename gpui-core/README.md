@@ -91,6 +91,12 @@ item](docs/gallery.png)
   With the focus, the arrows, Page Up and Page Down, Space, Home and End scroll it.
   `track_scroll(&ScrollAreaHandle)` lets the host read the position and scroll to an offset, a
   child (`scroll_to_child`) or an end.
+- **Progress.** `Progress::new(id).value(40.)`: shadcn's eight-pixel bar across its parent,
+  the primary colour filling a 20% track as far as the value (clamped to 0–100, and 0 for
+  NaN). Without a value it's indeterminate: a stretch of fill sweeping across, only while
+  drawn and not under GPUI's `cx.set_reduce_motion(true)`. To assistive tech it's a progress
+  indicator with its value (none when indeterminate) and an optional
+  `.accessibility_label(…)`.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
