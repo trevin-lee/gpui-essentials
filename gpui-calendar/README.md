@@ -101,9 +101,10 @@ their look.
 - **The event panel** (`event_panel`, off by default): opening an event (a double click, Enter,
   or a tap on the selected one on touch) shows its details beside it on the Mac, or in a sheet
   on touch and in a narrow calendar: the title, when, the calendar (with Change, listing the
-  other calendars it can move to), the place, the notes, the links (each opens its link), the
-  guests (counted by answer, "4 guests" over "2 yes, 1 maybe, 1 awaiting", then each
-  with theirs), Yes / Maybe / No for the guest marked `me`, and Edit and
+  other calendars it can move to), the place, the notes (web addresses in these two are
+  underlined, and a click on one sends `CalendarEvent::OpenUrl` for your app to open it), the
+  links (each opens its link), the guests (counted by answer, "4 guests" over "2 yes, 1 maybe,
+  1 awaiting", then each with theirs), Yes / Maybe / No for the guest marked `me`, and Edit and
   Delete. `CalendarEvent::Open` is still sent, panel or not. Every action goes to your app as
   an event: `Edit`, `Delete`, `ChangeCalendar` and `Rsvp`, the last three asking "this event,
   following or all?" first for a repeating event. A read-only event's panel has no Edit,

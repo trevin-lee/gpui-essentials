@@ -2,6 +2,8 @@
 //! can be done with it, as a popover beside the event on the Mac and a sheet on touch. Every
 //! action goes to the host as a [`CalendarEvent`]; the panel changes nothing itself.
 
+use std::ops::Range;
+
 use chrono::{Datelike, Duration};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -64,6 +66,88 @@ pub(super) fn guest_summary(guests: &[Attendee]) -> (String, String) {
     .collect::<Vec<_>>()
     .join(", ");
     (count, answers)
+}
+
+/// The web addresses in text ("https://…", "http://…" and "www.…") as byte ranges of it,
+/// each with the address to open: a "www." one gets "https://". A sentence's punctuation after
+/// one isn't part of it, nor a closing bracket it didn't open.
+pub(super) fn find_urls(text: &str) -> Vec<(Range<usize>, String)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let at_word = text[..i]
+            .chars()
+            .next_back()
+            .is_none_or(|c| c.is_whitespace() || "([<\"'".contains(c));
+        let prefix = ["https://", "http://", "www."].into_iter().find(|p| {
+            rest.get(..p.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(p))
+        });
+        if at_word && let Some(prefix) = prefix {
+            let mut end = rest
+                .find(|c: char| c.is_whitespace() || "<>\"".contains(c))
+                .unwrap_or(rest.len());
+            while let Some(last) = rest[..end].chars().next_back() {
+                let found = &rest[..end];
+                let unopened = |open: char, close: char| {
+                    found.matches(open).count() < found.matches(close).count()
+                };
+                let trailing = match last {
+                    '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' => true,
+                    ')' => unopened('(', ')'),
+                    ']' => unopened('[', ']'),
+                    _ => false,
+                };
+                if !trailing {
+                    break;
+                }
+                end -= last.len_utf8();
+            }
+            if end > prefix.len() {
+                let found = &rest[..end];
+                let url = if prefix == "www." {
+                    format!("https://{found}")
+                } else {
+                    found.to_string()
+                };
+                out.push((i..i + end, url));
+                i += end;
+                continue;
+            }
+        }
+        i += rest.chars().next().map_or(1, char::len_utf8);
+    }
+    out
+}
+
+/// Two lists of highlights, each in order and not overlapping, as one such list: where they
+/// overlap, the two styles together.
+fn merge_highlights(
+    a: &[(Range<usize>, HighlightStyle)],
+    b: &[(Range<usize>, HighlightStyle)],
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let mut cuts: Vec<usize> = a
+        .iter()
+        .chain(b)
+        .flat_map(|(r, _)| [r.start, r.end])
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    let mut out: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
+    for w in cuts.windows(2) {
+        let piece = w[0]..w[1];
+        let style = a
+            .iter()
+            .chain(b)
+            .filter(|(r, _)| r.start <= piece.start && piece.end <= r.end)
+            .map(|(_, s)| *s)
+            .reduce(HighlightStyle::highlight);
+        if let Some(style) = style {
+            out.push((piece, style));
+        }
+    }
+    out
 }
 
 impl Calendar {
@@ -132,6 +216,64 @@ impl Calendar {
             ..Default::default()
         };
         StyledText::new(text).with_highlights(ranges.into_iter().map(|r| (r, style)))
+    }
+
+    /// Text as `marked` gives it, with its web addresses underlined: a click on one asks the
+    /// host to open it ([`CalendarEvent::OpenUrl`]).
+    fn linked(
+        &self,
+        id: &'static str,
+        text: SharedString,
+        event: EventRef,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let urls = find_urls(&text);
+        if urls.is_empty() {
+            return self.marked(text, cx).into_any_element();
+        }
+        let colors = self
+            .colors
+            .unwrap_or_else(|| crate::theme::CalendarColors::from_theme(cx));
+        let found: Vec<(Range<usize>, HighlightStyle)> = self
+            .query
+            .as_ref()
+            .map(|q| q.ranges(&text))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| {
+                (
+                    r,
+                    HighlightStyle {
+                        background_color: Some(colors.find.opacity(0.38)),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        let underline = HighlightStyle {
+            underline: Some(UnderlineStyle {
+                thickness: px(1.),
+                color: None,
+                wavy: false,
+            }),
+            ..Default::default()
+        };
+        let links: Vec<(Range<usize>, HighlightStyle)> =
+            urls.iter().map(|(r, _)| (r.clone(), underline)).collect();
+        let styled = StyledText::new(text).with_highlights(merge_highlights(&found, &links));
+        let ranges = urls.iter().map(|(r, _)| r.clone()).collect();
+        let this = cx.entity().downgrade();
+        InteractiveText::new(id, styled)
+            .on_click(ranges, move |i, window, cx| {
+                let Some((_, url)) = urls.get(i) else { return };
+                let (event, url) = (event.clone(), SharedString::from(url.clone()));
+                this.update(cx, |c, cx| {
+                    cx.emit(CalendarEvent::OpenUrl { event, url });
+                    c.focus.focus(window, cx);
+                })
+                .ok();
+            })
+            .into_any_element()
     }
 
     /// The panel for the event it's open on, if any.
@@ -361,7 +503,10 @@ impl Calendar {
                 "place",
                 IconName::MapPin,
                 text_line,
-                div().child(place.clone()).into_any_element(),
+                div()
+                    .debug_selector(|| "panel-place".into())
+                    .child(self.linked("panel-place", place.clone(), e.to_ref(), cx))
+                    .into_any_element(),
             ));
         }
         if let Some(notes) = &e.notes {
@@ -371,7 +516,8 @@ impl Calendar {
                 text_line,
                 div()
                     .text_color(c.popover_foreground.opacity(0.9))
-                    .child(self.marked(notes.clone(), cx))
+                    .debug_selector(|| "panel-notes".into())
+                    .child(self.linked("panel-notes", notes.clone(), e.to_ref(), cx))
                     .into_any_element(),
             ));
         }
@@ -610,7 +756,7 @@ impl Calendar {
 
 #[cfg(test)]
 mod tests {
-    use super::guest_summary;
+    use super::{find_urls, guest_summary};
     use crate::{Attendee, Response};
 
     #[test]
@@ -636,5 +782,48 @@ mod tests {
             guest_summary(&guests[4..5]),
             ("1 guest".into(), "1 awaiting".into())
         );
+    }
+
+    fn urls(text: &str) -> Vec<(&str, String)> {
+        find_urls(text)
+            .into_iter()
+            .map(|(r, url)| (&text[r], url))
+            .collect()
+    }
+
+    #[test]
+    fn web_addresses_are_found_without_the_sentence_round_them() {
+        assert_eq!(
+            urls("Join at https://meet.google.com/abc-defg-hij."),
+            [(
+                "https://meet.google.com/abc-defg-hij",
+                "https://meet.google.com/abc-defg-hij".into()
+            )]
+        );
+        // In brackets, and with brackets of their own.
+        assert_eq!(
+            urls("Notes (https://en.wikipedia.org/wiki/Rust_(language)), and www.example.com!"),
+            [
+                (
+                    "https://en.wikipedia.org/wiki/Rust_(language)",
+                    "https://en.wikipedia.org/wiki/Rust_(language)".into()
+                ),
+                ("www.example.com", "https://www.example.com".into()),
+            ]
+        );
+        // Several, after text that isn't ASCII, with queries and anchors.
+        assert_eq!(
+            urls("Café: http://a.example/x?y=1&z=2#top\nZoom <https://zoom.us/j/1>"),
+            [
+                (
+                    "http://a.example/x?y=1&z=2#top",
+                    "http://a.example/x?y=1&z=2#top".into()
+                ),
+                ("https://zoom.us/j/1", "https://zoom.us/j/1".into()),
+            ]
+        );
+        // Not in the middle of a word, and not a bare prefix.
+        assert!(urls("xhttps://a.example and https:// and www.").is_empty());
+        assert!(urls("Room 4, Building 2").is_empty());
     }
 }
