@@ -157,6 +157,9 @@ pub struct Dialog {
     colors: Option<PopoverColors>,
     scrim: Option<Hsla>,
     touch: bool,
+    label: Option<SharedString>,
+    /// No padding round the content (a command palette's field and list reach the edges).
+    bare: bool,
     style: StyleRefinement,
     children: Vec<AnyElement>,
 }
@@ -181,6 +184,8 @@ impl Dialog {
             colors: None,
             scrim: None,
             touch: false,
+            label: None,
+            bare: false,
             style: StyleRefinement::default(),
             children: Vec::new(),
         }
@@ -254,6 +259,19 @@ impl Dialog {
     /// The scrim's colour: by default the theme's `background` at 70%.
     pub fn scrim(mut self, color: impl Into<Hsla>) -> Self {
         self.scrim = Some(color.into());
+        self
+    }
+
+    /// What it's called to assistive tech, when it has no [`title`](Self::title) (or for a
+    /// fuller name than that).
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Its content reaches its edges: no padding round it.
+    pub(crate) fn bare(mut self) -> Self {
+        self.bare = true;
         self
     }
 
@@ -394,8 +412,7 @@ impl Dialog {
             .min_h_0()
             .min_w_0()
             .overflow_y_scroll()
-            .p(css(16.))
-            .gap(css(16.))
+            .when(!self.bare, |s| s.p(css(16.)).gap(css(16.)))
             .children(header)
             .children(body)
             .children(footer);
@@ -452,8 +469,8 @@ impl Dialog {
             })
             .child(scroll)
             .children(close);
-        if let Some(title) = self.title.clone() {
-            panel = panel.aria_label(title);
+        if let Some(label) = self.label.clone().or_else(|| self.title.clone()) {
+            panel = panel.aria_label(label);
         }
         if let Some(description) = self.description.clone() {
             panel = panel.aria_description(description);

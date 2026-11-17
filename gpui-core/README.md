@@ -67,6 +67,12 @@ item](docs/gallery.png)
   header and footer and the keyboard held inside as in a Dialog. Escape and a press on the
   scrim call `on_dismiss`, and so does dragging a bottom drawer's handle or header down past a
   quarter of its height (`DismissReason::Swiped`); short of that it goes back.
+- **CommandDialog.** `CommandDialog::new(id).open(open).group(heading, [PopupMenuItem…])
+  .on_select(…).on_dismiss(…)` is the web's command palette: a Dialog holding a Picker, its
+  commands under headings with icons and shortcuts' text. Typing filters them, a group's
+  heading shows while any of its commands match, Up and Down move the highlight while the
+  field keeps the keyboard, and Enter or a press runs one. `Picker::heading(title)` is what
+  groups them, and works in any picker.
 - **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
   the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
   monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab

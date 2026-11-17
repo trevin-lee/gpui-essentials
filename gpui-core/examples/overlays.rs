@@ -1,4 +1,4 @@
-//! gpui-core's overlays in a window: Dialog, AlertDialog, HoverCard and Drawer.
+//! gpui-core's overlays in a window: Dialog, AlertDialog, HoverCard, Drawer and CommandDialog (⌘K).
 //!
 //! ```sh
 //! cargo run --example overlays [-- --light]
@@ -10,12 +10,15 @@
 use gpui::*;
 use gpui_core::*;
 
-actions!(overlays, [ZoomIn, ZoomOut, Quit]);
+actions!(overlays, [ZoomIn, ZoomOut, Quit, OpenCommands]);
 
 struct Overlays {
     dialog: bool,
     alert: bool,
     drawer: Option<DrawerSide>,
+    commands: bool,
+    /// The page's own focus, so ⌘K reaches it before anything else has the keyboard.
+    focus: FocusHandle,
     name: Entity<InputState>,
     said: SharedString,
 }
@@ -38,6 +41,11 @@ impl Render for Overlays {
         };
         div()
             .size_full()
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &OpenCommands, _, cx| {
+                this.commands = true;
+                cx.notify();
+            }))
             .p(rems(2.))
             .flex()
             .flex_col()
@@ -149,6 +157,46 @@ impl Render for Overlays {
                             })),
                     ),
             )
+            .child(section("Command"))
+            .child(
+                div().flex().child(
+                    Button::new("open-commands")
+                        .outline()
+                        .label("Open the command palette (⌘K)")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.commands = true;
+                            cx.notify();
+                        })),
+                ),
+            )
+            .child(
+                CommandDialog::new("commands")
+                    .open(self.commands)
+                    .group(
+                        "Suggestions",
+                        [
+                            PopupMenuItem::new("calendar", "Calendar").icon(IconName::Calendar),
+                            PopupMenuItem::new("search", "Search emoji").icon(IconName::Search),
+                            PopupMenuItem::new("calculator", "Calculator").disabled(true),
+                        ],
+                    )
+                    .group(
+                        "Settings",
+                        [
+                            PopupMenuItem::new("profile", "Profile").shortcut("⌘P"),
+                            PopupMenuItem::new("billing", "Billing").shortcut("⌘B"),
+                            PopupMenuItem::new("settings", "Settings").shortcut("⌘S"),
+                        ],
+                    )
+                    .on_select(cx.listener(|this, pick: &MenuSelect, _, cx| {
+                        this.commands = false;
+                        this.set(&format!("ran {}", pick.id), cx);
+                    }))
+                    .on_dismiss(cx.listener(|this, _, _, cx| {
+                        this.commands = false;
+                        this.set("palette dismissed", cx);
+                    })),
+            )
             .child(
                 Dialog::new("profile")
                     .open(self.dialog)
@@ -227,6 +275,7 @@ fn main() {
                 KeyBinding::new("cmd-=", ZoomIn, None),
                 KeyBinding::new("cmd--", ZoomOut, None),
                 KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("cmd-k", OpenCommands, None),
             ]);
             cx.on_action(|_: &ZoomIn, cx| {
                 let t = Theme::global_mut(cx);
@@ -244,10 +293,14 @@ fn main() {
             };
             gpui_core::open_window(options, cx, |window, cx| {
                 let name = cx.new(|cx| InputState::new(window, cx).default_value("Pedro Duarte"));
+                let focus = cx.focus_handle();
+                window.focus(&focus, cx);
                 cx.new(|_| Overlays {
+                    focus,
                     dialog: false,
                     alert: false,
                     drawer: None,
+                    commands: false,
                     name,
                     said: "nothing yet".into(),
                 })

@@ -101,6 +101,8 @@ pub(crate) fn init(cx: &mut App) {
 pub struct Picker {
     id: ElementId,
     items: Vec<PopupMenuItem>,
+    /// Each group's heading, with the index of its first entry.
+    headings: Vec<(usize, SharedString)>,
     placeholder: SharedString,
     empty: SharedString,
     on_select: Option<OnSelect>,
@@ -125,6 +127,7 @@ impl Picker {
         Self {
             id: id.into(),
             items: Vec::new(),
+            headings: Vec::new(),
             placeholder: "Search".into(),
             empty: "No matches".into(),
             on_select: None,
@@ -149,6 +152,14 @@ impl Picker {
 
     pub fn items(mut self, items: impl IntoIterator<Item = PopupMenuItem>) -> Self {
         self.items.extend(items);
+        self
+    }
+
+    /// Starts a group: a heading over the entries added after it (up to the next heading),
+    /// shown while any of them match. A list of more than a hundred matches is drawn without
+    /// its headings.
+    pub fn heading(mut self, title: impl Into<SharedString>) -> Self {
+        self.headings.push((self.items.len(), title.into()));
         self
     }
 
@@ -292,6 +303,14 @@ struct PickerState {
     highlighted_id: Option<SharedString>,
 }
 
+/// The entry, if it's one to pick (not a heading).
+fn as_item(e: &Entry) -> Option<&PopupMenuItem> {
+    match e {
+        Entry::Item(i) => Some(i),
+        _ => None,
+    }
+}
+
 /// Whether `label` matches `query`: every word of the query is in it, case aside.
 fn matches(label: &str, query: &str) -> bool {
     let label = label.to_lowercase();
@@ -340,14 +359,44 @@ impl RenderOnce for Picker {
             .iter()
             .any(|i| i.label.to_lowercase() == typed.to_lowercase());
         let filter = self.filter;
-        let mut shown: Vec<PopupMenuItem> = self
-            .items
-            .into_iter()
-            .filter(|i| !filter || matches(&i.label, &text))
-            .collect();
+        let mut items: Vec<PopupMenuItem> = Vec::new();
+        // Each heading kept, with the index among the matches of its group's first.
+        let mut heads: Vec<(usize, SharedString)> = Vec::new();
+        let mut headings = self.headings.into_iter().peekable();
+        for (i, item) in self.items.into_iter().enumerate() {
+            let mut head = None;
+            while let Some((_, title)) = headings.next_if(|(at, _)| *at <= i) {
+                head = Some(title);
+            }
+            if let Some(title) = head {
+                heads.push((items.len(), title));
+            }
+            if !filter || matches(&item.label, &text) {
+                items.push(item);
+            }
+        }
+        // A last group with no matches has no heading (not over the Create entry).
+        let matched = items.len();
+        heads.retain(|(at, _)| *at < matched);
         if self.on_create.is_some() && !typed.is_empty() && !exact {
-            shown
+            items
                 .push(PopupMenuItem::new(CREATE, format!("Create “{typed}”")).icon(IconName::Plus));
+        }
+        let count = items.len();
+        // A long list's rows are all one height: no headings there.
+        let virtual_list = count > VIRTUAL_AFTER;
+        let mut heads = heads.into_iter().peekable();
+        let mut shown: Vec<Entry> = Vec::with_capacity(count);
+        for (i, item) in items.into_iter().enumerate() {
+            // A group with no matches has no entry at its index: the next group's heading wins.
+            let mut head = None;
+            while let Some((_, title)) = heads.next_if(|(at, _)| *at <= i) {
+                head = Some(title);
+            }
+            if let Some(title) = head.filter(|_| !virtual_list) {
+                shown.push(Entry::Heading(title));
+            }
+            shown.push(Entry::Item(item));
         }
         // A pick, or the Create entry's.
         let typed_text = text.clone();
@@ -368,19 +417,30 @@ impl RenderOnce for Picker {
                 }
             })),
         };
-        let pickable: Rc<Vec<bool>> = Rc::new(shown.iter().map(|i| !i.disabled).collect());
+        let pickable: Rc<Vec<bool>> = Rc::new(
+            shown
+                .iter()
+                .map(|e| as_item(e).is_some_and(|i| !i.disabled))
+                .collect(),
+        );
         // Where it opens: on the host's entry, else the current option (the checked one), else
         // the first match.
-        let given = self
-            .highlight
-            .as_ref()
-            .and_then(|want| shown.iter().position(|i| &i.id == want && !i.disabled));
+        let given = self.highlight.as_ref().and_then(|want| {
+            shown
+                .iter()
+                .position(|e| as_item(e).is_some_and(|i| &i.id == want && !i.disabled))
+        });
         let current = given.or_else(|| {
             shown
                 .iter()
-                .position(|i| i.checked == Some(true) && !i.disabled)
+                .position(|e| as_item(e).is_some_and(|i| i.checked == Some(true) && !i.disabled))
         });
-        let ids: Rc<Vec<SharedString>> = Rc::new(shown.iter().map(|i| i.id.clone()).collect());
+        let ids: Rc<Vec<SharedString>> = Rc::new(
+            shown
+                .iter()
+                .map(|e| as_item(e).map(|i| i.id.clone()).unwrap_or_default())
+                .collect(),
+        );
 
         // Opening highlights the current option, a new query the first match; the pointer and
         // the keys move it from there.
@@ -484,10 +544,9 @@ impl RenderOnce for Picker {
         let theme = cx.theme().clone();
         let muted = self.colors.muted.unwrap_or(theme.muted_foreground);
         let empty = shown.is_empty();
-        let count = shown.len();
         let set_highlight: crate::menu::SetHighlight =
             Rc::new(move |i, cx: &mut App| set(Some(i), cx));
-        let list: gpui::AnyElement = if count > VIRTUAL_AFTER {
+        let list: gpui::AnyElement = if virtual_list {
             // Only the rows in view are made, from entries taken as they're shown.
             let rem = window.rem_size();
             let row_px = self
@@ -504,7 +563,7 @@ impl RenderOnce for Picker {
                 .visible_rows
                 .unwrap_or(if self.row.touch { 8 } else { 10 });
             let entries: Rc<std::cell::RefCell<Vec<Option<Entry>>>> = Rc::new(
-                std::cell::RefCell::new(shown.into_iter().map(|i| Some(Entry::Item(i))).collect()),
+                std::cell::RefCell::new(shown.into_iter().map(Some).collect()),
             );
             let (id, row, colors) = (self.id.clone(), self.row, self.colors);
             let scroll = state.read(cx).scroll.clone();
@@ -556,7 +615,7 @@ impl RenderOnce for Picker {
                 .min_w_0()
                 .children(rows(
                     &self.id,
-                    shown.into_iter().map(Entry::Item).collect(),
+                    shown,
                     0,
                     highlighted,
                     self.row,

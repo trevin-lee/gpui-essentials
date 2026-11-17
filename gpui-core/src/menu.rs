@@ -947,7 +947,9 @@ fn rows_with(
                         .into_any_element();
                 }
                 Entry::Heading(title) => {
+                    let name = title.clone();
                     return div()
+                        .debug_selector(move || format!("menu-heading-{name}"))
                         .flex_none()
                         .px(css(8.))
                         .pt(css(6.))
