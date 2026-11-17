@@ -239,7 +239,9 @@ view in a page: a line holding only `[Q4 board](doc:b1 "embed board 480")`, with
 should show it (`table`, `board`, `mindmap`, `calendar`, `page`) and its height. Your app draws
 the content with `Options::embeds(..)`; the editor keeps the space, draws the frame and title,
 selects, moves and deletes the block whole, and lets the bottom edge be dragged to change the
-height. Without content from your app, it says the document isn't shown there.
+height. Without content from your app, it says the document isn't shown there. `Embed::block`
+is the embed's lasting block id (as in [the JSON](#as-json)), so two embeds of one document are
+told apart; `Editor::set_embed_view` rewrites the view embeds of a document show.
 
 Pasting a document link on a line of its own (a mention, `[title](doc:id)` from another app, or
 the address `doc:id`) offers to show it as a mention, a sub-page or an embed.

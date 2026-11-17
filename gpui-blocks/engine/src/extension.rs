@@ -120,6 +120,20 @@ pub trait Extension: Send + Sync + 'static {
         gpui::IntoElement::into_any_element(node.as_text().to_string())
     }
 
+    /// Draws a block node, told which block of the document it is: for an extension that acts
+    /// on its block (replaces it, tells it apart from another block drawing the same node).
+    /// Called each time the document is drawn. By default, [`Extension::render`].
+    fn render_block(
+        &self,
+        node: &CustomNode,
+        block: crate::BlockId,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let _ = block;
+        self.render(node, window, cx)
+    }
+
     /// Draws an inline node within its line, with the distance from its top to its text's
     /// baseline, or `None` to draw its text.
     fn render_inline(
