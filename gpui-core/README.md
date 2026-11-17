@@ -160,6 +160,17 @@ item](docs/gallery.png)
   each top-level block laid out again only when it changes. A selection in unchanged sources
   stays while later ones change. `trailing_caret(Some(colour))` draws a caret after the last
   source's text, painted only, so it never moves a line.
+- **Sidebar.** `Sidebar::new(id, &state).header(…).group(SidebarGroup::new(id).label(…)
+  .item(SidebarItem::new(id, label).icon(…).badge(…).action(icon, label, …)))….footer(…)
+  .active(id).on_select(…).content(page)`: shadcn's app sidebar beside the page, with the host's
+  `SidebarState` entity saying whether it's collapsed. `SidebarTrigger::new(id, &state)` or ⌘B
+  (Ctrl-B off Apple, while the keyboard is in it or the page) collapses it to a rail of icons,
+  each item's label then a tooltip, and expands it. Under its `breakpoint` (768 pixels unless
+  given) it leaves the page the whole width and the trigger opens it over the page instead, on a
+  scrim, with the keyboard in it; Escape, the scrim or a pick closes it. Items are links to
+  assistive tech (the active one the current page), Up, Down, Home and End move between them,
+  `collapsible(true)` groups fold under their label, long labels are cut short, and
+  `touch(true)` makes items 44 points.
 - **Syntax highlighting** (the `highlight` feature, off by default for the grammars' size).
   `Highlighter::new()` knows Rust, Swift, Go, TypeScript/TSX, JavaScript/JSX, Python, JSON,
   TOML, YAML, Bash, SQL, Markdown, HTML, CSS, C and C++ by the names code fences use (case
