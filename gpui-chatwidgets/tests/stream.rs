@@ -63,13 +63,29 @@ struct Chat {
     /// Some text laid out below the draft as one TextView, in the same style, and not painted:
     /// to measure how tall it is.
     probe: Option<SharedString>,
+    /// Some text drawn in the draft's place as one TextView, as a message of that text is.
+    whole: Option<SharedString>,
+    /// The links pressed, in the draft or in `whole`.
+    links: Rc<RefCell<Vec<String>>>,
 }
 
 impl Render for Chat {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let shown = match &self.card {
-            Some(card) => card.clone().into_any_element(),
-            None => self.draft.clone().into_any_element(),
+        let links = self.links.clone();
+        let shown = match (&self.card, &self.whole) {
+            (Some(card), _) => card.clone().into_any_element(),
+            (None, Some(text)) => div()
+                .debug_selector(|| "whole".into())
+                .child(
+                    TextView::markdown("whole", text.clone())
+                        .style(style())
+                        .selectable(true)
+                        .on_link_click(move |url, _, _, _| {
+                            links.borrow_mut().push(url.to_string())
+                        }),
+                )
+                .into_any_element(),
+            (None, None) => self.draft.clone().into_any_element(),
         };
         div()
             .size_full()
@@ -121,7 +137,7 @@ fn open_in(app: &mut TestAppContext, width: f32, height: f32) -> Opened<'_> {
     setup(app);
     let links: Rc<RefCell<Vec<String>>> = Rc::default();
     let made: Made = Rc::default();
-    let (m, l) = (made.clone(), links.clone());
+    let (m, l, l2) = (made.clone(), links.clone(), links.clone());
     let (_, cx) = app.add_window_view(move |window, cx| {
         let draft = cx.new(|_| {
             StreamingMarkdown::new("d")
@@ -134,6 +150,8 @@ fn open_in(app: &mut TestAppContext, width: f32, height: f32) -> Opened<'_> {
             card: None,
             width: px(width),
             probe: None,
+            whole: None,
+            links: l2,
         });
         *m.borrow_mut() = Some((draft, chat.clone()));
         gpui_core::Root::new(chat, window, cx)
@@ -781,6 +799,139 @@ fn a_link_defined_further_down_resolves_while_the_reply_streams() {
     assert!(o.draft.read_with(o.cx, |d, _| d.is_writing()));
     press(&mut o);
     assert_eq!(o.links.borrow().as_slice(), ["https://x.test/docs"]);
+}
+
+/// Draws `text` whole as one TextView in the draft's place, as a message of it is.
+fn show_whole(o: &mut Opened, text: &str) {
+    let chat = o.chat.clone();
+    let text = SharedString::from(text.to_string());
+    o.cx.update(|_, cx| {
+        chat.update(cx, |c, cx| {
+            c.whole = Some(text);
+            cx.notify();
+        })
+    });
+    draw(o.cx);
+}
+
+/// All the text what's marked `what` draws, selected whole and copied.
+fn all_text(o: &mut Opened, what: &'static str) -> String {
+    let at = o.cx.debug_bounds(what).expect("drawn");
+    o.cx.simulate_click(
+        point(at.left() + px(2.), at.top() + px(4.)),
+        Modifiers::none(),
+    );
+    o.cx.simulate_keystrokes("cmd-a");
+    copied(o)
+}
+
+/// The first link pressed along the line `y` below the top of what's marked `what`, from its
+/// left.
+fn press_along(o: &mut Opened, what: &'static str, y: Pixels) -> Option<String> {
+    o.links.borrow_mut().clear();
+    let at = o.cx.debug_bounds(what).expect("drawn");
+    let mut x = at.left() + px(2.);
+    while o.links.borrow().is_empty() && x < at.left() + px(300.) {
+        o.cx.simulate_click(point(x, at.top() + y), Modifiers::none());
+        x += px(6.);
+    }
+    draw(o.cx);
+    o.links.borrow().first().cloned()
+}
+
+#[test]
+fn a_footnote_defined_in_another_block_resolves_and_the_blocks_stay() {
+    // Each note defined in a block of its own, away from its reference: one before it, and one
+    // at the end, still open when the draft ends.
+    const TEXT: &str = "A claim.[^1]\n\n[^2]: An earlier note.\n\nSome text between.\n\n\
+                        A second claim.[^2]\n\nThe end.\n\n[^1]: The source.\n";
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    for delta in deltas(TEXT, 5) {
+        append(&mut o, &delta);
+    }
+    let settled = o.draft.read_with(o.cx, |d, _| d.settled_text().to_string());
+    assert_eq!(
+        settled,
+        "A claim.[^1]\n\n[^2]: An earlier note.\n\nSome text between.\n\nA second claim.[^2]\n\n\
+         The end.\n\n"
+    );
+    let stats = o.draft.read_with(o.cx, |d, _| d.stats());
+    assert_eq!(stats.settled, 5, "{stats:?}");
+    let kept = settled_glyphs(&mut o);
+    assert!(!kept.is_empty());
+    let d = o.draft.clone();
+    o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
+    draw(o.cx);
+    // Ended, the settled blocks stay as they were: none read or made again (only the open tail
+    // is read, a last time), and each laid out where it was.
+    let now = o.draft.read_with(o.cx, |d, _| d.stats());
+    assert_eq!(
+        (now.settled, now.made, now.reread),
+        (stats.settled, stats.made, stats.reread),
+        "{now:?}"
+    );
+    assert_eq!(
+        o.draft.read_with(o.cx, |d, _| d.settled_text().to_string()),
+        settled
+    );
+    let draft = o.cx.debug_bounds("d:draft").unwrap();
+    let drawn = glyphs(o.cx);
+    assert!(missing(&kept, &drawn).is_empty(), "a settled block moved");
+    // Each reference is its note's label, and each note is drawn once, where it's written.
+    let text = all_text(&mut o, "d:draft");
+    assert_eq!(text.matches("The source.").count(), 1, "{text:?}");
+    assert_eq!(text.matches("An earlier note.").count(), 1, "{text:?}");
+    assert!(
+        text.contains("A claim.[1]") && text.contains("A second claim.[2]"),
+        "{text:?}"
+    );
+    assert!(!text.contains("[^"), "{text:?}");
+    // The same as a message of the text: drawn whole as one TextView.
+    show_whole(&mut o, TEXT);
+    assert_eq!(o.cx.debug_bounds("whole"), Some(draft));
+    assert_eq!(glyphs(o.cx), drawn);
+    assert_eq!(all_text(&mut o, "whole"), text);
+}
+
+#[test]
+fn of_a_link_defined_twice_in_different_blocks_the_first_wins() {
+    // The first definition with the first reference, and the second with a reference of its
+    // own, in a later block: in one document the first wins, for both.
+    const BEFORE: &str =
+        "See [the docs][d] first.\n\n[d]: https://first.test\n\nSome text between.";
+    const TEXT: &str = "See [the docs][d] first.\n\n[d]: https://first.test\n\nSome text between.\n\n\
+                        Again, [the docs][d].\n\n[d]: https://second.test\n\nThe end.\n";
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    for delta in deltas(TEXT, 5) {
+        append(&mut o, &delta);
+    }
+    let settled = o.draft.read_with(o.cx, |d, _| d.settled_text().to_string());
+    // The two definitions are in different blocks.
+    assert!(
+        settled.starts_with(&format!("{BEFORE}\n\n"))
+            && settled.ends_with("[d]: https://second.test\n\n"),
+        "{settled:?}"
+    );
+    assert_eq!(o.draft.read_with(o.cx, |d, _| d.stats().settled), 3);
+    // The second reference's line: the last of the text up to it.
+    let again = height_of(&mut o, &format!("{BEFORE}\n\nAgain, [the docs][d].")) - px(10.);
+    let first = Some("https://first.test".to_string());
+    // While it's written, and once it has ended.
+    assert_eq!(press_along(&mut o, "d:draft", px(8.)), first);
+    assert_eq!(press_along(&mut o, "d:draft", again), first);
+    let d = o.draft.clone();
+    o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
+    draw(o.cx);
+    assert_eq!(press_along(&mut o, "d:draft", px(8.)), first);
+    assert_eq!(press_along(&mut o, "d:draft", again), first);
+    let drawn = glyphs(o.cx);
+    // As a message of the text, drawn whole as one TextView, reads it.
+    show_whole(&mut o, TEXT);
+    assert_eq!(glyphs(o.cx), drawn);
+    assert_eq!(press_along(&mut o, "whole", px(8.)), first);
+    assert_eq!(press_along(&mut o, "whole", again), first);
 }
 
 #[test]
