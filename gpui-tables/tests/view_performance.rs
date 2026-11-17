@@ -510,3 +510,63 @@ fn ten_thousand_rows_regroup_as_a_value_changes() {
         );
     }
 }
+
+#[test]
+fn ten_thousand_rows_searched_a_key_at_a_time() {
+    let (db, rows) = (database(), rows());
+    let mut firsts = Vec::new();
+    let mut keys = Vec::new();
+    let mut frames = Vec::new();
+    for run in 0..3 {
+        let mut app = TestAppContext::build_with_text_system(
+            TestDispatcher::new(run),
+            None,
+            Arc::new(gpui_apple::AppleTextSystem::new()),
+        );
+        setup(&mut app);
+        let host = TestHost::new();
+        host.apply.set(false);
+        let h: Rc<dyn TableHost> = host.clone();
+        let (db, rows) = (db.clone(), rows.clone());
+        let made: Rc<std::cell::RefCell<Option<Entity<TableView>>>> = Rc::default();
+        let (_, cx) = app.add_window_view({
+            let made = made.clone();
+            move |window, cx| {
+                let t = cx.new(|cx| TableView::new(h, db, rows, cx).with_view_bar(true));
+                *made.borrow_mut() = Some(t.clone());
+                gpui_core::Root::new(t, window, cx)
+            }
+        });
+        let table = made.borrow().clone().unwrap();
+        cx.simulate_resize(size(px(1400.), px(900.)));
+        draw(cx);
+        // The first key folds every row's words (its title and its columns as they read).
+        firsts.push(table.update(cx, |t, cx| {
+            let start = Instant::now();
+            t.set_search(Some("h".into()), cx);
+            start.elapsed()
+        }));
+        frame(cx);
+        // Each key after that searches them again: timed alone, then with its frame.
+        for typed in [
+            "ha", "har", "harb", "harbo", "harbou", "harbour", "harbou", "harbo",
+        ] {
+            // The search alone (a test's update ends in a draw of its own), then with a frame.
+            let start = Instant::now();
+            let key = table.update(cx, |t, cx| {
+                let start = Instant::now();
+                t.set_search(Some(typed.into()), cx);
+                start.elapsed()
+            });
+            keys.push(key);
+            frames.push(start.elapsed() + frame(cx));
+            let found = table.update(cx, |t, _| t.shown_rows().len());
+            assert!(found > 0 && found < ROWS, "{typed}: {found}");
+        }
+        table.update(cx, |t, cx| t.set_search(None, cx));
+        assert_eq!(table.update(cx, |t, _| t.shown_rows().len()), ROWS);
+    }
+    report("the first key of a search of 10,000 rows", firsts, 50);
+    report("each key after it", keys, 3);
+    report("each key after it, drawn", frames, 12);
+}

@@ -584,6 +584,23 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     Sorts and filters are made from the headers; the bar sums up the shown view's (its sort's
     first property and how many more, its filter's property or how many rules), and pressing
     either opens the settings.
+- **Search.** The search button at the bar's right end, or ⌘F while the view has the keyboard,
+  opens a field in its place ("Search", with a × to clear it). As it's typed, the table, board
+  or list shows only the rows whose title or any shown property's text (a table's columns, a
+  board's cards' or a list's lines' properties) contains it, without regard to case or accents,
+  by what the cells show (an option's or a person's name, a related row's title, a number in
+  its format, never an id), on top of the view's own filter, sorts and groups. Groups with
+  nothing found are left out, and the counts are of what's found; "No results for “…”" stands
+  where the rows would be when nothing is. Escape clears what's typed, then closes the field;
+  clearing it shows the view as it was, scrolled where it was, with its focused cell and
+  selected rows. The search is the entity's alone: never saved, never an edit, kept across the
+  views it shows. While the field is open the sort and filter summaries are their icons alone,
+  so a narrow bar keeps room for the tabs. `TableView::set_search(Option<String>)` and `search()` let a host drive it
+  (and `open_search` opens the field), and `engine::search` is the same without the UI: rows'
+  words folded once into a `SearchText`, then `search(&view_rows, &text, &Query::new(..))` for
+  each query.
+
+  ![People searched for “kestrel”: the field open at the bar's right end, and the three people whose company or role say Kestrel, in the view's order; the sort's summary is its icon alone while the field is open](docs/view-search.png)
 - **Limits** are kept in the menus, each refused with a note: no view past `views` (+ shows its
   types but can't make one, and Duplicate is refused), names typed up to `name_chars` with a note
   at the limit and an empty name refused, and in a column's menu no sort added past `sorts`
@@ -595,8 +612,9 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   view. The menus are driven as the property menus are (Up, Down, Home, End, Enter; → and ←
   open and close a submenu, Escape closes the innermost), and a menu opened from the bar gives
   the keyboard back to it when it closes.
-- **Touch.** With `TableTheme::with_touch(true)` tabs, +, the summaries and the settings button
-  are 44 points tall (+ and the settings 44 wide), as is every menu and submenu entry and the
+- **Touch.** With `TableTheme::with_touch(true)` tabs, +, the summaries, the settings button
+  and the search (its button, field and ×) are 44 points tall (+, the settings, the search
+  button and its × 44 wide), as is every menu and submenu entry and the
   rename field; a tap opens a submenu.
 
 ## Databases and rows are docs
@@ -1006,6 +1024,8 @@ nothing draws while nothing changes.
   | Read 10,000 rows from JSON (5.4 MB) | 17 ms |
   | Check 10,000 rows against the limits | 2.3 ms |
   | 10,000 fresh order keys | 0.4 ms |
+  | Fold 10,000 rows' words for a search | 7.7 ms |
+  | Search them, a query at a time | 0.1 ms |
 
   The tests fail past bounds well above these (25 ms for any of a view's work in a release build,
   10 ms for a regroup and 5 ms for the group step alone, forty times that in a debug one), loose
@@ -1024,9 +1044,11 @@ nothing draws while nothing changes.
   | A sort, a filter and a group by select, worked out and drawn | 18 ms |
   | A value changed, regrouped by select / multi-select / date / person | 1.4 / 1.9 / 1.4 / 2.1 ms |
   | The same, regrouped and drawn | 4.0 / 4.2 / 4.2 / 4.8 ms |
+  | A search's first key (every row's words folded) | 14 ms |
+  | Each key after it / with its frame | 0.2 / 6.3 ms |
 
-  The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one), and
-  a regroup past 10 ms worked out and 25 ms drawn.
+  The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one), a
+  regroup past 10 ms worked out and 25 ms drawn, and a search's keys past 50, 3 and 12 ms.
 - **The board view** draws only the cards on screen in each column (a `uniform_list` each).
   Measured the same way, the same 10,000 rows as a board of seven columns, each card showing four
   values:
@@ -1166,6 +1188,13 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   and line properties shown, hidden and ordered, a table's Properties menu; the sort and filter
   summary; every limit refused with a note; the keyboard (Up to the bar, Left, Right, Enter, ⌥↓,
   Down back, the + menu's field); 44-point targets on touch.
+- `tests/search.rs`: searching from the bar: the button and ⌘F opening the field, typing
+  narrowing a table, a board and a list by what the cells show (a related row's title, an email,
+  an option's and a person's name; never an option's id or a hidden column), on top of the
+  view's filter, groups with nothing found left out and counts of what's found, "No results",
+  Escape clearing then closing, the × clearing, the view's scroll, focused cell and selection
+  back once cleared, the host's `set_search`, no event ever emitted, and 44-point targets on
+  touch. Unit tests in `engine::search` fold case and accents and keep the view's order.
 - `tests/overflow.rs`: worst-case text in every cell, header, group and menu (the property
   menus too: the + menu, options, an option's page, number format, relation, delete, rename; a
   row's handle, the rows' menu and its delete confirm, and a row carried with the sort's note)
@@ -1174,7 +1203,9 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   folded columns (scrolled, and with a finger's sizes), and on a list's lines and headers
   (grouped or not, focused, with a finger's sizes, and the worst valid icons), and in the bar of
   views and its menus (the + menu, a view's menu, its settings, grouping, type, delete, card
-  properties and rename, by a table, a board and a list, with a finger's sizes too), laid out
+  properties and rename, by a table, a board and a list, with a finger's sizes too), and its
+  search field (a long query, and the worst one with "No results" for it, the tabs keeping
+  room beside it), laid out
   with Core Text; no glyph leaves its place.
 - `tests/fields.rs`: the fields values are typed in, in place, laid out with Core Text: typing
   stops at a value's limit (counted in characters, a title's, an email's, a filter value's), a

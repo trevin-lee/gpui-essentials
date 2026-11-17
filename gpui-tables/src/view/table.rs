@@ -383,6 +383,8 @@ pub struct TableView {
     pub(crate) anchor: Option<String>,
     /// The row a pointer is over: its handle is made, the others' aren't.
     pub(crate) hovered_row: Option<String>,
+    /// The search from the bar of views, and what it keeps between keystrokes.
+    pub(crate) search: super::search::Search,
 }
 
 impl Focusable for TableView {
@@ -437,6 +439,7 @@ impl TableView {
             selected: Vec::new(),
             anchor: None,
             hovered_row: None,
+            search: Default::default(),
         }
     }
 
@@ -737,7 +740,10 @@ impl TableView {
             s.min_column_width,
             s.max_column_width,
         );
-        let result = engine::query(fields, &view, &self.rows, &ecx);
+        // The bar's search, if any, on top of the view's own rows.
+        let result = self.searched(fields, &view, &columns, || {
+            engine::query(fields, &view, &self.rows, &ecx)
+        });
         let mut items = Vec::with_capacity(result.rows.len() + 1);
         let mut collapsed = Vec::new();
         let groups = result.groups.unwrap_or_default();

@@ -27,7 +27,8 @@
 //! property named, its type to pick) and `options` (a select's options beside its column's
 //! menu, the first one's submenu open to rename, recolour, reorder and delete it); and views:
 //! `add-view` (the bar's + menu, a new view named, its type to pick), `view-menu` (a view's
-//! menu) and `view-settings` (a board's settings beside its menu, its card properties open).
+//! menu) and `view-settings` (a board's settings beside its menu, its card properties open); and
+//! `search` (People searched from the bar for a company's name, typed without its capital).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -893,6 +894,10 @@ mod shots {
                             )
                         });
                     }
+                    "search" => {
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| t.open_search(window, cx));
+                    }
                     "rows" => {
                         let t = pick(0, cx);
                         unsorted_with_selection(&t, false, cx);
@@ -941,6 +946,7 @@ mod shots {
             let typed = match scene.as_str() {
                 "columns" => "Deal size",
                 "add-view" => "Follow-ups by owner",
+                "search" => "kestrel",
                 _ => "",
             };
             if !typed.is_empty() {

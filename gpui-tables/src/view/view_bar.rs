@@ -1,6 +1,7 @@
 //! Drawing the bar of views: the tabs (scrolling sideways when they don't fit), the + that adds
-//! a view, a summary of the shown view's sort and filter, and its settings button; and the
-//! views' menus in gpui-core's Popover, hanging from them.
+//! a view, a summary of the shown view's sort and filter, its settings button and the search
+//! (its field drawn in `search.rs`); and the views' menus in gpui-core's Popover, hanging from
+//! them.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -65,8 +66,16 @@ impl TableView {
         // The menus hang from where the bar's controls were drawn last frame, so they're laid
         // out before the bar forgets that.
         let popover = self.render_view_popover(window, cx);
+        self.prepare_search(window, cx);
         let bar = self.bar.on.then(|| self.render_bar(cx));
+        // A search that finds nothing says so where the rows would be.
+        let body = if self.search_finds_nothing() {
+            self.render_no_results(cx)
+        } else {
+            body
+        };
         div()
+            .on_action(cx.listener(|this, _: &super::Search, window, cx| this.find(window, cx)))
             .size_full()
             .flex()
             .flex_col()
@@ -323,14 +332,17 @@ impl TableView {
         );
 
         // The shown view's sort and filter, in a few words: pressing one opens its settings.
+        // While the search field is open they're their icons alone, which leaves the field and
+        // the tabs room on a narrow bar.
+        let searching = self.search.open;
         let summary = |id: &'static str, name: IconName, text: String, label: String| {
             Press::new(id)
                 .accessibility_label(label)
                 .focus_on_press(false)
                 .focus_ring_color(t.colors.focus)
                 .debug_selector(move || id.into())
-                .flex_shrink_1()
-                .min_w_0()
+                .when(searching, |d| d.flex_none())
+                .when(!searching, |d| d.flex_shrink_1().min_w_0())
                 .max_w(t.px(180.))
                 .h(h)
                 .px(t.px(6.))
@@ -342,7 +354,7 @@ impl TableView {
                 .text_color(t.colors.accent)
                 .hover(|s| s.bg(t.colors.hover))
                 .child(div().flex_none().child(icon(name, small, t.colors.accent)))
-                .child(line(text))
+                .when(!searching, |d| d.child(line(text)))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     open_settings(this, window, cx)
                 }))
@@ -417,6 +429,7 @@ impl TableView {
             .children(sort)
             .children(filter)
             .child(settings_button)
+            .child(self.render_search(h, cx))
             .into_any_element()
     }
 

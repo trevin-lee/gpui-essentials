@@ -48,6 +48,7 @@ pub mod ops;
 mod properties;
 mod render;
 mod rows;
+mod search;
 mod table;
 mod theme;
 mod view_bar;
@@ -114,6 +115,8 @@ actions!(
         MoveRowsUp,
         /// ⌘⇧↓: moves the selected rows (or the focused row) down a place.
         MoveRowsDown,
+        /// ⌘F: opens the bar of views' search field (with the bar on).
+        Search,
     ]
 );
 
@@ -127,7 +130,7 @@ pub const VIEW_BAR: &str = "GpuiTablesViewBar";
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
 /// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; a table's rows' (Space and
 /// Shift-arrows to select, ⌘⌫ to delete, ⌘D to duplicate, ⌘/ for their menu, ⌘⇧↑ and ⌘⇧↓ to
-/// move); and the bar of views' ([`VIEW_BAR`]).
+/// move); ⌘F to search the rows from the bar; and the bar of views' ([`VIEW_BAR`]).
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -154,6 +157,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-/", RowMenu, c),
         KeyBinding::new("cmd-shift-up", MoveRowsUp, c),
         KeyBinding::new("cmd-shift-down", MoveRowsDown, c),
+        KeyBinding::new("cmd-f", Search, c),
     ]);
     let b = Some(VIEW_BAR);
     cx.bind_keys([
@@ -162,5 +166,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("down", Down, b),
         KeyBinding::new("escape", Cancel, b),
         KeyBinding::new("alt-down", TabMenu, b),
+        KeyBinding::new("cmd-f", Search, b),
     ]);
 }
