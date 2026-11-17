@@ -84,6 +84,13 @@ item](docs/gallery.png)
   shadcn's `Empty` (renamed, as GPUI has an `Empty` of its own), an icon in a 40-pixel muted
   circle over a title, a muted description and an action area (its children), centred in the
   space it fills, with its text held to shadcn's 384 pixels and wrapping in a narrow space.
+- **ScrollArea.** `ScrollArea::new(id).h(…).child(…)` scrolls its children inside a box
+  with shadcn's thin overlay scrollbars, up and down unless `horizontal()` or `both()`. The bars
+  show where the content overflows, while it scrolls or the pointer is over it, then fade (never
+  for a finger, which scrolls with GPUI's momentum); a thumb drags and a press on a track pages.
+  With the focus, the arrows, Page Up and Page Down, Space, Home and End scroll it.
+  `track_scroll(&ScrollAreaHandle)` lets the host read the position and scroll to an offset, a
+  child (`scroll_to_child`) or an end.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
