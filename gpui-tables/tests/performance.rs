@@ -420,3 +420,65 @@ fn regrouping_10000_rows() {
         }]
     );
 }
+
+#[test]
+fn searching_10000_rows() {
+    use engine::search::{Query, SearchText, search};
+
+    let (db, rows) = (database(), rows());
+    let cx = Context::new(now());
+    let mut grouped = view();
+    grouped.group_by = Some("stage".into());
+    let shown = query(&db, &grouped, &rows, &cx);
+    // Each row's words as its cells read: its title, note, stage's and tags' names and email.
+    let names = |p: &str, ids: &[String]| -> Vec<String> {
+        let p = db.property(p).unwrap();
+        ids.iter()
+            .filter_map(|id| p.option(id).map(|o| o.name.clone()))
+            .collect()
+    };
+    let text = time("fold 10,000 rows' words", 25, || {
+        let mut text = SearchText::new(rows.len());
+        for &r in &shown.rows {
+            let row = &rows[r];
+            let v = |id: &str| row.value(id);
+            let mut words = vec![row.title.clone()];
+            words.extend(v("note").and_then(Value::as_str).map(str::to_owned));
+            words.extend(names(
+                "stage",
+                &v("stage")
+                    .and_then(Value::as_str)
+                    .map(|s| vec![s.to_owned()])
+                    .unwrap_or_default(),
+            ));
+            words.extend(names(
+                "tags",
+                v("tags").and_then(Value::option_ids).unwrap_or(&[]),
+            ));
+            words.extend(v("email").and_then(Value::as_str).map(str::to_owned));
+            text.set(r, words);
+        }
+        text
+    });
+    // A query typed a key at a time, each searched over every row.
+    let mut found = 0;
+    for typed in [
+        "h", "ha", "har", "harb", "harbo", "harbou", "harbour", "über", "s 3",
+    ] {
+        let q = Query::new(typed).unwrap();
+        let out = time(&format!("search 10,000 rows for {typed:?}"), 3, || {
+            search(&shown, &text, &q)
+        });
+        let grouped: usize = out
+            .groups
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|g| g.rows.len())
+            .sum();
+        assert_eq!(grouped, out.rows.len());
+        assert!(out.rows.iter().all(|&r| text.matches(r, &q)));
+        found = out.rows.len();
+    }
+    assert!(found > 0 && found < ROWS, "{found}");
+}
