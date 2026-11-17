@@ -4910,3 +4910,97 @@ fn a_wide_picture_is_narrowed_to_the_page(cx: &mut TestAppContext) {
         "4:1 at the page's width: {bounds:?}"
     );
 }
+
+/// The text the selection covers, as `(leaf index, start, end)`.
+fn selected(editor: &Entity<BlockEditorState>, cx: &VisualTestContext) -> (usize, usize, usize) {
+    editor.read_with(cx, |e, _| {
+        let BlockSelection::Text { anchor, head } = e.model().selection().clone() else {
+            panic!("not a text selection");
+        };
+        let leaf = e
+            .model()
+            .document()
+            .leaves()
+            .position(|l| l.id() == anchor.block)
+            .unwrap();
+        (leaf, anchor.offset, head.offset)
+    })
+}
+
+/// Finding selects the first match at or after the caret, steps through every match (code and
+/// table cells too), wraps at both ends, and follows edits.
+#[gpui::test]
+fn find_steps_through_the_page_from_the_caret(cx: &mut TestAppContext) {
+    let (editor, cx) = open(
+        cx,
+        "Plan one\n\n```\nplan()\n```\n\n| a | b |\n| --- | --- |\n| PLAN | x |\n\nlast plan",
+    );
+    draw(cx);
+    // Leaves: "Plan one", the code, the cells a, b, PLAN, x, "last plan".
+    caret_at(&editor, cx, 1, 2);
+    editor.update(cx, |e, cx| e.find("plan", false, cx));
+    let count = |cx: &VisualTestContext| editor.read_with(cx, |e, _| e.find_matches().0.len());
+    assert_eq!(count(cx), 4);
+    assert_eq!(
+        selected(&editor, cx),
+        (4, 0, 4),
+        "the cell after the caret's match"
+    );
+    editor.update(cx, |e, cx| e.find_next(cx));
+    assert_eq!(selected(&editor, cx), (6, 5, 9));
+    editor.update(cx, |e, cx| e.find_next(cx));
+    assert_eq!(
+        selected(&editor, cx),
+        (0, 0, 4),
+        "past the last, back to the first"
+    );
+    editor.update(cx, |e, cx| e.find_previous(cx));
+    assert_eq!(
+        selected(&editor, cx),
+        (6, 5, 9),
+        "before the first, back to the last"
+    );
+    // Case: only exact matches when asked.
+    editor.update(cx, |e, cx| e.find("plan", true, cx));
+    assert_eq!(count(cx), 2);
+    // An edit adding a match is found.
+    caret_at(&editor, cx, 0, 8);
+    type_text(cx, " plan");
+    assert_eq!(count(cx), 3);
+    // Cleared, nothing is shown.
+    editor.update(cx, |e, cx| e.clear_find(cx));
+    assert_eq!(count(cx), 0);
+}
+
+/// Replacing one match keeps its marks and moves on; replacing all is one undo step; a
+/// read-only editor replaces nothing.
+#[gpui::test]
+fn replace_one_then_all(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "a **cat** sat\n\nthe cat and the cat");
+    draw(cx);
+    caret_at(&editor, cx, 0, 0);
+    editor.update(cx, |e, cx| e.find("cat", false, cx));
+    assert!(editor.update(cx, |e, cx| e.replace_match("dog", cx)));
+    assert_eq!(
+        source(&editor, cx),
+        "a **dog** sat\n\nthe cat and the cat",
+        "the marks stay"
+    );
+    assert_eq!(selected(&editor, cx), (1, 4, 7), "on to the next");
+    let n = editor.update(cx, |e, cx| e.replace_all_matches("cow", cx));
+    assert_eq!(n, 2);
+    assert_eq!(source(&editor, cx), "a **dog** sat\n\nthe cow and the cow");
+    keys(cx, "M-z");
+    assert_eq!(
+        source(&editor, cx),
+        "a **dog** sat\n\nthe cat and the cat",
+        "replacing all undoes in one go"
+    );
+    editor.update(cx, |e, cx| {
+        e.set_readonly(true, cx);
+        e.find("cat", false, cx);
+    });
+    assert!(!editor.update(cx, |e, cx| e.replace_match("x", cx)));
+    assert_eq!(editor.update(cx, |e, cx| e.replace_all_matches("x", cx)), 0);
+    assert_eq!(source(&editor, cx), "a **dog** sat\n\nthe cat and the cat");
+}
