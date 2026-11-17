@@ -13,10 +13,6 @@ use doc::{Doc, display, trim_blank_lines};
 
 type OnLink = Rc<dyn Fn(&str, &Modifiers, &mut Window, &mut App)>;
 
-/// What an empty open tail is drawn as while the draft is written: a line with nothing to see
-/// on it, so the caret has a line of its own inside the draft, as it would after a block.
-const NOTHING_YET: &str = "\u{200B}";
-
 /// An agent's reply in Markdown, drawn as it streams in: the host makes one when a reply starts
 /// (a chat server's draft), feeds it the text as it comes ([`append`](Self::append), or
 /// [`replace`](Self::replace) with the whole draft), and [`end`](Self::end)s or
@@ -51,7 +47,8 @@ pub struct StreamingMarkdown {
     writing: bool,
     /// The text changed since the blocks were last worked out.
     dirty: bool,
-    /// The open tail as drawn, under its key: none once the draft has ended with nothing open.
+    /// The open tail as drawn, under its key: empty while the draft is written and nothing open
+    /// shows yet, none once it has ended with nothing open.
     tail: Option<(u64, SharedString)>,
     /// The width the content was last laid out at, and the tallest it's been at that width.
     tallest: Rc<Cell<(Pixels, Pixels)>>,
@@ -201,10 +198,7 @@ impl StreamingMarkdown {
     /// The open tail as it's drawn now (closed for now), for tests.
     #[doc(hidden)]
     pub fn shown_tail(&self) -> Option<SharedString> {
-        self.tail.as_ref().map(|(_, s)| match s.as_ref() {
-            NOTHING_YET => SharedString::default(),
-            _ => s.clone(),
-        })
+        self.tail.as_ref().map(|(_, s)| s.clone())
     }
 
     /// The settled blocks' text, from the start of the draft, for tests.
@@ -239,15 +233,16 @@ impl StreamingMarkdown {
         self.dirty = more;
         let tail = self.doc.tail();
         let source = if self.writing {
-            match display(tail) {
-                s if s.is_empty() => NOTHING_YET.to_string(),
-                s => s,
-            }
+            display(tail)
         } else {
             trim_blank_lines(tail).to_string()
         };
         self.tail_reads += 1;
-        self.tail = (!source.is_empty()).then(|| (self.doc.tail_key() as u64, source.into()));
+        // While it's written, an empty tail is still the last source, so the TextView puts the
+        // caret after the last character before it (at the start with no text at all). Once
+        // ended, nothing open is nothing drawn.
+        self.tail = (self.writing || !source.is_empty())
+            .then(|| (self.doc.tail_key() as u64, source.into()));
         more
     }
 }
