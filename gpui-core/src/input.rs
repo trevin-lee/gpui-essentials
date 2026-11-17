@@ -1180,6 +1180,21 @@ impl EntityInputHandler for InputState {
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Committed as it is: what doesn't fit the limit is cut, as a typed commit's is.
+        if let (Some(max), Some(r)) = (self.max_chars, self.marked.clone())
+            && let Some(marked) = self.text.get(r.clone())
+        {
+            let kept = self.text.chars().count() - marked.chars().count();
+            let room = max.saturating_sub(kept);
+            if marked.chars().count() > room {
+                let cut = fit(marked, room);
+                self.text.replace_range(r.clone(), &cut);
+                let end = r.start + cut.len();
+                self.selected = end..end;
+                self.reversed = false;
+                cx.emit(InputEvent::Change);
+            }
+        }
         self.marked = None;
         window.notify_text_input_changed(&self.focus);
         cx.notify();

@@ -247,3 +247,22 @@ fn the_host_can_reveal_and_mask_a_field() {
     assert_eq!(copied(vcx).as_deref(), Some("before"), "masked again");
     assert_eq!(value(&field, vcx), "secret");
 }
+
+#[test]
+fn a_composition_committed_as_it_is_is_cut_to_the_limit_too() {
+    let mut cx = app();
+    let (field, vcx) = open(&mut cx, TextAlign::Left, limited(5, "ab"));
+    // The input method composes past the limit (it isn't counted while composing), then
+    // commits what it has with unmarkText rather than inserting it again.
+    vcx.update(|window, cx| {
+        field.update(cx, |f, cx| {
+            f.replace_and_mark_text_in_range(None, "かきくけ", None, window, cx);
+            f.unmark_text(window, cx);
+        })
+    });
+    vcx.run_until_parked();
+    assert_eq!(value(&field, vcx), "abかきく");
+    // Typing after it goes nowhere: it's full.
+    vcx.simulate_input("z");
+    assert_eq!(value(&field, vcx), "abかきく");
+}
