@@ -440,7 +440,8 @@ pub struct Editor {
     /// The headings a table of contents lists, kept up to date after each change.
     headings: Arc<std::sync::Mutex<Vec<Heading>>>,
     /// The blocks' ids in [`Editor::document`].
-    ids: crate::json::Ids,
+    /// The blocks' lasting ids, shared with the embeds, which tell the app theirs.
+    ids: Arc<std::sync::Mutex<crate::json::Ids>>,
     /// A selection handle being dragged by touch: the selection's other end, which stays, and
     /// how far the finger is from the end it moves.
     touch_drag: Option<(BlockPosition, Point<Pixels>)>,
@@ -481,7 +482,15 @@ impl Editor {
         let embed_heights: docs::Heights = Arc::default();
         let this = cx.entity().downgrade();
         let that = this.clone();
+        let ids: Arc<std::sync::Mutex<crate::json::Ids>> = Arc::default();
+        let embed_ids = ids.clone();
         let embeds = EmbedHooks {
+            lasting_id: Some(Arc::new(move |block| {
+                embed_ids
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .id_of(block)
+            })),
             docs: options.docs.clone(),
             render: options.embeds.clone(),
             on_click: Some(Arc::new(move |id: &str, _: &mut Window, cx: &mut App| {
@@ -581,7 +590,7 @@ impl Editor {
             dismissed: None,
             open_on_next_change: false,
             hovered: None,
-            ids: Default::default(),
+            ids,
             headings,
             embed_heights,
             resizing: None,
@@ -625,7 +634,7 @@ impl Editor {
         let _ = self
             .state
             .update(cx, |state, cx| state.set_source(body, cx));
-        self.ids.clear();
+        self.lock_ids().clear();
         self.update_headings(cx);
         self.slash = None;
         self.dismissed = None;
@@ -639,7 +648,11 @@ impl Editor {
     /// edited and moved, until the document is replaced; a new block gets a new one.
     pub fn document(&mut self, cx: &App) -> crate::json::Document {
         let state = self.state.read(cx);
-        crate::json::Document::from_model(state.model(), self.front_matter.clone(), &mut self.ids)
+        crate::json::Document::from_model(
+            state.model(),
+            self.front_matter.clone(),
+            &mut self.lock_ids(),
+        )
     }
 
     /// Replaces the document with `document`, keeping its blocks' ids. Undo history starts over,
@@ -647,7 +660,7 @@ impl Editor {
     pub fn set_document(&mut self, document: &crate::json::Document, cx: &mut Context<Self>) {
         self.set_markdown(&document.to_markdown(), cx);
         let state = self.state.read(cx);
-        self.ids.adopt(state.model(), &document.blocks);
+        self.lock_ids().adopt(state.model(), &document.blocks);
     }
 
     /// What a comment on the selection is anchored to: the lasting id (as in
@@ -690,7 +703,7 @@ impl Editor {
             );
         }
         let block = leaves[start.0].id();
-        Some((self.ids.id_of(block), lines.join("\n")))
+        Some((self.lock_ids().id_of(block), lines.join("\n")))
     }
 
     /// Where the top-level block holding the block `id` (a lasting id, as in
@@ -701,7 +714,7 @@ impl Editor {
         let mut block = state
             .model()
             .document()
-            .block(self.ids.block_of(state.model(), id)?)?;
+            .block(self.lock_ids().block_of(state.model(), id)?)?;
         while let Some(parent) = block.parent()
             && parent.parent().is_some()
         {
@@ -720,7 +733,7 @@ impl Editor {
     /// for an id the document doesn't have.
     pub fn reveal_block(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let state = self.state.clone();
-        let Some(block) = self.ids.block_of(state.read(cx).model(), id) else {
+        let Some(block) = self.lock_ids().block_of(state.read(cx).model(), id) else {
             return false;
         };
         state.update(cx, |state, cx| {
@@ -1098,6 +1111,13 @@ impl Editor {
             }
         });
         self.focus(window, cx);
+    }
+
+    /// The blocks' lasting ids, for reading or giving.
+    fn lock_ids(&self) -> std::sync::MutexGuard<'_, crate::json::Ids> {
+        self.ids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Gives the editor the keyboard.

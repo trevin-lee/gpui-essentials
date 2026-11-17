@@ -659,7 +659,8 @@ pub(crate) enum Tree {
         code: String,
         highlights: Rc<[(Range<usize>, gpui::HighlightStyle)]>,
     },
-    Custom(CustomNode),
+    /// A custom block's node, and its block.
+    Custom(CustomNode, crate::BlockId),
     /// A break, a link definition or an unknown block: nothing to see.
     Nothing,
 }
@@ -761,7 +762,7 @@ pub(crate) fn tree(
                 }
             }
             (K::Custom, Some(BlockContent::Atom(AtomData::Custom(node)))) => {
-                Tree::Custom(node.clone())
+                Tree::Custom(node.clone(), block)
             }
             (K::Break { .. } | K::Definition { .. } | K::Unknown, _) => Tree::Nothing,
             _ => return None,
@@ -939,13 +940,13 @@ pub(crate) fn draw(
                 .child(div().bg(d.colors.border).h(px(1.)))
                 .into_any_element()
         }
-        Tree::Custom(node) => {
+        Tree::Custom(node, block) => {
             let drawn = d
                 .leaves
                 .extensions
                 .iter()
                 .find(|e| e.name() == node.name())
-                .map(|e| e.render(node, window, app));
+                .map(|e| e.render_block(node, *block, window, app));
             let content =
                 drawn.unwrap_or_else(|| div().child(node.as_text().to_string()).into_any_element());
             div().pb(gap).child(content).into_any_element()
