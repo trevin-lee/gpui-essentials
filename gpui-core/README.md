@@ -13,6 +13,9 @@ item](docs/gallery.png)
   with `Theme::set`, and components read it with `cx.theme()`.
 - **Root.** It makes the theme's `font_size` the window's rem, so every size in rems follows
   the host's zoom. It draws the window's surface in the theme and moves the focus with Tab.
+  It takes the window's first focus, which puts keys above your view: a view with key bindings
+  of its own (a ⌘K palette) opens with `open_window_focusing` (or `Root::focusing`), so it takes
+  the first focus itself and its bindings work from the first key.
 - **Setup.** `gpui_core::init(cx)` binds the components' keys and sets the default theme. It
   also runs by itself the first time a `Root` or an `InputState` is made, so a crate that embeds
   gpui-core's components in a host that never calls it still works; calling it twice does
