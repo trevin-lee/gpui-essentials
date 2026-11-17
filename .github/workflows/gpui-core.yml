@@ -18,19 +18,27 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/gpui-core.yml"
 
+  # Every change was built and tested on its pull request, so a push to main runs only the
+  # Linux jobs: GitHub runs 5 macOS jobs at once, and each push to main queued macOS and iOS
+  # jobs in every crate. Main gets the full macOS and iOS run once a night instead (which is
+  # also when the caches pull requests restore are saved), or by hand.
+  schedule:
+    - cron: "37 10 * * *"
+  workflow_dispatch:
+
 permissions:
   contents: read
   # The changes job lists a pull request's files.
   pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   # Only the newest commit's result matters, on main as on a pull request.
   cancel-in-progress: true
 
 jobs:
   # Whether the crate itself changed, as opposed to only the files every crate shares. The slow
-  # jobs (the iOS build, the shots lint) run on main always, and on a pull request only then.
+  # jobs (the iOS build, the shots lint) run on main nightly, and on a pull request only then.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -46,6 +54,7 @@ jobs:
 
   macos:
     needs: changes
+    if: github.event_name != 'push'
     # GPUI draws through Metal, so GitHub's macOS runners build and run its tests, the headless
     # ones included.
     runs-on: macos-latest
@@ -73,7 +82,7 @@ jobs:
 
   ios:
     needs: changes
-    if: needs.changes.outputs.own == 'true'
+    if: github.event_name != 'push' && needs.changes.outputs.own == 'true'
     # The crate must build for iOS too (the shared editors may run in the iPhone and iPad apps).
     runs-on: macos-latest
     steps:
