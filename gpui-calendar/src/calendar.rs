@@ -433,6 +433,9 @@ pub struct Calendar {
     pub(crate) mini: Option<Entity<DatePickerState>>,
     mini_shown: Option<(NaiveDate, chrono::Weekday)>,
     mini_open: bool,
+    /// That a press outside the open mini month closed it, for the title the press may be on:
+    /// it's that press's, so it doesn't open it again. Cleared each frame.
+    mini_dismissed: bool,
     /// Whether the mini month was beside the calendar in the last frame.
     mini_side: bool,
     _mini_sub: Option<Subscription>,
@@ -520,6 +523,7 @@ impl Calendar {
             mini: None,
             mini_shown: None,
             mini_open: false,
+            mini_dismissed: false,
             mini_side: false,
             _mini_sub: None,
             typing: false,
@@ -2684,29 +2688,7 @@ impl Calendar {
                         .text_color(colors.text)
                 }
                 if self.options.mini_month {
-                    // The mini month is behind the title here: a press opens it (on the way
-                    // down, so a press that closes it doesn't open it again), and so do Enter
-                    // and Space when Tab has brought the keyboard here.
-                    let toggle = cx.listener(|c, e: &ClickEvent, window, cx| {
-                        if e.is_keyboard() {
-                            c.toggle_mini_month(window, cx);
-                        }
-                    });
-                    style(Press::new("calendar-title"), colors)
-                        .accessibility_label(SharedString::from(format!("{title}, go to a date")))
-                        .focus_on_press(false)
-                        .debug_selector(|| "calendar-title".into())
-                        .cursor_pointer()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|c, _, window, cx| {
-                                cx.stop_propagation();
-                                c.toggle_mini_month(window, cx);
-                            }),
-                        )
-                        .on_click(toggle)
-                        .child(SharedString::from(title))
-                        .into_any_element()
+                    style(self.title_press(title.clone(), cx), colors).into_any_element()
                 } else {
                     style(div(), colors)
                         .debug_selector(|| "calendar-title".into())
@@ -2769,6 +2751,35 @@ impl Calendar {
         width < px(paint::NARROW * f32::from(window.rem_size()) / 15.)
     }
 
+    /// The title as the button that opens the mini month behind it: a press opens it (on the
+    /// way down, so a press that closes it doesn't open it again), and so do Enter and Space
+    /// when Tab has brought the keyboard here. VoiceOver hears "November 2026, go to a date".
+    fn title_press(&self, title: String, cx: &mut Context<Self>) -> Press {
+        let toggle = cx.listener(|c, e: &ClickEvent, window, cx| {
+            if e.is_keyboard() {
+                c.toggle_mini_month(window, cx);
+            }
+        });
+        Press::new("calendar-title")
+            .accessibility_label(SharedString::from(format!("{title}, go to a date")))
+            .focus_on_press(false)
+            .debug_selector(|| "calendar-title".into())
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|c, _, window, cx| {
+                    cx.stop_propagation();
+                    // The press that closed it from outside (on this title) is done.
+                    if std::mem::take(&mut c.mini_dismissed) {
+                        return;
+                    }
+                    c.toggle_mini_month(window, cx);
+                }),
+            )
+            .on_click(toggle)
+            .child(SharedString::from(title))
+    }
+
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::global(cx);
         let colors = theme.colors;
@@ -2801,17 +2812,26 @@ impl Calendar {
             .border_b_1()
             .border_color(colors.border)
             .gap(rems(12. / 15.))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(rems(18. / 15.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors.foreground)
-                    .debug_selector(|| "calendar-title".into())
-                    .child(SharedString::from(self.title())),
-            )
+            .child({
+                fn style<E: Styled>(e: E, colors: &gpui_core::Colors) -> E {
+                    e.flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(rems(18. / 15.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(colors.foreground)
+                }
+                // Where the mini month has no room beside the days, it's behind the title, as
+                // in the compact header.
+                if self.options.mini_month && !self.mini_side {
+                    style(self.title_press(self.title(), cx), &colors).into_any_element()
+                } else {
+                    style(div(), &colors)
+                        .debug_selector(|| "calendar-title".into())
+                        .child(SharedString::from(self.title()))
+                        .into_any_element()
+                }
+            })
             .child(
                 div()
                     .flex()

@@ -1261,6 +1261,37 @@ fn the_mini_month_is_behind_the_title_when_narrow(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn on_a_desktop_without_room_beside_the_days_the_title_opens_the_mini_month(
+    cx: &mut TestAppContext,
+) {
+    // 736 points: the desktop header, but less than the 848 the side column needs.
+    let (c, _, cx) = open_with(cx, |c| mini_on(c).with_header(true));
+    cx.simulate_resize(size(px(736.), px(800.)));
+    draw(cx);
+    draw(cx);
+    assert!(cx.debug_bounds("calendar-mini").is_none());
+    let title = cx.debug_bounds("calendar-title").expect("a title");
+    cx.simulate_click(title.center(), Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.is_mini_month_open()));
+    assert!(cx.debug_bounds("calendar-mini").is_some());
+    // A press on the title again closes it.
+    cx.simulate_click(title.center(), Modifiers::none());
+    draw(cx);
+    assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
+
+    // Wide enough, the mini month is beside the days and the title is only the title.
+    cx.simulate_resize(size(px(1280.), px(800.)));
+    draw(cx);
+    draw(cx);
+    assert!(cx.debug_bounds("calendar-mini").is_some());
+    let title = cx.debug_bounds("calendar-title").expect("a title");
+    cx.simulate_click(title.center(), Modifiers::none());
+    draw(cx);
+    assert!(!c.read_with(cx, |c, _| c.is_mini_month_open()));
+}
+
+#[gpui::test]
 fn every_event_is_described_for_a_screen_reader(cx: &mut TestAppContext) {
     let (c, _, cx) = open(cx);
     c.read_with(cx, |c, _| {

@@ -126,6 +126,8 @@ impl Calendar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> (Option<AnyElement>, Option<AnyElement>) {
+        // A press's dismissal belongs to that press only.
+        self.mini_dismissed = false;
         if !self.options.mini_month {
             return (None, None);
         }
@@ -158,8 +160,10 @@ impl Calendar {
             return (Some(aside), None);
         }
         let this = cx.entity().downgrade();
-        let dismiss = move |_: &DismissReason, _: &mut Window, cx: &mut App| {
+        let dismiss = move |reason: &DismissReason, _: &mut Window, cx: &mut App| {
             this.update(cx, |c, cx| {
+                // Closed by the press, if this press then lands on the title.
+                c.mini_dismissed = c.mini_open && *reason == DismissReason::ClickOutside;
                 c.mini_open = false;
                 cx.notify();
             })
