@@ -86,14 +86,17 @@ impl Calendar {
         let held = start
             .and_then(|(date, minute)| self.point_at(date, minute))
             .unwrap_or(at);
+        // The press is where it went down, so a click that wobbles a pixel stays a click; the
+        // event is held by its start, so a drag carries that start.
         self.drag = Some(super::Drag::Press {
-            at: held,
+            at,
             target: Target::Event {
                 id,
                 area: Area::Grid,
                 resize: false,
                 read_only,
             },
+            held: Some(held),
         });
         cx.notify();
     }
