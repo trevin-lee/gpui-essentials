@@ -1,19 +1,23 @@
-//! Charts: nice tick values and short labels; a bar chart's bars where Recharts puts them
-//! (grouped, stacked, below a zero line); the x value under the pointer; the tooltip following
-//! the pointer, a tap and the keyboard; empty data; and nothing redrawing while idle.
+//! Charts: nice tick values and short labels, or the host's; a bar chart's bars where Recharts
+//! puts them (grouped, stacked, below a zero line); line and area charts' points, gaps, stacks
+//! and monotone curves; the x value under the pointer; the tooltip following the pointer, a tap
+//! and the keyboard; empty data; and nothing redrawing while idle.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui::SharedString;
 use gpui::{
     AppContext as _, Bounds, Context, Entity, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
     Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
     Pixels, Point, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
     size,
 };
-use gpui_core::chart::{BarRect, compact_number, format_value, label_stride, nice_ticks};
-use gpui_core::{BarChart, Root};
+use gpui_core::chart::{
+    BarRect, CurveSegment, compact_number, curve_segments, format_value, label_stride, nice_ticks,
+};
+use gpui_core::{AreaChart, BarChart, Curve, LineChart, Root};
 
 fn plot(w: f32, h: f32) -> Bounds<Pixels> {
     Bounds::new(point(px(0.), px(0.)), size(px(w), px(h)))
@@ -265,25 +269,231 @@ fn it_summarises_itself_to_assistive_technology() {
     );
 }
 
+#[track_caller]
+fn assert_point(got: Point<Pixels>, want: (f32, f32)) {
+    let (x, y) = (f32::from(got.x), f32::from(got.y));
+    assert!(
+        (x - want.0).abs() <= 0.5 && (y - want.1).abs() <= 0.5,
+        "got ({x}, {y}), want {want:?}"
+    );
+}
+
+#[test]
+fn lines_run_through_their_points_twelve_pixels_in_from_the_ends() {
+    let chart = LineChart::new("c")
+        .categories(["A", "B", "C"])
+        .series("a", "A", [0., 50., 100.]);
+    let lines = chart.lines(plot(224., 100.));
+    assert_eq!(lines.len(), 1);
+    let pts = &lines[0].points;
+    assert_point(pts[0], (12., 100.));
+    assert_point(pts[1], (112., 50.));
+    assert_point(pts[2], (212., 0.));
+    assert!(lines[0].base.is_empty(), "a line has no bottom edge");
+}
+
+#[test]
+fn a_gap_breaks_a_line() {
+    let chart = LineChart::new("c").series("a", "A", [10., f64::NAN, 30., 40.]);
+    let lines = chart.lines(plot(324., 100.));
+    let runs: Vec<(usize, usize)> = lines.iter().map(|r| (r.start, r.points.len())).collect();
+    assert_eq!(runs, [(0, 1), (2, 2)], "a run alone, then a run of two");
+}
+
+#[test]
+fn point_charts_pick_the_nearest_point() {
+    let chart = LineChart::new("c").series("a", "A", [1., 2., 3.]);
+    let area = plot(224., 100.);
+    // Points at 12, 112 and 212.
+    assert_eq!(chart.nearest(area, px(61.)), Some(0));
+    assert_eq!(chart.nearest(area, px(63.)), Some(1));
+    assert_eq!(chart.nearest(area, px(170.)), Some(2));
+    assert_eq!(chart.nearest(area, px(-50.)), Some(0));
+    assert_eq!(chart.nearest(area, px(999.)), Some(2));
+    assert_eq!(LineChart::new("e").nearest(area, px(5.)), None);
+}
+
+#[test]
+fn a_single_point_sits_in_the_middle() {
+    let chart = LineChart::new("c")
+        .categories(["Now"])
+        .series("a", "A", [5.]);
+    let lines = chart.lines(plot(200., 100.));
+    assert_point(lines[0].points[0], (100., 0.));
+    assert_eq!(chart.nearest(plot(200., 100.), px(3.)), Some(0));
+    assert!(LineChart::new("e").lines(plot(200., 100.)).is_empty());
+}
+
+#[test]
+fn monotone_curves_never_overshoot_and_flatten_at_peaks() {
+    let pts: Vec<Point<Pixels>> = [(0., 100.), (30., 90.), (100., 20.), (120., 0.)]
+        .iter()
+        .map(|(x, y)| point(px(*x), px(*y)))
+        .collect();
+    let segs = curve_segments(&pts, Curve::Monotone);
+    assert_eq!(segs.len(), 3);
+    for s in &segs {
+        let (lo, hi) = (s.from.y.min(s.to.y), s.from.y.max(s.to.y));
+        for c in [s.c1, s.c2] {
+            assert!(
+                c.y >= lo && c.y <= hi,
+                "{c:?} outside {lo:?}..{hi:?} in {s:?}"
+            );
+            assert!(
+                c.x >= s.from.x && c.x <= s.to.x,
+                "{c:?} goes backwards in {s:?}"
+            );
+        }
+    }
+    // A lopsided peak: the curve is flat there, so it doesn't rise past it.
+    let peak: Vec<Point<Pixels>> = [(0., 100.), (50., 0.), (150., 80.)]
+        .iter()
+        .map(|(x, y)| point(px(*x), px(*y)))
+        .collect();
+    let segs = curve_segments(&peak, Curve::Monotone);
+    assert_eq!(segs[0].c2.y, px(0.));
+    assert_eq!(segs[1].c1.y, px(0.));
+}
+
+#[test]
+fn straight_curves_keep_their_control_points_on_the_line() {
+    let pts = [
+        point(px(0.), px(0.)),
+        point(px(30.), px(60.)),
+        point(px(60.), px(0.)),
+    ];
+    let segs = curve_segments(&pts, Curve::Linear);
+    assert_eq!(
+        segs[0],
+        CurveSegment {
+            from: pts[0],
+            c1: point(px(10.), px(20.)),
+            c2: point(px(20.), px(40.)),
+            to: pts[1],
+        }
+    );
+    // Two points are joined straight even when asked for a smooth curve.
+    let two = curve_segments(&pts[..2], Curve::Monotone);
+    assert_eq!(two, curve_segments(&pts[..2], Curve::Linear));
+    assert!(curve_segments(&pts[..1], Curve::Monotone).is_empty());
+}
+
+#[test]
+fn areas_fill_down_to_zero_or_onto_the_one_below() {
+    let flat = AreaChart::new("c")
+        .series("a", "A", [20., 40.])
+        .series("b", "B", [10., 20.]);
+    assert_eq!(flat.scale().ticks, [0., 10., 20., 30., 40.]);
+    let areas = flat.areas(plot(224., 80.));
+    assert_eq!(areas.len(), 2);
+    for a in &areas {
+        assert!(
+            a.base.iter().all(|p| p.y == px(80.)),
+            "each down to the zero line"
+        );
+    }
+
+    let stacked = flat.stacked(true);
+    assert_eq!(stacked.scale().ticks, [0., 20., 40., 60.]);
+    let areas = stacked.areas(plot(224., 60.));
+    // One pixel a unit: A's top at 20 and 40, B's on it at 30 and 60.
+    assert_point(areas[0].points[0], (12., 40.));
+    assert_point(areas[0].points[1], (212., 20.));
+    assert_point(areas[1].points[0], (12., 30.));
+    assert_point(areas[1].points[1], (212., 0.));
+    assert_eq!(areas[1].base, areas[0].points, "B sits on A");
+    assert!(areas[0].base.iter().all(|p| p.y == px(60.)));
+}
+
+#[test]
+fn negative_values_dip_below_the_zero_line() {
+    let chart = AreaChart::new("c").series("a", "A", [-50., 100.]);
+    let scale = chart.scale();
+    assert_eq!(scale.ticks, [-50., 0., 50., 100.]);
+    let areas = chart.areas(plot(224., 150.));
+    assert_point(areas[0].points[0], (12., 150.));
+    assert!(
+        areas[0].base.iter().all(|p| p.y == px(100.)),
+        "the base is the zero line"
+    );
+}
+
+#[test]
+fn the_host_writes_the_values() {
+    let dollars = |v: f64| -> SharedString { format!("${v}").into() };
+    let bars = two_by_two().format_value(dollars);
+    assert_eq!(
+        bars.tick_labels(),
+        ["$0", "$20", "$40", "$60", "$80", "$100"]
+    );
+    assert_eq!(
+        bars.accessibility_summary(),
+        "Bar chart of Desktop and Mobile: 2 points, A to B; values from $50 to $100"
+    );
+    let line = LineChart::new("c")
+        .series("a", "Views", [1_200., 3_400_000.])
+        .format_value(dollars);
+    assert_eq!(
+        line.tick_labels().last().map(|s| s.as_ref()),
+        Some("$4000000")
+    );
+    let area = AreaChart::new("c")
+        .series("a", "A", [0.5])
+        .format_value(dollars);
+    assert!(area.accessibility_summary().ends_with("from $0.5 to $0.5"));
+    // Without one: short on the axis, in full in the tooltip and the summary.
+    let plain = LineChart::new("c").series("a", "Views", [1_200., 3_400_000.]);
+    assert_eq!(plain.tick_labels().last().map(|s| s.as_ref()), Some("4M"));
+    assert!(
+        plain
+            .accessibility_summary()
+            .ends_with("from 1,200 to 3,400,000")
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // In a window
 
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Bar,
+    Line,
+    Area,
+    Empty,
+}
+
 struct Panel {
-    empty: bool,
+    kind: Kind,
     draws: Rc<Cell<usize>>,
 }
+
+const MONTHS: [&str; 4] = ["Jan", "Feb", "Mar", "Apr"];
+const DESKTOP: [f64; 4] = [186., 305., 237., 73.];
+const MOBILE: [f64; 4] = [80., 200., 120., 190.];
 
 impl Render for Panel {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.draws.set(self.draws.get() + 1);
-        let chart = if self.empty {
-            BarChart::new("sales")
-        } else {
-            BarChart::new("sales")
-                .categories(["Jan", "Feb", "Mar", "Apr"])
-                .series("desktop", "Desktop", [186., 305., 237., 73.])
-                .series("mobile", "Mobile", [80., 200., 120., 190.])
+        let chart = match self.kind {
+            Kind::Empty => BarChart::new("sales").into_any_element(),
+            Kind::Bar => BarChart::new("sales")
+                .categories(MONTHS)
+                .series("desktop", "Desktop", DESKTOP)
+                .series("mobile", "Mobile", MOBILE)
                 .legend(true)
+                .into_any_element(),
+            Kind::Line => LineChart::new("sales")
+                .categories(MONTHS)
+                .series("desktop", "Desktop", DESKTOP)
+                .series("mobile", "Mobile", MOBILE)
+                .dots(true)
+                .into_any_element(),
+            Kind::Area => AreaChart::new("sales")
+                .categories(MONTHS)
+                .series("desktop", "Desktop", DESKTOP)
+                .series("mobile", "Mobile", MOBILE)
+                .stacked(true)
+                .into_any_element(),
         };
         div()
             .size_full()
@@ -293,23 +503,24 @@ impl Render for Panel {
 }
 
 struct Opened<'a> {
+    kind: Kind,
     draws: Rc<Cell<usize>>,
     vcx: &'a mut VisualTestContext,
 }
 
-fn open(cx: &mut TestAppContext, empty: bool) -> Opened<'_> {
+fn open(cx: &mut TestAppContext, kind: Kind) -> Opened<'_> {
     cx.update(gpui_core::init);
     let draws = Rc::new(Cell::new(0));
     let d = draws.clone();
     let made: Rc<RefCell<Option<Entity<Panel>>>> = Rc::default();
     let m = made.clone();
     let (_, vcx) = cx.add_window_view(move |window, cx| {
-        let panel = cx.new(|_| Panel { empty, draws: d });
+        let panel = cx.new(|_| Panel { kind, draws: d });
         *m.borrow_mut() = Some(panel.clone());
         Root::new(panel, window, cx)
     });
     vcx.run_until_parked();
-    Opened { draws, vcx }
+    Opened { kind, draws, vcx }
 }
 
 impl Opened<'_> {
@@ -319,11 +530,15 @@ impl Opened<'_> {
             .expect("the plot is drawn")
     }
 
-    /// The middle of band `i` of 4.
+    /// Where x value `i` of 4 is: its band's middle, or its point (12 pixels in at the ends).
     fn at(&mut self, i: usize, dx: f32) -> Point<Pixels> {
         let p = self.plot();
-        let band = p.size.width / 4.;
-        point(p.origin.x + band * (i as f32 + 0.5) + px(dx), p.center().y)
+        let x = if self.kind == Kind::Bar {
+            p.origin.x + p.size.width / 4. * (i as f32 + 0.5)
+        } else {
+            p.origin.x + px(12.) + (p.size.width - px(24.)) / 3. * i as f32
+        };
+        point(x + px(dx), p.center().y)
     }
 
     fn hover(&mut self, at: Point<Pixels>) {
@@ -387,7 +602,7 @@ impl Opened<'_> {
 
 #[gpui::test]
 fn the_tooltip_follows_the_pointer_and_goes_when_it_leaves(cx: &mut TestAppContext) {
-    let mut o = open(cx, false);
+    let mut o = open(cx, Kind::Bar);
     assert_eq!(o.tooltip(), None, "no tooltip before the pointer comes");
     let at = o.at(1, 0.);
     o.hover(at);
@@ -408,7 +623,7 @@ fn the_tooltip_follows_the_pointer_and_goes_when_it_leaves(cx: &mut TestAppConte
 
 #[gpui::test]
 fn a_tap_shows_the_tooltip_and_a_tap_elsewhere_hides_it(cx: &mut TestAppContext) {
-    let mut o = open(cx, false);
+    let mut o = open(cx, Kind::Bar);
     let at = o.at(3, 0.);
     o.tap(at);
     assert_eq!(o.tooltip(), Some(3));
@@ -418,7 +633,7 @@ fn a_tap_shows_the_tooltip_and_a_tap_elsewhere_hides_it(cx: &mut TestAppContext)
 
 #[gpui::test]
 fn the_keyboard_moves_the_tooltip(cx: &mut TestAppContext) {
-    let mut o = open(cx, false);
+    let mut o = open(cx, Kind::Bar);
     o.keys("tab right");
     assert_eq!(o.tooltip(), Some(0), "Right from nothing: the first");
     o.keys("right right");
@@ -437,7 +652,7 @@ fn the_keyboard_moves_the_tooltip(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn without_data_it_says_so_and_ignores_keys(cx: &mut TestAppContext) {
-    let mut o = open(cx, true);
+    let mut o = open(cx, Kind::Empty);
     assert!(o.vcx.debug_bounds("sales-empty").is_some());
     assert!(o.vcx.debug_bounds("sales-plot").is_none());
     o.keys("tab right");
@@ -446,7 +661,7 @@ fn without_data_it_says_so_and_ignores_keys(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn nothing_redraws_while_idle(cx: &mut TestAppContext) {
-    let mut o = open(cx, false);
+    let mut o = open(cx, Kind::Bar);
     for _ in 0..10 {
         assert_eq!(o.frame(), 0, "asked for a frame before anything happened");
     }
@@ -469,4 +684,42 @@ fn nothing_redraws_while_idle(cx: &mut TestAppContext) {
     let at = o.at(2, 0.);
     o.hover(at);
     assert!(o.draws.get() > shown, "didn't redraw for another x");
+}
+
+#[gpui::test]
+fn a_line_chart_follows_the_pointer_and_the_keyboard(cx: &mut TestAppContext) {
+    let mut o = open(cx, Kind::Line);
+    // Nearer the second point than the first.
+    let at = o.at(1, -30.);
+    o.hover(at);
+    assert_eq!(o.tooltip(), Some(1));
+    let at = o.at(3, 0.);
+    o.hover(at);
+    assert_eq!(o.tooltip(), Some(3));
+    o.hover(point(px(5.), px(5.)));
+    assert_eq!(o.tooltip(), None);
+    o.keys("tab right right");
+    assert_eq!(o.tooltip(), Some(1));
+    o.keys("end escape");
+    assert_eq!(o.tooltip(), None);
+}
+
+#[gpui::test]
+fn an_area_chart_redraws_only_for_another_x(cx: &mut TestAppContext) {
+    let mut o = open(cx, Kind::Area);
+    let at = o.at(2, 0.);
+    o.tap(at);
+    assert_eq!(o.tooltip(), Some(2));
+    for _ in 0..30 {
+        assert_eq!(o.frame(), 0, "asked for a frame with the tooltip up");
+    }
+    let shown = o.draws.get();
+    for dx in [-20., -8., 8., 20.] {
+        let at = o.at(2, dx);
+        o.hover(at);
+    }
+    assert_eq!(o.draws.get(), shown, "redrew while nearest the same point");
+    let at = o.at(1, 0.);
+    o.hover(at);
+    assert_eq!(o.tooltip(), Some(1));
 }
