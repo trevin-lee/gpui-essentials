@@ -47,6 +47,7 @@ mod collapsible;
 mod context_menu;
 mod date_picker;
 mod empty_state;
+mod field;
 #[cfg(feature = "highlight")]
 pub mod highlight;
 mod hover_card;
@@ -99,6 +100,7 @@ pub use date_picker::{
     DatePicker, DatePickerColors, DatePickerEvent, DatePickerState, DateValue, MonthGrid,
 };
 pub use empty_state::EmptyState;
+pub use field::{Field, FieldGroup, FieldLegend, FieldSet, Label};
 pub use hover_card::{HOVER_CARD_CLOSE_DELAY, HOVER_CARD_OPEN_DELAY, HoverCard};
 pub use icon::{Icon, IconName, Icons};
 pub use input::{Input, InputEvent, InputState};
