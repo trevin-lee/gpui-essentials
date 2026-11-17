@@ -291,7 +291,7 @@ impl RenderOnce for BlockEditor {
                 }
             }
             let reduce_motion = cx.reduce_motion();
-            let (offsets, moving, dragged_block) = self.state.update(cx, |state, _| {
+            let (offsets, moving, held) = self.state.update(cx, |state, _| {
                 let top = state.content_top();
                 let dragged = state.live_block_drag().filter(|d| d.active);
                 let (offsets, moving) = state.reorder.frame(
@@ -300,7 +300,10 @@ impl RenderOnce for BlockEditor {
                     std::time::Instant::now(),
                     reduce_motion,
                 );
-                (offsets, moving, dragged.map(|d| d.block))
+                let held = dragged
+                    .map(|d| state.dragged_blocks(&d))
+                    .unwrap_or_default();
+                (offsets, moving, held)
             });
             if moving {
                 window.request_animation_frame();
@@ -401,10 +404,11 @@ impl RenderOnce for BlockEditor {
                 };
                 let block_id = snapshot.blocks[unit.block];
                 let offset = offsets.get(&block_id).copied().unwrap_or(0.);
-                let element = if dragged_block == Some(block_id) {
+                let element = if let Some(held_ix) = held.iter().position(|id| *id == block_id) {
                     // Under the pointer: a copy drawn over every other block, while the block
                     // itself keeps its place and its geometry, unseen. The copy is painted
-                    // after the editor's own geometry is collected, so it reports none.
+                    // after the editor's own geometry is collected, so it reports none. A run
+                    // of blocks is one copy, drawn from the first of them laid out here.
                     let ghost = (!ghost_drawn).then(|| {
                         ghost_drawn = true;
                         // Without the margins it has among other blocks, and reporting no
@@ -419,26 +423,19 @@ impl RenderOnce for BlockEditor {
                             },
                             ..draw_cx
                         };
-                        let copy = match super::draw::tree(
-                            &self.state.read(cx).model.doc,
-                            block_id,
-                            highlighting.as_ref(),
-                        ) {
-                            Some(tree) => super::draw::draw(
-                                &tree,
-                                super::draw::Place {
-                                    first: true,
-                                    last: true,
-                                    prev: None,
-                                    depth: 0,
-                                },
-                                None,
-                                &ghost_cx,
-                                window,
-                                cx,
-                            ),
-                            None => div().into_any_element(),
-                        };
+                        let trees: Vec<super::draw::Tree> = held[held_ix..]
+                            .iter()
+                            .filter_map(|id| {
+                                super::draw::tree(
+                                    &self.state.read(cx).model.doc,
+                                    *id,
+                                    highlighting.as_ref(),
+                                )
+                            })
+                            .collect();
+                        let copy = div().w_full().min_w_0().children(super::draw::children_of(
+                            &trees, 0, None, &ghost_cx, window, cx,
+                        ));
                         let theme = gpui_core::Theme::global(cx);
                         deferred(
                             div()

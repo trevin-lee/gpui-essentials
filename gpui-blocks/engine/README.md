@@ -142,7 +142,9 @@ top-left corner, or a code block by the strip left of it (the pointer becomes
 an open hand), and the blocks it passes slide out of the way to open the gap
 it will drop into between top-level blocks. One undo step. The editor draws
 no handle for other blocks; a host can drag any top-level block with
-`BlockEditorState::begin_block_drag`.
+`BlockEditorState::begin_block_drag`. Pressing one of several selected
+top-level blocks drags them all together, and `MoveBlocks` moves a selection
+of several sibling blocks up or down as one.
 
 Text-editing keys (D21). Word deletes: Option+Backspace / Option+Delete on
 macOS, Ctrl+Backspace / Ctrl+Delete elsewhere (word motion is Option+arrows /

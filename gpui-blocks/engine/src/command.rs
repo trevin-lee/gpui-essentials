@@ -30,9 +30,10 @@ pub enum EditorCommand {
     SetTaskChecked(bool),
     Indent,
     Outdent,
-    /// Move the selected block, else the caret's list item, else the
-    /// caret's block, one place up or down among its siblings. A table's
-    /// cell moves its table and a toggle's summary its toggle, and no block
+    /// Move the selected blocks, else the caret's list item, else the
+    /// caret's block, one place up or down among their siblings. Several
+    /// selected blocks move together and stay selected. A table's cell
+    /// moves its table and a toggle's summary its toggle, and no block
     /// takes a summary's place.
     MoveBlocks {
         down: bool,
@@ -2120,27 +2121,56 @@ impl BlockEditorModel {
     /// with `Unsupported`; a move onto its own position is a no-op that
     /// returns `false`.
     pub fn move_block_to(&mut self, block: BlockId, to: usize) -> Result<bool, CommandError> {
+        self.move_run_to(block, 1, to)
+    }
+
+    /// Move the `count` top-level blocks starting at `first`, in order, into
+    /// the gap `to`, as `move_block_to` moves one. The move is one undo
+    /// step. The blocks end up selected: the selection is kept when it
+    /// already covers them, else it becomes the whole run. A gap inside or
+    /// at either edge of the run is a no-op that returns `false`.
+    pub(crate) fn move_run_to(
+        &mut self,
+        first: BlockId,
+        count: usize,
+        to: usize,
+    ) -> Result<bool, CommandError> {
         let root = self.doc.root;
-        let Some((parent, index)) = self.doc.index_in_parent(block) else {
-            return Err(CommandError::Position(PositionError::UnknownBlock(block)));
+        let Some((parent, index)) = self.doc.index_in_parent(first) else {
+            return Err(CommandError::Position(PositionError::UnknownBlock(first)));
         };
         if parent != root {
             return Err(CommandError::Unsupported("move a nested block"));
         }
-        let len = self.doc.children(root).len();
+        let children = self.doc.children(root);
+        let len = children.len();
+        let end = index + count;
+        if count == 0 || end > len {
+            return Err(CommandError::Unsupported("run out of range"));
+        }
         if to > len {
             return Err(CommandError::Unsupported("gap out of range"));
         }
-        let new_index = if to > index { to - 1 } else { to };
-        if new_index == index {
+        if (index..=end).contains(&to) {
             return Ok(false);
         }
-        let selection = BlockSelection::Blocks {
-            anchor: block,
-            head: block,
+        let run = children[index..end].to_vec();
+        let last = run[count - 1];
+        let selection = match self.selected_blocks() {
+            Some((p, range)) if p == root && range == (index..end) => self.selection.clone(),
+            _ => BlockSelection::Blocks {
+                anchor: first,
+                head: last,
+            },
         };
         self.transact(EditOrigin::Command("move_block_to"), |tx| {
-            tx.move_block(block, root, new_index)?;
+            // Moving up, each block goes after the one moved before it.
+            // Moving down, each leaves from the front of the run and goes
+            // last, just before the gap.
+            for (i, block) in run.into_iter().enumerate() {
+                let new_index = if to < index { to + i } else { to - 1 };
+                tx.move_block(block, root, new_index)?;
+            }
             Ok(Some(selection))
         })
     }
@@ -2215,13 +2245,13 @@ impl BlockEditorModel {
 
     fn move_blocks(&mut self, down: bool) -> Result<bool, CommandError> {
         let doc = &self.doc;
-        let mut target = match self.selected_blocks() {
-            Some((parent, range)) if range.len() == 1 => doc.children(parent)[range.start],
-            Some(_) => return Err(CommandError::Unsupported("move several blocks")),
-            None => self.caret_unit()?,
+        let (mut target, mut count) = match self.selected_blocks() {
+            Some((parent, range)) => (doc.children(parent)[range.start], range.len()),
+            None => (self.caret_unit()?, 1),
         };
         // A table's cell or row, or a toggle's summary, never moves on its
-        // own: the table or toggle moves instead.
+        // own: the table or toggle moves instead, and so does a run of
+        // blocks that starts at a summary.
         while let Some((parent, index)) = doc.index_in_parent(target)
             && (matches!(
                 doc.kind(target),
@@ -2229,30 +2259,38 @@ impl BlockEditorModel {
             ) || (index == 0 && matches!(doc.kind(parent), Some(BlockKindData::Toggle { .. }))))
         {
             target = parent;
+            count = 1;
         }
         let Some((parent, index)) = doc.index_in_parent(target) else {
             return Ok(false);
         };
-        let len = doc.children(parent).len();
+        let children = doc.children(parent);
+        let len = children.len();
+        let end = index + count;
+        if end > len {
+            return Ok(false);
+        }
         // In a toggle, nothing takes the summary's place at index 0.
         let first = usize::from(matches!(
             doc.kind(parent),
             Some(BlockKindData::Toggle { .. })
         ));
-        let new_index = if down {
-            if index + 1 >= len {
+        // The run moves past its neighbour: the neighbour moves to its
+        // other side, one step for any number of blocks.
+        let (neighbour, new_index) = if down {
+            if end >= len {
                 return Ok(false);
             }
-            index + 1
+            (children[end], index)
         } else {
             if index <= first {
                 return Ok(false);
             }
-            index - 1
+            (children[index - 1], end - 1)
         };
         let selection = self.selection.clone();
         self.transact(EditOrigin::Command("move_blocks"), |tx| {
-            tx.move_block(target, parent, new_index)?;
+            tx.move_block(neighbour, parent, new_index)?;
             Ok(Some(selection))
         })
     }

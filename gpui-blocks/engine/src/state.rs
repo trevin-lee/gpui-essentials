@@ -370,7 +370,11 @@ pub struct PasteRequest {
 /// an ordinary click.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BlockDrag {
+    /// The dragged block, or the first of a run of selected blocks.
     pub(crate) block: BlockId,
+    /// How many top-level blocks are dragged, from `block` on: 1 for one
+    /// block, more for a run of selected blocks dragged together.
+    pub(crate) count: usize,
     pub(crate) start: Point<Pixels>,
     pub(crate) active: bool,
     /// The gap between top-level blocks the block would drop into.
@@ -390,9 +394,15 @@ pub(crate) struct BlockDrag {
 }
 
 impl BlockDrag {
-    pub(crate) fn new(block: BlockId, at: Point<Pixels>, top: Pixels, revision: u64) -> Self {
+    pub(crate) fn new(
+        (block, count): (BlockId, usize),
+        at: Point<Pixels>,
+        top: Pixels,
+        revision: u64,
+    ) -> Self {
         Self {
             block,
+            count,
             start: at,
             active: false,
             drop: None,
@@ -410,6 +420,7 @@ impl BlockDrag {
         let pointer = self.at.y - top;
         super::reorder::Dragged {
             block: self.block,
+            count: self.count,
             dy: f32::from(pointer - (self.start.y - self.start_top)),
             pointer: f32::from(pointer),
             velocity: self.velocity,
@@ -2020,19 +2031,47 @@ impl BlockEditorState {
     /// Start dragging a top-level block from a handle the host draws, at the
     /// pointer's window position. The editor follows the pointer from here
     /// (a drop indicator in the gap, then one undoable move on release), as
-    /// for its own handles. Call it from the handle's mouse-down and stop
-    /// the event there.
+    /// for its own handles. When `block` is one of several selected
+    /// top-level blocks, the whole selected run is dragged and dropped
+    /// together. Call it from the handle's mouse-down and stop the event
+    /// there.
     pub fn begin_block_drag(&mut self, block: BlockId, at: Point<Pixels>) {
         let doc = &self.model.doc;
         if self.readonly || doc.parent(block) != Some(doc.root) {
             return;
         }
         self.block_drag = Some(BlockDrag::new(
-            block,
+            self.drag_run(block),
             at,
             self.content_top(),
             self.model.revision(),
         ));
+    }
+
+    /// What pressing the top-level `block` drags: the run of selected
+    /// top-level blocks when it is one of them, else `block` alone. As the
+    /// first block and how many.
+    fn drag_run(&self, block: BlockId) -> (BlockId, usize) {
+        let doc = &self.model.doc;
+        match self.model.selected_blocks() {
+            Some((parent, range))
+                if parent == doc.root && doc.children(parent)[range.clone()].contains(&block) =>
+            {
+                (doc.children(parent)[range.start], range.len())
+            }
+            _ => (block, 1),
+        }
+    }
+
+    /// The top-level blocks an active drag holds, in order.
+    pub(crate) fn dragged_blocks(&self, drag: &BlockDrag) -> Vec<BlockId> {
+        let doc = &self.model.doc;
+        let children = doc.children(doc.root);
+        children
+            .iter()
+            .position(|id| *id == drag.block)
+            .map(|ix| children[ix..(ix + drag.count).min(children.len())].to_vec())
+            .unwrap_or_default()
     }
 
     /// The top of the editor's content in window y, as last drawn: content
@@ -2206,7 +2245,7 @@ impl BlockEditorState {
         let (top, revision) = (self.content_top(), self.model.revision());
         self.block_drag = self
             .drag_handle_at(at)
-            .map(|block| BlockDrag::new(block, at, top, revision));
+            .map(|block| BlockDrag::new(self.drag_run(block), at, top, revision));
     }
 
     /// D22: pointer moved with the button down. Returns whether a block
@@ -2224,10 +2263,21 @@ impl BlockEditorState {
             drag.active = true;
             self.dragging = false;
             self.end_composition();
-            let _ = self.model.set_selection(BlockSelection::Blocks {
-                anchor: drag.block,
-                head: drag.block,
-            });
+            // The dragged blocks are selected; a selection of exactly them stays as it is.
+            let held = self.dragged_blocks(&drag);
+            let doc = &self.model.doc;
+            let kept = self
+                .model
+                .selected_blocks()
+                .is_some_and(|(parent, range)| doc.children(parent).get(range) == Some(&held[..]));
+            if let (Some(first), Some(last)) = (held.first(), held.last())
+                && !kept
+            {
+                let _ = self.model.set_selection(BlockSelection::Blocks {
+                    anchor: *first,
+                    head: *last,
+                });
+            }
             self.selection_changed(cx);
             // The middles of the blocks' text as drawn now, in content y: the pointer passing
             // one moves it.
@@ -2277,7 +2327,7 @@ impl BlockEditorState {
                 self.model.break_coalescing();
                 self.edit(
                     EditOrigin::Command("move_block_to"),
-                    |m| m.move_block_to(drag.block, to).map(|_| ()),
+                    |m| m.move_run_to(drag.block, drag.count, to).map(|_| ()),
                     cx,
                 );
                 self.model.break_coalescing();

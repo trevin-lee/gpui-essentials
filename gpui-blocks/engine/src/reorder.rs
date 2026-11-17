@@ -1,7 +1,8 @@
 //! Motion when top-level blocks change places.
 //!
 //! While a block is dragged it follows the pointer exactly, and the blocks it passes slide out
-//! of the way to open the slot it would drop into. When the order changes (a drop, a keyboard
+//! of the way to open the slot it would drop into. A run of selected blocks is dragged as one:
+//! they all follow the pointer, and the slot opened is the run's whole height. When the order changes (a drop, a keyboard
 //! move, an undo of either), every block that moved starts from where it was last drawn and
 //! springs to its new place; a dropped block starts at the pointer's speed and lands with a
 //! little give, the rest settle without overshoot. Springs, not timed curves, so a block caught
@@ -64,7 +65,10 @@ impl Spring {
 /// The block being dragged, this frame.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Dragged {
+    /// The dragged block, or the first of a run of them.
     pub(crate) block: BlockId,
+    /// How many blocks are dragged, from `block` on: 1 for one block.
+    pub(crate) count: usize,
     /// How far the pointer has moved since the drag began, in points.
     pub(crate) dy: f32,
     /// Where the pointer is, in content y: the slot is the one it's over.
@@ -82,8 +86,8 @@ pub(crate) struct Reorder {
     drag_slots: Option<Vec<(BlockId, Slot)>>,
     /// The middle of each block as drawn when the drag began, in content y.
     middles: HashMap<BlockId, f32>,
-    /// The drag just let go of, for the frame that follows.
-    released: Option<Dragged>,
+    /// The drag just let go of and the blocks it held, for the frame that follows.
+    released: Option<(Dragged, Vec<BlockId>)>,
     last_step: Option<Instant>,
     /// Whether anything was moving after the last frame. Frames are drawn while nothing moves
     /// too (a caret blink), so the time since the last one is no step for a motion just begun.
@@ -119,19 +123,23 @@ impl Reorder {
         self.released = None;
     }
 
-    /// The drag ended (dropped or not); the next frame lands the block.
+    /// The drag ended (dropped or not); the next frame lands the blocks.
     pub(crate) fn release(&mut self, dragged: Dragged) {
-        self.drag_slots = None;
-        self.released = Some(dragged);
+        let held = self
+            .drag_slots
+            .take()
+            .map(|slots| run(&slots, &dragged))
+            .unwrap_or_default();
+        self.released = Some((dragged, held));
     }
 
-    /// The gap between top-level blocks (0 is before the first) the dragged block would drop
-    /// into: past every block whose middle the pointer has passed. In the terms of
-    /// `BlockEditorModel::move_block_to`.
+    /// The gap between top-level blocks (0 is before the first) the dragged blocks would drop
+    /// into: past every other block whose middle the pointer has passed. In the terms of
+    /// `BlockEditorModel::move_run_to`.
     pub(crate) fn drop_gap(&self, dragged: &Dragged) -> Option<usize> {
         let slots = self.drag_slots.as_ref()?;
         let (from, at) = new_index(slots, &self.middles, dragged)?;
-        Some(if at > from { at + 1 } else { at })
+        Some(if at > from { at + dragged.count } else { at })
     }
 
     /// Advances the motion to `now` for a layout of `slots`, and returns each moving block's
@@ -172,23 +180,26 @@ impl Reorder {
                 spring.damping = SETTLE;
             }
         }
-        // A released block lands from the pointer, at its speed.
-        if let Some(released) = self.released.take()
-            && let Some(spring) = self.springs.get_mut(&released.block)
-        {
-            spring.v = released.velocity;
-            spring.damping = RELEASE;
+        // Released blocks land from the pointer, at its speed.
+        if let Some((released, held)) = self.released.take() {
+            for id in held {
+                if let Some(spring) = self.springs.get_mut(&id) {
+                    spring.v = released.velocity;
+                    spring.damping = RELEASE;
+                }
+            }
         }
 
         let targets = match (&self.drag_slots, dragged) {
             (Some(start), Some(dragged)) => room_for(start, &self.middles, &dragged),
             _ => HashMap::new(),
         };
-        // Every block that has somewhere to go, and the one under the pointer, has a spring.
-        let held = dragged
-            .filter(|_| self.drag_slots.is_some())
-            .map(|d| d.block);
-        for id in targets.keys().copied().chain(held) {
+        // Every block that has somewhere to go, and those under the pointer, have a spring.
+        let held: HashSet<BlockId> = match (&self.drag_slots, dragged) {
+            (Some(start), Some(dragged)) => run(start, &dragged).into_iter().collect(),
+            _ => HashSet::new(),
+        };
+        for id in targets.keys().chain(held.iter()).copied() {
             self.springs.entry(id).or_insert(Spring {
                 x: 0.,
                 v: 0.,
@@ -197,7 +208,7 @@ impl Reorder {
         }
         let mut moving = false;
         self.springs.retain(|id, spring| {
-            if let Some(d) = dragged.filter(|d| d.block == *id && self.drag_slots.is_some()) {
+            if let Some(d) = dragged.filter(|_| held.contains(id)) {
                 // Under the pointer: exactly where it is, no spring.
                 spring.x = d.dy;
                 spring.v = d.velocity;
@@ -248,20 +259,34 @@ fn reordered(before: &[(BlockId, Slot)], after: &[(BlockId, Slot)]) -> bool {
     !a.eq(b)
 }
 
-/// The dragged block's index in `slots`, and its index once dropped where the pointer is: after
-/// every other block whose middle is above the pointer. A block that wasn't drawn (scrolled far
-/// away) stays on its side.
+/// The dragged blocks in `slots`, in order.
+fn run(slots: &[(BlockId, Slot)], dragged: &Dragged) -> Vec<BlockId> {
+    let Some(from) = slots.iter().position(|(id, _)| *id == dragged.block) else {
+        return Vec::new();
+    };
+    slots
+        .iter()
+        .skip(from)
+        .take(dragged.count.max(1))
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+/// The first dragged block's index in `slots`, and its index once the run is dropped where the
+/// pointer is: after every other block whose middle is above the pointer. A block that wasn't
+/// drawn (scrolled far away) stays on its side.
 fn new_index(
     slots: &[(BlockId, Slot)],
     middles: &HashMap<BlockId, f32>,
     dragged: &Dragged,
 ) -> Option<(usize, usize)> {
     let from = slots.iter().position(|(id, _)| *id == dragged.block)?;
+    let held = from..from + dragged.count.max(1);
     let at = slots
         .iter()
         .enumerate()
         .filter(|(ix, (id, _))| {
-            *ix != from
+            !held.contains(ix)
                 && middles
                     .get(id)
                     .map_or(*ix < from, |middle| *middle < dragged.pointer)
@@ -270,8 +295,8 @@ fn new_index(
     Some((from, at))
 }
 
-/// Where the other blocks go to make room: those between the dragged block's slot and the one
-/// it would drop into move by its pitch, toward the slot it left.
+/// Where the other blocks go to make room: those between the dragged blocks' slots and the
+/// place they would drop into move by the run's pitch, toward the slots it left.
 fn room_for(
     slots: &[(BlockId, Slot)],
     middles: &HashMap<BlockId, f32>,
@@ -280,19 +305,21 @@ fn room_for(
     let Some((from, at)) = new_index(slots, middles, dragged) else {
         return HashMap::new();
     };
-    let pitch = slots[from].1.pitch;
+    let end = (from + dragged.count.max(1)).min(slots.len());
+    let pitch: f32 = slots[from..end].iter().map(|(_, s)| s.pitch).sum();
+    let count = end - from;
     slots
         .iter()
         .enumerate()
         .filter_map(|(ix, (id, _))| {
-            let target = if from < ix && ix <= at {
+            let target = if end <= ix && ix < at + count {
                 -pitch
             } else if at <= ix && ix < from {
                 pitch
             } else {
                 0.
             };
-            (ix != from && target != 0.).then_some((*id, target))
+            (target != 0.).then_some((*id, target))
         })
         .collect()
 }
@@ -353,6 +380,7 @@ mod tests {
         // Picked up at its middle (20) and moved 75 down, to 95: past block 1's middle (60), not 2's (100).
         let d = Dragged {
             block: b[0],
+            count: 1,
             dy: 75.,
             pointer: 95.,
             velocity: 300.,
@@ -397,6 +425,46 @@ mod tests {
     }
 
     #[test]
+    fn dragging_a_run_moves_it_together_and_opens_its_whole_height() {
+        let b = ids(4);
+        let layout = slots(&b);
+        let mut r = Reorder::default();
+        let t = Instant::now();
+        r.frame(layout.clone(), None, t, false);
+        r.begin_drag(middles(&layout));
+        // Blocks 0 and 1, picked up at block 1's middle (60) and moved 50 down, to 110: past
+        // block 2's middle (100), not 3's (140).
+        let d = Dragged {
+            block: b[0],
+            count: 2,
+            dy: 50.,
+            pointer: 110.,
+            velocity: 0.,
+        };
+        assert_eq!(r.drop_gap(&d), Some(3));
+        let (o, _) = r.frame(layout.clone(), Some(d), t, true);
+        assert_eq!((o[&b[0]], o[&b[1]]), (50., 50.), "both under the pointer");
+        assert_eq!(o[&b[2]], -80., "the block passed moves up by both");
+        assert!(!o.contains_key(&b[3]));
+        // Above the blocks before the run it drops at the top; held over the run, in its place.
+        let up = Dragged {
+            block: b[2],
+            count: 2,
+            dy: -110.,
+            pointer: 10.,
+            velocity: 0.,
+        };
+        assert_eq!(r.drop_gap(&up), Some(0));
+        let (o, _) = r.frame(layout.clone(), Some(up), t, true);
+        assert_eq!((o[&b[0]], o[&b[1]]), (80., 80.));
+        let still = Dragged {
+            pointer: 110.,
+            ..up
+        };
+        assert_eq!(r.drop_gap(&still), Some(2));
+    }
+
+    #[test]
     fn a_drop_lands_from_the_pointer_and_settles_with_nothing_left_moving() {
         let b = ids(3);
         let mut r = Reorder::default();
@@ -405,6 +473,7 @@ mod tests {
         r.begin_drag(middles(&slots(&b)));
         let d = Dragged {
             block: b[0],
+            count: 1,
             dy: 50.,
             pointer: 70.,
             velocity: 600.,
@@ -455,6 +524,7 @@ mod tests {
         r.begin_drag(middles(&slots(&b)));
         let d = Dragged {
             block: b[0],
+            count: 1,
             dy: 50.,
             pointer: 70.,
             velocity: 0.,
