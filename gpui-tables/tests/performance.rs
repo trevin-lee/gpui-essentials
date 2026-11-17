@@ -324,3 +324,99 @@ fn ordering_10000_rows() {
     });
     assert!(appended.len() <= 4);
 }
+
+/// Grouping 10,000 rows by each type that groups, as a view regroups when a value changes: the
+/// group step alone, the whole query, and one row's value changed followed by the whole query.
+#[test]
+fn regrouping_10000_rows() {
+    let (db, mut rows) = (database(), rows());
+    let cx = Context::new(now());
+    let all: Vec<usize> = (0..ROWS).collect();
+    let today = time::days_from_civil(2026, 11, 15);
+    let cases = [
+        (
+            "select",
+            "stage",
+            None,
+            Value::text("s1"),
+            Value::text("s4"),
+        ),
+        (
+            "multi-select",
+            "tags",
+            None,
+            Value::ids(["t2"]),
+            Value::ids(["t5", "t9"]),
+        ),
+        (
+            "date by month",
+            "when",
+            Some(DateBucket::Month),
+            Value::date_on_day(today - 200),
+            Value::date_on_day(today + 90),
+        ),
+        (
+            "date, relative",
+            "when",
+            None,
+            Value::date_on_day(today - 3),
+            Value::date_on_day(today + 12),
+        ),
+        (
+            "person",
+            "who",
+            None,
+            Value::People(vec![Person::Owner]),
+            Value::People(vec![Person::agent("agent-3")]),
+        ),
+        (
+            "checkbox",
+            "done",
+            None,
+            Value::Bool(true),
+            Value::Bool(false),
+        ),
+    ];
+    for (label, by, bucket, a, b) in cases {
+        let p = db.property(by).unwrap();
+        let date = bucket.clone().unwrap_or(DateBucket::Relative);
+        let groups = time(&format!("group step, by {label}"), 5, || {
+            engine::group::group(p, &date, &rows, &all, &cx).unwrap()
+        });
+        assert!(groups.len() > 1);
+        let mut v = view();
+        v.group_by = Some(by.into());
+        v.group_date = bucket;
+        let out = time(&format!("query grouped by {label}"), 10, || {
+            query(&db, &v, &rows, &cx)
+        });
+        assert!(out.issues.is_empty());
+        let mut n = 0usize;
+        time(
+            &format!("a {label} value changed, then the query"),
+            10,
+            || {
+                n += 1;
+                let row = (n * 7_919) % ROWS;
+                let value = if n.is_multiple_of(2) {
+                    a.clone()
+                } else {
+                    b.clone()
+                };
+                rows[row].values.as_mut().unwrap().insert(by.into(), value);
+                query(&db, &v, &rows, &cx)
+            },
+        );
+    }
+    // A relation doesn't group (as Notion's databases don't): the view says why.
+    let mut v = view();
+    v.group_by = Some("rel".into());
+    let out = query(&db, &v, &rows, &cx);
+    assert!(out.groups.is_none());
+    assert_eq!(
+        out.issues,
+        vec![engine::Issue::CantGroupBy {
+            property_id: "rel".into()
+        }]
+    );
+}

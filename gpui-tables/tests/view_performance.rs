@@ -414,3 +414,99 @@ fn ten_thousand_lines_draw_and_scroll_without_dropping_frames() {
     report("a frame while scrolling the list", scrolls, 12);
     report("a frame while dragging a row", drags, 12);
 }
+
+/// A grouped table regrouped as a value changes: one row's value changed by the host, then the
+/// rows worked out again (the query, the groups and the lines), and then drawn, for each type
+/// that groups.
+#[test]
+fn ten_thousand_rows_regroup_as_a_value_changes() {
+    let (db, rows) = (database(), rows());
+    let today = time::days_from_civil(2026, 11, 15);
+    let mut app = TestAppContext::build_with_text_system(
+        TestDispatcher::new(0),
+        None,
+        Arc::new(gpui_apple::AppleTextSystem::new()),
+    );
+    setup(&mut app);
+    let host = TestHost::new();
+    host.apply.set(false);
+    let h: Rc<dyn TableHost> = host.clone();
+    let made: Rc<std::cell::RefCell<Option<Entity<TableView>>>> = Rc::default();
+    let (_, cx) = app.add_window_view({
+        let (made, db, rows) = (made.clone(), db.clone(), rows.clone());
+        move |window, cx| {
+            let t = cx.new(|cx| TableView::new(h, db, rows, cx));
+            *made.borrow_mut() = Some(t.clone());
+            gpui_core::Root::new(t, window, cx)
+        }
+    });
+    let table = made.borrow().clone().unwrap();
+    cx.simulate_resize(size(px(1400.), px(900.)));
+    let cases = [
+        (
+            "select",
+            "stage",
+            None,
+            Value::text("s1"),
+            Value::text("s4"),
+        ),
+        (
+            "multi-select",
+            "tags",
+            None,
+            Value::ids(["t2"]),
+            Value::ids(["t5", "t9"]),
+        ),
+        (
+            "date by month",
+            "when",
+            Some(DateBucket::Month),
+            Value::date_on_day(today - 200),
+            Value::date_on_day(today + 90),
+        ),
+        (
+            "person",
+            "who",
+            None,
+            Value::People(vec![Person::Owner]),
+            Value::People(vec![Person::agent("agent-3")]),
+        ),
+    ];
+    for (label, by, bucket, a, b) in cases {
+        let mut db = db.clone();
+        let view = &mut db.database.as_mut().unwrap().views[0];
+        view.group_by = Some(by.into());
+        view.group_date = bucket;
+        table.update(cx, |t, cx| t.set_database(db, cx));
+        draw(cx);
+        let mut works = Vec::new();
+        let mut frames = Vec::new();
+        for n in 0..9 {
+            // The host's new rows, made before the clock starts: one value changed.
+            let mut next = rows.clone();
+            let row = (n * 7_919 + 11) % ROWS;
+            let value = if n.is_multiple_of(2) {
+                a.clone()
+            } else {
+                b.clone()
+            };
+            next[row].values.as_mut().unwrap().insert(by.into(), value);
+            // Timed inside the update: a test window draws as each update ends.
+            let (work, groups) = table.update(cx, |t, cx| {
+                t.set_rows(next, cx);
+                let start = Instant::now();
+                let groups = t.groups().len();
+                (start.elapsed(), groups)
+            });
+            assert!(groups > 1);
+            works.push(work);
+            frames.push(work + frame(cx));
+        }
+        report(&format!("a {label} value changed, worked out"), works, 10);
+        report(
+            &format!("a {label} value changed, worked out and drawn"),
+            frames,
+            25,
+        );
+    }
+}
