@@ -247,7 +247,11 @@ fn main() {
   the list is shown, editable, and gets a palette colour chosen by its calendar id.
 - **Events:** an `Event` has an id, a series id for an occurrence of a recurring event, a title,
   an `EventTime`, a calendar id, a location, notes, attendees (`Attendee`: name, email,
-  `Response`, organizer, me), a read-only flag of its own and, rarely, a colour of its own. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
+  `Response`, organizer, me), a read-only flag of its own, rarely a colour of its own, and the
+  zone it was made in (`time_zone`, Google's `timeZone`): where that zone's clock differs from
+  the display zone's, the panel adds the time there, "Wednesday, November 18 · 2 – 3 PM
+  (GMT-5) New York". Build one with `Event::timed`, `Event::all_day` and the builder methods,
+  or a struct literal ending in `..Default::default()`, so fields added later don't break it. An `EventTime` is either two instants or all-day dates. The end is exclusive, as
   iCalendar's DTEND: a one-day event on the 14th ends on the 15th. Your app supplies the events
   for the range it's told about in `RangeChange`.
 - **The calendar never changes an event.** Making, moving, resizing and deleting are proposals,

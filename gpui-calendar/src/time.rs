@@ -523,6 +523,32 @@ pub fn title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -> Strin
     }
 }
 
+/// A zone's offset from GMT at an instant, as Google Calendar writes it: "GMT-5", "GMT+5:30",
+/// or "GMT" itself.
+pub fn gmt_offset(at: DateTime<Utc>, tz: Tz) -> String {
+    let secs = tz
+        .offset_from_utc_datetime(&at.naive_utc())
+        .fix()
+        .local_minus_utc();
+    let sign = if secs < 0 { '-' } else { '+' };
+    let (h, m) = (secs.abs() / 3600, secs.abs() % 3600 / 60);
+    match (h, m) {
+        (0, 0) => "GMT".into(),
+        (h, 0) => format!("GMT{sign}{h}"),
+        (h, m) => format!("GMT{sign}{h}:{m:02}"),
+    }
+}
+
+/// A zone's place, from its IANA name: "New York" for America/New_York, "Buenos Aires" for
+/// America/Argentina/Buenos_Aires, "UTC" for UTC.
+pub fn zone_place(tz: Tz) -> String {
+    tz.name()
+        .rsplit('/')
+        .next()
+        .unwrap_or(tz.name())
+        .replace('_', " ")
+}
+
 /// The zone's short name on a date, for the corner of the grid: "PST", or "GMT+5:30" where the
 /// database has no letters for it.
 pub fn zone_label(date: NaiveDate, tz: Tz) -> String {
