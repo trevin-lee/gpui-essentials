@@ -33,6 +33,12 @@ It replaces GPUI Kit in this workspace's crates, covering what they use. See
   indenting a line or every selected line, Enter keeping the indent, and Ctrl-Tab moving the
   keyboard on. Only the rows in view are drawn, so a file of thousands of lines types as fast as
   a short one. Undo, the input method and the rest are a field's.
+- **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
+  .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
+  radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
+  End move along and turn on what they reach, passing over a disabled option and stopping at
+  the ends. `touch(true)` makes its options 44 points tall; in a narrow space their labels are
+  cut short.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
