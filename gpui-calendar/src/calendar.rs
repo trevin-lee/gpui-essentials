@@ -60,6 +60,9 @@ actions!(
         Find,
         /// Opens the mini month to jump to a date (where it's behind the title).
         GoToDate,
+        /// With the event panel open, asks the host to edit its event ([`CalendarEvent::Edit`]),
+        /// as the panel's Edit does. Nothing for a read-only event.
+        EditPanelEvent,
     ]
 );
 
@@ -88,6 +91,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("delete", DeleteSelected, c),
         KeyBinding::new("escape", Cancel, c),
         KeyBinding::new("g", GoToDate, c),
+        KeyBinding::new("e", EditPanelEvent, c),
         KeyBinding::new(
             if cfg!(any(target_os = "macos", target_os = "ios")) {
                 "cmd-f"
@@ -2450,6 +2454,20 @@ impl Calendar {
         }
     }
 
+    /// The panel's Edit: the panel closes and the host is asked to open its editor on the
+    /// event. Nothing without the panel, or for an event that can't be edited.
+    pub fn edit_panel_event(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.panel.as_ref().map(|p| p.id.clone()) else {
+            return;
+        };
+        let Some(event) = self.editable(&id).map(Event::to_ref) else {
+            return;
+        };
+        self.panel = None;
+        cx.emit(CalendarEvent::Edit(event));
+        cx.notify();
+    }
+
     /// The event the panel shows, if it's open.
     pub fn panel_event(&self) -> Option<&EventId> {
         self.panel.as_ref().map(|p| &p.id)
@@ -3081,6 +3099,7 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
             .on_action(cx.listener(|_, _: &Find, _, cx| cx.emit(CalendarEvent::Find)))
             .on_action(cx.listener(|c, _: &GoToDate, window, cx| c.toggle_mini_month(window, cx)))
+            .on_action(cx.listener(|c, _: &EditPanelEvent, _, cx| c.edit_panel_event(cx)))
             .children(aside)
             .child(
                 div()

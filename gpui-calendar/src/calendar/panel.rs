@@ -785,8 +785,6 @@ impl Calendar {
             } else {
                 ControlSize::Small
             };
-            let this_edit = this.clone();
-            let r = e.to_ref();
             footer = footer.child(
                 div()
                     .flex()
@@ -798,17 +796,7 @@ impl Calendar {
                             .label("Edit")
                             .outline()
                             .with_size(size)
-                            .on_click(move |_, window, cx| {
-                                let event = r.clone();
-                                this_edit
-                                    .update(cx, |c, cx| {
-                                        c.panel = None;
-                                        cx.emit(CalendarEvent::Edit(event));
-                                        c.focus.focus(window, cx);
-                                        cx.notify();
-                                    })
-                                    .ok();
-                            }),
+                            .on_click(act(|c, cx| c.edit_panel_event(cx))),
                     )
                     .child(
                         div().debug_selector(|| "panel-delete".into()).child(
