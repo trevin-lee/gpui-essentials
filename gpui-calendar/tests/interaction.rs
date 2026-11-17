@@ -1717,6 +1717,56 @@ fn side_by_side_events_too_many_for_the_day_show_a_count_that_lists_the_rest(
 }
 
 #[gpui::test]
+fn a_month_days_more_lists_its_events_beside_it(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let ids = crowded(&c, cx);
+    c.update(cx, |c, cx| c.set_view(CalendarView::Month, cx));
+    draw(cx);
+    draw(cx);
+    let more = c
+        .read_with(cx, |c, _| c.accessibility_items())
+        .into_iter()
+        .find(|i| i.target == A11yTarget::More(day(3)))
+        .expect("Thursday's +N more")
+        .bounds;
+    // A click lists all of Thursday's events, by start, beside it; the view stays.
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Month);
+    assert_eq!(c.read_with(cx, |c, _| c.more_day()), Some(day(3)));
+    let mut want: Vec<EventId> = vec!["ro".into()];
+    want.extend(ids.iter().cloned());
+    assert_eq!(
+        c.read_with(cx, |c, _| c.crowd_events().map(<[EventId]>::to_vec)),
+        Some(want)
+    );
+    let list = cx.debug_bounds("gpui-core-popover").expect("the list");
+    let both = list.intersect(&more);
+    assert!(
+        both.size.width <= px(0.) || both.size.height <= px(0.),
+        "{list:?} over {more:?}"
+    );
+    // Again closes it; Escape does too.
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+    c.update(cx, |c, cx| assert!(c.open_more(day(3), cx)));
+    draw(cx);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+    // A click on a row opens that event, and the list closes.
+    cx.simulate_click(more.center(), Modifiers::none());
+    draw(cx);
+    let row = cx.debug_bounds("crowd-row-0").expect("a row");
+    cx.simulate_click(row.center(), Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.crowd_events().is_none()));
+    assert!(has(&seen, &CalendarEvent::Open("ro".into())));
+    assert_eq!(c.read_with(cx, |c, _| c.view()), CalendarView::Month);
+}
+
+#[gpui::test]
 fn a_row_of_the_list_drags_its_event_into_the_grid(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let ids = crowded(&c, cx);

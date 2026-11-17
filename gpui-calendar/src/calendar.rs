@@ -1481,8 +1481,11 @@ impl Calendar {
         };
         let target = paint::target_at(&geo, &self.shared, event.position);
         // A press outside the list closes it; one on its "+N" toggles it.
-        let reopen = matches!(&target, Target::Crowd(ids, _)
-            if self.crowd.as_ref().is_none_or(|c| &c.ids != ids));
+        let reopen = match &target {
+            Target::Crowd(ids, _) => self.crowd.as_ref().is_none_or(|c| &c.ids != ids),
+            Target::More(date) => self.crowd.as_ref().is_none_or(|c| c.day != Some(*date)),
+            _ => false,
+        };
         self.close_crowd(cx);
         let double = event.click_count >= 2;
         match &target {
@@ -1506,7 +1509,25 @@ impl Calendar {
                 }
                 return;
             }
-            Target::More(date) | Target::Date(date) => {
+            // A month day's "+N more" lists the day's events beside it (a click on it again
+            // closes the list).
+            Target::More(date) => {
+                if reopen {
+                    let anchor = self
+                        .shared
+                        .mores
+                        .borrow()
+                        .iter()
+                        .find(|(_, d)| d == date)
+                        .map_or(
+                            Bounds::new(event.position, size(px(1.), px(1.))),
+                            |(b, _)| *b,
+                        );
+                    self.open_day_list(*date, anchor, cx);
+                }
+                return;
+            }
+            Target::Date(date) => {
                 let date = *date;
                 self.view = CalendarView::Day;
                 self.go_to(date, cx);
