@@ -117,14 +117,9 @@ instead and never resolve URLs, decode data or read paths.
 
 ## Features and keys
 
-Cargo features forward to gpui-kit's syntax highlighting for fenced code
-blocks; gpui-kit only highlights when one is on:
-
-| Feature | Effect |
-| --- | --- |
-| `syntect` (default) | About 200 languages, no syntax tree |
-
-Disable default features to build without highlighting.
+Fenced code blocks are coloured by the host's highlighter
+(`BlockEditorState::with_code_highlighter`; gpui-core's `highlight` feature makes one), and
+drawn uncoloured without one.
 
 Keys (Cmd instead of Ctrl on macOS): Enter, Backspace/Delete, arrows,
 Home/End, Ctrl+Home/End (document start/end), Shift to select, Ctrl+A,
@@ -182,8 +177,8 @@ Linux needs the same system libraries as gpui-kit
 (`script/install-linux.sh` in that repo). Then:
 
 ```sh
-cargo run --example story
 cargo test            # window tests need a display; headless: xvfb-run -a cargo test
+cargo run -p gpui-blocks --example editor   # the editor, in gpui-blocks' example
 ```
 
 Everything builds from public dependencies only.
