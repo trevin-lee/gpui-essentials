@@ -79,7 +79,8 @@ their look.
   hours.
 - **Touch** (`touch`, on by default on iOS and Android): GPUI turns touches into taps, long
   presses and pans, the same on every platform, and the calendar takes them so:
-  - A tap selects, and a tap on the selected event opens it.
+  - A tap selects, a tap on the selected event opens it, and a tap on the selected empty slot
+    makes an event of the usual length there (a day, in the all-day row and the month).
   - A long press on empty time makes an event of the usual length there (or a day, in the
     all-day row and the month), and a long press on an event picks it up; either then follows
     the finger, and lifting it proposes the change.
@@ -97,7 +98,7 @@ their look.
     period.
 - **Narrow widths:** below 600 pixels the calendar lays itself out for a phone. The header is a
   compact one, drawn from plain elements: a short title ("Wed, Nov 18", "Nov 2026"), Today, the
-  arrows, and Day, Month and List. The gutter narrows, days too narrow for "Mon 16" show the name
+  arrows, and Day, Week, Month and List. The gutter narrows, days too narrow for "Mon 16" show the name
   over the number, "+3 more" becomes "+3", and the month's rows drop their times for the
   title. Anywhere, text that can't keep two letters before its "…" is left out rather than cut
   to "L…". `short_title()` gives the short title for a header of your own.

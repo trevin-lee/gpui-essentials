@@ -490,9 +490,10 @@ pub struct CalendarOptions {
     pub mini_month: bool,
     /// The most rows of all-day events the time grid shows before it says "+N".
     pub all_day_rows: usize,
-    /// Taken by touch, as on a phone or a tablet. A long press picks an event up or makes one,
-    /// a touch on the selected event drags it, a swipe sideways changes the period, small
-    /// things take taps in a 44-point square, and the header's arrows give way to the swipe.
+    /// Taken by touch, as on a phone or a tablet. A long press picks an event up or makes one
+    /// (so does a tap on the slot a tap picked), a touch on the selected event drags it, a
+    /// swipe sideways changes the period, small things take taps in a 44-point square, and the
+    /// header's arrows give way to the swipe.
     /// On by default on iOS and Android.
     pub touch: bool,
     /// The answers a repeating event's edit can be given, for a host that can't carry out all
