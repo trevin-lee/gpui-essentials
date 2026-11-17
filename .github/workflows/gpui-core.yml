@@ -79,6 +79,11 @@ jobs:
       - run: cargo doc -p gpui-core --locked --no-deps --features highlight
         env:
           RUSTDOCFLAGS: -D warnings
+      # Every crate draws with gpui-core, and their workflows don't run for a gpui-core change
+      # alone: lint them all and build their tests here, in one job instead of one per crate.
+      # Main's nightly run tests each crate in full.
+      - run: cargo clippy --workspace --locked --all-targets -- -D warnings
+      - run: cargo test --workspace --locked --no-run
 
   ios:
     needs: changes
