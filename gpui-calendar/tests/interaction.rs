@@ -1216,6 +1216,68 @@ fn the_panel_adds_the_events_own_zone_where_it_differs(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn the_panel_joins_the_call_and_opens_the_events_page(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open_with(cx, panel_on);
+    c.update(cx, |c, cx| c.open_panel("a".into(), cx));
+    draw(cx);
+    // Without either, neither is shown.
+    assert!(cx.debug_bounds("panel-join").is_none());
+    assert!(cx.debug_bounds("panel-url").is_none());
+    c.update(cx, |c, cx| {
+        let e = c
+            .event("a")
+            .unwrap()
+            .clone()
+            .conference(
+                "https://meet.example/abc-defg",
+                Some("Join with Meet".into()),
+            )
+            .url("https://calendar.example/event?eid=a", None);
+        c.upsert_event(e, cx);
+    });
+    draw(cx);
+    let opened = |seen: &Seen| {
+        seen.borrow()
+            .iter()
+            .filter_map(|e| match e {
+                CalendarEvent::OpenUrl { event, url } => Some((event.id.clone(), url.clone())),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let join = cx.debug_bounds("panel-join").expect("Join");
+    cx.simulate_click(join.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        opened(&seen),
+        vec![("a".into(), "https://meet.example/abc-defg".into())]
+    );
+    let page = cx.debug_bounds("panel-url").expect("the event's page");
+    cx.simulate_click(page.center(), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        opened(&seen).last().cloned(),
+        Some(("a".into(), "https://calendar.example/event?eid=a".into()))
+    );
+    // Neither closes the panel, and they're there for a read-only event too.
+    assert_eq!(
+        c.read_with(cx, |c, _| c.panel_event().cloned()),
+        Some("a".into())
+    );
+    c.update(cx, |c, cx| {
+        let e = c
+            .event("ro")
+            .unwrap()
+            .clone()
+            .conference("https://meet.example/ro", None);
+        c.upsert_event(e, cx);
+        c.open_panel("ro".into(), cx);
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("panel-join").is_some());
+}
+
+#[gpui::test]
 fn a_read_only_events_panel_has_no_edits(cx: &mut TestAppContext) {
     let (c, _, cx) = open_with(cx, panel_on);
     double_click(cx, spot(&c, cx, day(3), 9, 30));
