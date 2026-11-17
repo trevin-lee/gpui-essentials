@@ -1,22 +1,24 @@
 //! A reply in Markdown drawn as it streams in ([`StreamingMarkdown`]): blocks laid out once and
-//! kept, the open block closed for now, the caret, its height while it's written, and what
-//! happens when it ends or its message replaces it. Laid out with Core Text and the bundled
-//! Inter, as on screen.
+//! kept, the open block closed for now, the caret, its height while it's written, a selection
+//! across blocks, and what happens when it ends or its message replaces it. Laid out with Core
+//! Text and the bundled Inter, as on screen.
 
 #![cfg(all(target_os = "macos", feature = "gpui"))]
 
 mod common;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use ::gpui::TestDispatcher;
 use common::{draw, setup};
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_chatwidgets::StreamingMarkdown;
-use gpui_core::text::TextViewStyle;
+use gpui_core::text::{TextView, TextViewStyle};
 // The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
 
@@ -49,12 +51,18 @@ fn style() -> TextViewStyle {
     }
 }
 
+/// The text colour around the draft: the caret's.
+const TEXT: u32 = 0xeeeeee;
+
 /// A chat's foot: the draft at a width, in the text style around it, or the card its message
 /// brought in its place.
 struct Chat {
     draft: Entity<StreamingMarkdown>,
     card: Option<Entity<gpui_chatwidgets::CardView>>,
     width: Pixels,
+    /// Some text laid out below the draft as one TextView, in the same style, and not painted:
+    /// to measure how tall it is.
+    probe: Option<SharedString>,
 }
 
 impl Render for Chat {
@@ -71,8 +79,18 @@ impl Render for Chat {
             .font_family("Inter")
             .text_size(px(14.))
             .line_height(px(14. * 1.625))
-            .text_color(rgb(0xeeeeee))
+            .text_color(rgb(TEXT))
             .child(div().flex_none().w(self.width).child(shown))
+            .when_some(self.probe.clone(), |d, text| {
+                d.child(
+                    div()
+                        .debug_selector(|| "probe".into())
+                        .invisible()
+                        .flex_none()
+                        .w(self.width)
+                        .child(TextView::markdown("probe", text).style(style())),
+                )
+            })
     }
 }
 
@@ -115,11 +133,13 @@ fn open_in(app: &mut TestAppContext, width: f32, height: f32) -> Opened<'_> {
             draft: draft.clone(),
             card: None,
             width: px(width),
+            probe: None,
         });
         *m.borrow_mut() = Some((draft, chat.clone()));
         gpui_core::Root::new(chat, window, cx)
     });
     cx.simulate_resize(size(px(1000.), px(height)));
+    cx.update(|window, _| window.activate_window());
     let (draft, chat) = made.borrow().clone().unwrap();
     draw(cx);
     Opened {
@@ -136,20 +156,95 @@ fn deltas(text: &str, n: usize) -> Vec<String> {
     chars.chunks(n).map(|c| c.iter().collect()).collect()
 }
 
-fn sel(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
+/// A glyph drawn: its bounds in pixels, a hundredth of a pixel at a time.
+type Glyph = [i64; 4];
+
+/// Every glyph drawn last frame, in order.
+fn glyphs(cx: &mut VisualTestContext) -> Vec<Glyph> {
+    cx.update(|window, _| {
+        let k = window.scale_factor();
+        let at = |v: ScaledPixels| (v.as_f32() / k * 100.).round() as i64;
+        let scene = window.rendered_scene();
+        let mut all: Vec<Glyph> = scene
+            .monochrome_sprites
+            .iter()
+            .map(|s| s.bounds)
+            .chain(scene.subpixel_sprites.iter().map(|s| s.bounds))
+            .map(|b| {
+                [
+                    at(b.origin.x),
+                    at(b.origin.y),
+                    at(b.size.width),
+                    at(b.size.height),
+                ]
+            })
+            .collect();
+        all.sort_by_key(|g| (g[1], g[0]));
+        all
+    })
 }
 
-/// The bounds of the draft and of every block drawn, by element.
-fn bounds(
-    cx: &mut VisualTestContext,
-    keys: usize,
-) -> (Bounds<Pixels>, Vec<Option<Bounds<Pixels>>>) {
-    let draft = cx.debug_bounds("d:draft").expect("the draft is drawn");
-    let blocks = (0..keys)
-        .map(|k| cx.debug_bounds(sel(format!("d:md{k}"))))
-        .collect();
-    (draft, blocks)
+/// How tall `text` is, drawn as one TextView at the draft's width.
+fn height_of(o: &mut Opened, text: &str) -> Pixels {
+    let chat = o.chat.clone();
+    let text = SharedString::from(text.to_string());
+    o.cx.update(|_, cx| {
+        chat.update(cx, |c, cx| {
+            c.probe = Some(text);
+            cx.notify();
+        })
+    });
+    draw(o.cx);
+    let h = o.cx.debug_bounds("probe").expect("the probe").size.height;
+    o.cx.update(|_, cx| {
+        chat.update(cx, |c, cx| {
+            c.probe = None;
+            cx.notify();
+        })
+    });
+    draw(o.cx);
+    h
+}
+
+/// The glyphs of the settled blocks: those above where the settled text ends.
+fn settled_glyphs(o: &mut Opened) -> Vec<Glyph> {
+    let settled = o.draft.read_with(o.cx, |d, _| d.settled_text().to_string());
+    let h = height_of(o, &settled);
+    let top = o.cx.debug_bounds("d:draft").expect("the draft").top();
+    let below = ((f32::from(top) + f32::from(h)) * 100.).round() as i64;
+    glyphs(o.cx).into_iter().filter(|g| g[1] < below).collect()
+}
+
+/// The glyphs of `kept` that aren't in `now`.
+fn missing(kept: &[Glyph], now: &[Glyph]) -> Vec<Glyph> {
+    let now: HashSet<&Glyph> = now.iter().collect();
+    kept.iter().filter(|g| !now.contains(g)).copied().collect()
+}
+
+/// The caret: the quads drawn in the text's colour.
+fn carets(cx: &mut VisualTestContext) -> Vec<Bounds<Pixels>> {
+    let colour: Hsla = rgb(TEXT).into();
+    cx.update(|window, _| {
+        let k = window.scale_factor();
+        window
+            .rendered_scene()
+            .quads
+            .iter()
+            .filter(|q| q.background.as_solid() == Some(colour))
+            .map(|q| {
+                Bounds::new(
+                    point(
+                        px(q.bounds.origin.x.as_f32() / k),
+                        px(q.bounds.origin.y.as_f32() / k),
+                    ),
+                    size(
+                        px(q.bounds.size.width.as_f32() / k),
+                        px(q.bounds.size.height.as_f32() / k),
+                    ),
+                )
+            })
+            .collect()
+    })
 }
 
 fn append(o: &mut Opened, text: &str) {
@@ -170,7 +265,7 @@ fn a_reply_streams_in_and_settled_blocks_stay_laid_out() {
     let mut o = open(&mut app, 560.);
     let mut tallest = px(0.);
     let mut last_settled = 0;
-    let mut kept: Vec<(usize, Bounds<Pixels>)> = Vec::new();
+    let mut kept: Vec<Glyph> = Vec::new();
     for (i, delta) in deltas(REPLY, 7).iter().enumerate() {
         append(&mut o, delta);
         let stats = o.draft.read_with(o.cx, |d, _| d.stats());
@@ -178,7 +273,7 @@ fn a_reply_streams_in_and_settled_blocks_stay_laid_out() {
         assert_eq!(stats.made, stats.settled, "at delta {i}");
         assert!(stats.settled >= last_settled, "blocks only settle");
         last_settled = stats.settled;
-        let (draft, blocks) = bounds(o.cx, stats.settled + 1);
+        let draft = o.cx.debug_bounds("d:draft").expect("the draft is drawn");
         // The draft only grows while it's written.
         assert!(
             draft.size.height >= tallest,
@@ -186,17 +281,11 @@ fn a_reply_streams_in_and_settled_blocks_stay_laid_out() {
             draft.size.height
         );
         tallest = draft.size.height;
-        // A settled block doesn't move or change size as the text after it grows.
-        for (k, b) in &kept {
-            assert_eq!(blocks[*k], Some(*b), "block {k} moved at delta {i}");
-        }
+        // A settled block's text doesn't move as the text after it grows.
+        let gone = missing(&kept, &glyphs(o.cx));
+        assert!(gone.is_empty(), "{} glyphs moved at delta {i}", gone.len());
         if i % 40 == 0 {
-            kept = blocks
-                .iter()
-                .enumerate()
-                .take(stats.settled)
-                .filter_map(|(k, b)| Some((k, (*b)?)))
-                .collect();
+            kept = settled_glyphs(&mut o);
         }
     }
     let stats = o.draft.read_with(o.cx, |d, _| d.stats());
@@ -204,6 +293,7 @@ fn a_reply_streams_in_and_settled_blocks_stay_laid_out() {
         stats.settled > 30,
         "a long reply settles into many blocks: {stats:?}"
     );
+    assert!(kept.len() > 2000, "{} glyphs kept", kept.len());
     assert_eq!(o.draft.read_with(o.cx, |d, _| d.text().to_string()), REPLY);
 }
 
@@ -211,26 +301,20 @@ fn a_reply_streams_in_and_settled_blocks_stay_laid_out() {
 fn the_open_block_shows_as_it_will_end_up() {
     let mut app = app();
     let mut o = open(&mut app, 560.);
-    let c = StreamingMarkdown::CARET;
     // Nothing yet: the caret alone.
-    assert_eq!(shown(&mut o), c);
+    assert_eq!(shown(&mut o), "");
+    assert_eq!(carets(o.cx).len(), 1);
     for (text, want) in [
-        ("Some **bold", format!("Some **bold{c}**")),
-        (
-            " words** and `co",
-            format!("Some **bold words** and `co{c}`"),
-        ),
-        (
-            "de` and [a li",
-            format!("Some **bold words** and `code` and a li{c}"),
-        ),
+        ("Some **bold", "Some **bold**"),
+        (" words** and `co", "Some **bold words** and `co`"),
+        ("de` and [a li", "Some **bold words** and `code` and a li"),
         (
             "nk](https://exa",
-            format!("Some **bold words** and `code` and a link{c}"),
+            "Some **bold words** and `code` and a link",
         ),
         (
             "mple.com).\n\n1.",
-            format!("Some **bold words** and `code` and [a link](https://example.com).{c}"),
+            "Some **bold words** and `code` and [a link](https://example.com).",
         ),
     ] {
         append(&mut o, text);
@@ -239,13 +323,11 @@ fn the_open_block_shows_as_it_will_end_up() {
     // The paragraph settled once the list's first line came whole.
     append(&mut o, " one\n```rust\nfn main() {\n");
     let tail = shown(&mut o);
-    assert!(
-        tail.ends_with(&format!("```rust\nfn main() {{{c}")),
-        "{tail:?}"
-    );
+    assert!(tail.ends_with("```rust\nfn main() {"), "{tail:?}");
     // An open fence is code, Markdown and all.
     append(&mut o, "  let x = **y;\n");
-    assert!(shown(&mut o).ends_with(&format!("let x = **y;{c}")));
+    assert!(shown(&mut o).ends_with("let x = **y;"));
+    assert_eq!(carets(o.cx).len(), 1);
 }
 
 #[test]
@@ -256,56 +338,57 @@ fn the_same_message_moves_nothing() {
         append(&mut o, &delta);
     }
     let stats = o.draft.read_with(o.cx, |d, _| d.stats());
-    let keys = stats.settled + 1;
-    let before = bounds(o.cx, keys);
+    let before = (o.cx.debug_bounds("d:draft"), glyphs(o.cx));
     let d = o.draft.clone();
     o.cx.update(|_, cx| d.update(cx, |d, cx| d.finish(REPLY, cx)));
     draw(o.cx);
-    let after = bounds(o.cx, keys);
-    assert_eq!(before, after, "every block where it was");
+    let after = (o.cx.debug_bounds("d:draft"), glyphs(o.cx));
+    assert_eq!(before, after, "every glyph where it was");
     let now = o.draft.read_with(o.cx, |d, _| d.stats());
-    assert_eq!(
-        now.made, stats.made,
-        "nothing laid out again but the caret's block"
-    );
+    assert_eq!(now.made, stats.made, "no block made again");
     assert!(!o.draft.read_with(o.cx, |d, _| d.is_writing()));
-    assert!(!shown(&mut o).contains(StreamingMarkdown::CARET));
+    assert!(carets(o.cx).is_empty());
     // `end` alone does the same.
     let mut app = self::app();
     let mut o = open(&mut app, 520.);
     for delta in deltas(REPLY, 29) {
         append(&mut o, &delta);
     }
-    let before = bounds(o.cx, keys);
+    let before = (o.cx.debug_bounds("d:draft"), glyphs(o.cx));
     let d = o.draft.clone();
     o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
     draw(o.cx);
-    assert_eq!(before, bounds(o.cx, keys));
+    assert_eq!(before, (o.cx.debug_bounds("d:draft"), glyphs(o.cx)));
     // Deltas after the end are ignored.
     append(&mut o, "more");
     assert_eq!(o.draft.read_with(o.cx, |d, _| d.text().len()), REPLY.len());
 }
 
 #[test]
-fn blocks_far_off_screen_are_kept_as_their_space_while_written() {
+fn blocks_off_screen_are_laid_out_but_not_painted() {
     let mut app = app();
     let mut o = open_in(&mut app, 520., 700.);
     for delta in deltas(REPLY, 37) {
         append(&mut o, &delta);
     }
-    let stats = o.draft.read_with(o.cx, |d, _| d.stats());
+    let draft = o.cx.debug_bounds("d:draft").unwrap();
     assert!(
-        stats.kept_as_space > 5,
-        "the blocks far below the window: {stats:?}"
+        draft.size.height > px(2000.),
+        "most of the reply is below the window: {draft:?}"
     );
-    let keys = stats.settled + 1;
-    let before = bounds(o.cx, keys);
-    // Ended, every block is text again, each where its space was.
+    // Only what's in the window is painted.
+    let drawn = glyphs(o.cx);
+    assert!(!drawn.is_empty());
+    assert!(
+        drawn.iter().all(|g| g[1] < 700 * 100),
+        "a glyph painted below the window"
+    );
+    // Ended, every block is where it was.
     let d = o.draft.clone();
     o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
     draw(o.cx);
-    assert_eq!(o.draft.read_with(o.cx, |d, _| d.stats().kept_as_space), 0);
-    assert_eq!(before, bounds(o.cx, keys));
+    assert_eq!(o.cx.debug_bounds("d:draft"), Some(draft));
+    assert_eq!(glyphs(o.cx), drawn);
 }
 
 #[test]
@@ -321,25 +404,21 @@ fn a_shorter_or_tidied_message_keeps_what_it_shares() {
             append(&mut o, &delta);
         }
         let stats = o.draft.read_with(o.cx, |d, _| d.stats());
-        let keys = stats.settled + 1;
-        let (draft_before, before) = bounds(o.cx, keys);
+        let draft_before = o.cx.debug_bounds("d:draft").unwrap();
+        let before = glyphs(o.cx);
         let first = REPLY[..cut].trim_end();
         let d = o.draft.clone();
         o.cx.update(|_, cx| d.update(cx, |d, cx| d.finish(first, cx)));
         draw(o.cx);
-        let (draft_after, after) = bounds(o.cx, keys);
+        let draft_after = o.cx.debug_bounds("d:draft").unwrap();
         assert_eq!(o.draft.read_with(o.cx, |d, _| d.text().to_string()), first);
-        // Every block wholly before the cut is where it was, laid out as it was.
-        let kept = before
-            .iter()
-            .zip(&after)
-            .take_while(|(b, a)| b.is_some() && b == a)
-            .count();
+        // Every block before the cut is where it was, laid out as it was; only the cut block
+        // is open.
+        let kept = settled_glyphs(&mut o);
+        assert!(missing(&kept, &before).is_empty(), "a kept block moved");
+        let open = shown(&mut o);
+        assert!(open.len() < 800, "only the cut block is open: {open:?}");
         let now = o.draft.read_with(o.cx, |d, _| d.stats());
-        assert!(
-            now.settled + 1 >= kept && kept + 2 >= now.settled,
-            "kept {kept} of {now:?}"
-        );
         assert!(
             now.made <= stats.made + 1,
             "at most the cut block made again: {now:?}"
@@ -353,27 +432,20 @@ fn a_shorter_or_tidied_message_keeps_what_it_shares() {
     for delta in deltas(REPLY, 31) {
         append(&mut o, &delta);
     }
-    let stats = o.draft.read_with(o.cx, |d, _| d.stats());
     let tidied = REPLY.replace("Step 3: the job itself", "Step 3: the job");
-    let changed_block = {
-        let at = REPLY.find("Step 3: the job itself").unwrap();
-        REPLY[..at].matches("\n\n").count()
-    };
-    let (_, before) = bounds(o.cx, stats.settled + 1);
+    let at = REPLY.find("Step 3: the job itself").unwrap();
+    let before = glyphs(o.cx);
     let d = o.draft.clone();
     o.cx.update(|_, cx| d.update(cx, |d, cx| d.finish(&tidied, cx)));
     draw(o.cx);
-    let (_, after) = bounds(o.cx, stats.settled + 1);
-    let same = before
-        .iter()
-        .zip(&after)
-        .take_while(|(b, a)| b.is_some() && b == a)
-        .count();
+    let kept = settled_glyphs(&mut o);
+    assert!(missing(&kept, &before).is_empty(), "a kept block moved");
+    let settled = o.draft.read_with(o.cx, |d, _| d.settled_text().len());
     assert!(
-        same + 3 >= changed_block.min(stats.settled),
-        "{same} kept, change near {changed_block}"
+        settled + 800 >= at && settled <= at,
+        "kept up to {settled}, the change at {at}"
     );
-    assert!(same > 10);
+    assert!(o.draft.read_with(o.cx, |d, _| d.stats().settled) > 10);
 }
 
 #[test]
@@ -473,7 +545,7 @@ fn a_link_goes_to_the_host() {
         &mut o,
         "See [the docs](https://x.test/docs) first.\n\nThen the rest",
     );
-    let at = o.cx.debug_bounds("d:md0").expect("the first block settled");
+    let at = o.cx.debug_bounds("d:draft").expect("the draft is drawn");
     // The link's words, a little way in.
     let x = at.origin.x + px(40.);
     o.cx.simulate_click(point(x, at.origin.y + px(8.)), Modifiers::none());
@@ -574,4 +646,139 @@ fn nothing_runs_out_of_a_narrow_draft_mid_stream() {
             &found[..found.len().min(10)]
         );
     }
+}
+
+fn drag(o: &mut Opened, from: Point<Pixels>, to: Point<Pixels>) {
+    o.cx.simulate_event(MouseDownEvent {
+        button: MouseButton::Left,
+        position: from,
+        modifiers: Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    o.cx.simulate_event(MouseMoveEvent {
+        position: to,
+        pressed_button: Some(MouseButton::Left),
+        modifiers: Modifiers::none(),
+    });
+    o.cx.simulate_event(MouseUpEvent {
+        button: MouseButton::Left,
+        position: to,
+        modifiers: Modifiers::none(),
+        click_count: 1,
+    });
+    draw(o.cx);
+}
+
+/// What Cmd-C copies, with the clipboard emptied first.
+fn copied(o: &mut Opened) -> String {
+    o.cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string(String::new())));
+    o.cx.simulate_keystrokes("cmd-c");
+    o.cx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()))
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_selection_across_settled_blocks_stays_while_the_reply_streams() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    for delta in deltas(
+        "First block.\n\nSecond block.\n\nThird, being written.\n\nFour",
+        5,
+    ) {
+        append(&mut o, &delta);
+    }
+    assert_eq!(o.draft.read_with(o.cx, |d, _| d.stats().settled), 2);
+    let top = o.cx.debug_bounds("d:draft").unwrap();
+    let first = height_of(&mut o, "First block.");
+    let both = height_of(&mut o, "First block.\n\nSecond block.");
+    // From the first block's start into the second block's words.
+    drag(
+        &mut o,
+        point(top.left() + px(1.), top.top() + first / 2.),
+        point(top.left() + px(30.), top.top() + both - px(4.)),
+    );
+    let picked = copied(&mut o);
+    assert!(picked.starts_with("First block.\n\nS"), "{picked:?}");
+    assert!(
+        "First block.\n\nSecond block.".starts_with(&picked),
+        "{picked:?}"
+    );
+    // The reply goes on: the third block settles, a fourth streams in, and the selection
+    // is still there to copy.
+    for delta in deltas("th, a list:\n\n- a\n- b\n\nAnd more text", 3) {
+        append(&mut o, &delta);
+    }
+    assert_eq!(o.draft.read_with(o.cx, |d, _| d.stats().settled), 4);
+    assert_eq!(copied(&mut o), picked);
+    // Select all reaches every block, the open one too.
+    o.cx.simulate_keystrokes("cmd-a");
+    assert_eq!(
+        copied(&mut o),
+        "First block.\n\nSecond block.\n\nThird, being written.\n\nFourth, a list:\n\na\nb\n\nAnd more text"
+    );
+}
+
+#[test]
+fn the_caret_follows_the_tail_and_never_moves_the_text() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    for delta in deltas("A settled paragraph.\n\nThe tail, being written", 4) {
+        append(&mut o, &delta);
+    }
+    let draft = o.cx.debug_bounds("d:draft").unwrap();
+    let drawn = glyphs(o.cx);
+    let c = carets(o.cx);
+    assert_eq!(c.len(), 1, "{c:?}");
+    let c = c[0];
+    // After the tail's last glyph, on its line.
+    let (top, bottom) = (
+        (f32::from(c.top()) * 100.) as i64,
+        (f32::from(c.bottom()) * 100.) as i64,
+    );
+    let right = drawn
+        .iter()
+        .filter(|g| g[1] + g[3] / 2 >= top && g[1] + g[3] / 2 <= bottom)
+        .map(|g| g[0] + g[2])
+        .max()
+        .expect("glyphs on the caret's line");
+    let x = (f32::from(c.left()) * 100.) as i64;
+    assert!(x >= right - 100 && x <= right + 400, "{c:?} after {right}");
+    assert!(c.top() > draft.top() + px(20.), "on the tail's line");
+    // Ended: the caret goes, and nothing moves.
+    let d = o.draft.clone();
+    o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
+    draw(o.cx);
+    assert!(carets(o.cx).is_empty());
+    assert_eq!(o.cx.debug_bounds("d:draft"), Some(draft));
+    assert_eq!(glyphs(o.cx), drawn);
+}
+
+#[test]
+fn a_link_defined_further_down_resolves_while_the_reply_streams() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    let press = |o: &mut Opened| {
+        let at = o.cx.debug_bounds("d:draft").unwrap();
+        let mut x = at.left() + px(2.);
+        while o.links.borrow().is_empty() && x < at.left() + px(200.) {
+            o.cx.simulate_click(point(x, at.top() + px(8.)), Modifiers::none());
+            x += px(6.);
+        }
+        draw(o.cx);
+    };
+    for delta in deltas("See [the docs][d] first.\n\nThen more text.\n\n", 5) {
+        append(&mut o, &delta);
+    }
+    assert!(o.draft.read_with(o.cx, |d, _| d.stats().settled) >= 1);
+    // No definition yet: the words as written, and no link.
+    press(&mut o);
+    assert!(o.links.borrow().is_empty());
+    for delta in deltas("[d]: https://x.test/docs\n\nThe end", 5) {
+        append(&mut o, &delta);
+    }
+    // The settled first block's link goes to the definition, while the reply is written.
+    assert!(o.draft.read_with(o.cx, |d, _| d.is_writing()));
+    press(&mut o);
+    assert_eq!(o.links.borrow().as_slice(), ["https://x.test/docs"]);
 }

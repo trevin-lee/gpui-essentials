@@ -267,7 +267,7 @@ draft.update(cx, |d, cx| d.finish(&message_body, cx));     // its message's text
 
 | | |
 |---|---|
-| `StreamingMarkdown::new(id) -> StreamingMarkdown` | An empty draft, being written, showing only the caret. `id` prefixes its element ids. |
+| `StreamingMarkdown::new(id) -> StreamingMarkdown` | An empty draft, being written, showing only the caret. `id` prefixes its TextView's element id. |
 | `.style(TextViewStyle)`, `.selectable(bool)`, `.on_link_click(f)` | As gpui-core's `TextView`'s. The text's colour, size, line height and font come from around it, as a TextView's do. |
 | `append(&mut self, text: &str, cx)` | Adds a delta. |
 | `replace(&mut self, text: &str, cx)` | The whole draft so far, in place of what it had. What the two share stays laid out. |
@@ -302,24 +302,29 @@ it draws again.
 
 ### What it draws while the text comes
 
-Each block of the Markdown (a paragraph, a heading, a list, a code block, a table, a quote) is a
-gpui-core `TextView` of its own, spaced as one TextView spaces the same blocks (the style's
-`block_gap`, a heading's margins, the paragraph gap). A block settles when the line after it is
-whole and can't carry it on or change what it is: a paragraph after a blank line or a block that
-interrupts it, a list after something that isn't its next item, a fence once it's closed and the
-next line has come. From then on it's laid out once and kept: its text and style don't change,
-so gpui-core's layout cache holds. On each delta only the open last block is read and laid out
-again, once a frame however many deltas came in it. (The one exception is a block far off screen,
-below.)
+The draft is one gpui-core `TextView` of keyed sources (`TextView::blocks`): each block of the
+Markdown that has settled (a paragraph, a heading, a list, a code block, a table, a quote) is a
+source under a key of its own, and the open last block is the last source. It's drawn, spaced,
+selected and copied as one TextView of the same text would be. A block settles when the line
+after it is whole and can't carry it on or change what it is: a paragraph after a blank line or
+a block that interrupts it, a list after something that isn't its next item, a fence once it's
+closed and the next line has come. From then on its source doesn't change, so the TextView keeps
+its layout; the open block's key becomes the settled block's, so what was laid out while it was
+open is kept too. On each delta only the open last block is read again, and of it only the
+top-level blocks that changed are laid out again, once a frame however many deltas came in it.
+
+**Text can be selected across blocks** and copied (Cmd-C), and Select All takes the whole draft.
+A selection in the settled blocks stays while the draft goes on being written.
 
 In the open block:
 
-- **A steady caret** (`StreamingMarkdown::CARET`, ▍, in the text's colour) at the end of the
-  text, wrapping with the last word. It doesn't blink or fade: nothing draws while no text
-  comes, and nothing draws after the draft ends.
-- **Emphasis, strikethrough and inline code open on the last line are closed for now**, after
-  the caret: `**bold` draws bold, and the rest of the text never flips bold and back. A marker
-  with nothing after it yet isn't drawn.
+- **A steady caret** (gpui-core's `trailing_caret`, a bar in the text's colour) after the text's
+  last character, in a code block or a list item too. It's drawn over the text, never laid out,
+  so it can't move the text, and its going when the draft ends moves nothing. It doesn't blink
+  or fade: nothing draws while no text comes, and nothing draws after the draft ends.
+- **Emphasis, strikethrough and inline code open on the last line are closed for now**:
+  `**bold` draws bold, and the rest of the text never flips bold and back. A marker with
+  nothing after it yet isn't drawn.
 - **A link being written draws as its words**, without its brackets or address, until it's
   whole: `[the docs](https://exa` draws `the docs`.
 - **An open code fence draws as code**, with nothing inside closed or read as Markdown.
@@ -342,8 +347,9 @@ fills it. At a new width the tallest so far starts again.
   were, and the draft is shorter by what follows in the next messages. Its height can shrink
   only here, and by any space kept while it was written.
 - **A reference-style link** (`[docs]` with `[docs]: https://…` further down) reads as text
-  while it streams, as the definition hasn't come yet; a draft whose text defines one is read
-  again whole when it ends, as one view.
+  until its definition comes, then links, in whichever block it is: the TextView reads every
+  block's definitions. A footnote's reference (`[^1]`) is resolved within a block only, so a
+  draft whose text defines a footnote is read again whole when it ends, as one source.
 
 ### Settling
 
@@ -369,32 +375,36 @@ chat 900 pixels tall that follows the reply's end (medians of three runs):
 
 | Into the reply | Streaming | One TextView of the whole text, for comparison |
 |---|---|---|
-| 1,000 characters | 0.48 ms | 0.76 ms |
-| 5,000 characters | 0.79 ms | 3.13 ms |
-| 10,000 characters | 1.07 ms | 6.91 ms |
+| 1,000 characters | 0.31 ms | 0.36 ms |
+| 5,000 characters | 0.38 ms | 0.69 ms |
+| 10,000 characters | 0.73 ms | 1.44 ms |
 
 What's left of the growth is the open block (at 10,000 characters it's a long list, at 1,000 a
-short paragraph) and the blocks' places in the window's layout. While the draft is written, a
-settled block far off screen (a chat's height or more away, as the start of a long reply is once
-the chat has followed its end) is drawn as the space it took, not built and measured each frame;
-one that comes back near the screen is drawn as text again from the next frame, and every block
-is text again when the draft ends, each where its space was. A block that's off screen but near
-it is laid out but not painted.
+short paragraph) and placing the settled blocks' paragraphs, which the TextView does once a
+frame with their layouts kept. gpui-core paints only the paragraphs inside the window's view:
+a block scrolled out of the chat (the start of a long reply, once the chat has followed its
+end) keeps its layout and its place, and costs no painting, and nothing about it changes when
+it comes back into view or the draft ends.
 
 `tests/stream_performance.rs` measures it, and fails if a delta at 10,000 characters costs more
 than three times one at 1,000 (plus half a millisecond), or more than 4 ms, in a release build.
-It prints a whole TextView read again each delta alongside, for comparison. CI runs it in release.
+It prints a whole TextView read again each delta alongside, for comparison, and a list growing
+an item at a time (below), held to 60 ms a delta at 1,000 items. CI runs it in release.
 
 ### Limits
 
-- **Selection stays within a block**: a paragraph, a list or a code block can be selected and
-  copied, but a selection doesn't reach across two blocks, as each is its own TextView.
-- **One long block is laid out whole on each delta**: a list or a table that goes on for pages
-  without a blank line, or a long code block, is one block until it ends, so a delta inside it
-  costs what laying out that block costs.
-- **A block kept as space while the draft is written loses its state**: a selection in a block
-  the chat has scrolled far past goes, and the block is read and laid out again (once) when it
-  comes back near the screen or the draft ends.
+- **The open block is laid out whole on each delta**: gpui-core keeps a layout for each
+  top-level block, and a list or a table that goes on for pages without ending, or a long code
+  block, is one block, and the open one until it ends. A delta at the end of a list costs what
+  laying out the list costs, growing with it: 2.2 ms at 100 short items, 11.6 ms at 500 and
+  23 ms at 1,000 (33,000 characters), measured as above (`tests/stream_performance.rs` prints
+  them).
+- **A selection goes when the text it reaches changes**: one in the settled blocks stays while
+  the draft is written, and one that reaches the open block's growing end goes with the next
+  delta.
+- **A footnote's reference resolves within its own block** while the draft is written (a
+  link's resolves across blocks); a draft that defines a footnote is read again whole when it
+  ends.
 - gpui-core's TextView's limits apply to each block (512 KB of text, 32 levels of nesting).
 - `examples/stream.rs` replays the long reply at a model's pace (`--cps`, `--delta`), then a
   short one whose message brings a card; `--shots <dir>` saves a picture mid-stream and one at the
