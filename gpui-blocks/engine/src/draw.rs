@@ -282,17 +282,6 @@ impl TextLeaf {
         });
         paragraph
     }
-
-    /// The width it takes unwrapped: the end of its longest line.
-    pub(crate) fn natural_width(&mut self, window: &mut Window, app: &mut App) -> Pixels {
-        let paragraph = self.build(window, app);
-        let layout = ParagraphLayout::new(&paragraph, &self.style, px(100_000.), window);
-        layout
-            .rows()
-            .iter()
-            .map(|row| layout.caret(row.range.end, Affinity::Upstream).left())
-            .fold(px(0.), Pixels::max)
-    }
 }
 
 /// A picture's box at `size`, centred on the text's middle, as GPUI Kit places pictures.
@@ -589,8 +578,6 @@ pub(crate) struct Colors {
     pub(crate) code_background: Hsla,
     pub(crate) mono: gpui::SharedString,
     pub(crate) border: Hsla,
-    /// A table's fill.
-    pub(crate) surface: Hsla,
 }
 
 /// A line height snapped to whole device pixels, as GPUI Kit lays its text out.
@@ -630,6 +617,8 @@ pub(crate) struct DrawCx<'a> {
     pub(crate) bands: &'a HashMap<u64, Vec<(Range<usize>, Hsla)>>,
     pub(crate) leaves: LeafContext<'a>,
     pub(crate) code: &'a CodeLook,
+    /// Tables' corners: the theme's `radius_md`.
+    pub(crate) radius: Pixels,
 }
 
 /// How code blocks look: GPUI Kit's code block, in the editor's theme.
@@ -1205,18 +1194,15 @@ fn item_row(
     row.child(div().flex_auto().min_w_0().overflow_hidden().child(content))
 }
 
-/// A table cell's padding (GPUI Kit's `px_3` and `py(7)`), the narrowest a column starts from,
-/// and the rules between rows and columns and around the table.
-const CELL_PAD_X: f32 = 12.;
-const CELL_PAD_Y: f32 = 7.;
-const CELL_MIN: f32 = 48.;
+/// A table cell's padding, in rems (gpui-core's TextView: half a rem), and the width of the lines
+/// between rows and round the table.
+pub(crate) const CELL_PAD_REMS: f32 = 0.5;
 const RULE: f32 = 1.;
 
-/// A table as GPUI Kit lays it out, so the grips and the caret find its cells where they were:
-/// each column is a cell and slack. A cell grows to fit its widest line, never narrower than its
-/// floor; flex layout grows every cell alike and stops each at its width, so narrow columns fit
-/// and the widest share what's left. Room left after every cell fits goes to the slack, in
-/// proportion to the columns, after, around or before the cell as the column is aligned.
+/// A table as gpui-core's TextView draws one, the web's look, so tables look alike in every app:
+/// columns of equal width, cells padded half a rem, the header row in semibold, a line between
+/// rows and a rounded border round the table, no fill. Each column's text is laid out to its
+/// alignment. `frame.rs`' `layout_tables` reads the cells' boxes back from their text.
 fn table_element(
     table: &TableTree,
     color: Option<Hsla>,
@@ -1224,118 +1210,59 @@ fn table_element(
     window: &mut Window,
     app: &mut App,
 ) -> AnyElement {
-    // The cells' share of the free room while any is still growing; the slack's is about a
-    // millionth of it.
-    const CELL_GROW: f32 = 1e6;
-    let cols = table.rows.iter().map(Vec::len).max().unwrap_or(0);
-    let style = paragraph_style(d.base, d.body_size, d.body_line, d.colors);
-    let mut rows: Vec<Vec<TextLeaf>> = table
+    let cols = table.rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
+    let pad = window.rem_size() * CELL_PAD_REMS;
+    let mut base = paragraph_style(d.base, d.body_size, d.body_line, d.colors);
+    if let Some(color) = color {
+        base.color = color;
+    }
+    let count = table.rows.len();
+    let border = d.colors.border;
+    let rows: Vec<AnyElement> = table
         .rows
         .iter()
         .enumerate()
         .map(|(r, row)| {
-            row.iter()
-                .enumerate()
-                .map(|(c, (key, inline))| {
-                    let mut style = style.clone();
-                    style.align = match table.aligns.get(c) {
-                        Some(ColumnAlign::Center) => gpui::TextAlign::Center,
-                        Some(ColumnAlign::Right) => gpui::TextAlign::Right,
-                        _ => gpui::TextAlign::Left,
-                    };
-                    // The header keeps the body colour in a quote, as GPUI Kit's does.
-                    if let Some(color) = color.filter(|_| r > 0) {
-                        style.color = color;
-                    }
-                    let bands = d.bands.get(key).cloned().unwrap_or_default();
-                    TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app)
-                })
-                .collect()
-        })
-        .collect();
-    let divider = |c: usize| if c + 1 < cols { RULE } else { 0. };
-    // Each column's width to fit its widest line, with the cells' padding and divider.
-    let mut widths = vec![CELL_MIN; cols];
-    for row in &mut rows {
-        for (c, leaf) in row.iter_mut().enumerate() {
-            let w = f32::from(leaf.natural_width(window, app)) + CELL_PAD_X * 2. + divider(c);
-            widths[c] = widths[c].max(w);
-        }
-    }
-    // Rounded up to device pixels, or a column can lose the fraction that keeps a line whole.
-    let scale = window.scale_factor();
-    let ceil = |w: f32| (w * scale).ceil() / scale;
-    let floor = f32::from(window.rem_size() * 4.);
-    // Each cell's (narrowest, widest), its divider left out.
-    let columns: Vec<(f32, f32)> = widths
-        .iter()
-        .enumerate()
-        .map(|(c, &w)| {
-            let max = ceil(w - divider(c));
-            (ceil(w.min(floor) - divider(c)).min(max), max)
-        })
-        .collect();
-    let total = columns.iter().map(|(_, max)| max).sum::<f32>().max(1.);
-    let count = rows.len();
-    let border = d.colors.border;
-    let slack = |grow: f32| {
-        div()
-            .flex_basis(px(0.))
-            .flex_grow(grow)
-            .flex_shrink(0.)
-            .border_color(border)
-    };
-    let rows = rows.into_iter().enumerate().map(|(r, row)| {
-        let mut cells = row.into_iter();
-        let mut children = Vec::with_capacity(cols * 2);
-        for (c, &(min, max)) in columns.iter().enumerate() {
-            let last = c + 1 == cols;
-            let grow = max / total;
-            let (lead, trail) = match table.aligns.get(c) {
-                Some(ColumnAlign::Center) => (grow / 2., grow / 2.),
-                Some(ColumnAlign::Right) => (grow, 0.),
-                _ => (0., grow),
-            };
-            if lead > 0. {
-                children.push(slack(lead).into_any_element());
-            }
-            children.push(
-                div()
-                    .flex_basis(px(0.))
-                    .flex_grow(CELL_GROW)
-                    .min_w(px(min))
-                    .max_w(px(max))
-                    .overflow_hidden()
-                    .px(px(CELL_PAD_X))
-                    .py(px(CELL_PAD_Y))
+            let cells: Vec<AnyElement> = (0..cols)
+                .map(|c| {
+                    let leaf = row.get(c).map(|(key, inline)| {
+                        let mut style = base.clone();
+                        if r == 0 {
+                            style.font.weight = gpui::FontWeight::SEMIBOLD;
+                        }
+                        style.align = match table.aligns.get(c) {
+                            Some(ColumnAlign::Center) => gpui::TextAlign::Center,
+                            Some(ColumnAlign::Right) => gpui::TextAlign::Right,
+                            _ => gpui::TextAlign::Left,
+                        };
+                        let bands = d.bands.get(key).cloned().unwrap_or_default();
+                        TextLeaf::new(*key, inline, style, bands, &d.leaves, window, app)
+                    });
                     // A short row keeps its missing cells' places.
-                    .children(cells.next())
-                    .into_any_element(),
-            );
-            if trail > 0. || !last {
-                children.push(
-                    slack(trail)
-                        .when(!last, |s| s.border_r_1())
-                        .into_any_element(),
-                );
-            }
-        }
-        div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .when(r + 1 < count, |row| row.border_b_1())
-            .border_color(border)
-            .when(r == 0, |row| row.bg(d.colors.code_background))
-            .children(children)
-            .into_any_element()
-    });
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .p(pad)
+                        .children(leaf)
+                        .into_any_element()
+                })
+                .collect();
+            div()
+                .w_full()
+                .flex()
+                .flex_row()
+                .when(r + 1 < count, |row| row.border_b(px(RULE)))
+                .border_color(border)
+                .children(cells)
+                .into_any_element()
+        })
+        .collect();
     div()
         .w_full()
         .overflow_hidden()
-        .bg(d.colors.surface)
-        .border_1()
+        .border(px(RULE))
         .border_color(border)
+        .rounded(d.radius)
         .children(rows)
         .into_any_element()
 }

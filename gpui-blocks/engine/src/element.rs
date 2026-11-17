@@ -155,7 +155,6 @@ impl RenderOnce for BlockEditor {
             code_background: look.muted,
             mono: look.mono_font_family.clone(),
             border: look.border,
-            surface: look.background,
         };
         // The gap below a block, as GPUI Kit's Markdown leaves.
         let paragraph_gap = gpui::rems(0.75).to_pixels(rem);
@@ -202,6 +201,7 @@ impl RenderOnce for BlockEditor {
                 images: image_source.as_ref(),
             },
             code: &code_look,
+            radius: in_px(look.radius_md()),
         };
         let mut children: Vec<AnyElement> = Vec::new();
         {
@@ -716,16 +716,10 @@ impl Element for EditorRoot {
                     .map(|(table, _)| super::frame::TableShape {
                         table: *table,
                         grid: super::table::grid(doc, *table),
-                        aligns: match doc.kind(*table) {
-                            Some(super::kind::BlockKindData::Table { aligns }) => aligns.clone(),
-                            _ => Vec::new(),
-                        },
                     })
                     .collect();
-                // gpui-kit's cell padding is `px_3`: 0.75rem.
-                let pad = window.rem_size() * 0.75;
-                let right = frame.content.map(|c| c.right());
-                frame.layout_tables(&shapes, pad, right);
+                let pad = window.rem_size() * super::draw::CELL_PAD_REMS;
+                frame.layout_tables(&shapes, pad);
             }
             // Scrolled during a drag: the dragged block follows the pointer in content y, so
             // draw again with the content's new top.

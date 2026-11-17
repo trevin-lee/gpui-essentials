@@ -47,7 +47,7 @@ Sizes are relative to the body font size (the editor's inherited text size).
 | Highlight (`<mark>`) | its colour behind, the text in a readable colour on it |
 | Quote | muted text, a 2 px left border, padding 0.9 × body |
 | Picture | its own size, narrowed to the line in its ratio; a square 0.75 × the line height while it loads; centred on the text's middle; without the host's loader, its description (or "Image") in the line's style |
-| Table | 1 px rules and frame on the surface colour, the header row on the code background; cells padded 12 px sides and 7 px top and bottom; a column is as wide as its widest line (at least 48 px), and when the table is short of room its text wraps down to 4 rem; room left over goes beside each cell by its alignment |
+| Table | drawn as gpui-core's TextView draws tables (the web's look), not as GPUI Kit did: columns of equal width, cells padded half a rem, the header in semibold, a 1 px line between rows and a 1 px border with `radius_md` corners round the table, no fill; each column's text laid out to its alignment |
 | Rule | 1.6 × body above and below |
 | Code block | mono, line height 1.6, padding 16 px sides, 14 px top (28 with a language label) and bottom, the code background and a border |
 
