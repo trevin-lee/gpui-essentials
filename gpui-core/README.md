@@ -80,6 +80,10 @@ item](docs/gallery.png)
   it's an image named for the person. `AvatarGroup::new(id).children(…).max(3)` overlaps
   them by eight pixels, each ringed in the page's colour, with a "+N" circle for the rest,
   clipped at its edge in a narrow space.
+- **EmptyState.** `EmptyState::new().icon(name).title(…).description(…).child(action)`:
+  shadcn's `Empty` (renamed, as GPUI has an `Empty` of its own), an icon in a 40-pixel muted
+  circle over a title, a muted description and an action area (its children), centred in the
+  space it fills, with its text held to shadcn's 384 pixels and wrapping in a narrow space.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
