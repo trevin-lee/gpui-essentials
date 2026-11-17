@@ -56,6 +56,7 @@ mod root;
 mod segmented;
 mod separator;
 mod sheet;
+mod sidebar;
 mod size;
 mod skeleton;
 mod slider;
@@ -92,6 +93,9 @@ pub use root::{FocusNext, FocusPrev, Root};
 pub use segmented::SegmentedControl;
 pub use separator::Separator;
 pub use sheet::Sheet;
+pub use sidebar::{
+    Sidebar, SidebarGroup, SidebarItem, SidebarState, SidebarTrigger, ToggleSidebar,
+};
 pub use size::{ControlSize, Disableable, Selectable, Sizable};
 pub use skeleton::Skeleton;
 pub use slider::{Slider, SliderEvent, SliderState};
@@ -130,6 +134,7 @@ pub fn init(cx: &mut App) {
     navigation_menu::init(cx);
     picker::init(cx);
     popover::init(cx);
+    sidebar::init(cx);
     text::init(cx);
 }
 
