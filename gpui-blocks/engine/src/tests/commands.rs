@@ -919,3 +919,60 @@ fn replacing_the_root_or_a_missing_block_fails() {
     );
     assert_eq!(m.source(), "a");
 }
+
+/// ⌘D copies the caret's block right after it, marks and all, and selects the copy; undo takes
+/// it away.
+#[test]
+fn duplicate_copies_the_caret_block_after_it() {
+    let mut m = model("a **bold** line\n\nnext");
+    caret_in(&mut m, 0, 2);
+    assert!(m.run(EditorCommand::DuplicateBlocks).unwrap());
+    assert_eq!(m.source(), "a **bold** line\n\na **bold** line\n\nnext");
+    let copy = m.document().root().children().nth(1).unwrap().id();
+    assert_eq!(
+        m.selection(),
+        &BlockSelection::Blocks {
+            anchor: copy,
+            head: copy
+        },
+        "the copy is selected"
+    );
+    assert_invariants(&m);
+    assert!(m.undo());
+    assert_eq!(m.source(), "a **bold** line\n\nnext");
+}
+
+/// A list item is copied within its list; a table cell copies its whole table; a toggle's
+/// summary its whole toggle.
+#[test]
+fn duplicate_copies_the_whole_unit() {
+    let mut m = model("- a\n- b");
+    caret_in(&mut m, 0, 0);
+    m.run(EditorCommand::DuplicateBlocks).unwrap();
+    assert_eq!(m.source(), "- a\n- a\n- b");
+    assert_invariants(&m);
+
+    let mut m = model("| x | y |\n| --- | --- |\n| 1 | 2 |");
+    caret_in(&mut m, 2, 0);
+    m.run(EditorCommand::DuplicateBlocks).unwrap();
+    assert_eq!(
+        m.source(),
+        "| x | y |\n| --- | --- |\n| 1 | 2 |\n\n| x | y |\n| --- | --- |\n| 1 | 2 |"
+    );
+    assert_invariants(&m);
+}
+
+/// Selected blocks are copied together, after the last of them.
+#[test]
+fn duplicate_copies_selected_blocks_together() {
+    let mut m = model("one\n\ntwo\n\nthree");
+    let ids: Vec<_> = m.document().root().children().map(|b| b.id()).collect();
+    m.set_selection(BlockSelection::Blocks {
+        anchor: ids[0],
+        head: ids[1],
+    })
+    .unwrap();
+    m.run(EditorCommand::DuplicateBlocks).unwrap();
+    assert_eq!(m.source(), "one\n\ntwo\n\none\n\ntwo\n\nthree");
+    assert_invariants(&m);
+}
