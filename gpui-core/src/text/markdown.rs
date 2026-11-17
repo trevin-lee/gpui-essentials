@@ -1,9 +1,7 @@
 //! Markdown (GitHub's flavour) to the blocks TextView draws. Nothing in it is ever run or
 //! fetched: raw HTML shows as its text, and an image shows as its description.
 
-use std::collections::HashMap;
-
-use markdown::mdast::{AlignKind, Node};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use super::paragraph::{Marks, Paragraph};
 
@@ -47,9 +45,6 @@ pub struct Item {
     pub blocks: Vec<Block>,
 }
 
-/// Link reference definitions by their identifier: the first of each wins.
-type Defs = HashMap<String, String>;
-
 pub fn parse(source: &str) -> Vec<Block> {
     parse_with(source, "").blocks
 }
@@ -86,291 +81,605 @@ pub fn parse_with(source: &str, context: &str) -> Parsed {
         text.push_str(&context[..room.min(context.len())]);
         &text
     };
-    // Raw HTML is never rendered, so it isn't parsed either: it reads as the text it is, and
-    // the Markdown after it isn't swallowed into an HTML block (which runs to a blank line).
-    let mut options = markdown::ParseOptions::gfm();
-    options.constructs.html_flow = false;
-    options.constructs.html_text = false;
-    match to_mdast(doc, &options) {
-        Some(Node::Root(root)) => {
-            let mut defs = Defs::new();
-            let mut own = String::new();
-            definitions(&root.children, source.len(), &mut defs, &mut own, 0);
-            Parsed {
-                blocks: blocks(&defs, &root.children, 0),
-                definitions: own,
-            }
+    // pulldown-cmark doesn't panic on what it's given (it's fuzzed for that, and so is this, in
+    // the tests below); the guard is there anyway, where a panic can be caught.
+    std::panic::catch_unwind(|| {
+        let parser = Parser::new_ext(doc, options());
+        let definitions = own_definitions(&parser, source.len());
+        Parsed {
+            blocks: convert_events(parser, 0),
+            definitions,
         }
-        // Markdown without MDX has no syntax errors, but the parser can panic on some input (an
-        // unclosed fence in a list item with a list of the other kind after it): then the text
-        // shows as it is, rather than taking the app down with it.
-        _ => Parsed {
-            blocks: vec![Block::Paragraph(Paragraph::plain(source))],
-            definitions: String::new(),
-        },
-    }
+    })
+    .unwrap_or_else(|_| Parsed {
+        blocks: vec![Block::Paragraph(Paragraph::plain(source))],
+        definitions: String::new(),
+    })
 }
 
-/// Gathers the link reference definitions under `nodes` into `defs` (the first of each
-/// identifier wins), and those starting before `own_end` (the source's own, not the context's)
-/// into `own` as `[label]: <url>` lines. A URL that can't be written back so is left out of
-/// `own`.
-fn definitions(nodes: &[Node], own_end: usize, defs: &mut Defs, own: &mut String, depth: usize) {
-    if depth > MAX_DEPTH {
-        return;
-    }
-    for n in nodes {
-        if let Node::Definition(d) = n {
-            defs.entry(d.identifier.clone())
-                .or_insert_with(|| d.url.clone());
-            let mine = d.position.as_ref().is_none_or(|p| p.start.offset < own_end);
-            let writable = !d.url.contains(['<', '>', '\n', '\r', '\\']);
-            if mine
-                && writable
-                && let Some(label) = &d.label
-            {
-                own.push_str(&format!("[{label}]: <{}>\n", d.url));
-            }
-        } else if let Some(children) = n.children() {
-            definitions(children, own_end, defs, own, depth + 1);
-        }
-    }
+/// The link reference definitions that start before `own_end` (the source's own, not the
+/// context's) as `[label]: <url>` lines. A URL that can't be written back so is left out.
+fn own_definitions(parser: &Parser, own_end: usize) -> String {
+    let mut defs: Vec<(usize, String, String)> = parser
+        .reference_definitions()
+        .iter()
+        .filter(|(_, d)| d.span.start < own_end)
+        .filter(|(label, d)| {
+            !d.dest.contains(['<', '>', '\n', '\r', '\\'])
+                && !label.contains(['[', ']', '\\', '\n', '\r'])
+        })
+        .map(|(label, d)| (d.span.start, label.to_string(), d.dest.to_string()))
+        .collect();
+    // In the order they're written, so the first of a label stays first for the others.
+    defs.sort();
+    defs.into_iter()
+        .map(|(_, label, url)| format!("[{label}]: <{url}>\n"))
+        .collect()
 }
 
-/// The parser's tree for `doc`, or `None` if it errs or panics. The `markdown` crate (1.0.0)
-/// panics on some input (`unreachable!("mismatched ListOrdered / ListUnordered")`); the text
-/// shown here is often a model's, so a panic is caught rather than allowed to end the app.
-fn to_mdast(doc: &str, options: &markdown::ParseOptions) -> Option<Node> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        markdown::to_mdast(doc, options)
-    }))
-    .ok()?
-    .ok()
+/// GitHub's flavour: tables, task lists, strikethrough and footnotes.
+fn options() -> Options {
+    Options::ENABLE_TABLES
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_GFM
 }
 
-fn blocks(defs: &Defs, nodes: &[Node], depth: usize) -> Vec<Block> {
-    if depth > MAX_DEPTH {
-        return Vec::new();
+/// What blocks are put into as they're read.
+enum Frame {
+    Blocks(Vec<Block>),
+    Quote(Vec<Block>),
+    List {
+        start: Option<u32>,
+        items: Vec<Item>,
+    },
+    Item(Item),
+    Footnote(Vec<Block>),
+    Table {
+        align: Vec<Align>,
+        rows: Vec<Vec<Paragraph>>,
+        row: Vec<Paragraph>,
+    },
+}
+
+/// What inline text is going into: a paragraph (or a list item's text, which in a tight list
+/// comes with no paragraph around it), a heading, or a table cell.
+#[derive(Clone, Copy, PartialEq)]
+enum Into_ {
+    Paragraph,
+    Heading(u8),
+    Cell,
+}
+
+struct Builder {
+    frames: Vec<Frame>,
+    text: Option<(Into_, Paragraph)>,
+    marks: Vec<Marks>,
+    code: Option<(Option<String>, String)>,
+    html: Option<String>,
+    /// An image's description, while its tags are open.
+    image: Option<String>,
+    /// How deep inside containers past the limit: their content is dropped.
+    skipping: usize,
+    /// How deep this reading is: an HTML block's text is read again, one deeper.
+    depth: usize,
+}
+
+impl Builder {
+    fn marks(&self) -> Marks {
+        self.marks.last().cloned().unwrap_or_default()
     }
-    let mut out = Vec::new();
-    for n in nodes {
-        match n {
-            Node::Paragraph(p) => out.push(Block::Paragraph(inline(defs, &p.children, depth))),
-            Node::Heading(h) => out.push(Block::Heading(h.depth, inline(defs, &h.children, depth))),
-            Node::Code(c) => out.push(Block::Code {
-                lang: c.lang.clone(),
-                text: c.value.clone(),
-            }),
-            Node::Math(m) => out.push(Block::Code {
-                lang: Some("math".into()),
-                text: m.value.clone(),
-            }),
-            Node::Blockquote(q) => out.push(Block::Quote(blocks(defs, &q.children, depth + 1))),
-            Node::List(l) => out.push(Block::List {
-                start: l.ordered.then(|| l.start.unwrap_or(1)),
-                items: l
-                    .children
-                    .iter()
-                    .filter_map(|c| match c {
-                        Node::ListItem(i) => Some(Item {
-                            checked: i.checked,
-                            blocks: blocks(defs, &i.children, depth + 1),
-                        }),
-                        _ => None,
-                    })
-                    .collect(),
-            }),
-            Node::ThematicBreak(_) => out.push(Block::Rule),
-            Node::Table(t) => out.push(Block::Table {
-                align: t
-                    .align
-                    .iter()
-                    .map(|a| match a {
-                        AlignKind::Center => Align::Center,
-                        AlignKind::Right => Align::Right,
-                        _ => Align::Left,
-                    })
-                    .collect(),
-                rows: t
-                    .children
-                    .iter()
-                    .filter_map(|r| match r {
-                        Node::TableRow(r) => Some(
-                            r.children
-                                .iter()
-                                .map(|c| match c {
-                                    Node::TableCell(c) => inline(defs, &c.children, depth),
-                                    _ => Paragraph::default(),
-                                })
-                                .collect(),
-                        ),
-                        _ => None,
-                    })
-                    .collect(),
-            }),
-            Node::Html(h) => out.push(Block::Paragraph(Paragraph::plain(h.value.clone()))),
-            Node::FootnoteDefinition(f) => out.extend(blocks(defs, &f.children, depth + 1)),
-            // Frontmatter and the like: nothing to show.
+
+    fn push_block(&mut self, b: Block) {
+        match self.frames.last_mut() {
+            Some(Frame::Blocks(v) | Frame::Quote(v) | Frame::Footnote(v)) => v.push(b),
+            Some(Frame::Item(i)) => i.blocks.push(b),
             _ => {}
+        }
+    }
+
+    /// Inline text, into the open paragraph, heading or cell, or a new paragraph (a tight list
+    /// item's text).
+    fn inline(&mut self, text: &str, marks: Marks) {
+        if self.text.is_none() {
+            self.text = Some((Into_::Paragraph, Paragraph::default()));
+        }
+        if let Some((_, p)) = self.text.as_mut() {
+            p.push(text, marks);
+        }
+    }
+
+    /// Ends the open paragraph or heading (a cell ends with its tag).
+    fn flush(&mut self) {
+        match self.text.take() {
+            Some((Into_::Paragraph, p)) => {
+                if !p.text.is_empty() {
+                    self.push_block(Block::Paragraph(linkify(p)));
+                }
+            }
+            Some((Into_::Heading(level), p)) => self.push_block(Block::Heading(level, linkify(p))),
+            Some((Into_::Cell, p)) => self.text = Some((Into_::Cell, p)),
+            None => {}
+        }
+    }
+
+    fn start(&mut self, tag: Tag) {
+        if self.skipping > 0 || self.frames.len() > MAX_DEPTH {
+            self.skipping += 1;
+            return;
+        }
+        match tag {
+            Tag::Paragraph => {
+                self.flush();
+                self.text = Some((Into_::Paragraph, Paragraph::default()));
+            }
+            Tag::Heading { level, .. } => {
+                self.flush();
+                let level = match level {
+                    HeadingLevel::H1 => 1,
+                    HeadingLevel::H2 => 2,
+                    HeadingLevel::H3 => 3,
+                    HeadingLevel::H4 => 4,
+                    HeadingLevel::H5 => 5,
+                    HeadingLevel::H6 => 6,
+                };
+                self.text = Some((Into_::Heading(level), Paragraph::default()));
+            }
+            Tag::BlockQuote(_) => {
+                self.flush();
+                self.frames.push(Frame::Quote(Vec::new()));
+            }
+            Tag::CodeBlock(kind) => {
+                self.flush();
+                let lang = match kind {
+                    CodeBlockKind::Fenced(info) => info
+                        .split_whitespace()
+                        .next()
+                        .filter(|l| !l.is_empty())
+                        .map(str::to_string),
+                    CodeBlockKind::Indented => None,
+                };
+                self.code = Some((lang, String::new()));
+            }
+            Tag::HtmlBlock => {
+                self.flush();
+                self.html = Some(String::new());
+            }
+            Tag::List(start) => {
+                self.flush();
+                self.frames.push(Frame::List {
+                    start: start.map(|n| n.min(u32::MAX as u64) as u32),
+                    items: Vec::new(),
+                });
+            }
+            Tag::Item => {
+                self.flush();
+                self.frames.push(Frame::Item(Item {
+                    checked: None,
+                    blocks: Vec::new(),
+                }));
+            }
+            Tag::FootnoteDefinition(_) => {
+                self.flush();
+                self.frames.push(Frame::Footnote(Vec::new()));
+            }
+            Tag::Table(align) => {
+                self.flush();
+                self.frames.push(Frame::Table {
+                    align: align
+                        .iter()
+                        .map(|a| match a {
+                            Alignment::Center => Align::Center,
+                            Alignment::Right => Align::Right,
+                            _ => Align::Left,
+                        })
+                        .collect(),
+                    rows: Vec::new(),
+                    row: Vec::new(),
+                });
+            }
+            Tag::TableHead | Tag::TableRow => {
+                if let Some(Frame::Table { row, .. }) = self.frames.last_mut() {
+                    row.clear();
+                }
+            }
+            Tag::TableCell => self.text = Some((Into_::Cell, Paragraph::default())),
+            Tag::Emphasis => self.marks.push(Marks {
+                italic: true,
+                ..self.marks()
+            }),
+            Tag::Strong => self.marks.push(Marks {
+                bold: true,
+                ..self.marks()
+            }),
+            Tag::Strikethrough => self.marks.push(Marks {
+                strike: true,
+                ..self.marks()
+            }),
+            Tag::Link { dest_url, .. } => self.marks.push(Marks {
+                link: Some(dest_url.to_string().into()),
+                ..self.marks()
+            }),
+            Tag::Image { .. } => self.image = Some(String::new()),
+            // Not turned on: superscript, subscript, definition lists, metadata.
+            _ => {}
+        }
+    }
+
+    fn end(&mut self, tag: TagEnd) {
+        if self.skipping > 0 {
+            self.skipping -= 1;
+            return;
+        }
+        match tag {
+            TagEnd::Paragraph | TagEnd::Heading(_) => self.flush(),
+            TagEnd::CodeBlock => {
+                if let Some((lang, mut text)) = self.code.take() {
+                    if text.ends_with('\n') {
+                        text.pop();
+                    }
+                    self.push_block(Block::Code { lang, text });
+                }
+            }
+            TagEnd::HtmlBlock => {
+                // Raw HTML is never rendered: it reads as the text it is, and the Markdown after
+                // it in the same block (which runs to a blank line) is still read. So the block
+                // is read again with its first `<` escaped.
+                if let Some(html) = self.html.take() {
+                    let escaped = match html.find('<') {
+                        Some(i) => format!("{}\\{}", &html[..i], &html[i..]),
+                        None => html,
+                    };
+                    let blocks = if self.depth < MAX_DEPTH {
+                        convert(&escaped, self.depth + 1)
+                    } else {
+                        vec![Block::Paragraph(Paragraph::plain(escaped))]
+                    };
+                    for b in blocks {
+                        self.push_block(b);
+                    }
+                }
+            }
+            TagEnd::BlockQuote(_) => {
+                self.flush();
+                if let Some(Frame::Quote(v)) = self.frames.pop() {
+                    self.push_block(Block::Quote(v));
+                }
+            }
+            TagEnd::Item => {
+                self.flush();
+                if let Some(Frame::Item(item)) = self.frames.pop()
+                    && let Some(Frame::List { items, .. }) = self.frames.last_mut()
+                {
+                    items.push(item);
+                }
+            }
+            TagEnd::List(_) => {
+                self.flush();
+                if let Some(Frame::List { start, items }) = self.frames.pop() {
+                    self.push_block(Block::List { start, items });
+                }
+            }
+            TagEnd::FootnoteDefinition => {
+                self.flush();
+                if let Some(Frame::Footnote(v)) = self.frames.pop() {
+                    for b in v {
+                        self.push_block(b);
+                    }
+                }
+            }
+            TagEnd::TableCell => {
+                let cell = match self.text.take() {
+                    Some((_, p)) => linkify(p),
+                    None => Paragraph::default(),
+                };
+                if let Some(Frame::Table { row, .. }) = self.frames.last_mut() {
+                    row.push(cell);
+                }
+            }
+            TagEnd::TableHead | TagEnd::TableRow => {
+                if let Some(Frame::Table { rows, row, .. }) = self.frames.last_mut() {
+                    rows.push(std::mem::take(row));
+                }
+            }
+            TagEnd::Table => {
+                if let Some(Frame::Table { align, rows, .. }) = self.frames.pop() {
+                    self.push_block(Block::Table { align, rows });
+                }
+            }
+            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => {
+                self.marks.pop();
+            }
+            TagEnd::Image => {
+                if let Some(alt) = self.image.take() {
+                    let alt = if alt.is_empty() {
+                        "image".to_string()
+                    } else {
+                        alt
+                    };
+                    let marks = Marks {
+                        muted: true,
+                        ..self.marks()
+                    };
+                    self.inline(&alt, marks);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn event(&mut self, e: Event) {
+        match e {
+            Event::Start(tag) => self.start(tag),
+            Event::End(tag) => self.end(tag),
+            _ if self.skipping > 0 => {}
+            Event::Text(t) => {
+                if let Some((_, code)) = self.code.as_mut() {
+                    code.push_str(&t);
+                } else if let Some(html) = self.html.as_mut() {
+                    html.push_str(&t);
+                } else if let Some(alt) = self.image.as_mut() {
+                    alt.push_str(&t);
+                } else {
+                    let marks = self.marks();
+                    self.inline(&t, marks);
+                }
+            }
+            Event::Code(t) => {
+                if let Some(alt) = self.image.as_mut() {
+                    alt.push_str(&t);
+                } else {
+                    let marks = Marks {
+                        code: true,
+                        ..self.marks()
+                    };
+                    self.inline(&t, marks);
+                }
+            }
+            Event::Html(t) => {
+                if let Some(html) = self.html.as_mut() {
+                    html.push_str(&t);
+                } else {
+                    let marks = self.marks();
+                    self.inline(&t, marks);
+                }
+            }
+            Event::InlineHtml(t) => {
+                let marks = self.marks();
+                self.inline(&t, marks);
+            }
+            Event::FootnoteReference(label) => {
+                let marks = Marks {
+                    muted: true,
+                    ..self.marks()
+                };
+                self.inline(&format!("[{label}]"), marks);
+            }
+            // A soft line break reads as a space, as CommonMark and the web read it.
+            Event::SoftBreak => {
+                if let Some(alt) = self.image.as_mut() {
+                    alt.push(' ');
+                } else {
+                    let marks = self.marks();
+                    self.inline(" ", marks);
+                }
+            }
+            Event::HardBreak => {
+                let marks = self.marks();
+                self.inline("\n", marks);
+            }
+            Event::Rule => {
+                self.flush();
+                self.push_block(Block::Rule);
+            }
+            Event::TaskListMarker(checked) => {
+                if let Some(Frame::Item(item)) = self.frames.last_mut() {
+                    item.checked = Some(checked);
+                }
+            }
+            Event::InlineMath(t) | Event::DisplayMath(t) => {
+                let marks = Marks {
+                    code: true,
+                    ..self.marks()
+                };
+                self.inline(&t, marks);
+            }
+        }
+    }
+}
+
+/// Reads `source`'s blocks (`depth` deep in re-readings of HTML blocks' text).
+fn convert(source: &str, depth: usize) -> Vec<Block> {
+    convert_events(Parser::new_ext(source, options()), depth)
+}
+
+/// The blocks the parser's events make.
+fn convert_events(parser: Parser, depth: usize) -> Vec<Block> {
+    let mut b = Builder {
+        frames: vec![Frame::Blocks(Vec::new())],
+        text: None,
+        marks: Vec::new(),
+        code: None,
+        html: None,
+        image: None,
+        skipping: 0,
+        depth,
+    };
+    for e in parser {
+        b.event(e);
+    }
+    b.flush();
+    // Anything left open (it can't be, but never mind) is closed into the blocks.
+    while b.frames.len() > 1 {
+        match b.frames.pop() {
+            Some(Frame::Quote(v)) => b.push_block(Block::Quote(v)),
+            Some(Frame::List { start, items }) => b.push_block(Block::List { start, items }),
+            Some(Frame::Item(item)) => {
+                if let Some(Frame::List { items, .. }) = b.frames.last_mut() {
+                    items.push(item);
+                }
+            }
+            Some(Frame::Footnote(v)) => {
+                for x in v {
+                    b.push_block(x);
+                }
+            }
+            Some(Frame::Table { align, rows, .. }) => b.push_block(Block::Table { align, rows }),
+            _ => {}
+        }
+    }
+    match b.frames.pop() {
+        Some(Frame::Blocks(v)) => v,
+        _ => Vec::new(),
+    }
+}
+
+/// `p` with GitHub's bare links (`https://…`, `www.…`) made links, where its text isn't a link
+/// or code already. Found in the whole paragraph, since the parser hands text over in pieces.
+fn linkify(p: Paragraph) -> Paragraph {
+    let mut found = bare_links(&p.text);
+    // Addresses (foo@example.com), where they aren't inside a link found already.
+    for e in bare_emails(&p.text) {
+        if found.iter().all(|(s, t, _)| e.1 <= *s || e.0 >= *t) {
+            found.push(e);
+        }
+    }
+    found.sort_by_key(|f| f.0);
+    let found: Vec<(usize, usize, String)> = found
+        .into_iter()
+        .filter(|(s, e, _)| {
+            p.spans
+                .iter()
+                .all(|(r, m)| (m.link.is_none() && !m.code) || r.end <= *s || r.start >= *e)
+        })
+        .collect();
+    if found.is_empty() {
+        return p;
+    }
+    let mut out = Paragraph {
+        text: String::with_capacity(p.text.len()),
+        spans: Vec::with_capacity(p.spans.len() + found.len() * 2),
+        boxes: p.boxes.clone(),
+    };
+    for (r, m) in &p.spans {
+        let mut at = r.start;
+        while at < r.end {
+            match found.iter().find(|(s, e, _)| *e > at && *s < r.end) {
+                Some((s, e, url)) if *s <= at => {
+                    let to = (*e).min(r.end);
+                    let marks = Marks {
+                        link: Some(url.clone().into()),
+                        ..m.clone()
+                    };
+                    out.push(&p.text[at..to], marks);
+                    at = to;
+                }
+                Some((s, _, _)) => {
+                    let to = (*s).min(r.end);
+                    out.push(&p.text[at..to], m.clone());
+                    at = to;
+                }
+                None => {
+                    out.push(&p.text[at..r.end], m.clone());
+                    at = r.end;
+                }
+            }
         }
     }
     out
 }
 
-/// A text node's soft line breaks as spaces, as CommonMark and the web read them: a single line
-/// ending inside a paragraph, with the spaces and tabs either side of it, is one space. (A hard
-/// break, two spaces or a backslash before the line ending, is a `Break` node, kept as a line.)
-fn soft_breaks(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.contains(['\n', '\r']) {
-        return text.into();
-    }
-    let lines: Vec<&str> = text.split('\n').collect();
-    let last = lines.len() - 1;
-    let mut out = String::with_capacity(text.len());
-    for (i, line) in lines.into_iter().enumerate() {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        let line = if i > 0 {
-            line.trim_start_matches([' ', '\t'])
-        } else {
-            line
-        };
-        let line = if i < last {
-            line.trim_end_matches([' ', '\t'])
-        } else {
-            line
-        };
-        if i > 0 {
-            out.push(' ');
+/// GitHub's bare email addresses in `text` (`foo@example.com`), as `mailto:` links: a local
+/// part of letters, digits and `.+-_`, then a domain of letters, digits and `-_` with at least
+/// one dot, not ending in `-` or `_`; a full stop after it is the sentence's.
+fn bare_emails(text: &str) -> Vec<(usize, usize, String)> {
+    let b = text.as_bytes();
+    let local = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'+' | b'-' | b'_');
+    let domain = |c: u8| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'-' | b'_');
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(i) = text[from..].find('@').map(|i| from + i) {
+        from = i + 1;
+        let mut start = i;
+        while start > 0 && local(b[start - 1]) {
+            start -= 1;
         }
-        out.push_str(line);
-    }
-    out.into()
-}
-
-fn inline(defs: &Defs, nodes: &[Node], depth: usize) -> Paragraph {
-    let mut p = Paragraph::default();
-    walk(defs, nodes, &Marks::default(), &mut p, depth);
-    p
-}
-
-fn walk(defs: &Defs, nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
-    if depth > MAX_DEPTH {
-        return;
-    }
-    for n in nodes {
-        match n {
-            Node::Text(t) => p.push(&soft_breaks(&t.value), marks.clone()),
-            Node::Emphasis(e) => walk(
-                defs,
-                &e.children,
-                &Marks {
-                    italic: true,
-                    ..marks.clone()
-                },
-                p,
-                depth + 1,
-            ),
-            Node::Strong(s) => walk(
-                defs,
-                &s.children,
-                &Marks {
-                    bold: true,
-                    ..marks.clone()
-                },
-                p,
-                depth + 1,
-            ),
-            Node::Delete(d) => walk(
-                defs,
-                &d.children,
-                &Marks {
-                    strike: true,
-                    ..marks.clone()
-                },
-                p,
-                depth + 1,
-            ),
-            Node::InlineCode(c) => p.push(
-                &c.value,
-                Marks {
-                    code: true,
-                    ..marks.clone()
-                },
-            ),
-            Node::InlineMath(m) => p.push(
-                &m.value,
-                Marks {
-                    code: true,
-                    ..marks.clone()
-                },
-            ),
-            Node::Break(_) => p.push("\n", marks.clone()),
-            Node::Link(l) => {
-                let link = Some(l.url.clone().into());
-                walk(
-                    defs,
-                    &l.children,
-                    &Marks {
-                        link,
-                        ..marks.clone()
-                    },
-                    p,
-                    depth + 1,
-                )
-            }
-            Node::Image(i) => {
-                let alt = if i.alt.is_empty() {
-                    "image"
-                } else {
-                    i.alt.as_str()
-                };
-                p.push(
-                    alt,
-                    Marks {
-                        muted: true,
-                        ..marks.clone()
-                    },
-                )
-            }
-            Node::Html(h) => p.push(&h.value, marks.clone()),
-            Node::LinkReference(r) => {
-                let link = defs.get(&r.identifier).map(|url| url.clone().into());
-                walk(
-                    defs,
-                    &r.children,
-                    &Marks {
-                        link,
-                        ..marks.clone()
-                    },
-                    p,
-                    depth + 1,
-                )
-            }
-            Node::ImageReference(i) => p.push(
-                if i.alt.is_empty() {
-                    "image"
-                } else {
-                    i.alt.as_str()
-                },
-                Marks {
-                    muted: true,
-                    ..marks.clone()
-                },
-            ),
-            Node::FootnoteReference(f) => p.push(
-                &format!("[{}]", f.identifier),
-                Marks {
-                    muted: true,
-                    ..marks.clone()
-                },
-            ),
-            other => {
-                if let Some(children) = other.children() {
-                    walk(defs, children, marks, p, depth + 1)
-                }
-            }
+        let mut end = i + 1;
+        while end < b.len() && domain(b[end]) {
+            end += 1;
+        }
+        while end > i + 1 && b[end - 1] == b'.' {
+            end -= 1;
+        }
+        let host = &text[i + 1..end];
+        let ok = start < i
+            && host.contains('.')
+            && !host.starts_with('.')
+            && !host.ends_with(['-', '_'])
+            && !host.contains("..");
+        if ok {
+            out.push((start, end, format!("mailto:{}", &text[start..end])));
+            from = end;
         }
     }
+    out
+}
+
+/// GitHub's bare links in `text`: `http://`, `https://` and `www.` addresses, to the first
+/// space or `<`, without the punctuation that ends a sentence after them. Each with where it is
+/// and the address it goes to.
+fn bare_links(text: &str) -> Vec<(usize, usize, String)> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while from < text.len() {
+        let rest = &text[from..];
+        let found = ["https://", "http://", "www."]
+            .iter()
+            .filter_map(|p| rest.find(p).map(|i| (i, *p)))
+            .min_by_key(|(i, _)| *i);
+        let Some((i, prefix)) = found else { break };
+        let start = from + i;
+        // At a word's start only.
+        let before = text[..start].chars().next_back();
+        if before.is_some_and(|c| c.is_alphanumeric() || c == '/' || c == '.' || c == '@') {
+            from = start + prefix.len();
+            continue;
+        }
+        let mut end = text[start..]
+            .find(|c: char| c.is_whitespace() || c == '<')
+            .map_or(text.len(), |n| start + n);
+        // Trailing punctuation, and a closing bracket without its opener, aren't the address's.
+        while let Some(c) = text[start..end].chars().next_back() {
+            let unmatched_paren = c == ')'
+                && text[start..end].matches('(').count() < text[start..end].matches(')').count();
+            if matches!(
+                c,
+                '.' | ',' | ':' | ';' | '!' | '?' | '"' | '\'' | '*' | '_' | '~'
+            ) || unmatched_paren
+            {
+                end -= c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        let body = &text[start + prefix.len()..end];
+        // An address has a dot in its host.
+        let host = body.split(['/', '?', '#']).next().unwrap_or("");
+        if !body.is_empty()
+            && (prefix != "www." || host.contains('.'))
+            && (prefix == "www." || host.contains('.'))
+        {
+            let url = if prefix == "www." {
+                format!("http://{}", &text[start..end])
+            } else {
+                text[start..end].to_string()
+            };
+            out.push((start, end, url));
+        }
+        from = end.max(start + prefix.len());
+    }
+    out
 }
 
 #[cfg(test)]
@@ -463,24 +772,58 @@ mod tests {
     }
 
     #[test]
-    fn input_the_parser_panics_on_shows_as_its_text() {
+    fn input_the_old_parser_panicked_on_is_read() {
+        // The `markdown` crate panicked on each: a fence opened in a list item, then a list of
+        // the other kind; and a table, then a quote with a tab and a backtick.
         for doc in [
             "- a\n  ```\n1. a\n",
             "x\n- ```\n1. a\n",
             "1. a\n   ```\n- b\n",
+            "| a | b |\n|---|---|\n> \t`",
         ] {
-            let b = parse(doc);
-            assert!(!b.is_empty(), "{doc:?}");
+            assert!(!convert(doc, 0).is_empty(), "{doc:?}");
         }
+        // Read as CommonMark reads it: the unclosed fence is code to its item's end, and the
+        // other list a list.
         let b = parse("- a\n  ```\n1. a\n");
         assert!(
-            matches!(&b[0], Block::Paragraph(p) if p.text.contains("1. a")),
-            "the text as it is: {b:?}"
+            matches!(&b[0], Block::List { start: None, items } if items[0].blocks.iter().any(|x| matches!(x, Block::Code { .. }))),
+            "{b:?}"
         );
+        assert!(matches!(&b[1], Block::List { start: Some(1), .. }), "{b:?}");
+    }
+
+    #[test]
+    fn bare_addresses_are_links_as_on_github() {
+        let b = parse(
+            "See https://x.test/a_(b), or www.example.com. Not foo.https://x or `https://code`.",
+        );
+        let Block::Paragraph(p) = &b[0] else {
+            panic!("{b:?}")
+        };
+        let link = |word: &str| p.link_at(p.text.find(word).unwrap()).map(|s| s.to_string());
+        assert_eq!(
+            link("https://x.test").as_deref(),
+            Some("https://x.test/a_(b)")
+        );
+        assert_eq!(link("www.").as_deref(), Some("http://www.example.com"));
+        assert_eq!(link("foo.https"), None);
+        assert_eq!(link("https://code"), None);
+        let b = parse("Write to foo.bar+x@example.co.uk. Not @nobody or a@b.");
+        let Block::Paragraph(p) = &b[0] else {
+            panic!("{b:?}")
+        };
+        let link = |word: &str| p.link_at(p.text.find(word).unwrap()).map(|s| s.to_string());
+        assert_eq!(
+            link("foo.bar").as_deref(),
+            Some("mailto:foo.bar+x@example.co.uk")
+        );
+        assert_eq!(link("@nobody"), None);
+        assert_eq!(link("a@b"), None);
     }
 
     /// Random Markdown made of the pieces parsers trip on (list markers, fences, indents,
-    /// quotes, tables, line ends): none of it may panic out of `parse`.
+    /// quotes, tables, line ends, tabs, HTML): none of it may panic the parser, unguarded.
     #[test]
     fn random_markdown_never_panics() {
         const PIECES: [&str; 22] = [
@@ -518,12 +861,13 @@ mod tests {
         let quiet = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let mut failed = None;
-        for _ in 0..20_000 {
+        for _ in 0..200_000 {
             let n = 1 + (next() % 24) as usize;
             let doc: String = (0..n)
                 .map(|_| PIECES[(next() % PIECES.len() as u64) as usize])
                 .collect();
-            if std::panic::catch_unwind(|| parse(&doc)).is_err() {
+            // The parser itself, unguarded: where panics abort, nothing could catch one.
+            if std::panic::catch_unwind(|| convert(&doc, 0)).is_err() {
                 failed = Some(doc);
                 break;
             }
