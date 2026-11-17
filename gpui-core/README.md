@@ -104,6 +104,12 @@ item](docs/gallery.png)
   With the focus, the arrows, Page Up and Page Down, Space, Home and End scroll it.
   `track_scroll(&ScrollAreaHandle)` lets the host read the position and scroll to an offset, a
   child (`scroll_to_child`) or an end.
+- **Carousel.** `Carousel::new(id).w(…).children(slides).on_slide(…)` shows slides in a row,
+  one in view or `slides_per_view(n)`, with previous and next buttons outside its sides
+  (disabled at the ends unless `looping(true)`) and optional `dots(true)` below. Left and Right
+  move it while the focus is inside, a sideways swipe on a touch screen or a trackpad drags it
+  and snaps to a slide, and a move slides briefly into place. `index(i)` moves it from the host.
+  It's a region described as a carousel, its slides groups named "1 of 5" and so on.
 - **Progress.** `Progress::new(id).value(40.)`: shadcn's eight-pixel bar across its parent,
   the primary colour filling a 20% track as far as the value (clamped to 0–100, and 0 for
   NaN). Without a value it's indeterminate: a stretch of fill sweeping across, only while
