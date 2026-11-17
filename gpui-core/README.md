@@ -97,6 +97,9 @@ item](docs/gallery.png)
   drawn and not under GPUI's `cx.set_reduce_motion(true)`. To assistive tech it's a progress
   indicator with its value (none when indeterminate) and an optional
   `.accessibility_label(…)`.
+- **AspectRatio.** `AspectRatio::new(16. / 9.).child(…)`: a box as wide as its parent (or
+  the width it's given) and as tall as the ratio makes that, its children filling it and
+  clipped at its edges, never stretching it. A ratio that isn't a positive number is a square.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
