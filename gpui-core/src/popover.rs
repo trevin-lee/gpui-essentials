@@ -271,6 +271,8 @@ pub struct Popover {
     on_dismiss: Option<DismissFn>,
     take_focus: bool,
     return_focus: Option<FocusHandle>,
+    /// Exactly the trigger's width, rather than at least.
+    fit_trigger_width: bool,
     max_height: Rems,
     match_trigger_width: bool,
     close_when_scrolled_away: bool,
@@ -293,6 +295,7 @@ impl Popover {
             on_dismiss: None,
             take_focus: true,
             return_focus: None,
+            fit_trigger_width: false,
             max_height: rems(24.),
             match_trigger_width: true,
             close_when_scrolled_away: true,
@@ -359,6 +362,14 @@ impl Popover {
     /// its content: a month under a wide field.
     pub fn match_trigger_width(mut self, matching: bool) -> Self {
         self.match_trigger_width = matching;
+        self
+    }
+
+    /// Whether it's exactly as wide as what it hangs from (off by default), rather than at least
+    /// as wide: content wider than that is laid out to it (a long option cut short), as a
+    /// combobox's list under its field.
+    pub fn fit_trigger_width(mut self, fit: bool) -> Self {
+        self.fit_trigger_width = fit;
         self
     }
 
@@ -487,6 +498,7 @@ impl RenderOnce for Popover {
             trigger: self.trigger,
             anchor,
             panel,
+            fit_trigger_width: self.fit_trigger_width,
             max_height: self.max_height,
             match_trigger_width: self.match_trigger_width,
             close_when_scrolled_away: self.close_when_scrolled_away,
@@ -769,6 +781,7 @@ struct PopoverElement {
     trigger: Option<AnyElement>,
     anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
     panel: Option<Stateful<gpui::Div>>,
+    fit_trigger_width: bool,
     max_height: Rems,
     match_trigger_width: bool,
     close_when_scrolled_away: bool,
@@ -888,11 +901,13 @@ impl Element for PopoverElement {
             px(0.)
         };
         let layer = layer(cx);
-        let panel = panel
-            .max_h(height)
-            .max_w(widest)
-            .min_w(narrowest)
-            .into_any_element();
+        let panel = panel.max_h(height).max_w(widest).min_w(narrowest);
+        let panel = if self.fit_trigger_width {
+            panel.w(anchor.size.width.min(widest))
+        } else {
+            panel
+        }
+        .into_any_element();
         let mut panel = InLayer::new(layer, panel).into_any_element();
         // Laid out on its own, now that what it hangs from has been placed this frame.
         let size = with_panel_colors(self.colors, window, cx, |window, cx| {
