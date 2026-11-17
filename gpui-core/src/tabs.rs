@@ -32,10 +32,9 @@ use gpui::{
     prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::press::Press;
-use crate::size::{Disableable as _, Selectable as _};
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Press, Selectable as _, Theme,
+};
 
 actions!(
     gpui_core_tabs,
@@ -414,7 +413,7 @@ fn panel(list: &ElementId, tab: Tab) -> Stateful<gpui::Div> {
 
 impl RenderOnce for Tabs {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let n = self.tabs.len();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| TabsState {
@@ -571,7 +570,7 @@ mod tests {
 
     #[gpui::test]
     fn the_list_tabs_and_panel_have_their_roles(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
         vcx.update(|window, cx| {
             let theme = cx.theme().clone();

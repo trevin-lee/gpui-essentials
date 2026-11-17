@@ -2,7 +2,7 @@
 //! list beside a detail pane (a vault's logins, codes and cards).
 //!
 //! Typing filters the rows (every word of the query in an item's search text, case aside, as
-//! [`Picker`](crate::Picker) does). Up and Down move a highlight through them while the field
+//! [`Picker`](crate::base::Picker) does). Up and Down move a highlight through them while the field
 //! keeps the keyboard, and Enter opens the highlighted row. A press opens a row too: a click or
 //! a tap, once (a double press doesn't open it twice). The row that's open is the host's to say
 //! ([`SearchList::selected`]); it's drawn selected, and the highlight goes to it. Escape clears
@@ -41,11 +41,7 @@ use gpui::{
     UniformListScrollHandle, Window, actions, div, prelude::FluentBuilder as _, rems, uniform_list,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::input::{Input, InputState};
-use crate::press::Press;
-use crate::size::Selectable as _;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Icon, IconName, Input, InputState, Press, Selectable as _};
 
 actions!(
     gpui_core_search_list,
@@ -234,7 +230,7 @@ fn words(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether `text` has every word in it, case aside: [`Picker`](crate::Picker)'s rule.
+/// Whether `text` has every word in it, case aside: [`Picker`](crate::base::Picker)'s rule.
 fn matches(text: &str, words: &[String]) -> bool {
     if words.is_empty() {
         return true;
@@ -249,7 +245,7 @@ fn css(v: f32) -> gpui::Rems {
 
 impl RenderOnce for SearchList {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let placeholder = self.placeholder.clone();
         let autofocus = self.autofocus;
         let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {

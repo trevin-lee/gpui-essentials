@@ -11,10 +11,9 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative, rems,
 };
 
-use crate::icon::Icon;
-use crate::press::Press;
-use crate::size::{ControlSize, Disableable, Selectable, Sizable};
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, ControlSize, Disableable, Icon, Press, Selectable, Sizable, Theme,
+};
 
 /// How a button looks.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -268,7 +267,7 @@ impl Button {
     }
 
     /// Tells assistive tech whether what it opens (a menu) is open.
-    pub(crate) fn expanded(mut self, expanded: bool) -> Self {
+    pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
         self
     }

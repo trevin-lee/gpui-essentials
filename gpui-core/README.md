@@ -436,6 +436,14 @@ fn run(cx: &mut App) {
 Components draw Lucide icons from gpui-core's assets, so the app serves them:
 `gpui_platform::application().with_assets(gpui_core::Icons)`.
 
+## Stability
+
+`gpui_core::base` is **semver-stable**. It's what components copied into a host's own crate
+(`gpui-core add select`, shadcn's way) are built on: the theme, sizes, `Press`, icons, the
+overlays' layers and focus, menus, fields and `Root`. A breaking change to anything in it breaks
+copied code, so it's a breaking change for gpui-core. `components.toml` lists the components a
+host can copy, what each needs, and the keys and actions it binds.
+
 ## The gallery
 
 Every component in one window, from the repository's root:

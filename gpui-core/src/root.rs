@@ -34,9 +34,8 @@ pub(crate) fn init(cx: &mut App) {
 pub struct Root {
     view: AnyView,
     focus: FocusHandle,
-    /// The toasts shown, each with its place in the order they came.
-    pub(crate) toasts: Vec<(u64, crate::toast::Toast)>,
-    pub(crate) next_toast: u64,
+    /// Views drawn over the content (the toasts' stack), one of each type.
+    overlays: Vec<AnyView>,
 }
 
 impl Root {
@@ -80,8 +79,7 @@ impl Root {
         Self {
             view,
             focus,
-            toasts: Vec::new(),
-            next_toast: 0,
+            overlays: Vec::new(),
         }
     }
 
@@ -89,13 +87,37 @@ impl Root {
     pub fn view(&self) -> &AnyView {
         &self.view
     }
+
+    /// The overlay of type `V`, if one has been [set](Self::set_overlay).
+    pub fn overlay<V: 'static>(&self) -> Option<Entity<V>> {
+        self.overlays
+            .iter()
+            .find_map(|view| view.clone().downcast::<V>().ok())
+    }
+
+    /// Draws `view` over the window's content, for as long as the window is open: where a
+    /// component keeps what it shows over the whole window and draws it (the toasts' stack,
+    /// which [`Toast::show`](crate::Toast::show) sets the first time). The view draws nothing
+    /// in the content's flow; it places what it shows itself, usually deferred over everything.
+    /// There's one of each type: setting another of the same type replaces it.
+    pub fn set_overlay<V: Render>(&mut self, view: Entity<V>, cx: &mut Context<Self>) {
+        let view = AnyView::from(view);
+        match self
+            .overlays
+            .iter_mut()
+            .find(|v| v.entity_type() == view.entity_type())
+        {
+            Some(slot) => *slot = view,
+            None => self.overlays.push(view),
+        }
+        cx.notify();
+    }
 }
 
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         window.set_rem_size(theme.font_size);
-        let toasts = crate::toast::stack(&self.toasts, cx.entity().downgrade(), &theme);
         div()
             .id("gpui-core-root")
             .key_context(CONTEXT)
@@ -109,6 +131,6 @@ impl Render for Root {
             .text_size(theme.text.base)
             .relative()
             .child(self.view.clone())
-            .children(toasts)
+            .children(self.overlays.iter().cloned())
     }
 }

@@ -45,10 +45,9 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::press::Press;
-use crate::size::{ControlSize, Disableable, Sizable};
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, ControlSize, Disableable, Icon, IconName, Press, Sizable, Theme,
+};
 
 actions!(
     gpui_core_toggle_group,
@@ -103,7 +102,7 @@ fn metrics(size: ControlSize) -> (Rems, Rems) {
 
 /// Fill, text and the fill under the pointer. Pressed in, it's shadcn's `data-[state=on]`
 /// accent look; in the dark, where accent is all but the page, the input colour, as a selected
-/// [`Button`](crate::Button) is.
+/// `Button` is.
 fn paint(variant: ToggleVariant, pressed: bool, theme: &Theme) -> (Hsla, Hsla, Hsla) {
     let dark = theme.mode.is_dark();
     let none = gpui::transparent_black();
@@ -513,7 +512,7 @@ struct GroupState {
 
 impl RenderOnce for ToggleGroup {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let n = self.items.len();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| GroupState {
             handles: Vec::new(),

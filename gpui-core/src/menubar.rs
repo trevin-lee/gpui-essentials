@@ -39,11 +39,9 @@ use gpui::{
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::menu::{MenuSelect, PopupMenu};
-use crate::popover::Popover;
-use crate::press::Press;
-use crate::size::Disableable as _;
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, Disableable as _, MenuSelect, Popover, PopupMenu, Press, Theme,
+};
 
 actions!(
     gpui_core_menubar,
@@ -244,7 +242,7 @@ fn step(enabled: &[bool], from: usize, step: isize) -> Option<usize> {
 
 impl RenderOnce for Menubar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let n = self.menus.len();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| MenubarState::default());
@@ -410,7 +408,7 @@ mod tests {
 
     #[gpui::test]
     fn the_bar_and_its_titles_have_their_roles(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
         vcx.update(|window, cx| {
             let bar = bar(&"m".into(), Some("Application".into()));

@@ -1,0 +1,282 @@
+# The components `gpui-core add` copies into a host's crate, read by that CLI and checked
+# against the source by tests/components_registry.rs (run `cargo test -p gpui-core --test
+# components_registry` after changing a component's paths).
+#
+# A component reaches the rest of gpui-core only through `crate::base::…` (in a copy,
+# `gpui_core::base::…`) and through the components in its `needs` (in a copy, `super::…`).
+# For each:
+#   file      its source, from this crate's directory
+#   needs     the components it uses directly, which are copied with it
+#   init      its function binding keys, which a host calls once it's copied; absent if none
+#   contexts  its own key contexts, which the CLI renames (with a `Ui` prefix)
+#   actions   its action namespace, which the CLI renames (to `ui`); absent if none
+
+# The modules that stay in gpui-core, behind gpui_core::base.
+base = ["a11y", "base", "chart", "highlight", "icon", "input", "menu", "modal", "picker", "popover", "press", "root", "size", "text", "theme"]
+
+[accordion]
+file = "src/accordion.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreAccordion"]
+actions = "gpui_core_accordion"
+
+[alert]
+file = "src/alert.rs"
+needs = []
+contexts = []
+
+[aspect_ratio]
+file = "src/aspect_ratio.rs"
+needs = []
+contexts = []
+
+[avatar]
+file = "src/avatar.rs"
+needs = []
+contexts = []
+
+[badge]
+file = "src/badge.rs"
+needs = []
+contexts = []
+
+[breadcrumb]
+file = "src/breadcrumb.rs"
+needs = []
+contexts = []
+
+[button]
+file = "src/button.rs"
+needs = []
+contexts = []
+
+[card]
+file = "src/card.rs"
+needs = []
+contexts = []
+
+[carousel]
+file = "src/carousel.rs"
+needs = ["button"]
+contexts = []
+
+[checkbox]
+file = "src/checkbox.rs"
+needs = []
+contexts = []
+
+[collapsible]
+file = "src/collapsible.rs"
+needs = []
+contexts = []
+
+[combobox]
+file = "src/combobox.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreCombobox"]
+actions = "gpui_core_combobox"
+
+[command]
+file = "src/command.rs"
+needs = ["dialog"]
+contexts = []
+
+[context_menu]
+file = "src/context_menu.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreContextMenu"]
+actions = "gpui_core_context_menu"
+
+[date_picker]
+file = "src/date_picker.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreDatePicker", "GpuiCoreMonthGrid"]
+actions = "gpui_core_date_picker"
+
+[dialog]
+file = "src/dialog.rs"
+needs = ["button"]
+contexts = []
+
+[drawer]
+file = "src/drawer.rs"
+needs = []
+contexts = []
+
+[dropdown_menu]
+file = "src/dropdown_menu.rs"
+needs = ["button"]
+init = "init"
+contexts = ["GpuiCoreDropdownMenu"]
+actions = "gpui_core_dropdown_menu"
+
+[empty_state]
+file = "src/empty_state.rs"
+needs = []
+contexts = []
+
+[field]
+file = "src/field.rs"
+needs = []
+contexts = []
+
+[hover_card]
+file = "src/hover_card.rs"
+needs = []
+contexts = []
+
+[input_group]
+file = "src/input_group.rs"
+needs = []
+contexts = []
+
+[input_otp]
+file = "src/input_otp.rs"
+needs = []
+contexts = []
+
+[item]
+file = "src/item.rs"
+needs = []
+contexts = []
+
+[kbd]
+file = "src/kbd.rs"
+needs = []
+contexts = []
+
+[menubar]
+file = "src/menubar.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreMenubar"]
+actions = "gpui_core_menubar"
+
+[navigation_menu]
+file = "src/navigation_menu.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreNavigationMenu", "GpuiCoreNavigationMenuPanel"]
+actions = "gpui_core_navigation_menu"
+
+[pagination]
+file = "src/pagination.rs"
+needs = []
+contexts = []
+
+[progress]
+file = "src/progress.rs"
+needs = []
+contexts = []
+
+[radio_group]
+file = "src/radio_group.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreRadioGroup"]
+actions = "gpui_core_radio_group"
+
+[scroll_area]
+file = "src/scroll_area.rs"
+needs = []
+contexts = []
+
+[search_list]
+file = "src/search_list.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreSearchList"]
+actions = "gpui_core_search_list"
+
+[segmented]
+file = "src/segmented.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreSegmented"]
+actions = "gpui_core_segmented"
+
+[select]
+file = "src/select.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreSelect"]
+actions = "gpui_core_select"
+
+[separator]
+file = "src/separator.rs"
+needs = []
+contexts = []
+
+[sheet]
+file = "src/sheet.rs"
+needs = []
+contexts = []
+
+[sidebar]
+file = "src/sidebar.rs"
+needs = ["tooltip"]
+init = "init"
+contexts = ["GpuiCoreSidebar", "GpuiCoreSidebarMenu"]
+actions = "gpui_core_sidebar"
+
+[skeleton]
+file = "src/skeleton.rs"
+needs = []
+contexts = []
+
+[slider]
+file = "src/slider.rs"
+needs = []
+contexts = []
+
+[spinner]
+file = "src/spinner.rs"
+needs = []
+contexts = []
+
+[split_view]
+file = "src/split_view.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreSplitView"]
+actions = "gpui_core_split_view"
+
+[switch]
+file = "src/switch.rs"
+needs = []
+contexts = []
+
+[table]
+file = "src/table.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreTable"]
+actions = "gpui_core_table"
+
+[tabs]
+file = "src/tabs.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreTabs"]
+actions = "gpui_core_tabs"
+
+[toast]
+file = "src/toast.rs"
+needs = ["button"]
+contexts = []
+
+[toggle]
+file = "src/toggle.rs"
+needs = []
+init = "init"
+contexts = ["GpuiCoreToggleGroup"]
+actions = "gpui_core_toggle_group"
+
+[tooltip]
+file = "src/tooltip.rs"
+needs = []
+contexts = []

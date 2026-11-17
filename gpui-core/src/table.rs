@@ -59,8 +59,7 @@ use gpui::{
     uniform_list,
 };
 
-use crate::press::focus_ring;
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{ActiveTheme as _, Theme, focus_ring};
 
 actions!(
     gpui_core_table,
@@ -382,7 +381,7 @@ enum Key {
 
 impl RenderOnce for Table {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let columns: Rc<Vec<TableColumn>> = Rc::new(self.columns);
         let count = self.count;

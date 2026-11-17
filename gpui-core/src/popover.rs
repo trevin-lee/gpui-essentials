@@ -43,9 +43,16 @@ use gpui::{
 
 use crate::theme::{ActiveTheme as _, Theme};
 
-actions!(gpui_core_popover, [Dismiss]);
+actions!(
+    gpui_core_popover,
+    [
+        /// Asks the overlay that has the keyboard to close (Escape).
+        Dismiss
+    ]
+);
 
-pub(crate) const CONTEXT: &str = "GpuiCorePopover";
+/// An overlay's key context: Escape in it sends [`Dismiss`].
+pub const CONTEXT: &str = "GpuiCorePopover";
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys([KeyBinding::new("escape", Dismiss, Some(CONTEXT))]);
@@ -56,11 +63,11 @@ const EDGE: f32 = 8.;
 const GAP: f32 = 4.;
 
 /// Above other deferred drawing such as tooltips' hosts; the same as the crate's other overlays.
-pub(crate) const PRIORITY: usize = 1;
+pub const PRIORITY: usize = 1;
 
 /// A modal's (a dialog's): over popovers. What's drawn from inside a modal goes in its layer
 /// (see [`layer`]), so a menu in a dialog is over the dialog.
-pub(crate) const MODAL_PRIORITY: usize = PRIORITY + 1;
+pub const MODAL_PRIORITY: usize = PRIORITY + 1;
 
 /// The layer of the overlay whose content is being placed.
 struct Layer(usize);
@@ -69,20 +76,20 @@ impl gpui::Global for Layer {}
 
 /// The priority an overlay drawn now is deferred at: [`PRIORITY`], or the layer of the overlay
 /// it's drawn from inside if that's higher (a popover in a dialog).
-pub(crate) fn layer(cx: &App) -> usize {
+pub fn layer(cx: &App) -> usize {
     cx.try_global::<Layer>()
         .map_or(PRIORITY, |l| l.0.max(PRIORITY))
 }
 
 /// Draws `child`, an overlay deferred at `priority`, with that as the [`layer`] of the overlays
 /// drawn from inside it.
-pub(crate) struct InLayer {
+pub struct InLayer {
     priority: usize,
     child: AnyElement,
 }
 
 impl InLayer {
-    pub(crate) fn new(priority: usize, child: AnyElement) -> Self {
+    pub fn new(priority: usize, child: AnyElement) -> Self {
         Self { priority, child }
     }
 }
@@ -434,7 +441,7 @@ struct OverlayState {
 /// An overlay's focus, kept across frames under `id`: on opening it takes the keyboard (with
 /// `take`) and remembers what had it; on closing it gives it back to `return_to` or to that,
 /// if the focus is still inside it or lost.
-pub(crate) fn overlay_focus(
+pub fn overlay_focus(
     id: &ElementId,
     open: bool,
     take: bool,

@@ -28,10 +28,7 @@ use gpui::{
     StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::press::Press;
-use crate::size::Disableable;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Disableable, Icon, IconName, Press};
 
 /// A size in the web's CSS pixels, as rems of its 15 pixel text.
 fn css(v: f32) -> Rems {

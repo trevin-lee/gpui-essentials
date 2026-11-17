@@ -2,7 +2,7 @@
 //! rests on it and when it has the keyboard's focus.
 //!
 //! Nothing works by hover alone, so the card shows while its trigger has the focus too, and
-//! Escape hides it. It's placed like a [`Popover`](crate::Popover) and isn't modal: the focus
+//! Escape hides it. It's placed like a [`Popover`](crate::base::Popover) and isn't modal: the focus
 //! stays on the trigger. Since the card isn't reachable from the keyboard, put nothing in it
 //! that can't be done elsewhere.
 //!
@@ -27,8 +27,7 @@ use gpui::{
     StyleRefinement, Styled, Window, div, rems,
 };
 
-use crate::popover::{Dismiss, Popover, PopoverColors};
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Dismiss, POPOVER_CONTEXT, Popover, PopoverColors};
 
 /// How long the pointer rests on the trigger before the card shows (the web's 700 ms).
 pub const HOVER_CARD_OPEN_DELAY: Duration = Duration::from_millis(700);
@@ -181,7 +180,7 @@ fn pointer(
 
 impl RenderOnce for HoverCard {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let key = ElementId::NamedChild(std::sync::Arc::new(self.id.clone()), "hover".into());
         let state = window.use_keyed_state(key, cx, |_, cx| HoverState {
             focus: cx.focus_handle(),
@@ -209,7 +208,7 @@ impl RenderOnce for HoverCard {
         let trigger = div()
             .id("hover-card-trigger")
             .track_focus(&focus)
-            .key_context(crate::popover::CONTEXT)
+            .key_context(POPOVER_CONTEXT)
             .on_hover(move |hovered, window, cx| {
                 pointer(&on_trigger, false, *hovered, delays, window, cx)
             })

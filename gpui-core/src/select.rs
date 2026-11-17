@@ -1,6 +1,6 @@
 //! A select, as shadcn draws it (its `select.tsx`): a field-like button showing the option
 //! chosen (or a placeholder) and a chevron, which opens a [`PopupMenu`] of the options in a
-//! [`Popover`], the chosen one checked. It isn't searchable: that's [`Picker`](crate::Picker).
+//! [`Popover`], the chosen one checked. It isn't searchable: that's [`Picker`](crate::base::Picker).
 //!
 //! ```no_run
 //! # use gpui::*;
@@ -33,12 +33,10 @@ use gpui::{
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::menu::{MenuSelect, PopupMenu, PopupMenuItem};
-use crate::popover::Popover;
-use crate::press::{Press, focus_ring};
-use crate::size::{ControlSize, Disableable, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{
+    ActiveTheme as _, ControlSize, Disableable, Icon, IconName, MenuSelect, Popover, PopupMenu,
+    PopupMenuItem, Press, Sizable, focus_ring,
+};
 
 actions!(
     gpui_core_select,
@@ -262,7 +260,7 @@ fn typed(event: &KeyDownEvent) -> Option<String> {
 
 impl RenderOnce for Select {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let dark = theme.mode.is_dark();
         let state = window.use_keyed_state(

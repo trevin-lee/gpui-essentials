@@ -34,11 +34,13 @@ use gpui::{
     StyleRefinement, Styled, Window, actions, div, rems,
 };
 
+use crate::base::{
+    Disableable, MenuSelect, Popover, PopoverAlign, PopoverSide, PopupMenu, PopupMenuItem, Press,
+};
 use crate::button::Button;
-use crate::menu::{MenuSelect, OnSelect, PopupMenu, PopupMenuItem};
-use crate::popover::{Popover, PopoverAlign, PopoverSide};
-use crate::press::Press;
-use crate::size::Disableable;
+
+/// Runs with a pick.
+type OnSelect = Rc<dyn Fn(&MenuSelect, &mut Window, &mut App)>;
 
 actions!(
     gpui_core_dropdown_menu,
@@ -224,7 +226,7 @@ fn set(state: &Entity<State>, open: Option<Opened>, cx: &mut App) {
 
 impl RenderOnce for DropdownMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State { open: None });
         let open = if self.disabled {
             None
@@ -260,8 +262,7 @@ impl RenderOnce for DropdownMenu {
         });
 
         let menu = open.map(|how| {
-            let mut menu = self.menu;
-            menu.start_blank = !how.keys;
+            let menu = self.menu.start_blank(!how.keys);
             let host = self.on_select.clone();
             let state = state.clone();
             menu.touch(self.touch || how.touch)
@@ -332,7 +333,7 @@ mod tests {
 
     #[gpui::test]
     fn a_press_trigger_says_whether_it_is_expanded(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
         vcx.update(|window, cx| {
             let focus = cx.focus_handle();

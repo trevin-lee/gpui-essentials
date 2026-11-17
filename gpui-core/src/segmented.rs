@@ -30,10 +30,7 @@ use gpui::{
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::press::Press;
-use crate::size::{Disableable as _, Selectable as _};
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Disableable as _, Icon, IconName, Press, Selectable as _};
 
 actions!(
     gpui_core_segmented,
@@ -183,7 +180,7 @@ fn step(enabled: &[bool], from: usize, step: isize) -> Option<usize> {
 
 impl RenderOnce for SegmentedControl {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         // A focus handle for each option, kept between frames.
         let n = self.segments.len();

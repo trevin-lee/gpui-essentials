@@ -27,11 +27,10 @@ use gpui::{
     TextInputConfiguration, Window, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::input::{self, Input, InputEvent, InputState};
-use crate::press::focus_ring;
-use crate::size::{ControlSize, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{
+    ActiveTheme as _, ControlSize, Icon, IconName, Input, InputEvent, InputState, Paste, Sizable,
+    focus_ring,
+};
 
 fn css(v: f32) -> Rems {
     rems(v / 15.)
@@ -392,7 +391,7 @@ impl RenderOnce for InputOtp {
             .max_w_full()
             .cursor_text()
             // A paste fills every slot, from the start, with what it takes of the clipboard.
-            .capture_action(move |_: &input::Paste, window, cx| {
+            .capture_action(move |_: &Paste, window, cx| {
                 cx.stop_propagation();
                 state.update(cx, |s, cx| s.paste(window, cx));
             })

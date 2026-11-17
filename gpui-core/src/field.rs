@@ -27,8 +27,7 @@ use gpui::{
     StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative, rems,
 };
 
-use crate::size::Disableable;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Disableable};
 
 fn css(v: f32) -> gpui::Rems {
     rems(v / 15.)
@@ -63,7 +62,7 @@ impl Label {
     }
 
     /// The control a press on it gives the focus to (a field's
-    /// [`InputState`](crate::InputState), whose handle `focus_handle(cx)` gives).
+    /// [`InputState`](crate::base::InputState), whose handle `focus_handle(cx)` gives).
     pub fn for_focus(mut self, focus: &FocusHandle) -> Self {
         self.focus = Some(focus.clone());
         self
@@ -129,7 +128,7 @@ impl RenderOnce for Label {
 /// control, as for a switch or a check box). An error shows in the destructive colour, the
 /// label turning that colour too. To assistive tech it's a group named by its label and
 /// described by its error, else its description; the control itself takes its own name (an
-/// [`Input`](crate::Input)'s `accessibility_label`, a check box's label).
+/// [`Input`](crate::base::Input)'s `accessibility_label`, a check box's label).
 #[derive(IntoElement)]
 pub struct Field {
     id: ElementId,

@@ -38,8 +38,7 @@ use gpui::{
     Role, StyleRefinement, Styled, TouchPhase, Window, actions, div, px, rems,
 };
 
-use crate::menu::PopupMenu;
-use crate::popover::Popover;
+use crate::base::{Popover, PopupMenu};
 
 actions!(
     gpui_core_context_menu,
@@ -77,7 +76,7 @@ type BuildMenu = Rc<dyn Fn(&mut Window, &mut App) -> PopupMenu>;
 /// selecting text in the element are the element's own.
 ///
 /// The menu is made by [`menu`](Self::menu) only while it's open. The element keeps the focus
-/// for the keys: make it something that takes the focus (a [`Press`](crate::Press)) to reach
+/// for the keys: make it something that takes the focus (a [`Press`](crate::base::Press)) to reach
 /// the menu from the keyboard. Give each element its own id: what's open is kept under it.
 #[derive(IntoElement)]
 pub struct ContextMenu {
@@ -138,7 +137,7 @@ fn set(state: &Entity<State>, open: Option<Opened>, cx: &mut App) {
 
 impl RenderOnce for ContextMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State { open: None });
         let open = state.read(cx).open;
         let menu = match (open, &self.menu) {
@@ -148,14 +147,8 @@ impl RenderOnce for ContextMenu {
                     menu = menu.touch(true);
                 }
                 // A pick closes it, after the host's handler.
-                let host = menu.on_select.take();
                 let state = state.clone();
-                Some(menu.on_select(move |pick, window, cx| {
-                    if let Some(f) = &host {
-                        f(pick, window, cx);
-                    }
-                    set(&state, None, cx);
-                }))
+                Some(menu.after_select(move |_, _, cx| set(&state, None, cx)))
             }
             _ => None,
         };

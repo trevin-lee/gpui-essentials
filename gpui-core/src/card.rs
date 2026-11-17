@@ -27,8 +27,7 @@ use gpui::{
     prelude::FluentBuilder as _, relative, rems,
 };
 
-use crate::size::{ControlSize, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, ControlSize, Sizable};
 
 /// A size in the web's CSS pixels, as rems of its 15 pixel text.
 fn css(v: f32) -> Rems {
