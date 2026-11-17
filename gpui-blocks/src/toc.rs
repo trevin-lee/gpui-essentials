@@ -6,8 +6,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use gpui_kit::component::ActiveTheme as _;
-use gpui_kit::*;
+use gpui::*;
+use gpui_core::ActiveTheme as _;
 use markdown::mdast::Node;
 use markdown_editor::BlockId;
 use markdown_editor::{CustomNode, Extension};
