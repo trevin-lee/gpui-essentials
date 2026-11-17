@@ -62,6 +62,8 @@ struct Gallery {
     tag_open: bool,
     tag: SharedString,
     sort: SharedString,
+    /// The segmented control's choice: a theme.
+    look: SharedString,
     /// What the list is grouped by: the sort menu's submenu.
     group: SharedString,
 }
@@ -374,6 +376,21 @@ impl Render for Gallery {
                             .child(format!("{}", self.level.read(cx).value())),
                     ),
             )
+            .child(heading("A segmented control (arrows, Home and End)", &theme))
+            .child(
+                div().w(rems(20.)).child(
+                    SegmentedControl::new("look")
+                        .accessibility_label("Theme")
+                        .segment_with_icon("system", "System", IconName::Monitor)
+                        .segment_with_icon("light", "Light", IconName::Sun)
+                        .segment_with_icon("dark", "Dark", IconName::Moon)
+                        .selected(self.look.clone())
+                        .on_change(cx.listener(|g, id: &SharedString, _, cx| {
+                            g.look = id.clone();
+                            cx.notify();
+                        })),
+                ),
+            )
             .child(heading("Fields", &theme))
             .child(
                 div()
@@ -522,6 +539,7 @@ fn main() {
                     tag_open: false,
                     tag: "Work".into(),
                     sort: "name".into(),
+                    look: "system".into(),
                     group: "none".into(),
                 })
             })
