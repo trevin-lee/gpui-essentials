@@ -1663,3 +1663,42 @@ fn the_view_follows_the_hosts_docs(cx: &mut TestAppContext) {
     assert_eq!(titles(&table, cx).len(), 7);
     let _ = TableTheme::dark();
 }
+
+#[gpui::test]
+fn the_focus_and_a_late_press_stay_on_their_row_when_the_rows_are_reordered(
+    cx: &mut TestAppContext,
+) {
+    let host = TestHost::new();
+    host.apply.set(false);
+    let (db, rows) = load("people");
+    let (table, cx) = open_with(cx, &host, db, rows.clone(), None, size(px(2600.), px(700.)));
+    table.update(cx, |t, cx| t.focus_cell(ANA, FOLLOW_UP, cx));
+    draw(cx);
+    // Reordered, then shrunk, by the host: the focus follows Ana's row.
+    let reversed: Vec<Doc> = rows.iter().rev().cloned().collect();
+    table.update(cx, |t, cx| t.set_rows(reversed, cx));
+    draw(cx);
+    assert_eq!(
+        table.update(cx, |t, _| t.focused_row_cell()),
+        Some((ANA.into(), FOLLOW_UP.into()))
+    );
+    let fewer: Vec<Doc> = rows.iter().filter(|r| r.id != ROWAN).cloned().collect();
+    table.update(cx, |t, cx| t.set_rows(fewer, cx));
+    draw(cx);
+    assert_eq!(
+        table.update(cx, |t, _| t.focused_row_cell()),
+        Some((ANA.into(), FOLLOW_UP.into()))
+    );
+    // A press on Imani's checkbox as drawn, as Ana's row goes (Imani's line moving up into
+    // Ana's place, Jonah's into Imani's): it toggles no other row's (here, none: the lines it
+    // was drawn from are gone).
+    let at = rect(cx, cell(IMANI, FOLLOW_UP)).center();
+    let without_ana: Vec<Doc> = rows.iter().filter(|r| r.id != ANA).cloned().collect();
+    host.clear();
+    click_as_rows_change(cx, &table, without_ana, at);
+    assert!(
+        host.edits().iter().all(|e| value_edit(e).0 == IMANI),
+        "{:?}",
+        host.edits()
+    );
+}

@@ -705,3 +705,85 @@ fn line_bounds_are_where_the_line_is_drawn(cx: &mut TestAppContext) {
             .is_none()
     );
 }
+
+#[gpui::test]
+fn line_bounds_never_answer_from_an_older_draw(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, rows) = crowded();
+    let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+    let (table, cx) = open_list(
+        cx,
+        &host,
+        (db, rows.clone()),
+        BY_STAGE,
+        size(px(700.), px(500.)),
+    );
+    let all = |table: &Entity<TableView>, cx: &mut VisualTestContext| {
+        table.read_with(cx, |t, _| {
+            ids.iter().map(|id| t.line_bounds(id)).collect::<Vec<_>>()
+        })
+    };
+    // Asked right after the rows are set, before the list can draw them: none known.
+    let set = |table: &Entity<TableView>, cx: &mut VisualTestContext, rows: Vec<Doc>| {
+        table.update(cx, |t, cx| {
+            t.set_rows(rows, cx);
+            ids.iter().map(|id| t.line_bounds(id)).collect::<Vec<_>>()
+        })
+    };
+    // Reordered.
+    let reversed: Vec<Doc> = rows.iter().rev().cloned().collect();
+    assert!(set(&table, cx, reversed).iter().all(Option::is_none));
+    draw(cx);
+    assert_eq!(
+        table.read_with(cx, |t, _| t.line_bounds(IMANI)),
+        Some(rect(cx, line(IMANI, &opt(WARM))))
+    );
+    // Shrunk to two rows: no panic, then their lines and no others.
+    let kept: Vec<Doc> = rows
+        .iter()
+        .filter(|r| r.id == IMANI || r.id == ROWAN)
+        .cloned()
+        .collect();
+    assert!(set(&table, cx, kept).iter().all(Option::is_none));
+    draw(cx);
+    let after = all(&table, cx);
+    for (id, b) in ids.iter().zip(after) {
+        assert_eq!(b.is_some(), id == IMANI || id == ROWAN, "{id}");
+    }
+    assert_eq!(
+        table.read_with(cx, |t, _| t.line_bounds(IMANI)),
+        Some(rect(cx, line(IMANI, &opt(WARM))))
+    );
+}
+
+#[gpui::test]
+fn the_focus_stays_on_its_row_when_the_rows_are_reordered(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, rows) = crowded();
+    let (table, cx) = open_list(
+        cx,
+        &host,
+        (db, rows.clone()),
+        BY_STAGE,
+        size(px(700.), px(500.)),
+    );
+    click(cx, line(IMANI, &opt(WARM)));
+    assert_eq!(focused(&table, cx).as_deref(), Some(IMANI));
+    let reversed: Vec<Doc> = rows.iter().rev().cloned().collect();
+    table.update(cx, |t, cx| t.set_rows(reversed, cx));
+    draw(cx);
+    assert_eq!(focused(&table, cx).as_deref(), Some(IMANI));
+    // Twice before a draw: still the row focused before either.
+    let shuffled: Vec<Doc> = rows
+        .iter()
+        .skip(3)
+        .chain(rows.iter().take(3))
+        .cloned()
+        .collect();
+    table.update(cx, |t, cx| {
+        t.set_rows(rows.clone(), cx);
+        t.set_rows(shuffled, cx);
+    });
+    draw(cx);
+    assert_eq!(focused(&table, cx).as_deref(), Some(IMANI));
+}

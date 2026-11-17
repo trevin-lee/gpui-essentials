@@ -370,7 +370,8 @@ A view of type `list` draws as a list: again the same `TableView` entity, `Table
 - **Touch.** With `TableTheme::with_touch(true)` lines, headers and New lines are 44 points tall
   and take presses through `Press::min_hit`.
 - **Scale.** Every line is the same height, so only those on screen are drawn (`uniform_list`),
-  however many rows and groups. `TableView::line_bounds` says where a row's line is.
+  however many rows and groups. `TableView::line_bounds` says where a row's line is (as last
+  drawn: none from new rows until they're drawn).
 - **Nothing redraws while nothing changes,** and the list keeps no timers.
 
 Not in this first list: dragging several rows at once, a row's Open button and inline editing

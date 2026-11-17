@@ -231,12 +231,16 @@ impl TableView {
     }
 
     /// Where a row's card is in the window (in the first open column it's in), as the board
-    /// last drew it: for a host's popover by a card, say. None when it isn't drawn.
+    /// last drew it: for a host's popover by a card, say. None when it isn't drawn, and while
+    /// the rows changed since (until the board draws them).
     pub fn card_bounds(&self, row_id: &str) -> Option<Bounds<Pixels>> {
         let cols = self.shown.board.as_ref()?;
         let m = self.board_metrics();
         cols.iter().enumerate().find_map(|(ci, c)| {
-            let index = c.rows.iter().position(|&r| self.rows[r].id == row_id)?;
+            let index = c
+                .rows
+                .iter()
+                .position(|&r| self.shown_row(r).is_some_and(|r| r.id == row_id))?;
             let list = self.list_bounds(ci)?;
             let scrolled = self
                 .board
@@ -294,7 +298,11 @@ impl TableView {
         let ci = cols.iter().position(|c| c.key_string() == f.column);
         match &f.spot {
             SpotId::Card(id) => {
-                let find = |c: &BoardColumn| c.rows.iter().position(|&r| self.rows[r].id == *id);
+                let find = |c: &BoardColumn| {
+                    c.rows
+                        .iter()
+                        .position(|&r| self.shown_row(r).is_some_and(|r| r.id == *id))
+                };
                 if let Some(ci) = ci
                     && !cols[ci].folded
                     && let Some(index) = find(&cols[ci])
@@ -324,7 +332,7 @@ impl TableView {
                 let c = cols.get(column)?;
                 BoardFocus {
                     column: c.key_string(),
-                    spot: SpotId::Card(self.rows[*c.rows.get(index)?].id.clone()),
+                    spot: SpotId::Card(self.shown_row(*c.rows.get(index)?)?.id.clone()),
                 }
             }
             BoardSpot::New { column } => BoardFocus {
@@ -869,6 +877,8 @@ impl TableView {
     /// drawn there. Near the board's edges, or a column's top or bottom, it scrolls them. (A
     /// list's row: the group and slot of the line under it.)
     pub(crate) fn drag_card_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        // The rows may have changed during the drag: their places are worked out again first.
+        self.ensure();
         if self.shown.list.is_some() {
             self.drag_row_to(at, cx);
             return;
@@ -972,6 +982,7 @@ impl TableView {
         let Some((to, slot)) = drag.target else {
             return;
         };
+        self.ensure();
         let list = self.shown.board.is_none();
         let Some(cols) = self.move_lanes() else {
             return;
@@ -982,12 +993,16 @@ impl TableView {
         let Some(row) = self.rows.iter().position(|r| r.id == drag.row_id) else {
             return;
         };
+        // The column it was over may be gone, if the rows changed during the drag.
+        let Some(dest) = cols.get(to) else {
+            return;
+        };
         // The slot counts the card itself when it's in that column; the index doesn't.
-        let index = match cols[to].rows.iter().position(|&r| r == row) {
+        let index = match dest.rows.iter().position(|&r| r == row) {
             Some(p) if p < slot => slot - 1,
             _ => slot,
         };
-        let key = cols[to].key_string();
+        let key = dest.key_string();
         self.move_card(&drag.row_id, from, to, index, window, cx);
         if list {
             self.focus_line(&drag.row_id, &key);

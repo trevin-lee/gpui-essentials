@@ -69,14 +69,14 @@ impl TableView {
     }
 
     /// Where a row's line is in the window (its first, for a row in several groups), as the
-    /// list last drew it: for a host's popover by a row, say. None when it isn't on screen.
+    /// list last drew it: for a host's popover by a row, say. None when it isn't on screen, and
+    /// while the rows changed since (until the list draws them).
     pub fn line_bounds(&self, row_id: &str) -> Option<Bounds<Pixels>> {
         self.shown.list.as_ref()?;
-        let ix = self
-            .shown
-            .items
-            .iter()
-            .position(|i| matches!(i, Item::Row { row, .. } if self.rows[*row].id == row_id))?;
+        let ix = self.shown.items.iter().position(|i| {
+            matches!(*i, Item::Row { row, .. }
+                if self.shown_row(row).is_some_and(|r| r.id == row_id))
+        })?;
         let b = self.item_bounds(ix)?;
         let list = self.lines_bounds()?;
         (b.bottom() > list.top() && b.top() < list.bottom()).then_some(b)
@@ -150,7 +150,8 @@ impl TableView {
         let lane = self.lane_of(ix)?;
         let key = self.shown.list.as_ref()?.get(lane)?.key_string();
         let b = self.item_bounds(ix)?;
-        b.contains(&at).then(|| (self.rows[row].id.clone(), key, b))
+        let id = self.shown_row(row)?.id.clone();
+        b.contains(&at).then_some((id, key, b))
     }
 
     /// The group (a place in [`TableView::list_groups`]) a line is in.
@@ -182,14 +183,14 @@ impl TableView {
         };
         let item = self.shown.items.iter().position(|i| {
             matches!(*i, Item::Row { row, group }
-                if self.rows[row].id == row_id
+                if self.shown_row(row).is_some_and(|r| r.id == row_id)
                     && lanes.get(group.unwrap_or(0)).is_some_and(|l| l.key_string() == key))
         });
         let item = item.or_else(|| {
-            self.shown
-                .items
-                .iter()
-                .position(|i| matches!(*i, Item::Row { row, .. } if self.rows[row].id == row_id))
+            self.shown.items.iter().position(|i| {
+                matches!(*i, Item::Row { row, .. }
+                    if self.shown_row(row).is_some_and(|r| r.id == row_id))
+            })
         });
         if let Some(item) = item {
             self.cell = Some(CellRef { item, column: 0 });
