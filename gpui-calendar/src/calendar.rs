@@ -2344,6 +2344,12 @@ impl Calendar {
             self.emit_edit(kind, event, time, EditScope::This, cx);
             return;
         }
+        // A host that allows one answer isn't asked a question with one answer.
+        if let [scope] = self.options.edit_scopes()[..] {
+            self.emit_edit(kind, event, time, scope, cx);
+            cx.notify();
+            return;
+        }
         self.asking = Some(Asking {
             kind,
             event,
@@ -2461,8 +2467,8 @@ impl Calendar {
     }
 
     fn highlight_answer(&mut self, by: i32, cx: &mut Context<Self>) {
+        let n = self.options.edit_scopes().len() as i32;
         if let Some(a) = &mut self.asking {
-            let n = EditScope::ALL.len() as i32;
             a.highlighted = (a.highlighted as i32 + by).rem_euclid(n) as usize;
             cx.notify();
         }
@@ -2482,7 +2488,8 @@ impl Calendar {
             EditKind::Rsvp(_) => "Answer for a repeating event",
         };
         let this = cx.entity().downgrade();
-        let rows = EditScope::ALL.into_iter().enumerate().map(|(i, scope)| {
+        let scopes = self.options.edit_scopes();
+        let rows = scopes.into_iter().enumerate().map(|(i, scope)| {
             let this = this.clone();
             let highlighted = i == asking.highlighted;
             Press::new(("scope", i))
@@ -3033,7 +3040,10 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &NewEvent, _, cx| c.new_event(cx)))
             .on_action(cx.listener(|c, _: &OpenSelected, _, cx| {
                 match c.asking.as_ref().map(|a| a.highlighted) {
-                    Some(i) => c.answer(EditScope::ALL[i], cx),
+                    Some(i) => {
+                        let scopes = c.options.edit_scopes();
+                        c.answer(scopes[i.min(scopes.len() - 1)], cx)
+                    }
                     None => c.open_selected(cx),
                 }
             }))
