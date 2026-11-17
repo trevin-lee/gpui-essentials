@@ -34,6 +34,7 @@
 struct ReadmeDoctests;
 
 mod a11y;
+mod accordion;
 mod alert;
 mod avatar;
 mod badge;
@@ -74,6 +75,7 @@ pub mod theme;
 mod toast;
 mod tooltip;
 
+pub use accordion::{Accordion, AccordionItem};
 pub use alert::{Alert, AlertVariant};
 pub use avatar::{Avatar, AvatarGroup, AvatarImage};
 pub use badge::{Badge, BadgeVariant};
@@ -135,6 +137,7 @@ pub fn init(cx: &mut App) {
         Theme::set(Theme::dark(), cx);
     }
     root::init(cx);
+    accordion::init(cx);
     segmented::init(cx);
     split_view::init(cx);
     tabs::init(cx);
