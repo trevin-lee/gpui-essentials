@@ -241,6 +241,7 @@ impl TableView {
             .map_or_else(|| ("all".to_owned(), 0), |l| (l.key_string(), l.rows.len()));
         let r = &self.rows[row];
         let rid = r.id.clone();
+        let shown = self.shown_serial;
         let focused = self.cell.is_some_and(|c| c.item == ix);
         let lifted = dragged == Some(rid.as_str());
         let empty = r.title.is_empty();
@@ -379,6 +380,9 @@ impl TableView {
             })
             .when_some(bar, |d, top| d.child(self.landing_bar(top)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&this.focus, cx);
                 this.cell = Some(CellRef {
                     item: ix,
@@ -418,6 +422,7 @@ impl TableView {
         let focused = self.cell.is_some_and(|c| c.item == ix);
         let key = group.key.to_string();
         let count = group.rows.len();
+        let shown = self.shown_serial;
         // In a sorted view a row dropped in another group goes where the sort puts it: the
         // group is marked rather than a place in it.
         let target = landing.is_some_and(|l| l.sorted && l.lane == g);
@@ -471,6 +476,9 @@ impl TableView {
                     .child(count.to_string()),
             )
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&this.focus, cx);
                 this.cell = Some(CellRef {
                     item: ix,
@@ -491,6 +499,7 @@ impl TableView {
     ) -> AnyElement {
         let t = &self.theme;
         let focused = self.cell.is_some_and(|c| c.item == ix);
+        let shown = self.shown_serial;
         let lane = g.unwrap_or(0);
         let lanes = self.shown.list.as_deref().unwrap_or(&[]);
         let key = lanes
@@ -530,6 +539,9 @@ impl TableView {
             .child(line("New"))
             .when(bar, |d| d.child(self.landing_bar(true)))
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                if !this.still_shown(shown) {
+                    return;
+                }
                 window.focus(&this.focus, cx);
                 this.cell = Some(CellRef {
                     item: ix,
