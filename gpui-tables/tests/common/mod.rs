@@ -246,6 +246,11 @@ fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
                 }
             }
         }
+        Edit::RowsDeleted { row_ids } => {
+            for r in rows.iter_mut().filter(|r| row_ids.contains(&r.id)) {
+                r.deleted = Some(NOW);
+            }
+        }
         Edit::RowsMoved { row_ids, orders } => {
             for (id, o) in row_ids.iter().zip(orders) {
                 if let Some(r) = rows.iter_mut().find(|r| r.id == *id) {
