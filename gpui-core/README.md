@@ -27,6 +27,13 @@ item](docs/gallery.png)
   above where there's more room, stays inside the window and scrolls past `max_height`. A click
   outside, Escape, or the trigger scrolling away calls `on_dismiss` with the reason; the host
   owns `open`. While open it has the keyboard, and on closing it hands the focus back.
+- **Breadcrumb.** `Breadcrumb::new(id).item(BreadcrumbItem::new(id, label))….on_navigate(…)`:
+  the path to the current page, its last item, separated by chevrons. The other items are links
+  (a press, Enter or Space calls `on_navigate` with the item's id); the current page is no link
+  and no Tab stop, and tells assistive tech it's the current page. When the path doesn't fit
+  its width, or has more than `max_items(n)`, its middle folds into an ellipsis that opens a
+  menu of the folded items; whatever's left is cut short rather than spilling. `touch(true)`
+  makes its links 44 points tall.
 - **Sheet.** `Sheet::new(id).open(open).on_dismiss(…).child(…)` is Popover's touch form: a
   panel across the bottom of the window over a scrim, centred and capped at `max_width` on a
   wide window, scrolling past nine tenths of its height. A press on the scrim or Escape calls

@@ -35,6 +35,7 @@ struct ReadmeDoctests;
 
 mod a11y;
 mod alert;
+mod breadcrumb;
 mod button;
 mod card;
 mod collapsible;
@@ -61,6 +62,7 @@ mod toast;
 mod tooltip;
 
 pub use alert::{Alert, AlertVariant};
+pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
 pub use collapsible::Collapsible;
