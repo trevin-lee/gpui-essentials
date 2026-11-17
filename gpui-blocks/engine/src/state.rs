@@ -33,8 +33,8 @@ pub(crate) const CONTEXT: &str = "BlockEditor";
 pub type ImageSourceFn =
     std::sync::Arc<dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + Send + Sync>;
 /// A host's syntax highlighter: a code block's language (the first word of its fence's info,
-/// possibly empty) and its code to the styles of byte ranges of the code, sorted. With one, the
-/// editor draws code blocks itself; without, GPUI Kit's own highlighting applies.
+/// possibly empty) and its code to the styles of byte ranges of the code, sorted. Without one,
+/// code blocks are drawn uncoloured.
 pub type CodeHighlightFn =
     std::sync::Arc<dyn Fn(&str, &str) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync>;
 

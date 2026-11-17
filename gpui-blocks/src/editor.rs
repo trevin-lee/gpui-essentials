@@ -198,8 +198,8 @@ impl Options {
     /// its fence's info, possibly empty) and its code, and returns the styles of byte ranges of
     /// the code, sorted. gpui-core's `highlight` feature makes one
     /// (`Highlighter::new().into_fn(theme)`). It's asked again only when a block's code or
-    /// language changes; pass a new one when the theme changes. Without it, code blocks keep
-    /// GPUI Kit's highlighting.
+    /// language changes; pass a new one when the theme changes. Without it, code blocks are
+    /// drawn uncoloured.
     pub fn code_highlighter(
         mut self,
         highlight: impl Fn(&str, &str) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
