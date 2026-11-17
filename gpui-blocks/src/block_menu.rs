@@ -66,19 +66,25 @@ impl Editor {
     /// Opens the block menu in a sheet for the top-level block the text selection starts in:
     /// the touch edit menu's Block….
     pub(crate) fn open_block_sheet(&mut self, cx: &mut Context<Self>) {
+        if let Some(block) = self.selection_top_block(cx) {
+            self.block_sheet = Some(block);
+            cx.notify();
+        }
+    }
+
+    /// The top-level block the text selection starts in.
+    pub(crate) fn selection_top_block(&self, cx: &App) -> Option<BlockId> {
         let state = self.state.read(cx);
         let doc = state.model().document();
-        let start = match state.model().selection() {
-            BlockSelection::Text { anchor, head } => {
-                let leaves: Vec<_> = doc.leaves().map(|leaf| leaf.id()).collect();
-                let at = |p: &BlockPosition| leaves.iter().position(|id| *id == p.block);
-                if at(head) < at(anchor) {
-                    head.block
-                } else {
-                    anchor.block
-                }
-            }
-            _ => return,
+        let BlockSelection::Text { anchor, head } = state.model().selection() else {
+            return None;
+        };
+        let leaves: Vec<_> = doc.leaves().map(|leaf| leaf.id()).collect();
+        let at = |p: &BlockPosition| leaves.iter().position(|id| *id == p.block);
+        let start = if at(head) < at(anchor) {
+            head.block
+        } else {
+            anchor.block
         };
         let mut block = doc.block(start);
         while let Some(b) = block
@@ -86,10 +92,7 @@ impl Editor {
         {
             block = b.parent();
         }
-        if let Some(block) = block.map(|b| b.id()) {
-            self.block_sheet = Some(block);
-            cx.notify();
-        }
+        block.map(|b| b.id())
     }
 
     /// Runs the block menu's entry `id` on `block`.
@@ -259,7 +262,7 @@ fn turn_into() -> Vec<(SharedString, EditorCommand)> {
         .collect()
 }
 
-fn turn_into_titles() -> Vec<SharedString> {
+pub(crate) fn turn_into_titles() -> Vec<SharedString> {
     turn_into().into_iter().map(|(title, _)| title).collect()
 }
 

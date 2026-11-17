@@ -2085,6 +2085,11 @@ impl BlockEditorState {
 
     /// The active block drag, after cancelling it if the document changed
     /// since it began: the blocks it measured may have moved or gone.
+    /// Whether the pointer is pressed and dragging out a text selection.
+    pub fn is_selecting(&self) -> bool {
+        self.dragging
+    }
+
     /// Whether a block is being dragged: pressed on a handle (see [`Self::begin_block_drag`]) and
     /// moved far enough to have started.
     pub fn is_dragging_block(&self) -> bool {
