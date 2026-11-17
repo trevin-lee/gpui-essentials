@@ -1,6 +1,8 @@
 //! Markdown (GitHub's flavour) to the blocks TextView draws. Nothing in it is ever run or
 //! fetched: raw HTML shows as its text, and an image shows as its description.
 
+use std::collections::HashMap;
+
 use markdown::mdast::{AlignKind, Node};
 
 use super::paragraph::{Marks, Paragraph};
@@ -45,32 +47,103 @@ pub struct Item {
     pub blocks: Vec<Block>,
 }
 
+/// Link reference definitions by their identifier: the first of each wins.
+type Defs = HashMap<String, String>;
+
 pub fn parse(source: &str) -> Vec<Block> {
+    parse_with(source, "").blocks
+}
+
+/// What [`parse_with`] read: the blocks, and the link reference definitions in the source
+/// itself (not the context's), as `[label]: <url>` lines for another source's context.
+#[derive(Debug, Default)]
+pub struct Parsed {
+    pub blocks: Vec<Block>,
+    pub definitions: String,
+}
+
+/// Reads `source` with `context` after it: link reference definitions from elsewhere (other
+/// parts of one document), so a `[text][label]` here resolves to one defined there. The
+/// context's definitions draw nothing.
+pub fn parse_with(source: &str, context: &str) -> Parsed {
     let mut end = source.len().min(MAX_LEN);
     while !source.is_char_boundary(end) {
         end -= 1;
     }
+    let source = &source[..end];
+    let mut text = String::new();
+    let doc = if context.is_empty() {
+        source
+    } else {
+        // A blank line first, so the definitions can't join the source's last paragraph.
+        let mut room = MAX_LEN.saturating_sub(source.len());
+        while room < context.len() && !context.is_char_boundary(room) {
+            room -= 1;
+        }
+        text.reserve(source.len() + room.min(context.len()) + 2);
+        text.push_str(source);
+        text.push_str("\n\n");
+        text.push_str(&context[..room.min(context.len())]);
+        &text
+    };
     // Raw HTML is never rendered, so it isn't parsed either: it reads as the text it is, and
     // the Markdown after it isn't swallowed into an HTML block (which runs to a blank line).
     let mut options = markdown::ParseOptions::gfm();
     options.constructs.html_flow = false;
     options.constructs.html_text = false;
-    match markdown::to_mdast(&source[..end], &options) {
-        Ok(Node::Root(root)) => blocks(&root.children, 0),
+    match markdown::to_mdast(doc, &options) {
+        Ok(Node::Root(root)) => {
+            let mut defs = Defs::new();
+            let mut own = String::new();
+            definitions(&root.children, source.len(), &mut defs, &mut own, 0);
+            Parsed {
+                blocks: blocks(&defs, &root.children, 0),
+                definitions: own,
+            }
+        }
         // Markdown without MDX has no syntax errors; if anything comes back, show the text.
-        _ => vec![Block::Paragraph(Paragraph::plain(&source[..end]))],
+        _ => Parsed {
+            blocks: vec![Block::Paragraph(Paragraph::plain(source))],
+            definitions: String::new(),
+        },
     }
 }
 
-fn blocks(nodes: &[Node], depth: usize) -> Vec<Block> {
+/// Gathers the link reference definitions under `nodes` into `defs` (the first of each
+/// identifier wins), and those starting before `own_end` (the source's own, not the context's)
+/// into `own` as `[label]: <url>` lines. A URL that can't be written back so is left out of
+/// `own`.
+fn definitions(nodes: &[Node], own_end: usize, defs: &mut Defs, own: &mut String, depth: usize) {
+    if depth > MAX_DEPTH {
+        return;
+    }
+    for n in nodes {
+        if let Node::Definition(d) = n {
+            defs.entry(d.identifier.clone())
+                .or_insert_with(|| d.url.clone());
+            let mine = d.position.as_ref().is_none_or(|p| p.start.offset < own_end);
+            let writable = !d.url.contains(['<', '>', '\n', '\r', '\\']);
+            if mine
+                && writable
+                && let Some(label) = &d.label
+            {
+                own.push_str(&format!("[{label}]: <{}>\n", d.url));
+            }
+        } else if let Some(children) = n.children() {
+            definitions(children, own_end, defs, own, depth + 1);
+        }
+    }
+}
+
+fn blocks(defs: &Defs, nodes: &[Node], depth: usize) -> Vec<Block> {
     if depth > MAX_DEPTH {
         return Vec::new();
     }
     let mut out = Vec::new();
     for n in nodes {
         match n {
-            Node::Paragraph(p) => out.push(Block::Paragraph(inline(&p.children, depth))),
-            Node::Heading(h) => out.push(Block::Heading(h.depth, inline(&h.children, depth))),
+            Node::Paragraph(p) => out.push(Block::Paragraph(inline(defs, &p.children, depth))),
+            Node::Heading(h) => out.push(Block::Heading(h.depth, inline(defs, &h.children, depth))),
             Node::Code(c) => out.push(Block::Code {
                 lang: c.lang.clone(),
                 text: c.value.clone(),
@@ -79,7 +152,7 @@ fn blocks(nodes: &[Node], depth: usize) -> Vec<Block> {
                 lang: Some("math".into()),
                 text: m.value.clone(),
             }),
-            Node::Blockquote(q) => out.push(Block::Quote(blocks(&q.children, depth + 1))),
+            Node::Blockquote(q) => out.push(Block::Quote(blocks(defs, &q.children, depth + 1))),
             Node::List(l) => out.push(Block::List {
                 start: l.ordered.then(|| l.start.unwrap_or(1)),
                 items: l
@@ -88,7 +161,7 @@ fn blocks(nodes: &[Node], depth: usize) -> Vec<Block> {
                     .filter_map(|c| match c {
                         Node::ListItem(i) => Some(Item {
                             checked: i.checked,
-                            blocks: blocks(&i.children, depth + 1),
+                            blocks: blocks(defs, &i.children, depth + 1),
                         }),
                         _ => None,
                     })
@@ -113,7 +186,7 @@ fn blocks(nodes: &[Node], depth: usize) -> Vec<Block> {
                             r.children
                                 .iter()
                                 .map(|c| match c {
-                                    Node::TableCell(c) => inline(&c.children, depth),
+                                    Node::TableCell(c) => inline(defs, &c.children, depth),
                                     _ => Paragraph::default(),
                                 })
                                 .collect(),
@@ -123,7 +196,7 @@ fn blocks(nodes: &[Node], depth: usize) -> Vec<Block> {
                     .collect(),
             }),
             Node::Html(h) => out.push(Block::Paragraph(Paragraph::plain(h.value.clone()))),
-            Node::FootnoteDefinition(f) => out.extend(blocks(&f.children, depth + 1)),
+            Node::FootnoteDefinition(f) => out.extend(blocks(defs, &f.children, depth + 1)),
             // Frontmatter and the like: nothing to show.
             _ => {}
         }
@@ -161,13 +234,13 @@ fn soft_breaks(text: &str) -> std::borrow::Cow<'_, str> {
     out.into()
 }
 
-fn inline(nodes: &[Node], depth: usize) -> Paragraph {
+fn inline(defs: &Defs, nodes: &[Node], depth: usize) -> Paragraph {
     let mut p = Paragraph::default();
-    walk(nodes, &Marks::default(), &mut p, depth);
+    walk(defs, nodes, &Marks::default(), &mut p, depth);
     p
 }
 
-fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
+fn walk(defs: &Defs, nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
     if depth > MAX_DEPTH {
         return;
     }
@@ -175,6 +248,7 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
         match n {
             Node::Text(t) => p.push(&soft_breaks(&t.value), marks.clone()),
             Node::Emphasis(e) => walk(
+                defs,
                 &e.children,
                 &Marks {
                     italic: true,
@@ -184,6 +258,7 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
                 depth + 1,
             ),
             Node::Strong(s) => walk(
+                defs,
                 &s.children,
                 &Marks {
                     bold: true,
@@ -193,6 +268,7 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
                 depth + 1,
             ),
             Node::Delete(d) => walk(
+                defs,
                 &d.children,
                 &Marks {
                     strike: true,
@@ -219,6 +295,7 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
             Node::Link(l) => {
                 let link = Some(l.url.clone().into());
                 walk(
+                    defs,
                     &l.children,
                     &Marks {
                         link,
@@ -243,6 +320,30 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
                 )
             }
             Node::Html(h) => p.push(&h.value, marks.clone()),
+            Node::LinkReference(r) => {
+                let link = defs.get(&r.identifier).map(|url| url.clone().into());
+                walk(
+                    defs,
+                    &r.children,
+                    &Marks {
+                        link,
+                        ..marks.clone()
+                    },
+                    p,
+                    depth + 1,
+                )
+            }
+            Node::ImageReference(i) => p.push(
+                if i.alt.is_empty() {
+                    "image"
+                } else {
+                    i.alt.as_str()
+                },
+                Marks {
+                    muted: true,
+                    ..marks.clone()
+                },
+            ),
             Node::FootnoteReference(f) => p.push(
                 &format!("[{}]", f.identifier),
                 Marks {
@@ -252,7 +353,7 @@ fn walk(nodes: &[Node], marks: &Marks, p: &mut Paragraph, depth: usize) {
             ),
             other => {
                 if let Some(children) = other.children() {
-                    walk(children, marks, p, depth + 1)
+                    walk(defs, children, marks, p, depth + 1)
                 }
             }
         }
