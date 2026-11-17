@@ -339,14 +339,16 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     click(cx, item("Red"));
     let p = first_property(&host);
     assert_eq!(p.option(LEAD).unwrap().color, Color::Red);
-    // Moved down: the options draw anew in their new order, Lead's submenu closed.
+    // Moved down: the options in their new order, Lead's submenu still open beside it, now
+    // with Move up too.
     click(cx, item("Move down"));
     let after = names(&table, cx);
     assert_eq!(after[1], "Lead");
     assert_eq!(after[0], start[1]);
-    assert!(!drawn(cx, "menu-submenu-Lead"));
-    // Renamed, in a step of its own, then back on the column's menu.
-    click(cx, item("Lead"));
+    assert!(drawn(cx, "menu-submenu-Lead"));
+    assert!(drawn(cx, item("Move up")));
+    // Renamed, in a step of its own, then back on the column's menu where it came from: the
+    // options open, the option's submenu open, the keyboard on Rename option.
     click(cx, item("Rename option"));
     type_name(cx, "Cold lead");
     keys(cx, "enter");
@@ -355,6 +357,11 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
         "Cold lead"
     );
     assert!(drawn(cx, item("Edit options")), "back on the column's menu");
+    assert!(drawn(cx, "menu-submenu-Edit options"));
+    assert!(drawn(cx, "menu-submenu-Cold lead"));
+    keys(cx, "enter");
+    assert!(drawn(cx, "menu-field"), "Enter is Rename option's again");
+    click(cx, item("Back"));
     // Another's name is refused.
     let n = batches(&host);
     click(cx, item("Edit options"));
@@ -365,10 +372,19 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     assert!(drawn(cx, "menu-note"));
     assert_eq!(batches(&host), n);
     click(cx, item("Back"));
-    // Deleted: rows still name it, and show empty.
+    // Deleted: rows still name it, and show empty. Its submenu goes, the keyboard back on the
+    // options.
     click(cx, item("Edit options"));
     click(cx, item("Cold lead"));
     click(cx, item("Delete option"));
+    assert!(!drawn(cx, "menu-submenu-Cold lead"));
+    assert!(drawn(cx, "menu-submenu-Edit options"));
+    keys(cx, "right");
+    assert!(
+        drawn(cx, format!("menu-submenu-{}", start[1])),
+        "the keys open the first option's submenu"
+    );
+    keys(cx, "left");
     let batch = last_batch(&host);
     assert_eq!(batch.len(), 1, "no row is rewritten: {batch:?}");
     assert!(property(&table, cx, STAGE).option(LEAD).is_none());
@@ -383,15 +399,16 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     for r in &lead_rows {
         assert_eq!(table.update(cx, |t, _| t.cell_words(r, STAGE)).unwrap(), "");
     }
-    // Added, after the others.
+    // Added, after the others, then back on Add an option in the options.
     click(cx, item("Add an option"));
     type_text(cx, "Churned");
     keys(cx, "enter");
     let p = property(&table, cx, STAGE);
     assert_eq!(p.options().last().unwrap().name, "Churned");
     assert_eq!(p.options().last().unwrap().color, Color::Default);
-    click(cx, item("Edit options"));
-    assert!(drawn(cx, "pill:Churned"), "in the options");
+    assert!(drawn(cx, "pill:Churned"), "in the options, open again");
+    keys(cx, "enter");
+    assert!(drawn(cx, "menu-field"), "Enter is Add an option's again");
 }
 
 fn color_name(c: &Color) -> String {
@@ -492,6 +509,11 @@ fn a_two_way_relation_is_made_in_both_databases_at_once(cx: &mut TestAppContext)
     click(cx, "add-property");
     type_text(cx, "Investors");
     click(cx, item("Relation"));
+    // Back (from the keyboard: the pointer would highlight what it's over): the + menu again,
+    // on Relation, the name as typed; Enter goes on as before.
+    keys(cx, "end enter");
+    assert!(drawn(cx, "menu-picker"));
+    keys(cx, "enter");
     // The other database first, checked, and whether it's two-way.
     assert!(drawn(cx, item("Companies")));
     assert!(drawn(cx, item("People")), "this database too");
@@ -766,6 +788,7 @@ fn property_menus_are_44_points_on_touch(cx: &mut TestAppContext) {
     };
     tall(cx, "add-property".into());
     click(cx, "add-property");
+    tall(cx, "picker-field".into());
     tall(cx, item("Number"));
     keys(cx, "escape");
     // A tap opens a submenu, its rows as tall.

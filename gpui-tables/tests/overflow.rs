@@ -785,6 +785,82 @@ fn no_view_tab_or_view_menu_lets_its_text_out() {
     );
 }
 
+/// The glyphs drawn clipped to `b` (a label or a hint that cuts its text off): those of its
+/// text, not what's drawn under it.
+fn glyphs_in(cx: &mut VisualTestContext, b: Bounds<Pixels>) -> usize {
+    draw(cx);
+    cx.update(|window, _| {
+        let scale = window.scale_factor();
+        let scene = window.rendered_scene();
+        // A clip inside `b`, give or take a few pixels for ink.
+        let inside = |m: &ContentMask<ScaledPixels>| {
+            let (l, r) = (
+                m.bounds.origin.x.as_f32() / scale,
+                (m.bounds.origin.x.as_f32() + m.bounds.size.width.as_f32()) / scale,
+            );
+            let (t, bt) = (
+                m.bounds.origin.y.as_f32() / scale,
+                (m.bounds.origin.y.as_f32() + m.bounds.size.height.as_f32()) / scale,
+            );
+            l >= f32::from(b.left()) - 4.
+                && r <= f32::from(b.right()) + 4.
+                && t >= f32::from(b.top()) - 4.
+                && bt <= f32::from(b.bottom()) + 4.
+                && m.bounds.size.width.as_f32() > 0.
+        };
+        scene
+            .monochrome_sprites
+            .iter()
+            .map(|s| &s.content_mask)
+            .chain(scene.subpixel_sprites.iter().map(|s| &s.content_mask))
+            .filter(|m| inside(m))
+            .count()
+    })
+}
+
+#[test]
+fn a_long_hint_is_cut_before_its_label() {
+    // Pipeline grouped by Stage, then by Stage named at length: Group by's hint is the whole
+    // name, cut short (gpui-core's) before the label is, which keeps every glyph it had.
+    let mut app = app_with_text();
+    let host = TestHost::new();
+    let (db, rows) = load("people");
+    let (table, cx) = open_with(
+        &mut app,
+        &host,
+        db,
+        rows,
+        Some(PIPELINE),
+        size(px(1400.), px(900.)),
+    );
+    table.update(cx, |t, cx| t.set_view_bar(true, cx));
+    draw(cx);
+    click(cx, "view-settings");
+    let short = rect(cx, "menu-label-Group by");
+    let whole = glyphs_in(cx, short);
+    keys(cx, "escape");
+    let (mut db, rows) = load("people");
+    let f = db.database.as_mut().unwrap();
+    f.properties
+        .iter_mut()
+        .find(|p| p.id == STAGE)
+        .unwrap()
+        .name = "Stage of the deal in the pipeline as this quarter closes".into();
+    table.update(cx, |t, cx| t.set_docs(db, rows, cx));
+    draw(cx);
+    click(cx, "view-settings");
+    let (label, hint, menu) = (
+        rect(cx, "menu-label-Group by"),
+        rect(cx, "menu-hint-Group by"),
+        rect(cx, "menu"),
+    );
+    assert_eq!(glyphs_in(cx, label), whole, "{label:?}");
+    assert!(glyphs_in(cx, hint) >= 2, "some of the name, cut: {hint:?}");
+    assert!(label.right() <= hint.left() + px(0.5), "{label:?} {hint:?}");
+    assert!(hint.right() <= menu.right(), "{hint:?} in {menu:?}");
+    assert!(overflows(cx).is_empty());
+}
+
 #[test]
 fn the_check_finds_text_past_its_box() {
     struct Boxed(bool, Entity<TableView>);

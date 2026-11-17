@@ -504,8 +504,11 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
   Down, Home, End and Enter move and pick; Enter, Space or → opens a submenu and ← or Escape
   closes it; Escape closes the menu). Fields take Enter to save. A submenu opens on a tap, as on
   a press. On touch every entry, the rename fields and the + are at least 44 points tall.
-- **Moving an option** draws its list anew in the new order, on the option moved, with its
-  submenu closed (gpui-core keeps an open submenu by its entry's place).
+- **Moving an option** shows its list in the new order with the option's submenu still open
+  beside it, on the entry that moved it (gpui-core keeps a menu's highlight and open submenu on
+  their entries). Back from a step (a rename, a new option, a delete confirmed) opens the
+  column's menu on the entry the step came from, inside the submenus it was in; Back from a new
+  relation's database opens the + menu on Relation, its name as typed.
 - **For a host's own control**, `TableView::open_add_property_menu` and
   `TableView::open_property_menu(property_id, PropertyMenu::Options, ..)` open the same menus:
   a submenu or step on its own, hanging from the column's header.
@@ -569,12 +572,12 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     table or list (a board always groups). A pick is a `viewChanged` with `groupBy`, its folded
     groups let go and its `groupDate` kept only for a date.
   - **Date grouping**, while it groups by a date: Relative, Day, Week, Month or Year
-    (`groupDate`, absent for relative). Grouping by a date adds it under Group by, highlighted,
-    the settings drawn anew so → opens it.
+    (`groupDate`, absent for relative). Grouping by a date adds it under Group by, and the
+    settings open again on it, so → opens it.
   - **Card properties** (a board) and **Properties** (a list) list the properties shown on cards
     or lines, in order, then the hidden ones. A hidden one pressed is shown after the others; a
-    shown one opens its own submenu, to hide it or move it up or down (the list then drawn anew
-    in its order, on the one moved). Each is a `viewChanged` with `cardProperties`.
+    shown one opens its own submenu, to hide it or move it up or down (the list then in its new
+    order, the submenu still open; hidden, the list has the keyboard, on the one hidden). Each is a `viewChanged` with `cardProperties`.
   - **Properties** (a table) opens the Properties menu the column headers have (Show and hide
     properties).
   - **Remove sorts** and **Clear filter**, while it sorts or filters, each a `viewChanged`.
