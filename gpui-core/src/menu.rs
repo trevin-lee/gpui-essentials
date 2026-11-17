@@ -318,6 +318,8 @@ pub struct PopupMenu {
     colors: PopupMenuColors,
     /// The entry whose submenu is open when it opens.
     open_submenu: Option<SharedString>,
+    /// The entry the host moves the highlight to.
+    move_highlight: Option<SharedString>,
     /// Set when it's drawn as another menu's submenu: how it closes.
     nested: Option<CloseFn>,
     /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
@@ -338,9 +340,19 @@ impl PopupMenu {
             take_focus: true,
             colors: PopupMenuColors::default(),
             open_submenu: None,
+            move_highlight: None,
             nested: None,
             start_blank: false,
         }
+    }
+
+    /// Moves an open menu's highlight to entry `id`: each time it's given an id other than the
+    /// one it was given last, the highlight goes there (the keys and the pointer move it on
+    /// from there). For a host that changes the menu under the person and wants them on the
+    /// right entry: on Date grouping after grouping by a date, say.
+    pub fn move_highlight(mut self, id: impl Into<SharedString>) -> Self {
+        self.move_highlight = Some(id.into());
+        self
     }
 
     /// Opens with entry `id`'s submenu open and the keyboard in it (its first entry
@@ -455,6 +467,8 @@ struct MenuState {
     sub_by_pointer: bool,
     /// Counts the pointer's moves, so a rest that's been moved on from does nothing.
     rest: u64,
+    /// The last entry the host moved the highlight to.
+    moved_to: Option<SharedString>,
 }
 
 /// The entry at `at` (clamped to the menu) if it can be picked, else the nearest before it,
@@ -505,6 +519,7 @@ impl RenderOnce for PopupMenu {
             open_sub: None,
             sub_by_pointer: false,
             rest: 0,
+            moved_to: None,
         });
         let (focus, focused_once) = {
             let s = state.read(cx);
@@ -551,6 +566,7 @@ impl RenderOnce for PopupMenu {
         // Whether the keyboard is in an open submenu (inside this menu, but not on it).
         let in_submenu = focus.contains_focused(window, cx) && !focus.is_focused(window);
         let mut gone = false;
+        let move_highlight = self.move_highlight.clone();
         let highlighted = state.update(cx, |s, _| {
             // Where the highlighted entry is now: by its id; if it's gone, the first that can be
             // picked.
@@ -592,6 +608,17 @@ impl RenderOnce for PopupMenu {
                         step(&pickable, None, 1)
                     }
                 });
+            }
+            // The host moving the highlight: once for each new id it gives.
+            if move_highlight.is_some() && move_highlight != s.moved_to {
+                s.moved_to = move_highlight.clone();
+                if let Some(i) = move_highlight
+                    .as_ref()
+                    .and_then(|want| ids.iter().position(|id| id.as_ref() == Some(want)))
+                    .filter(|i| pickable[*i])
+                {
+                    s.highlighted = Some(i);
+                }
             }
             s.highlighted_id = s.highlighted.and_then(|i| ids.get(i).cloned().flatten());
             s.highlighted
