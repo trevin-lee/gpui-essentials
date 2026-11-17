@@ -677,6 +677,7 @@ impl RenderOnce for Picker {
                     .when(empty, |d| {
                         d.child(
                             div()
+                                .debug_selector(|| "picker-empty".into())
                                 .px(rems(8. / 15.))
                                 .py(rems(6. / 15.))
                                 .text_size(theme.text.sm)
