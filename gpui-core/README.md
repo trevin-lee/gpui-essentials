@@ -154,6 +154,16 @@ item](docs/gallery.png)
   Up and Down move between headers (going round), Home and End go to the ends, and disabled
   items are passed over. The chevron points down or up; nothing animates. `touch(true)` makes
   headers at least 44 points tall.
+- **Table.** `Table::new(id).column(TableColumn::new("Amount").fixed(px(100.)))…
+  .rows(count, |range, window, cx| rows).footer(row).caption(…)`: a simple display table (the
+  data grid is gpui-tables'). Columns are fixed, a `fraction` of what's left, or `Auto` (an
+  equal share), aligned `Start`, `Center` or `End`, and line up in every row; cells cut their
+  text short. Give it a height and its body scrolls by itself, asking the host only for the
+  rows in view, so a thousand rows cost what a screenful does; without one it draws them all.
+  The host says which row is `selected`; with `on_select` a click asks to select a row and the
+  body is a Tab stop where Up, Down, Home, End, Page Up and Page Down ask for another and
+  scroll it into view. Rows light up under the pointer. It's a table of rows and cells to
+  assistive technology, named by its caption.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
