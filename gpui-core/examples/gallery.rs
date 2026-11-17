@@ -55,6 +55,8 @@ struct Gallery {
     level: Entity<SliderState>,
     name: Entity<InputState>,
     note: Entity<InputState>,
+    /// A code editor: the approval policy as text.
+    code: Entity<InputState>,
     more: bool,
     sort_open: bool,
     tag_open: bool,
@@ -380,6 +382,13 @@ impl Render for Gallery {
                     .child(div().w(rems(14.)).child(Input::new(&self.name)))
                     .child(div().w(rems(22.)).child(Input::new(&self.note))),
             )
+            .child(
+                div()
+                    .flex_none()
+                    .w(rems(37.))
+                    .h(rems(9.))
+                    .child(Input::new(&self.code).size_full()),
+            )
             .child(heading("Markdown", &theme))
             .child(
                 div().w(rems(36.)).child(
@@ -485,6 +494,11 @@ fn main() {
                         .auto_grow(2, 6)
                         .default_value("A textarea grows with its text, from two rows to six, and wraps a long line rather than running out of its box.")
                 });
+                let code = cx.new(|cx| {
+                    InputState::code(window, cx).default_value(
+                        "rules:\n  - name: Read anything in the shared folder\n    match: { tool: read, path: \"/shared/**\" }\n    action: allow\n  - name: Ask before sending mail, whoever it's to and whatever it says\n    match: { tool: send_mail }\n    action: ask\n",
+                    )
+                });
                 let date = cx.new(|cx| DatePickerState::new(window, cx));
                 let month = cx.new(|cx| DatePickerState::new(window, cx).week_start(chrono::Weekday::Mon));
                 cx.new(|cx| Gallery {
@@ -502,6 +516,7 @@ fn main() {
                     view: 1,
                     name,
                     note,
+                    code,
                     more: false,
                     sort_open: shot,
                     tag_open: false,
