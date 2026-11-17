@@ -92,7 +92,7 @@ pub fn page(id: &str, title: &str) -> String {
 
 /// `title` as a link's text: on one line, with the characters Markdown would read as syntax
 /// escaped.
-fn link_text(title: &str) -> String {
+pub(crate) fn link_text(title: &str) -> String {
     let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
     let title = if title.is_empty() { UNTITLED } else { &title };
     let mut out = String::with_capacity(title.len());
@@ -109,7 +109,7 @@ fn link_text(title: &str) -> String {
 }
 
 /// The plain text of a link's children.
-fn plain_text(nodes: &[Node]) -> String {
+pub(crate) fn plain_text(nodes: &[Node]) -> String {
     let mut out = String::new();
     for node in nodes {
         match node {

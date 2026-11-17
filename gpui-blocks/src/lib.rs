@@ -12,6 +12,8 @@
 //!   so any Markdown tool can still read the document.
 //! - **Links to other documents** ([`docs`]): mentions inside text and sub-page blocks, drawn
 //!   with the title and icon the app gives them.
+//! - **@-mentions** ([`mentions`]): `@` lists the people, agents, pages and dates the app
+//!   offers, and picking one puts a mention chip in the text.
 //! - **JSON** ([`json`]): the document as a tree of blocks with ids that last, for storing
 //!   and indexing.
 //! - **Import** ([`import`]): notes exported from Notion or kept in Obsidian, as documents.
@@ -44,6 +46,7 @@ mod editor;
 mod find;
 pub mod import;
 pub mod json;
+pub mod mentions;
 pub mod slash;
 pub mod toc;
 pub mod widget;

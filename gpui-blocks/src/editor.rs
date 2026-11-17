@@ -24,6 +24,7 @@ use crate::docs::{
     self, DocHooks, Docs, Embed, EmbedFn, EmbedHooks, EmbedPlugin, MentionPlugin, PagePlugin,
     ResizeStart,
 };
+use crate::mentions::{ChipPlugin, MentionHooks, MentionKind, MentionMenu, Mentions};
 use crate::slash::{self, SlashAction, SlashItem};
 use crate::toc::{Heading, TocHooks, TocPlugin};
 use crate::widget::{Widget, WidgetPlugin};
@@ -114,6 +115,7 @@ pub fn extensions(widgets: &[Arc<dyn Widget>]) -> Extensions {
         DocHooks::default(),
         TocHooks::default(),
         EmbedHooks::default(),
+        MentionHooks::default(),
     )
 }
 
@@ -122,12 +124,14 @@ fn extensions_with(
     hooks: DocHooks,
     toc: TocHooks,
     embeds: EmbedHooks,
+    chips: MentionHooks,
 ) -> Extensions {
     let ext = Extensions::default()
         .with(TocPlugin(toc))
         .with(EmbedPlugin(embeds))
         .with(PagePlugin(hooks.clone()))
-        .with(MentionPlugin(hooks));
+        .with(MentionPlugin(hooks))
+        .with(ChipPlugin(chips));
     widgets
         .iter()
         .fold(ext, |ext, widget| ext.with(WidgetPlugin(widget.clone())))
@@ -147,6 +151,7 @@ pub struct Options {
     highlighter: Option<markdown_editor::CodeHighlightFn>,
     docs: Option<Arc<dyn Docs>>,
     embeds: Option<Arc<EmbedFn>>,
+    mentions: Option<Arc<dyn Mentions>>,
     gutter: Pixels,
     top: Pixels,
     compact_below: Pixels,
@@ -162,6 +167,7 @@ impl Default for Options {
             highlighter: None,
             docs: None,
             embeds: None,
+            mentions: None,
             gutter: px(GUTTER),
             top: px(TOP),
             compact_below: px(COMPACT_BELOW),
@@ -186,6 +192,7 @@ impl std::fmt::Debug for Options {
             .field("highlighter", &self.highlighter.is_some())
             .field("docs", &self.docs.is_some())
             .field("embeds", &self.embeds.is_some())
+            .field("mentions", &self.mentions.is_some())
             .field("gutter", &self.gutter)
             .field("top", &self.top)
             .field("compact_below", &self.compact_below)
@@ -261,6 +268,13 @@ impl Options {
         self
     }
 
+    /// Who and what `@` can mention: the app's people, agents, pages and today's date (see
+    /// [`crate::mentions`]). Without it, `@` is an ordinary character.
+    pub fn mentions(mut self, mentions: impl Mentions) -> Self {
+        self.mentions = Some(Arc::new(mentions));
+        self
+    }
+
     /// Add an item to the end of the slash menu.
     pub fn slash_item(mut self, item: SlashItem) -> Self {
         self.items.push(item);
@@ -317,6 +331,9 @@ pub enum EditorEvent {
     /// The slash menu's Embed: the app asks which document and view, then calls
     /// [`Editor::insert_embed`].
     EmbedRequested,
+    /// A click on a person, agent or date mention (see [`crate::mentions`]): the app shows it.
+    /// A page's mention sends [`EditorEvent::DocClicked`].
+    MentionClicked { kind: MentionKind, id: SharedString },
 }
 
 /// Splits YAML front matter (between `---` lines at the very top) from the document, so the
@@ -346,7 +363,7 @@ pub(crate) fn split_front_matter(markdown: &str) -> (String, &str) {
 
 /// An open slash menu.
 #[derive(Clone, Debug, PartialEq)]
-struct Slash {
+pub(crate) struct Slash {
     block: BlockId,
     /// Byte offset of the `/` in the caret's line.
     at: usize,
@@ -366,7 +383,7 @@ pub struct Editor {
     /// The block whose menu is open in a sheet, from the touch edit menu's Block….
     pub(crate) block_sheet: Option<BlockId>,
     scroll: ScrollHandle,
-    menu_scroll: ScrollHandle,
+    pub(crate) menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
     gutter: Pixels,
     top: Pixels,
@@ -375,7 +392,13 @@ pub struct Editor {
     image_link: Option<ImageLink>,
     /// The document's front matter, kept aside (see [`split_front_matter`]).
     front_matter: String,
-    slash: Option<Slash>,
+    pub(crate) slash: Option<Slash>,
+    /// The app's people, agents and pages, for the @ menu.
+    pub(crate) mentions: Option<Arc<dyn Mentions>>,
+    /// The open @ menu.
+    pub(crate) mention: Option<MentionMenu>,
+    /// The `@` closed with Esc. It stays closed until the caret leaves it.
+    pub(crate) mention_dismissed: Option<(BlockId, usize)>,
     /// The `/` closed with Esc. It stays closed until the caret leaves it.
     dismissed: Option<(BlockId, usize)>,
     /// The next change may open the slash menu even though it wasn't typed (the side menu's
@@ -452,6 +475,17 @@ impl Editor {
         };
         let headings: Arc<std::sync::Mutex<Vec<Heading>>> = Arc::default();
         let this = cx.entity().downgrade();
+        let chips = MentionHooks {
+            on_click: Some(Arc::new(
+                move |kind: MentionKind, id: &str, _: &mut Window, cx: &mut App| {
+                    let id = SharedString::from(id.to_string());
+                    let _ = this.update(cx, |_, cx| {
+                        cx.emit(EditorEvent::MentionClicked { kind, id })
+                    });
+                },
+            )),
+        };
+        let this = cx.entity().downgrade();
         let toc = TocHooks {
             headings: headings.clone(),
             on_click: Some(Arc::new(move |block, window: &mut Window, cx: &mut App| {
@@ -460,7 +494,7 @@ impl Editor {
         };
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
-                .with_markdown_extensions(extensions_with(&widgets, hooks, toc, embeds))
+                .with_markdown_extensions(extensions_with(&widgets, hooks, toc, embeds, chips))
                 .with_source(body);
             // Pictures load only through the app's loader.
             state = match images {
@@ -485,13 +519,18 @@ impl Editor {
                     this.update_headings(cx);
                     this.refresh_paste_offer(*origin == EditOrigin::Paste, cx);
                     this.refresh_slash(open, cx);
+                    this.refresh_mention(open, cx);
                     cx.emit(EditorEvent::Changed);
                 }
                 BlockEditorEvent::SelectionChanged => {
                     this.keep_paste_offer(cx);
-                    this.refresh_slash(false, cx)
+                    this.refresh_slash(false, cx);
+                    this.refresh_mention(false, cx);
                 }
-                BlockEditorEvent::Blur => this.close_slash(cx),
+                BlockEditorEvent::Blur => {
+                    this.close_slash(cx);
+                    this.close_mention(cx);
+                }
                 BlockEditorEvent::EditLinkRequested { url } => {
                     cx.emit(EditorEvent::EditLinkRequested { url: url.clone() })
                 }
@@ -512,6 +551,9 @@ impl Editor {
             image_link: options.image_link,
             front_matter,
             slash: None,
+            mentions: options.mentions.clone(),
+            mention: None,
+            mention_dismissed: None,
             dismissed: None,
             open_on_next_change: false,
             hovered: None,
@@ -562,6 +604,8 @@ impl Editor {
         self.update_headings(cx);
         self.slash = None;
         self.dismissed = None;
+        self.mention = None;
+        self.mention_dismissed = None;
         self.hovered = None;
         cx.notify();
     }
@@ -745,6 +789,7 @@ impl Editor {
         self.state
             .update(cx, |state, cx| state.set_readonly(readonly, cx));
         self.slash = None;
+        self.mention = None;
         self.hovered = None;
         cx.notify();
     }
@@ -1101,6 +1146,9 @@ impl Editor {
     }
 
     fn step(&mut self, by: isize, cx: &mut Context<Self>) {
+        if self.step_mention(by, cx) {
+            return;
+        }
         let Some(slash) = &mut self.slash else {
             cx.propagate();
             return;
@@ -1112,6 +1160,12 @@ impl Editor {
     }
 
     fn slash_pick(&mut self, _: &SlashPick, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(selected) = self.mention.as_ref().map(|m| m.selected) {
+            if !self.pick_mention(selected, window, cx) {
+                cx.propagate();
+            }
+            return;
+        }
         let picked = self
             .slash
             .as_ref()
@@ -1143,6 +1197,9 @@ impl Editor {
     }
 
     fn slash_close(&mut self, _: &SlashClose, _: &mut Window, cx: &mut Context<Self>) {
+        if self.dismiss_mention(cx) {
+            return;
+        }
         match self.slash.take() {
             Some(slash) => {
                 self.dismissed = Some((slash.block, slash.at));
@@ -1984,6 +2041,7 @@ impl Render for Editor {
             (self.gutter, self.top)
         };
         let slash_menu = self.slash_menu(cx);
+        let mention_menu = self.mention_menu(cx);
         let handles = self.selection_handles(window, cx);
         let paste_menu = self.paste_menu(cx);
         let resize = self.resizing.is_some().then(|| {
@@ -2031,7 +2089,7 @@ impl Render for Editor {
         let page = div()
             .id("gpui-blocks")
             .size_full()
-            .key_context(if self.slash.is_some() {
+            .key_context(if self.slash.is_some() || self.mention.is_some() {
                 CONTEXT_WITH_MENU
             } else {
                 CONTEXT
@@ -2071,6 +2129,7 @@ impl Render for Editor {
             )
             .children(side_menu)
             .children(slash_menu)
+            .children(mention_menu)
             .children(handles)
             .children(paste_menu)
             .children(resize)
