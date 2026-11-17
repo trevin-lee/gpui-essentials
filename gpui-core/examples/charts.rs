@@ -1,5 +1,7 @@
-//! gpui-core's charts in a window: bar charts grouped and stacked, with negative values, huge
-//! values, crowded labels, a single point and no data at all.
+//! gpui-core's charts in a window: line charts smooth and straight (with dots and a gap), area
+//! charts stacked with a gradient and flat with negative values and dollars, and bar charts
+//! grouped and stacked, with negative values, huge values, crowded labels, a single point and
+//! no data at all.
 //!
 //! ```sh
 //! cargo run --example charts [-- --light]
@@ -9,6 +11,7 @@
 //! Point at a chart (or tap it) for its tooltip; Tab to one and use Left, Right and Escape.
 
 use gpui::*;
+use gpui_core::chart::compact_number;
 use gpui_core::*;
 
 actions!(charts, [Quit]);
@@ -43,6 +46,73 @@ impl Render for Charts {
             .gap(rems(1.))
             .text_color(theme.foreground)
             .text_size(theme.text.base)
+            .child(
+                div()
+                    .flex()
+                    .gap(rems(1.))
+                    .child(
+                        div().flex_1().min_w_0().child(card(
+                            "Line chart",
+                            "Smooth (monotone) lines",
+                            LineChart::new("line")
+                                .categories(short)
+                                .series("desktop", "Desktop", DESKTOP)
+                                .series("mobile", "Mobile", MOBILE)
+                                .legend(true)
+                                .h(rems(14.)),
+                        )),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(card(
+                            "Line chart - linear",
+                            "Straight, with dots and a gap in April",
+                            LineChart::new("linear")
+                                .categories(short)
+                                .series(
+                                    "desktop",
+                                    "Desktop",
+                                    [186., 305., 237., f64::NAN, 209., 214.],
+                                )
+                                .curve(Curve::Linear)
+                                .dots(true)
+                                .h(rems(14.)),
+                        )),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(rems(1.))
+                    .child(
+                        div().flex_1().min_w_0().child(card(
+                            "Area chart - stacked",
+                            "With a gradient",
+                            AreaChart::new("area-stacked")
+                                .categories(short)
+                                .series("mobile", "Mobile", MOBILE)
+                                .series("desktop", "Desktop", DESKTOP)
+                                .stacked(true)
+                                .fill(AreaFill::Gradient)
+                                .legend(true)
+                                .h(rems(14.)),
+                        )),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(card(
+                            "Area chart - profit",
+                            "Flat fill, below zero, in dollars",
+                            AreaChart::new("area-profit")
+                                .categories(short)
+                                .series("profit", "Profit", [1200., 800., -400., 300., 1500., 900.])
+                                .series_color("profit", theme.chart_2)
+                                .format_value(|v| {
+                                    let sign = if v < 0. { "-" } else { "" };
+                                    format!("{sign}${}", compact_number(v.abs())).into()
+                                })
+                                .h(rems(14.)),
+                        )),
+                    ),
+            )
             .child(card(
                 "Bar chart - multiple",
                 "January to June",

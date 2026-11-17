@@ -104,7 +104,7 @@ pub use breadcrumb::{Breadcrumb, BreadcrumbItem};
 pub use button::{Button, ButtonGroup, ButtonVariant, ButtonVariants};
 pub use card::Card;
 pub use carousel::Carousel;
-pub use chart::BarChart;
+pub use chart::{AreaChart, AreaFill, BarChart, Curve, LineChart};
 pub use checkbox::Checkbox;
 pub use collapsible::Collapsible;
 pub use combobox::Combobox;
