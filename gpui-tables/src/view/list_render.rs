@@ -18,13 +18,33 @@ use super::render::{icon, line};
 use super::table::{CellRef, Item, TableView};
 use crate::model::{PropertyType, Value};
 
-/// A dragged row's place to land, as each line needs it.
+/// A dragged row's place to land, as each line (a list's or a table's) needs it.
 #[derive(Clone, Copy)]
-struct Landing {
-    lane: usize,
-    slot: usize,
+pub(crate) struct Landing {
+    pub lane: usize,
+    pub slot: usize,
     /// The view is sorted: the group is marked rather than a place in it.
-    sorted: bool,
+    pub sorted: bool,
+}
+
+impl Landing {
+    /// Where the line is drawn on the `slot`th row of a group of `count` rows: above it
+    /// (true), below it (false, the last row's, for the group's end), or not at all.
+    pub(crate) fn bar(
+        landing: Option<Self>,
+        lane: usize,
+        slot: usize,
+        count: usize,
+    ) -> Option<bool> {
+        let l = landing.filter(|l| !l.sorted && l.lane == lane)?;
+        if l.slot == slot {
+            Some(true)
+        } else if l.slot == count && slot + 1 == count {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 impl TableView {
@@ -207,8 +227,9 @@ impl TableView {
     }
 
     /// A line showing where a dragged row would land: above or below a line.
-    fn landing_bar(&self, top: bool) -> gpui::Div {
+    pub(crate) fn landing_bar(&self, top: bool) -> gpui::Div {
         div()
+            .debug_selector(|| "landing".into())
             .absolute()
             .left_0()
             .right_0()
@@ -302,17 +323,7 @@ impl TableView {
         let weak = cx.entity().downgrade();
         let from = key.clone();
         let sel = format!("line:{rid}:{key}");
-        let bar = landing
-            .filter(|l| !l.sorted && l.lane == lane)
-            .and_then(|l| {
-                if l.slot == slot {
-                    Some(true)
-                } else if l.slot == count && slot + 1 == count {
-                    Some(false)
-                } else {
-                    None
-                }
-            });
+        let bar = Landing::bar(landing, lane, slot, count);
         Press::new(ElementId::NamedInteger("line".into(), ix as u64))
             .tab_stop(false)
             .focus_on_press(false)
@@ -397,7 +408,15 @@ impl TableView {
                     let at = window.mouse_position();
                     match weak.upgrade() {
                         Some(view) => view.update(cx, |this, cx| {
-                            this.begin_card_drag(&d.row_id, &d.from, offset, at, false, cx)
+                            this.begin_card_drag(
+                                &d.row_id,
+                                &d.from,
+                                Vec::new(),
+                                offset,
+                                at,
+                                false,
+                                cx,
+                            )
                         }),
                         None => cx.new(|_| CardGhost::empty()),
                     }

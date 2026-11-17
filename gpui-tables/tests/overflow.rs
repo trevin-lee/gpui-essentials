@@ -3,7 +3,8 @@
 //! Arabic and emoji, numbers of twenty digits), under headers and options with the same names,
 //! are laid out with Core Text (as on screen) in windows 360, 700 and 1400 wide, with the
 //! columns at their widths and at their narrowest, grouped and not, with a menu and a picker
-//! open, and with each typed value's field open in place; and on a board's cards and a list's
+//! open, with each typed value's field open in place, and with a row's handle, the rows' menu
+//! and a row carried; and on a board's cards and a list's
 //! lines, with every property on them; and in the bar of views and its menus, with the views'
 //! names at their worst, by a table, a board and a list, with a finger's sizes too. Any glyph or icon drawn past what clips it, past the table
 //! or past the window fails the test with where it is. The places a glyph may cross its clip are
@@ -20,7 +21,7 @@ use std::sync::Arc;
 use common::ids::*;
 use common::*;
 use gpui::*;
-use gpui_tables::view::{TableHost, TableView};
+use gpui_tables::view::{Select, TableHost, TableView};
 use gpui_tables::*;
 use gpui_tables::{Filter, Sort, Value};
 // The built-in #[test], not GPUI's, which gpui::* brings in.
@@ -442,6 +443,53 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                     found.push(format!("{case}, the rename field open: {o}"));
                 }
                 keys(cx, "escape");
+                // A row selected (its handle shown) and its menu open, saying the sort places
+                // rows; two selected and asking whether to delete them; and a row carried, with
+                // the note that the sort places it.
+                cx.update(|_, cx| {
+                    table.update(cx, |t, cx| {
+                        t.close_popover(cx);
+                        t.select_row(ROWAN, Select::Only, cx);
+                        t.open_row_menu(cx)
+                    })
+                });
+                draw(cx);
+                assert!(
+                    table.read_with(cx, |t, _| t.has_popover()),
+                    "{case}: the rows' menu opened"
+                );
+                for o in overflows(cx) {
+                    found.push(format!("{case}, the rows' menu open: {o}"));
+                }
+                keys(cx, "escape");
+                cx.update(|_, cx| {
+                    table.update(cx, |t, cx| t.select_row(IMANI, Select::Toggle, cx))
+                });
+                keys(cx, "cmd-backspace");
+                assert!(drawn(cx, "menu-item-Delete 2 rows"), "{case}: asked");
+                for o in overflows(cx) {
+                    found.push(format!("{case}, asking to delete two rows: {o}"));
+                }
+                keys(cx, "escape escape");
+                let over = rect(cx, cell(ROWAN, NAME)).center();
+                cx.simulate_mouse_move(over, None, Modifiers::none());
+                draw(cx);
+                let from = rect(cx, format!("handle:{ROWAN}")).center();
+                cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+                draw(cx);
+                cx.simulate_mouse_move(
+                    from + point(px(40.), px(60.)),
+                    MouseButton::Left,
+                    Modifiers::none(),
+                );
+                draw(cx);
+                assert!(drawn(cx, "drag-note"), "{case}: the drag's note");
+                for o in overflows(cx) {
+                    found.push(format!("{case}, a row carried: {o}"));
+                }
+                keys(cx, "escape");
+                cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
+                draw(cx);
             }
         }
     }

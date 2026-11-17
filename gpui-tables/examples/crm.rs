@@ -638,6 +638,26 @@ mod shots {
     const ANA: &str = "f3b7a50d-f373-4a53-b488-f87605e999f3";
     const FOLLOW_UP: &str = "923a7369-94e3-4f91-9a61-dbe22e44158b";
     const ROLE: &str = "0fd630f1-f29d-4da9-953f-48f1a09f76b5";
+    const THEO: &str = "fa529ba3-fe3b-4ada-bcf2-0724d953ee26";
+    const SAMI: &str = "bfeaa155-1a28-47b3-a4e4-e25a15fc899e";
+
+    /// People's table in the manual order (its sort taken off, in the table only), with Imani
+    /// selected, and Theo too for `both`.
+    fn unsorted_with_selection(t: &Entity<TableView>, both: bool, cx: &mut App) {
+        t.update(cx, |t, cx| {
+            let mut db = t.database().clone();
+            if let Some(f) = db.database.as_mut() {
+                for v in &mut f.views {
+                    v.sort.clear();
+                }
+            }
+            t.set_database(db, cx);
+            t.select_row(IMANI, gpui_tables::view::Select::Only, cx);
+            if both {
+                t.select_row(THEO, gpui_tables::view::Select::Toggle, cx);
+            }
+        });
+    }
 
     /// The database's first board view.
     fn board_view(t: &Entity<TableView>, cx: &App) -> String {
@@ -680,9 +700,36 @@ mod shots {
                 Some((start, end))
             })
         });
-        let Some((start, end)) = points else {
-            return;
-        };
+        if let Some((start, end)) = points {
+            carry(window, start, end, cx).await;
+        }
+    }
+
+    /// Picks Imani's row up by its handle (Theo's, selected too, with it) and carries them
+    /// down between Lena and Sami, without letting go.
+    async fn drag_rows(window: AnyWindowHandle, crm: &Entity<Crm>, cx: &mut AsyncApp) {
+        let points = cx.update(|cx| {
+            let t = crm.read(cx).table();
+            let t = t.read(cx);
+            let from = t.handle_bounds(IMANI)?;
+            let over = t.handle_bounds(SAMI)?;
+            Some((
+                from.center(),
+                point(over.left() + px(220.), over.top() + px(6.)),
+            ))
+        });
+        if let Some((start, end)) = points {
+            carry(window, start, end, cx).await;
+        }
+    }
+
+    /// Presses the mouse at `start` and moves it to `end` in steps, without letting go.
+    async fn carry(
+        window: AnyWindowHandle,
+        start: Point<Pixels>,
+        end: Point<Pixels>,
+        cx: &mut AsyncApp,
+    ) {
         let send = |event: PlatformInput, cx: &mut AsyncApp| {
             let _ = cx.update_window(window, |_, window, cx| {
                 window.dispatch_event(event, cx);
@@ -846,6 +893,15 @@ mod shots {
                             )
                         });
                     }
+                    "rows" => {
+                        let t = pick(0, cx);
+                        unsorted_with_selection(&t, false, cx);
+                        t.update(cx, |t, cx| t.open_row_menu(cx));
+                    }
+                    "rows-drag" => {
+                        let t = pick(0, cx);
+                        unsorted_with_selection(&t, true, cx);
+                    }
                     "scrolled" => {
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| {
@@ -915,6 +971,9 @@ mod shots {
             }
             if scene == "board-drag" {
                 drag_a_card(window, &crm, cx).await;
+            }
+            if scene == "rows-drag" {
+                drag_rows(window, &crm, cx).await;
             }
             if scene == "board-worst" {
                 cx.update(|cx| {
