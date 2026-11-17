@@ -229,3 +229,26 @@ fn a_lazy_submenu_is_made_only_when_it_opens(cx: &mut TestAppContext) {
         ["mail"]
     );
 }
+
+#[gpui::test]
+fn when_the_submenu_with_the_keyboard_goes_the_menu_takes_it_back(cx: &mut TestAppContext) {
+    let (p, vcx) = open(cx, |_| {});
+    // Into Move to's submenu with the keys: it has the keyboard.
+    keys(vcx, "down right");
+    assert!(vcx.debug_bounds("menu-submenu-move").is_some());
+    // The host takes Move to away (its option deleted, say).
+    change(vcx, &p, |p| p.removed = true);
+    assert!(vcx.debug_bounds("menu-submenu-move").is_none());
+    // The keys still work, from where Move to was: Share is there now, Enter opens its
+    // submenu, Escape closes that, and a second Escape closes the menu.
+    keys(vcx, "enter");
+    assert!(
+        vcx.debug_bounds("menu-submenu-share").is_some(),
+        "the keys work on Share"
+    );
+    keys(vcx, "escape escape");
+    assert!(
+        vcx.debug_bounds("menu-item-copy").is_none(),
+        "Escape still closes it"
+    );
+}
