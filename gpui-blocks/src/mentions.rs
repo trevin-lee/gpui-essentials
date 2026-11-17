@@ -484,6 +484,11 @@ impl Extension for ChipPlugin {
                 move || format!("blocks-chip-{id}")
             })
             .id(SharedString::from(format!("blocks-chip-{}", mention.id)))
+            .role(Role::Link)
+            .aria_label(match mention.kind {
+                MentionKind::Date => mention.title.to_string(),
+                _ => format!("@{}", mention.title),
+            })
             .h(line)
             .max_w(px(480.))
             .flex()
@@ -702,6 +707,10 @@ impl Editor {
             rows.push(
                 div()
                     .id(("blocks-mention-row", ix))
+                    .role(Role::ListBoxOption)
+                    .aria_label(mention.title.clone())
+                    .aria_description(mention.hint.clone())
+                    .aria_selected(ix == menu.selected)
                     .debug_selector(move || format!("blocks-mention-option-{id}"))
                     .mx_1()
                     .px_2()
@@ -770,6 +779,8 @@ impl Editor {
                     .child(
                         div()
                             .id("blocks-mention-menu")
+                            .role(Role::ListBox)
+                            .aria_label("Mentions")
                             .debug_selector(|| "blocks-mention-menu".into())
                             .w(px(300.))
                             .max_h(px(340.))
