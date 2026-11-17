@@ -390,17 +390,29 @@ it comes back into view or the draft ends.
 
 `tests/stream_performance.rs` measures it, and fails if a delta at 10,000 characters costs more
 than three times one at 1,000 (plus half a millisecond), or more than 4 ms, in a release build.
-It prints a whole TextView read again each delta alongside, for comparison, and a list growing
-an item at a time (below), held to 60 ms a delta at 1,000 items. CI runs it in release.
+It prints a whole TextView read again each delta alongside, for comparison, and a list, a table
+and a code fence growing at the end of the reply (below): a delta held to 20 ms at 1,000 list
+items, 80 ms at 500 table rows and 250 ms at 1,000, and 30 ms at 1,000 code lines and 60 ms at
+2,000 (the medians; four times that on CI). CI runs it in release.
 
 ### Limits
 
-- **The open block is laid out whole on each delta**: gpui-core keeps a layout for each
-  top-level block, and a list or a table that goes on for pages without ending, or a long code
-  block, is one block, and the open one until it ends. A delta at the end of a list costs what
-  laying out the list costs, growing with it: 2.2 ms at 100 short items, 11.6 ms at 500 and
-  23 ms at 1,000 (33,000 characters), measured as above (`tests/stream_performance.rs` prints
-  them).
+- **The open block is read whole on each delta**: gpui-core keeps a layout for each top-level
+  block, and a list or a table that goes on for pages without ending, or a long code block, is
+  one block, and the open one until it ends. A list keeps each item's layout, so a delta lays
+  out only its new item, but a table and a code block are laid out whole again, and all three
+  are read again whole. A delta at the end of one, measured as above (medians of five runs of
+  `tests/stream_performance.rs`, which prints them):
+
+  | Growing block | Small | Medium | Large |
+  |---|---|---|---|
+  | List, short items | 0.54 ms at 100 | 1.97 ms at 500 | 4.1 ms at 1,000 (33,000 characters) |
+  | Table, 4 short columns | 3.1 ms at 100 rows | 26 ms at 500 | 68 ms at 1,000 (34,000 characters) |
+  | Code fence | 1.7 ms at 200 lines | 8.6 ms at 1,000 | 18 ms at 2,000 (47,000 characters) |
+
+  A list and a code fence grow linearly. A table grows faster than its rows, because reading
+  it does (the `markdown` crate's tables): reading alone is 14 ms of a delta at 500 rows and
+  52 ms at 1,000. Reading a code fence is about a tenth of its delta: the rest is laying it out.
 - **A selection goes when the text it reaches changes**: one in the settled blocks stays while
   the draft is written, and one that reaches the open block's growing end goes with the next
   delta.
