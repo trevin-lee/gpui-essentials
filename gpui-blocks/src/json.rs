@@ -329,6 +329,21 @@ fn front_matter(front: &str) -> String {
 pub(crate) struct Ids(HashMap<BlockId, String>);
 
 impl Ids {
+    /// `block`'s lasting id, given now if it has none yet, as [`Document::from_model`] would.
+    pub(crate) fn id_of(&mut self, block: BlockId) -> String {
+        self.get_or_new(block)
+    }
+
+    /// The block with the lasting id `id`, if `model` still has it.
+    pub(crate) fn block_of(&self, model: &BlockEditorModel, id: &str) -> Option<BlockId> {
+        self.0
+            .iter()
+            .find(|(block, given)| {
+                given.as_str() == id && model.document().block(**block).is_some()
+            })
+            .map(|(block, _)| *block)
+    }
+
     fn get_or_new(&mut self, block: BlockId) -> String {
         self.0.entry(block).or_insert_with(new_id).clone()
     }
