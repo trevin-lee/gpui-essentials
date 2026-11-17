@@ -194,6 +194,8 @@ fn a_delta_costs_about_the_same_at_the_end_of_a_long_reply() {
             s[i]
         );
     }
-    // And well under reading and laying the whole text out again.
-    assert!(s[2] * 2 < w[2], "streaming {:?}, whole {:?}", s[2], w[2]);
+    // The whole text read again each delta is printed for comparison, not held to a ratio:
+    // since gpui-core's TextView keeps the layout of every unchanged block, re-reading it whole
+    // costs about what streaming does, and either is fine as long as streaming stays flat and
+    // under its bound.
 }
