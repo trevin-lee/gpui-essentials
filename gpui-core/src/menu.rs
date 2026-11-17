@@ -319,7 +319,7 @@ pub struct PopupMenu {
     /// The entry whose submenu is open when it opens.
     open_submenu: Option<SharedString>,
     /// The entry the host moves the highlight to.
-    move_highlight: Option<SharedString>,
+    move_highlight: Option<(SharedString, u64)>,
     /// Set when it's drawn as another menu's submenu: how it closes.
     nested: Option<CloseFn>,
     /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
@@ -349,9 +349,17 @@ impl PopupMenu {
     /// Moves an open menu's highlight to entry `id`: each time it's given an id other than the
     /// one it was given last, the highlight goes there (the keys and the pointer move it on
     /// from there). For a host that changes the menu under the person and wants them on the
-    /// right entry: on Date grouping after grouping by a date, say.
-    pub fn move_highlight(mut self, id: impl Into<SharedString>) -> Self {
-        self.move_highlight = Some(id.into());
+    /// right entry: on Date grouping after grouping by a date, say. To move to the same entry
+    /// again, see [`PopupMenu::move_highlight_request`].
+    pub fn move_highlight(self, id: impl Into<SharedString>) -> Self {
+        self.move_highlight_request(id, 0)
+    }
+
+    /// Moves an open menu's highlight to entry `id` each time the pair of `id` and `request`
+    /// is other than the one it was given last: a host counting its requests moves the
+    /// highlight to the same entry again by giving the next number.
+    pub fn move_highlight_request(mut self, id: impl Into<SharedString>, request: u64) -> Self {
+        self.move_highlight = Some((id.into(), request));
         self
     }
 
@@ -467,8 +475,8 @@ struct MenuState {
     sub_by_pointer: bool,
     /// Counts the pointer's moves, so a rest that's been moved on from does nothing.
     rest: u64,
-    /// The last entry the host moved the highlight to.
-    moved_to: Option<SharedString>,
+    /// The last entry the host moved the highlight to, and its request.
+    moved_to: Option<(SharedString, u64)>,
 }
 
 /// The entry at `at` (clamped to the menu) if it can be picked, else the nearest before it,
@@ -614,7 +622,7 @@ impl RenderOnce for PopupMenu {
                 s.moved_to = move_highlight.clone();
                 if let Some(i) = move_highlight
                     .as_ref()
-                    .and_then(|want| ids.iter().position(|id| id.as_ref() == Some(want)))
+                    .and_then(|(want, _)| ids.iter().position(|id| id.as_ref() == Some(want)))
                     .filter(|i| pickable[*i])
                 {
                     s.highlighted = Some(i);
