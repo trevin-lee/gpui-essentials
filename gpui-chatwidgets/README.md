@@ -345,6 +345,21 @@ fills it. At a new width the tallest so far starts again.
   while it streams, as the definition hasn't come yet; a draft whose text defines one is read
   again whole when it ends, as one view.
 
+### Settling
+
+**Settling is linear in the text, and bounded a frame.** Each new line is read once, into what
+the open block is so far (a code fence and its marker, a list and its item's indent, a quote, a
+table, a paragraph, after a blank line or not), and only a line that could end the open block is
+checked, by reading the block alone and with the line: never the inside of a code fence, a
+list's next item or a line inside it, a quote's next line or a paragraph's next line of words.
+It settles exactly where checking every line would. A frame's settling reads at most 1 MiB of new
+text, and the checks read at most 16 KiB of open blocks again (or a single check, if one is
+more); what's left carries on in the next frame. A 50,000-line code block (394 KB) settles in
+about 1 ms in one append, in under 10 ms over 50,000 appends of a line each (no frame over
+0.15 ms), and through `replace` with no frame over 2 ms; checked at every line, as settling was
+before, 4,000 lines took 17 s, growing faster than their square. `tests/stream_performance.rs`
+holds it to 5 ms a frame, 1 ms a line and 60 ms for the lines (four times that on CI).
+
 ### Cost
 
 Per delta (the text added, the blocks worked out, and the window laid out and painted), with Core

@@ -10,6 +10,17 @@ use gpui_core::text::{Block, BlockKind, parse_markdown};
 /// in the text's own colour, so it sits where the next word goes and wraps with it.
 pub const CARET: &str = "\u{258D}";
 
+/// The most of the new text settling reads in one go (a frame), a line at a time: past it, the
+/// rest waits for the next frame.
+pub(crate) const SCAN: usize = 1024 * 1024;
+
+/// The most the checks read again in one go (a frame), past the first check: about a few
+/// milliseconds of parsing. Past it, the rest waits for the next frame.
+pub(crate) const REREAD: usize = 16 * 1024;
+
+/// How much of a text gpui-core's Markdown parser reads: what's after is dropped.
+const CAP: usize = 512 * 1024;
+
 /// A settled block: Markdown that nothing written after it can change.
 pub(crate) struct Settled {
     /// Where it is in the text, from its first character to where the next block starts.
@@ -34,6 +45,15 @@ pub(crate) struct Doc {
     pub settled: usize,
     /// Lines that start before this were tried as a block's start already.
     checked: usize,
+    /// What the open block's lines before `checked` make it.
+    open: Open,
+    /// The last check's read of the open block with its line, which it didn't settle: the next
+    /// check's read of the block, if the line after is checked too. The tail's start, the end
+    /// of what it read, and the blocks.
+    read: Option<(usize, usize, Vec<Block>)>,
+    /// Bytes the checks read, for the tests: each check reads the open block (unless the last
+    /// check read it already) and the line.
+    pub reread: usize,
     next_key: usize,
     /// Blocks opened again by a change: one that settles again where it was, with the same
     /// text, keeps its key, so its view keeps its layout.
@@ -72,6 +92,8 @@ impl Doc {
         self.spare = self.blocks.split_off(keep);
         self.settled = self.blocks.last().map_or(0, |b| b.range.end);
         self.checked = self.settled;
+        self.open = Open::default();
+        self.read = None;
     }
 
     /// The open tail: everything after the settled blocks.
@@ -98,68 +120,139 @@ impl Doc {
     /// delimiter row). Nothing after that line can change the block then, as Markdown never
     /// opens a block again once something has closed it; the one exception, a link defined
     /// further down, is taken care of when the draft ends ([`Doc::defines_links`]).
-    pub fn settle(&mut self) {
-        self.split(false, true);
+    ///
+    /// The check reads the open block, so it's only made at a line that could end it: each new
+    /// line is read once, into what the open block is so far ([`Open`]), and a line that surely
+    /// carries the block on (the inside of a code fence, a list's next item, a quote's next
+    /// line, a paragraph's next line of words) isn't checked. What's read in one go is bounded
+    /// ([`SCAN`], [`REREAD`]): true when there's more, for the next frame.
+    pub fn settle(&mut self) -> bool {
+        self.split(false, true)
     }
 
     /// After the draft ended with other text ([`Doc::replace`]): settles again, where they
     /// were, the blocks the change opened that are still as they were, so their views keep
     /// their layouts; the text is whole, so its last line counts as finished. No block is split
     /// off that wasn't one before, so what was drawn as one view stays one.
-    pub fn restore(&mut self) {
-        if !self.spare.is_empty() {
-            self.split(true, false);
-        }
+    ///
+    /// Bounded as [`Doc::settle`] is: true when there's more, for the next frame.
+    pub fn restore(&mut self) -> bool {
+        !self.spare.is_empty() && self.split(true, false)
     }
 
-    fn split(&mut self, complete: bool, new: bool) {
+    fn split(&mut self, complete: bool, new: bool) -> bool {
         let mut at = self.checked.max(self.settled);
+        let (mut scanned, mut reread) = (0, 0);
         loop {
             let end = match self.text[at..].find('\n') {
                 Some(nl) => at + nl + 1,
                 None if complete && at < self.text.len() => self.text.len(),
                 None => break,
             };
-            let line = &self.text[at..end];
-            let open = &self.text[self.settled..at];
-            if at > self.settled && !line.trim().is_empty() && !open.trim().is_empty() {
-                let alone = parse_markdown(open);
-                let mut both = alone.clone();
-                both.extend(parse_markdown(line));
-                if parse_markdown(&self.text[self.settled..end]) == both {
-                    let source = trim_blank_lines(open);
-                    let start = self.settled;
-                    let old = self
-                        .spare
-                        .iter()
-                        .position(|b| b.range.start == start && b.source.as_ref() == source)
-                        .map(|i| self.spare.remove(i));
-                    let block = match old {
-                        Some(b) => Settled {
-                            range: start..at,
-                            seen: end,
-                            ..b
-                        },
-                        None if !new => break,
-                        None => {
-                            self.next_key += 1;
-                            self.made += 1;
-                            Settled {
-                                range: start..at,
-                                seen: end,
-                                source: SharedString::from(source.to_string()),
-                                kinds: kinds(&alone),
-                                key: self.next_key - 1,
-                            }
-                        }
-                    };
-                    self.blocks.push(block);
-                    self.settled = at;
-                }
+            if scanned >= SCAN {
+                return true;
             }
+            let line = &self.text[at..end];
+            let checks = at > self.settled && !line.trim().is_empty() && self.open.words;
+            let step = match self.open.next(line, at - self.settled) {
+                Step::Ends if !checks => Step::Check,
+                step => step,
+            };
+            let kind = match step {
+                Step::On(kind) => kind,
+                // Not checked: the block's first line, or a line of white space.
+                Step::Check if !checks => match self.open.kind {
+                    Kind::None if !self.open.words => first(line),
+                    _ => Kind::Unknown,
+                },
+                Step::Check => {
+                    let cached =
+                        matches!(self.read, Some((s, e, _)) if s == self.settled && e == at);
+                    let block = if cached { 0 } else { at - self.settled };
+                    let cost = block + (end - self.settled) + line.len();
+                    if reread > 0 && reread + cost > REREAD {
+                        return true;
+                    }
+                    reread += cost;
+                    self.reread += cost;
+                    let open = &self.text[self.settled..at];
+                    let alone = match self.read.take() {
+                        Some((_, _, read)) if cached => read,
+                        _ => parse_markdown(open),
+                    };
+                    let mut both = alone.clone();
+                    both.extend(parse_markdown(line));
+                    let read = parse_markdown(&self.text[self.settled..end]);
+                    if read == both {
+                        match self.settle_at(at, end, new, || kinds(&alone)) {
+                            Some(kind) => kind,
+                            None => break,
+                        }
+                    } else {
+                        let kind = after_check(line, &read);
+                        self.read = Some((self.settled, end, read));
+                        kind
+                    }
+                }
+                // A closed code fence, and a line with words after it: the check would settle
+                // it, and the fence is code from end to end.
+                Step::Ends => match self
+                    .settle_at(at, end, new, || Some((BlockKind::Code, BlockKind::Code)))
+                {
+                    Some(kind) => kind,
+                    None => break,
+                },
+            };
+            self.open = self.open.with(kind, &self.text[at..end]);
+            scanned += end - at;
             at = end;
             self.checked = end;
         }
+        false
+    }
+
+    /// Settles the open block before the line at `at` (which ends at `end`), the check having
+    /// found it finished: the block that was there before a change, if it's the same, else a
+    /// new one if `new`. What the open block is then, from the line; none when it's not
+    /// settled (not `new` and no block from before).
+    fn settle_at(
+        &mut self,
+        at: usize,
+        end: usize,
+        new: bool,
+        kinds: impl FnOnce() -> Option<(BlockKind, BlockKind)>,
+    ) -> Option<Kind> {
+        let source = trim_blank_lines(&self.text[self.settled..at]);
+        let start = self.settled;
+        let old = self
+            .spare
+            .iter()
+            .position(|b| b.range.start == start && b.source.as_ref() == source)
+            .map(|i| self.spare.remove(i));
+        let block = match old {
+            Some(b) => Settled {
+                range: start..at,
+                seen: end,
+                ..b
+            },
+            None if !new => return None,
+            None => {
+                self.next_key += 1;
+                self.made += 1;
+                Settled {
+                    range: start..at,
+                    seen: end,
+                    source: SharedString::from(source.to_string()),
+                    kinds: kinds(),
+                    key: self.next_key - 1,
+                }
+            }
+        };
+        self.blocks.push(block);
+        self.settled = at;
+        self.open = Open::default();
+        self.read = None;
+        Some(first(&self.text[at..end]))
     }
 
     /// Whether the text defines a link or a footnote for its references (`[a]: https://…`):
@@ -174,6 +267,313 @@ impl Doc {
                     .is_some_and(|i| i > 1 && !t[1..i].contains(['[', ']']))
         })
     }
+}
+
+/// What the open block is, as far as its lines so far show: enough to tell, for most lines, that
+/// a line carries the block on, so the check that reads the whole block isn't needed.
+///
+/// It describes the open text read on its own, from its first line (where a document starts), as
+/// the check reads it. Each kind says only what a line surely does; a line it can't be sure of is
+/// checked, and if the check doesn't settle the block, the kind becomes `Unknown` (every line
+/// checked) unless the check's read shows what it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Open {
+    kind: Kind,
+    /// A line so far has words (not only white space).
+    words: bool,
+    /// The last line was blank (only spaces and tabs).
+    blank: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Kind {
+    /// No line yet that isn't blank.
+    #[default]
+    None,
+    /// A paragraph, every line since its first carrying it on.
+    Paragraph,
+    /// A code fence its first line opened, not closed yet: its character and length.
+    Fence { mark: u8, len: usize },
+    /// Code indented four columns.
+    Indented,
+    /// A list: a bullet's character or an ordered list's delimiter, and the column its current
+    /// item's text starts at.
+    List {
+        ordered: bool,
+        mark: u8,
+        content: usize,
+    },
+    /// A quote.
+    Quote,
+    /// A table, rows starting with `|`.
+    Table,
+    /// A code fence its first line opened, and closed: a line with words after it settles it.
+    Closed,
+    /// One that's ended (a heading, a rule): the next line with words is checked.
+    Done,
+    /// One the lines don't tell: every line with words is checked.
+    Unknown,
+}
+
+/// What a line does to the open block.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    /// It surely carries the block on (or it's blank): the check would find the block changed
+    /// by it. The block is this then.
+    On(Kind),
+    /// It may end the block: the check reads the block and the line.
+    Check,
+    /// It surely ends the block: the check would settle it.
+    Ends,
+}
+
+impl Open {
+    /// What `line` does to the open block, `len` bytes long.
+    fn next(self, line: &str, len: usize) -> Step {
+        let s = content(line);
+        if blank(s) {
+            return Step::On(self.kind);
+        }
+        // A carriage return inside a line ends a line for Markdown: lines aren't what they seem.
+        if s.contains('\r') {
+            return Step::Check;
+        }
+        let (col, r) = indent(s);
+        // The parser reads the first CAP bytes: past them, the check reads the block alone and
+        // with the line the same, and settles it only before a line that reads as nothing on
+        // its own (a link's definition).
+        if len >= CAP {
+            return if col <= 3 && r.starts_with('[') {
+                Step::Check
+            } else {
+                Step::On(self.kind)
+            };
+        }
+        // Where the cap cuts the block or the line, it's checked.
+        if len + line.len() + 4 > CAP {
+            return Step::Check;
+        }
+        let on = |carries: bool| {
+            if carries {
+                Step::On(self.kind)
+            } else {
+                Step::Check
+            }
+        };
+        let tabbed = s.len() - r.len() != col;
+        match self.kind {
+            Kind::None | Kind::Done | Kind::Unknown => Step::Check,
+            Kind::Closed => Step::Ends,
+            // A paragraph's next line, unless it can interrupt the paragraph or change it (an
+            // underline, a table's delimiter row).
+            Kind::Paragraph => on(!self.blank && (col >= 4 || !interrupts(r))),
+            Kind::Fence { mark, len: n } => Step::On(if col <= 3 && closes(r, mark, n) {
+                Kind::Closed
+            } else {
+                self.kind
+            }),
+            Kind::Indented => on(col >= 4),
+            Kind::List {
+                ordered,
+                mark,
+                content,
+            } => {
+                if tabbed {
+                    Step::Check
+                } else if col >= content {
+                    // In the item. A definition there reads as nothing, so the check would
+                    // find the list as it was.
+                    on(!r.starts_with('['))
+                } else if col <= 3 && !rule(r) {
+                    // The list's next item.
+                    match item(r) {
+                        Some((o, m, width)) if o == ordered && m == mark => {
+                            Step::On(match item_content(col, width, r) {
+                                Some(content) => Kind::List {
+                                    ordered,
+                                    mark,
+                                    content,
+                                },
+                                // An empty item, or a tab after the marker: in the list, but
+                                // where its text starts is harder to say.
+                                None => Kind::Unknown,
+                            })
+                        }
+                        _ => Step::Check,
+                    }
+                } else {
+                    Step::Check
+                }
+            }
+            Kind::Quote => on(!self.blank && !tabbed && col <= 3 && r.starts_with('>')),
+            Kind::Table => on(!self.blank && !tabbed && col <= 3 && r.starts_with('|')),
+        }
+    }
+
+    /// With `line` read into the block as `kind`.
+    fn with(self, kind: Kind, line: &str) -> Open {
+        Open {
+            kind,
+            words: self.words || !line.trim().is_empty(),
+            blank: blank(content(line)),
+        }
+    }
+}
+
+/// What a block is from its first line, read where a document starts.
+fn first(line: &str) -> Kind {
+    let s = content(line);
+    if blank(s) {
+        return Kind::None;
+    }
+    if s.contains('\r') {
+        return Kind::Unknown;
+    }
+    let (col, r) = indent(s);
+    if col >= 4 {
+        return Kind::Indented;
+    }
+    if let Some((c, n, info)) = fence(r) {
+        // A backtick fence's info has no backticks; one that does is inline code.
+        if c == '~' || !info.contains('`') {
+            return Kind::Fence {
+                mark: c as u8,
+                len: n,
+            };
+        }
+    }
+    if atx(r) || rule(r) {
+        return Kind::Done;
+    }
+    if r.starts_with('>') {
+        return Kind::Quote;
+    }
+    if let Some((ordered, mark, width)) = item(r) {
+        return match item_content(col, width, r) {
+            Some(content) if s.len() - r.len() == col => Kind::List {
+                ordered,
+                mark,
+                content,
+            },
+            _ => Kind::Unknown,
+        };
+    }
+    // A link's definition (which reads as nothing) or a paragraph.
+    if r.starts_with('[') {
+        return Kind::Unknown;
+    }
+    Kind::Paragraph
+}
+
+/// What a block is after a check that didn't settle it at `line`: a table, when the check read
+/// the block and the line as one table and the line is its row; else unknown.
+fn after_check(line: &str, read: &[Block]) -> Kind {
+    let s = content(line);
+    let (col, r) = indent(s);
+    let table = matches!(read, [Block::Table { .. }]);
+    if table && !s.contains(['\r', '\t']) && col <= 3 && r.starts_with('|') {
+        Kind::Table
+    } else {
+        Kind::Unknown
+    }
+}
+
+/// A line without its line ending.
+fn content(line: &str) -> &str {
+    let s = line.strip_suffix('\n').unwrap_or(line);
+    s.strip_suffix('\r').unwrap_or(s)
+}
+
+/// Whether a line is blank for Markdown: nothing but spaces and tabs.
+fn blank(s: &str) -> bool {
+    s.bytes().all(|b| b == b' ' || b == b'\t')
+}
+
+/// A line's indent in columns (a tab to the next multiple of four), and what comes after it.
+fn indent(s: &str) -> (usize, &str) {
+    let mut col = 0;
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            b' ' => col += 1,
+            b'\t' => col += 4 - col % 4,
+            _ => return (col, &s[i..]),
+        }
+    }
+    (col, "")
+}
+
+/// An ATX heading's opening: one to six #s, then a space, a tab or the end.
+fn atx(r: &str) -> bool {
+    let n = r.bytes().take_while(|b| *b == b'#').count();
+    (1..=6).contains(&n) && matches!(r.as_bytes().get(n), None | Some(b' ' | b'\t'))
+}
+
+/// A thematic break: three or more of one of `-`, `*` and `_`, with spaces and tabs between.
+fn rule(r: &str) -> bool {
+    let Some(c) = r.bytes().next().filter(|c| matches!(c, b'-' | b'*' | b'_')) else {
+        return false;
+    };
+    let mut n = 0;
+    for b in r.bytes() {
+        if b == c {
+            n += 1;
+        } else if b != b' ' && b != b'\t' {
+            return false;
+        }
+    }
+    n >= 3
+}
+
+/// A list item's marker: whether it's ordered, its bullet or delimiter, and its width.
+fn item(r: &str) -> Option<(bool, u8, usize)> {
+    let b = r.as_bytes();
+    let after = |w: usize| matches!(b.get(w), None | Some(b' ' | b'\t'));
+    if matches!(b.first(), Some(b'-' | b'+' | b'*')) && after(1) {
+        return Some((false, b[0], 1));
+    }
+    let digits = b.iter().take_while(|c| c.is_ascii_digit()).count();
+    if (1..=9).contains(&digits) && matches!(b.get(digits), Some(b'.' | b')')) && after(digits + 1)
+    {
+        return Some((true, b[digits], digits + 1));
+    }
+    None
+}
+
+/// The column a list item's text starts at, from its marker's column and width; none for an
+/// empty item or a tab after the marker.
+fn item_content(col: usize, width: usize, r: &str) -> Option<usize> {
+    let after = &r[width..];
+    let spaces = after.bytes().take_while(|b| *b == b' ').count();
+    let rest = &after[spaces..];
+    if rest.is_empty() || rest.starts_with('\t') {
+        return None;
+    }
+    // Five spaces or more: the text is indented code, a space after the marker.
+    Some(col + width + if spaces >= 5 { 1 } else { spaces })
+}
+
+/// Whether a line can end a paragraph or change it: a heading, a fence, a quote, a rule, a
+/// heading's underline, a list item, a table's delimiter row or a footnote's definition.
+fn interrupts(r: &str) -> bool {
+    let underline = {
+        let t = r.trim_end_matches([' ', '\t']);
+        !t.is_empty() && (t.bytes().all(|b| b == b'=') || t.bytes().all(|b| b == b'-'))
+    };
+    let delimiter_row = r.contains('-') && r.bytes().all(|b| b"|-: \t".contains(&b));
+    atx(r)
+        || fence(r).is_some()
+        || r.starts_with('>')
+        || rule(r)
+        || underline
+        || item(r).is_some()
+        || delimiter_row
+        || r.starts_with("[^")
+}
+
+/// Whether a line closes a fence of `mark` at least `len` long.
+fn closes(r: &str, mark: u8, len: usize) -> bool {
+    let n = r.bytes().take_while(|b| *b == mark).count();
+    n >= len && blank(&r[n..])
 }
 
 /// The first and last kinds of some blocks.
@@ -700,5 +1100,469 @@ mod tests {
         assert!(d.defines_links());
         d.replace("A [b] c\n\n  [x] y");
         assert!(!d.defines_links());
+    }
+
+    /// Settling as it was before it kept what the open block is: every line checked, reading the
+    /// open block again. Settling now must settle the same blocks, at the same places.
+    mod before {
+        use super::super::{Settled, kinds, trim_blank_lines};
+        use gpui::SharedString;
+        use gpui_core::text::parse_markdown;
+
+        #[derive(Default)]
+        pub struct Doc {
+            pub text: String,
+            pub blocks: Vec<Settled>,
+            pub settled: usize,
+            checked: usize,
+            next_key: usize,
+            spare: Vec<Settled>,
+            pub made: usize,
+        }
+
+        impl Doc {
+            pub fn append(&mut self, delta: &str) {
+                self.text.push_str(delta);
+            }
+
+            pub fn replace(&mut self, text: &str) {
+                let mut same = self
+                    .text
+                    .bytes()
+                    .zip(text.bytes())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                while !text.is_char_boundary(same) {
+                    same -= 1;
+                }
+                if same < self.text.len() {
+                    let keep = self.blocks.iter().take_while(|b| b.seen <= same).count();
+                    self.spare = self.blocks.split_off(keep);
+                    self.settled = self.blocks.last().map_or(0, |b| b.range.end);
+                    self.checked = self.settled;
+                }
+                self.text.clear();
+                self.text.push_str(text);
+            }
+
+            pub fn settle(&mut self) {
+                self.split(false, true);
+            }
+
+            pub fn restore(&mut self) {
+                if !self.spare.is_empty() {
+                    self.split(true, false);
+                }
+            }
+
+            fn split(&mut self, complete: bool, new: bool) {
+                let mut at = self.checked.max(self.settled);
+                loop {
+                    let end = match self.text[at..].find('\n') {
+                        Some(nl) => at + nl + 1,
+                        None if complete && at < self.text.len() => self.text.len(),
+                        None => break,
+                    };
+                    let line = &self.text[at..end];
+                    let open = &self.text[self.settled..at];
+                    if at > self.settled && !line.trim().is_empty() && !open.trim().is_empty() {
+                        let alone = parse_markdown(open);
+                        let mut both = alone.clone();
+                        both.extend(parse_markdown(line));
+                        if parse_markdown(&self.text[self.settled..end]) == both {
+                            let source = trim_blank_lines(open);
+                            let start = self.settled;
+                            let old = self
+                                .spare
+                                .iter()
+                                .position(|b| b.range.start == start && b.source.as_ref() == source)
+                                .map(|i| self.spare.remove(i));
+                            let block = match old {
+                                Some(b) => Settled {
+                                    range: start..at,
+                                    seen: end,
+                                    ..b
+                                },
+                                None if !new => break,
+                                None => {
+                                    self.next_key += 1;
+                                    self.made += 1;
+                                    Settled {
+                                        range: start..at,
+                                        seen: end,
+                                        source: SharedString::from(source.to_string()),
+                                        kinds: kinds(&alone),
+                                        key: self.next_key - 1,
+                                    }
+                                }
+                            };
+                            self.blocks.push(block);
+                            self.settled = at;
+                        }
+                    }
+                    at = end;
+                    self.checked = end;
+                }
+            }
+        }
+    }
+
+    /// Lines that start, carry on, interrupt and close blocks, and ones that only look as if
+    /// they did.
+    const LINES: &[&str] = &[
+        "a",
+        "Words and more",
+        "**Bold** start",
+        "2024 was",
+        "1.5 x",
+        "",
+        "",
+        "   ",
+        "\t",
+        "# h",
+        "#nope",
+        "###### six",
+        "####### seven",
+        "## h ##",
+        "---",
+        "***",
+        "* * *",
+        "___",
+        "- - -",
+        "--",
+        "-",
+        "===",
+        "- a",
+        "- ",
+        "+ a",
+        "* a",
+        "-x",
+        "- [ ] task",
+        "-   a",
+        "-     a",
+        "1. a",
+        "1.",
+        "2) b",
+        "10. c",
+        "1) x",
+        "  - n",
+        "   - n",
+        "    - n",
+        "  more",
+        "   more",
+        "  1. n",
+        "    code",
+        "      deep",
+        "\tcode",
+        "  \tx",
+        "-\tx",
+        "> q",
+        ">",
+        "> > q",
+        "> - a",
+        ">```",
+        " > q",
+        "> # h",
+        "```",
+        "```rust",
+        "``` x`y",
+        "~~~",
+        "````",
+        "   ```",
+        "  ~~~",
+        "  ```",
+        "- ```",
+        "1. ```",
+        "| a | b |",
+        "|---|---|",
+        "a | b",
+        ":--|--:",
+        "--|--",
+        "| 1 | x |",
+        "| 2",
+        "    | x |",
+        "[x]: http://u",
+        "  [x]: http://u",
+        "[x]",
+        "see [x]",
+        "[^1]: note",
+        "[^1]",
+        "[foo",
+        "bar]: /u",
+        "$$",
+        "<div>",
+        "\u{a0}",
+        "a\rb",
+        "x\r",
+        "\\",
+        "![](x)",
+        "é words",
+        "職務",
+        "  [y]: /v",
+        "   [x]",
+        "    [x]: /u",
+    ];
+
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+
+        fn text(&mut self, lines: usize) -> String {
+            let mut s = String::new();
+            for _ in 0..lines {
+                s.push_str(LINES[self.below(LINES.len())]);
+                s.push('\n');
+            }
+            if self.below(4) == 0 {
+                s.pop();
+            }
+            s
+        }
+    }
+
+    fn same(new: &Doc, old: &before::Doc, text: &str) {
+        let blocks = |b: &[Settled]| {
+            b.iter()
+                .map(|b| {
+                    (
+                        b.range.clone(),
+                        b.seen,
+                        b.source.to_string(),
+                        b.kinds,
+                        b.key,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(blocks(&new.blocks), blocks(&old.blocks), "in {text:?}");
+        assert_eq!(new.settled, old.settled, "in {text:?}");
+        assert_eq!(new.made, old.made, "in {text:?}");
+    }
+
+    #[test]
+    fn settling_reads_lines_once_and_settles_as_reading_every_line_again_did() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let rounds = if cfg!(debug_assertions) { 400 } else { 2500 };
+        let mut skipped = 0;
+        for _ in 0..rounds {
+            let n = 1 + rng.below(14);
+            let text = rng.text(n);
+            // A reconnect's text, or the message's: a line changed, some cut off, or more.
+            let mut other = text.clone();
+            match rng.below(3) {
+                0 => {
+                    let at = rng.below(other.len() + 1);
+                    let at = (0..=at).rev().find(|i| other.is_char_boundary(*i)).unwrap();
+                    other.truncate(at);
+                }
+                1 => {
+                    let at = other.find('\n').map_or(0, |i| i + 1);
+                    let n = 1 + rng.below(3);
+                    other.insert_str(at, &rng.text(n));
+                }
+                _ => {
+                    let n = 1 + rng.below(4);
+                    other.push_str(&rng.text(n));
+                }
+            }
+            // The parser (markdown 1.0.0) panics on some lists: a code fence left open in an
+            // item, then a list of the other kind. Those texts are left out here.
+            if !parses(&text) || !parses(&other) {
+                skipped += 1;
+                continue;
+            }
+            let (mut new, mut old) = (Doc::default(), before::Doc::default());
+            // Streamed in cuts of a few bytes.
+            let mut i = 0;
+            while i < text.len() {
+                let mut j = (i + 1 + rng.below(9)).min(text.len());
+                while !text.is_char_boundary(j) {
+                    j += 1;
+                }
+                new.append(&text[i..j]);
+                old.append(&text[i..j]);
+                while new.settle() {}
+                old.settle();
+                same(&new, &old, &text[..j]);
+                i = j;
+            }
+            new.replace(&other);
+            old.replace(&other);
+            if rng.below(2) == 0 {
+                while new.settle() {}
+                old.settle();
+            } else {
+                while new.restore() {}
+                old.restore();
+            }
+            same(&new, &old, &other);
+        }
+        assert!(skipped * 10 < rounds, "{skipped} of {rounds} left out");
+    }
+
+    /// Whether every run of whole lines of `text` parses without the parser panicking.
+    fn parses(text: &str) -> bool {
+        let starts: Vec<usize> = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+            .chain(std::iter::once(text.len()))
+            .collect();
+        starts.iter().enumerate().all(|(k, &a)| {
+            starts[k + 1..]
+                .iter()
+                .all(|&b| std::panic::catch_unwind(|| parse_markdown(&text[a..b])).is_ok())
+        })
+    }
+
+    /// Settles `text` given in `pieces`, settling after each as a frame would: the frames it
+    /// took, and the most a frame read (new text and checks).
+    fn stream<'a>(d: &mut Doc, pieces: impl IntoIterator<Item = &'a str>) -> (usize, usize) {
+        let (mut frames, mut most) = (0, 0);
+        for piece in pieces {
+            d.append(piece);
+            loop {
+                let (checked, reread) = (d.checked, d.reread);
+                let more = d.settle();
+                frames += 1;
+                most = most.max(d.checked - checked + d.reread - reread);
+                if !more {
+                    break;
+                }
+            }
+        }
+        (frames, most)
+    }
+
+    fn fence(lines: usize) -> String {
+        let mut s = String::from("```rust\n");
+        for i in 0..lines {
+            s.push_str(&format!("x{}\n", i % 1000));
+        }
+        s.push_str("```\n\nAfter.\n\nThe end\n");
+        s
+    }
+
+    #[test]
+    fn a_long_fence_is_read_once() {
+        let text = fence(50_000);
+        let fence_len = text.find("\nAfter").unwrap() + 1;
+        let check = |d: &Doc| {
+            assert_eq!(d.blocks.len(), 2);
+            assert_eq!(d.blocks[0].range, 0..fence_len);
+            assert_eq!(d.blocks[1].source.as_ref(), "After.");
+            assert_eq!(d.blocks[0].kinds, Some((BlockKind::Code, BlockKind::Code)));
+        };
+        // In one go: a frame or two, each bounded.
+        let mut d = Doc::default();
+        let (frames, most) = stream(&mut d, [text.as_str()]);
+        check(&d);
+        assert!(frames <= 2, "{frames} frames");
+        assert!(most <= SCAN + REREAD, "a frame read {most}");
+        // Nothing in the fence was checked: only "After." against the line after it.
+        assert!(d.reread < 64, "the checks read {}", d.reread);
+        // A line at a time.
+        let mut d = Doc::default();
+        let (frames, most) = stream(&mut d, text.split_inclusive('\n'));
+        check(&d);
+        assert_eq!(frames, text.lines().count());
+        assert!(most < 64, "a frame read {most}");
+        assert!(d.reread < 64, "the checks read {}", d.reread);
+        // Half, then the whole text in its place (a reconnect), and again with a change
+        // inside the fence.
+        let mut d = Doc::default();
+        stream(&mut d, [&text[..text.len() / 2]]);
+        d.replace(&text);
+        while d.settle() {}
+        check(&d);
+        let changed = text.replacen("x500\n", "y500\n", 1);
+        d.replace(&changed);
+        assert!(d.blocks.is_empty());
+        while d.settle() {}
+        assert_eq!(d.blocks.len(), 2);
+        assert!(d.reread < 128, "the checks read {}", d.reread);
+    }
+
+    #[test]
+    fn a_long_list_and_deep_nesting_are_read_once() {
+        let mut list = String::new();
+        for i in 0..20_000 {
+            list.push_str(&format!("- item {i}\n"));
+            if i % 100 == 0 {
+                list.push_str("  - nested\n    more of it\n\n  and a paragraph\n");
+            }
+        }
+        let mut nested = String::new();
+        for i in 0..2_000 {
+            let depth = 1 + i % 30;
+            nested.push_str(&"> ".repeat(depth));
+            nested.push_str(&"- ".repeat(i % 7));
+            nested.push_str(&format!("line {i}\n"));
+        }
+        for body in [list, nested] {
+            let text = format!("{body}\nAfter.\n\nThe end\n");
+            for pieces in [vec![text.as_str()], text.split_inclusive('\n').collect()] {
+                let mut d = Doc::default();
+                let (_, most) = stream(&mut d, pieces);
+                assert_eq!(
+                    d.blocks.iter().map(|b| b.range.clone()).collect::<Vec<_>>(),
+                    [0..body.len() + 1, body.len() + 1..text.len() - 8]
+                );
+                // The block's settling check read it twice (alone, and with the line after),
+                // and nothing else read it again.
+                assert!(
+                    d.reread < 2 * body.len() + 64,
+                    "the checks read {}",
+                    d.reread
+                );
+                assert!(most <= SCAN + 2 * body.len() + 64, "a frame read {most}");
+            }
+        }
+    }
+
+    #[test]
+    fn what_can_t_be_told_is_checked_a_bounded_amount_a_frame() {
+        // A list whose items carry on lazily, unindented: each line is checked.
+        let mut text = String::new();
+        for i in 0..300 {
+            text.push_str(&format!("- item {i}\nlazy {i}\n"));
+        }
+        let mut d = Doc::default();
+        d.append(&text);
+        let mut frames = 0;
+        loop {
+            let reread = d.reread;
+            let more = d.settle();
+            frames += 1;
+            // At most the budget, or a single check past it.
+            let check = 2 * (d.checked - d.settled) + 64;
+            assert!(
+                d.reread - reread <= REREAD.max(check),
+                "{}",
+                d.reread - reread
+            );
+            if !more {
+                break;
+            }
+        }
+        assert!(frames > 1, "spread over frames");
+        assert!(d.blocks.is_empty());
+        assert_eq!(d.checked, text.len());
+    }
+
+    #[test]
+    fn the_parser_reads_as_much_as_settling_expects() {
+        let heading = |pad: usize| {
+            let text = format!("{}\n\n# h", "a".repeat(pad));
+            parse_markdown(&text)
+                .iter()
+                .any(|b| matches!(b, Block::Heading(..)))
+        };
+        assert!(heading(CAP - 10));
+        assert!(!heading(CAP));
     }
 }
