@@ -61,6 +61,12 @@ item](docs/gallery.png)
   toasts over it. `AlertDialog::new(id)….cancel(button).action(button)` asks for a decision:
   no close button, a press on the scrim doesn't close it, and it opens with the keyboard on
   the cancel.
+- **Drawer.** `Drawer::new(id).open(open).side(DrawerSide::Bottom).title(…).description(…)
+  .on_dismiss(…).child(…).footer(button)` is a modal panel against an edge of the window (the
+  bottom by default; `Top`, `Left`, `Right`) over a scrim. It's Sheet's fuller form, with a
+  header and footer and the keyboard held inside as in a Dialog. Escape and a press on the
+  scrim call `on_dismiss`, and so does dragging a bottom drawer's handle or header down past a
+  quarter of its height (`DismissReason::Swiped`); short of that it goes back.
 - **Code editor.** `InputState::code(window, cx)` with `Input::new(&state).size_full()` in a box
   the host sizes: lines that don't wrap (it scrolls sideways to the caret), the theme's
   monospace font, line numbers (`Input::line_numbers(false)` hides them), Tab and Shift-Tab
