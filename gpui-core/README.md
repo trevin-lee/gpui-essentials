@@ -192,6 +192,13 @@ item](docs/gallery.png)
   indeterminate); the host keeps it. It's a check box to assistive tech (mixed when
   indeterminate), named by its label; `invalid(true)` gives it the destructive border,
   `disabled(true)` dims it, `touch()` takes presses 44 points tall, and a long label wraps.
+- **RadioGroup.** `RadioGroup::new(id).option(id, label)….selected(id).on_change(…)`: options
+  one above the other (`horizontal(true)` puts them side by side, wrapping), each a circle and
+  a label, one on. It's a radio group to assistive tech with one Tab stop (the option that's
+  on); the arrows move to the next option and turn it on, going round from the last to the
+  first and passing over `disable(id)`'d ones, and a press on a circle or its label turns it
+  on. `disabled(true)` dims them all, `invalid(true)` gives them the destructive border,
+  `touch()` makes each option 44 points tall, and a long label wraps.
 - **PopupMenu.** `PopupMenu::new(id).item(PopupMenuItem::new(id, label)…).separator()
   .on_select(…)`, usually as a Popover's content. Entries take an icon, a check, a shortcut's
   text, a host-drawn chip, and can be disabled. Up and Down move a highlight over what can be
