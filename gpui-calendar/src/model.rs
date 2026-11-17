@@ -198,6 +198,18 @@ pub struct Event {
     /// time in it: "Wednesday, November 18 · 2 – 3 PM (GMT-5) New York". The grid always
     /// draws in the display zone.
     pub time_zone: Option<Tz>,
+    /// The event's own page at its provider (Google's `htmlLink`). The panel shows it as a
+    /// link, [`Event::url_label`] or "Open in browser", that sends
+    /// [`crate::CalendarEvent::OpenUrl`].
+    pub url: Option<String>,
+    /// What the panel calls [`Event::url`]: "Open in Google Calendar", say.
+    pub url_label: Option<SharedString>,
+    /// A video call's link (Google's `hangoutLink` or a conference entry point). The panel
+    /// shows a Join button for it, [`Event::conference_label`] or "Join video call", that
+    /// sends [`crate::CalendarEvent::OpenUrl`].
+    pub conference: Option<String>,
+    /// What the panel's Join button says: "Join with Google Meet", say.
+    pub conference_label: Option<SharedString>,
 }
 
 /// An empty event: no id, no title, at no time (the Unix epoch, lasting nothing), in no
@@ -309,6 +321,10 @@ impl Event {
             notes: None,
             attendees: Vec::new(),
             time_zone: None,
+            url: None,
+            url_label: None,
+            conference: None,
+            conference_label: None,
         }
     }
 
@@ -360,6 +376,20 @@ impl Event {
     /// Adds a link to a doc or an agent.
     pub fn link(mut self, link: EventLink) -> Self {
         self.links.push(link);
+        self
+    }
+
+    /// The event's page at its provider, and what the panel calls it (see [`Event::url`]).
+    pub fn url(mut self, url: impl Into<String>, label: Option<SharedString>) -> Self {
+        self.url = Some(url.into());
+        self.url_label = label;
+        self
+    }
+
+    /// A video call's link, and what its Join button says (see [`Event::conference`]).
+    pub fn conference(mut self, url: impl Into<String>, label: Option<SharedString>) -> Self {
+        self.conference = Some(url.into());
+        self.conference_label = label;
         self
     }
 

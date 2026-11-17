@@ -230,6 +230,26 @@ impl Calendar {
         when_there(e, self.options.time_zone, self.options.hour12)
     }
 
+    /// What a click that opens a web address does: asks the host to open it, and gives the
+    /// keyboard back to the calendar.
+    fn open_url(
+        &self,
+        event: EventRef,
+        url: String,
+        cx: &Context<Self>,
+    ) -> impl Fn(&mut Window, &mut App) + 'static {
+        let this = cx.entity().downgrade();
+        let url = SharedString::from(url);
+        move |window, cx| {
+            let (event, url) = (event.clone(), url.clone());
+            this.update(cx, |c, cx| {
+                cx.emit(CalendarEvent::OpenUrl { event, url });
+                c.focus.focus(window, cx);
+            })
+            .ok();
+        }
+    }
+
     /// Text with what the find query found in it marked, as the grid marks it.
     fn marked(&self, text: SharedString, cx: &App) -> StyledText {
         let ranges = self
@@ -451,6 +471,51 @@ impl Calendar {
                 })
                 .into_any_element(),
         ));
+        // A video call: Join, and where it goes.
+        if let Some(call) = e.conference.clone() {
+            let size = if touch {
+                ControlSize::Touch
+            } else {
+                ControlSize::Small
+            };
+            let label = e
+                .conference_label
+                .clone()
+                .unwrap_or_else(|| "Join video call".into());
+            let shown = call
+                .split_once("://")
+                .map_or(call.as_str(), |(_, rest)| rest)
+                .to_string();
+            let open = self.open_url(e.to_ref(), call, cx);
+            body = body.child(line(
+                "conference",
+                IconName::Video,
+                row_line,
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(rems(2. / 15.))
+                    .items_start()
+                    .child(
+                        div().debug_selector(|| "panel-join".into()).child(
+                            Button::new("panel-join")
+                                .label(label)
+                                .primary()
+                                .with_size(size)
+                                .on_click(move |_, window, cx| open(window, cx)),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(muted)
+                            .child(shown),
+                    )
+                    .into_any_element(),
+            ));
+        }
         // The calendar, and the others it can move to.
         let source = self.calendar(&e.calendar).cloned();
         let others: Vec<CalendarSource> = self
@@ -599,6 +664,30 @@ impl Calendar {
                 IconName::Link,
                 row_line,
                 links.into_any_element(),
+            ));
+        }
+        // The event's own page at its provider.
+        if let Some(url) = e.url.clone() {
+            let label = e
+                .url_label
+                .clone()
+                .unwrap_or_else(|| "Open in browser".into());
+            let open = self.open_url(e.to_ref(), url, cx);
+            body = body.child(line(
+                "url",
+                IconName::ExternalLink,
+                row_line,
+                Press::new("panel-url")
+                    .flex()
+                    .items_center()
+                    .min_h(row_h)
+                    .px(rems(6. / 15.))
+                    .rounded(rems(6. / 15.))
+                    .hover(|d| d.bg(c.accent))
+                    .debug_selector(|| "panel-url".into())
+                    .on_click(move |_, window, cx| open(window, cx))
+                    .child(div().min_w_0().truncate().child(label))
+                    .into_any_element(),
             ));
         }
         // Guests, and the answer of the one using the calendar.
