@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -676,6 +676,21 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                     for key in ["t", "h", "e"] {
                         window.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx);
                     }
+                });
+                settle(window, cx).await;
+            }
+            // The block menu, open beside the "This week" heading's grip.
+            "block-menu" => {
+                let _ = cx.update_window(window, |_, window, cx| {
+                    root.update(cx, |root, cx| {
+                        root.editor.update(cx, |e, cx| {
+                            e.focus(window, cx);
+                            let heading = e.state().read(cx).model().document().root().children().nth(3).map(|b| b.id());
+                            if let Some(heading) = heading {
+                                e.open_block_menu(heading, cx);
+                            }
+                        });
+                    });
                 });
                 settle(window, cx).await;
             }

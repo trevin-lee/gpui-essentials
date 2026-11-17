@@ -323,6 +323,10 @@ pub struct Editor {
     pub(crate) state: Entity<BlockEditorState>,
     /// The find bar, when it's open.
     pub(crate) find: Option<crate::find::FindBar>,
+    /// The block whose grip is pressed, until it's let go (see `block_menu.rs`).
+    pub(crate) grip_down: Option<BlockId>,
+    /// The block whose menu is open.
+    pub(crate) block_menu: Option<BlockId>,
     scroll: ScrollHandle,
     menu_scroll: ScrollHandle,
     items: Vec<SlashItem>,
@@ -474,6 +478,8 @@ impl Editor {
             docs: options.docs.clone(),
             touch_drag: None,
             find: None,
+            grip_down: None,
+            block_menu: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -1238,7 +1244,8 @@ impl Editor {
     }
 
     fn side_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        let block = self.hovered?;
+        // Beside the block whose menu is open, else the block under the pointer.
+        let block = self.block_menu.or(self.hovered)?;
         let state = self.state.read(cx);
         if state.is_readonly() {
             return None;
@@ -1274,6 +1281,21 @@ impl Editor {
         let this = cx.entity().downgrade();
         let this_drag = this.clone();
         let state = self.state.clone();
+        let grip = button("blocks-side-grip", "⋮⋮")
+            .cursor_grab()
+            .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                // The editor follows the pointer from here and drops the block where it's let
+                // go, as one undoable move; let go without moving, it opens the block menu.
+                cx.stop_propagation();
+                state.update(cx, |s, _| s.begin_block_drag(block, event.position));
+                let _ = this_drag.update(cx, |this, cx| {
+                    this.hovered = None;
+                    this.grip_pressed(block);
+                    cx.notify();
+                });
+            })
+            .into_any_element();
+        let grip = self.grip_with_menu(block, grip, cx);
         Some(
             deferred(
                 anchored().position(point(left - px(52.), top)).child(
@@ -1289,22 +1311,7 @@ impl Editor {
                                         .update(cx, |this, cx| this.add_below(block, window, cx));
                                 }),
                         )
-                        .child(
-                            button("blocks-side-grip", "⋮⋮")
-                                .cursor_grab()
-                                .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-                                    // The editor follows the pointer from here and drops the
-                                    // block where it's let go, as one undoable move.
-                                    cx.stop_propagation();
-                                    state.update(cx, |s, _| {
-                                        s.begin_block_drag(block, event.position)
-                                    });
-                                    let _ = this_drag.update(cx, |this, cx| {
-                                        this.hovered = None;
-                                        cx.notify();
-                                    });
-                                }),
-                        ),
+                        .child(grip),
                 ),
             )
             .with_priority(1),
@@ -1897,6 +1904,22 @@ impl Render for Editor {
         });
         let edit_menu = self.edit_menu(window, cx);
         let find_bar = self.find_bar(cx);
+        // While a grip is pressed: its release, seen before the editor ends the drag.
+        let grip_watch = self.grip_down.is_some().then(|| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let up = this.clone();
+                    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ = up.update(cx, |this, cx| this.grip_released(cx));
+                        }
+                    });
+                },
+            )
+            .size_0()
+        });
         let page = div()
             .id("gpui-blocks")
             .size_full()
@@ -1944,6 +1967,7 @@ impl Render for Editor {
             .children(paste_menu)
             .children(resize)
             .children(edit_menu)
+            .children(grip_watch)
             .child(self.long_press_watch(cx));
         // The find bar stays at the top while the page scrolls under it.
         div()
@@ -2146,6 +2170,62 @@ mod tests {
         draw(cx);
         assert!(editor.read_with(cx, |e, _| e.find.is_none()));
         assert_eq!(found(&editor, cx), (0, None));
+    }
+
+    /// A press on a grip that doesn't drag opens the block menu; its entries turn the block into
+    /// a heading, duplicate it and delete it.
+    #[gpui::test]
+    fn the_block_menu_turns_duplicates_and_deletes(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "first\n\nsecond");
+        let block = |editor: &Entity<Editor>, cx: &mut VisualTestContext, ix: usize| {
+            editor.update(cx, |e, cx| {
+                e.state()
+                    .read(cx)
+                    .model()
+                    .document()
+                    .root()
+                    .children()
+                    .nth(ix)
+                    .unwrap()
+                    .id()
+            })
+        };
+        let first = block(&editor, cx, 0);
+        editor.update(cx, |e, cx| {
+            e.grip_pressed(first);
+            e.grip_released(cx);
+        });
+        assert_eq!(editor.read_with(cx, |e, _| e.block_menu), Some(first));
+        draw(cx);
+        // Turn into: Heading 1 (the slash menu's second built-in block).
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(first, "turn-1", window, cx)
+        });
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            "# first\n\nsecond"
+        );
+        assert_eq!(
+            editor.read_with(cx, |e, _| e.block_menu),
+            None,
+            "picking closes it"
+        );
+        let first = block(&editor, cx, 0);
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(first, "duplicate", window, cx)
+        });
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            "# first\n\n# first\n\nsecond"
+        );
+        let copy = block(&editor, cx, 1);
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(copy, "delete", window, cx)
+        });
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            "# first\n\nsecond"
+        );
     }
 
     fn draw(cx: &mut VisualTestContext) {
