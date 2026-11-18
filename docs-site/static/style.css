@@ -68,6 +68,18 @@ pre {
   font-size: 13px;
 }
 
+/* A long line of code scrolls inside its block: the page itself never scrolls sideways. */
+pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+main,
+main section,
+.example {
+  min-width: 0;
+}
+
 p code {
   background: var(--muted);
   border-radius: 4px;
@@ -93,6 +105,7 @@ p code {
 .brand {
   font-weight: 600;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .links {
@@ -100,6 +113,7 @@ p code {
   align-items: center;
   gap: 20px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .links a {
@@ -353,6 +367,47 @@ h2 a:hover {
   line-height: 1.45;
 }
 
+/* The live page: a note and Start, then the app's canvas in a framed stage. */
+
+.live-start {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.live-start p:first-child {
+  margin-top: 0;
+}
+
+.button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button.primary:hover {
+  opacity: 0.9;
+  background: var(--accent);
+}
+
+.button.primary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.live-stage {
+  margin-top: 24px;
+  height: min(760px, calc(100vh - 120px));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
 /* A crate's page: its pictures, one under another, each with what it shows. */
 
 .shot {
@@ -374,6 +429,17 @@ h2 a:hover {
   border-top: 1px solid var(--border);
   color: var(--muted-fg);
   font-size: 14px;
+}
+
+@media (max-width: 480px) {
+  .topbar {
+    gap: 12px;
+    padding: 0 16px;
+  }
+
+  .links {
+    gap: 12px;
+  }
 }
 
 @media (max-width: 760px) {

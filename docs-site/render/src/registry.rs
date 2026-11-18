@@ -169,7 +169,7 @@ pub fn components() -> Vec<Component> {
             name: "Input",
             slug: "input",
             about: "A text field of one line or several, its text kept in an InputState.",
-            docs: "gpui_core/struct.Input.html",
+            docs: "gpui_core/input/struct.Input.html",
             variants: [
                 view("Default", "default"),
                 view("Password", "password"),
@@ -418,7 +418,7 @@ pub fn components() -> Vec<Component> {
             name: "Bar Chart",
             slug: "bar-chart",
             about: "Values as bars by category: side by side, stacked, or below zero.",
-            docs: "gpui_core/struct.BarChart.html",
+            docs: "gpui_core/chart/struct.BarChart.html",
             variants: [
                 demo("Default", "default"),
                 demo("Stacked", "stacked"),
@@ -430,7 +430,7 @@ pub fn components() -> Vec<Component> {
             name: "Line Chart",
             slug: "line-chart",
             about: "Values as lines across categories, smooth or straight.",
-            docs: "gpui_core/struct.LineChart.html",
+            docs: "gpui_core/chart/struct.LineChart.html",
             variants: [
                 demo("Default", "default"),
                 demo("Linear, with dots", "linear"),
@@ -441,7 +441,7 @@ pub fn components() -> Vec<Component> {
             name: "Area Chart",
             slug: "area-chart",
             about: "Values as filled areas, stacked or not, flat or with a gradient.",
-            docs: "gpui_core/struct.AreaChart.html",
+            docs: "gpui_core/chart/struct.AreaChart.html",
             variants: [
                 demo("Default", "default"),
                 demo("Own values", "values"),
@@ -452,7 +452,7 @@ pub fn components() -> Vec<Component> {
             name: "Pie Chart",
             slug: "pie-chart",
             about: "Slices of a whole, as a pie or a donut.",
-            docs: "gpui_core/struct.PieChart.html",
+            docs: "gpui_core/chart/struct.PieChart.html",
             variants: [
                 demo("Default", "default"),
                 demo("Donut", "donut"),
@@ -678,7 +678,7 @@ pub fn components() -> Vec<Component> {
             name: "Text View",
             slug: "text-view",
             about: "Markdown drawn as selectable text.",
-            docs: "gpui_core/struct.TextView.html",
+            docs: "gpui_core/text/struct.TextView.html",
             variants: [demo("Default", "default")],
         },
     ]
