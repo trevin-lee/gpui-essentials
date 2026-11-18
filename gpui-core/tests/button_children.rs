@@ -79,3 +79,48 @@ fn children_are_drawn_not_announced(cx: &mut TestAppContext) {
         "not \"Inbox 12\""
     );
 }
+
+struct Tip;
+
+impl Render for Tip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().debug_selector(|| "tip".into()).child("Copy")
+    }
+}
+
+struct Tipped;
+
+impl Render for Tipped {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().p(px(20.)).child(
+            Button::new("copy")
+                .icon(IconName::Copy)
+                .accessibility_label("Copy")
+                .debug_selector(|| "copy-button".into())
+                .tooltip(|_, cx| cx.new(|_| Tip).into()),
+        )
+    }
+}
+
+#[gpui::test]
+fn a_host_names_its_selector_and_gives_a_tooltip(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| Root::new(cx.new(|_| Tipped), window, cx));
+    vcx.simulate_resize(size(px(300.), px(200.)));
+    vcx.run_until_parked();
+    let at = vcx
+        .debug_bounds("copy-button")
+        .expect("found by the host's selector");
+    assert!(
+        vcx.debug_bounds("copy").is_none(),
+        "the host's selector replaces its id's"
+    );
+    vcx.simulate_mouse_move(at.center(), None, gpui::Modifiers::none());
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    vcx.run_until_parked();
+    assert!(
+        vcx.debug_bounds("tip").is_some(),
+        "the tooltip shows once the pointer rests"
+    );
+}
