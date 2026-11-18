@@ -70,6 +70,11 @@ their look.
   once they say yes or maybe. The month's dot becomes a ring, and the agenda's bar an outline.
   VoiceOver adds ", not answered" or ", declined". `Event::my_answer()` gives the answer.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
+- **Menu:** a right-click on an event selects it and opens its menu, as in Google Calendar:
+  Open, Edit and Delete (Open alone for one that can't be changed); on empty time, New event.
+  Shift-F10 opens the selection's menu from the keyboard. Each entry does what its key does
+  (Enter, `e`, Delete, `n`), so a repeating event's Delete still asks which occurrences.
+  `menu_items()` and `pick_menu_item(id)` drive it from your app and its tests.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event; ← and → cross into the next or previous day (and period) in the day,
   week and month views. With nothing selected, ← and → change the period. `j` goes to the next
@@ -439,7 +444,6 @@ gpui-core's README says.
 Not done yet:
 - Editing a recurrence rule itself (expanding recurring events, and applying a scoped edit to
   the series, is the app's job, as above).
-- A context menu (Delete is the key for now).
 - Year, resource and timeline views.
 - A scrollbar on the grid.
 - In narrow columns, titles are cut to one line with "…" rather than wrapped.
