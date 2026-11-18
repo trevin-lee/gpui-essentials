@@ -26,6 +26,11 @@ gpui-core = { path = "../gpui-core" }
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+# GPUI's Instant in a browser, where wasm32 has no std::time::Instant: the version GPUI's own
+# clock uses, so the lock doesn't grow.
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1.1.0"
+
 [features]
 # GPUI's test support (a headless window, simulated input), for hosts' tests.
 test-support = ["gpui/test-support"]

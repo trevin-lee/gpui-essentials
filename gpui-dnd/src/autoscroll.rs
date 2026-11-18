@@ -3,7 +3,12 @@
 //! It stops asking for frames as soon as nothing under the pointer can scroll.
 
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// GPUI's clock: std's Instant, but in a browser (which has none) web-time's.
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement,
