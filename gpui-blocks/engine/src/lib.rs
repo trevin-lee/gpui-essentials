@@ -118,7 +118,9 @@ pub(crate) fn init_for_tests(cx: &mut gpui::App) {
 
 pub use id::BlockId;
 pub use kind::BlockKind;
-pub use marks::{MarkChange, MarkKind, MarkSet, MarkState};
+pub use marks::{
+    BACKGROUNDS, MarkChange, MarkKind, MarkSet, MarkState, PaletteColor, background_of,
+};
 pub use position::{Affinity, BlockPosition, PositionError};
 pub use selection::{BlockSelection, SelectionError};
 pub use transaction::{EditOrigin, Transaction};

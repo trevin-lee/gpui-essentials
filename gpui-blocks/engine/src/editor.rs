@@ -9,7 +9,7 @@ use std::{
 
 static NEXT_EDITOR_OWNER: AtomicU64 = AtomicU64::new(1);
 
-use gpui::SharedString;
+use gpui::{Hsla, SharedString};
 
 use super::{
     command::CommandError,
@@ -177,6 +177,28 @@ impl BlockEditorModel {
             (true, true) => MarkState::Mixed,
             _ => MarkState::Off,
         }
+    }
+
+    /// The highlight colour all of the selection has: `None` when some of it has none, or
+    /// another colour. A caret has the colour typing there gets.
+    pub fn selection_highlight(&self) -> Option<Hsla> {
+        let range = self.doc.resolve_selection(&self.selection).ok()?;
+        if range.is_collapsed() {
+            return self.active_marks().highlight();
+        }
+        let mut color = None;
+        for (block, lo, hi) in self.text_ranges(range) {
+            let inline = self.doc.inline(block)?;
+            for (piece, marks, _) in inline.pieces() {
+                if piece.start < hi && piece.end > lo {
+                    let here = marks.highlight?;
+                    if *color.get_or_insert(here) != here {
+                        return None;
+                    }
+                }
+            }
+        }
+        color
     }
 
     /// Kind of the text block holding the caret, if any.

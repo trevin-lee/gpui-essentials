@@ -350,6 +350,11 @@ fn text_baseline(style: &ParagraphStyle, window: &Window) -> Pixels {
 
 /// The paragraph layer's marks for an editor mark.
 fn marks(mark: &TextMark, style: &ParagraphStyle) -> Marks {
+    // Light text is a dark theme: a background colour is drawn with its dark twin there.
+    let dark = style.color.l > 0.5;
+    let highlight = mark
+        .highlight
+        .map(|c| crate::marks::drawn_highlight(c, dark));
     Marks {
         bold: mark.bold,
         italic: mark.italic,
@@ -358,11 +363,10 @@ fn marks(mark: &TextMark, style: &ParagraphStyle) -> Marks {
         code: mark.code,
         link: mark.link.as_ref().map(|l| l.url.clone()),
         muted: false,
-        highlight: mark.highlight,
+        highlight,
         // A highlight sets the text's colour with its fill, as HTML's `mark` does, so a light
         // fill stays readable in a dark theme.
-        color: mark
-            .highlight
+        color: highlight
             .filter(|c| c.a > 0.)
             .map(|c| readable_on(c, style.color)),
     }
