@@ -532,3 +532,73 @@ fn a_transition_reports_the_viewport_as_it_goes(cx: &mut TestAppContext) {
     assert!(at.zoom > 1. && at.zoom < 2., "{at:?}");
     assert_eq!(last, Some(at));
 }
+
+/// Auto-pan, as React Flow's: a node dragged to within 40 points of the pane's edge moves the
+/// view that way each frame, the node with it under the pointer; back inside, it stops.
+#[gpui::test]
+fn a_node_dragged_to_the_panes_edge_pans_the_view_and_stays_under_the_pointer(
+    cx: &mut TestAppContext,
+) {
+    let (flow, _, cx) = open(cx, with_three);
+    let at = center(&flow, cx, "b");
+    let grab = flow.read_with(cx, |f, _| {
+        f.screen_to_flow(at) - f.node("b").unwrap().position
+    });
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(offset(at, -10., 0.), MouseButton::Left, Modifiers::none());
+    draw(cx);
+    // To 4 points from the pane's left edge, where it goes at nearly full speed.
+    let edge = flow.read_with(cx, |f, _| f.flow_to_screen(xy(4., 0.)));
+    let to = gpui::point(edge.x, at.y);
+    cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    for _ in 0..10 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        draw(cx);
+    }
+    let panned = flow.read_with(cx, |f, _| f.viewport());
+    // Ten frames of about 15 * 36 / 40 points: the view moved right, by about 130.
+    assert!(panned.x > 100. && panned.x < 170., "{panned:?}");
+    assert_eq!(panned.y, 0.);
+    flow.read_with(cx, |f, _| {
+        let now = f.screen_to_flow(to) - f.node("b").unwrap().position;
+        assert!(
+            (now.x - grab.x).abs() < 0.01 && (now.y - grab.y).abs() < 0.01,
+            "{now:?} {grab:?}"
+        );
+    });
+    // Back inside, it stops.
+    cx.simulate_mouse_move(offset(at, -10., 0.), MouseButton::Left, Modifiers::none());
+    for _ in 0..5 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        draw(cx);
+    }
+    assert_eq!(flow.read_with(cx, |f, _| f.viewport()), panned);
+    cx.simulate_mouse_up(offset(at, -10., 0.), MouseButton::Left, Modifiers::none());
+}
+
+/// With it off, the view stays put.
+#[gpui::test]
+fn auto_pan_can_be_turned_off(cx: &mut TestAppContext) {
+    let (flow, _, cx) = open(cx, |f| {
+        with_three(f).with_options(|o| o.auto_pan_on_node_drag = false)
+    });
+    let at = center(&flow, cx, "b");
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_move(offset(at, -10., 0.), MouseButton::Left, Modifiers::none());
+    draw(cx);
+    let edge = flow.read_with(cx, |f, _| f.flow_to_screen(xy(4., 0.)));
+    cx.simulate_mouse_move(
+        gpui::point(edge.x, at.y),
+        MouseButton::Left,
+        Modifiers::none(),
+    );
+    for _ in 0..5 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        draw(cx);
+    }
+    assert_eq!(flow.read_with(cx, |f, _| f.viewport()), Viewport::default());
+}
