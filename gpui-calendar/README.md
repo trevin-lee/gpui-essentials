@@ -83,6 +83,12 @@ their look.
   at the selected slot, or at the next round half hour today. Enter opens the selected event or
   makes one in the selected slot, Delete or Backspace asks to delete the selected event, and
   Escape drops a drag or the selection.
+- **Moving by keyboard:** with the days focused, Space picks the selected event up and
+  Shift+Space its end. The arrows move it a snap step (up and down) or a day (left and right)
+  on the grid, a day or a week in the month. Space or Enter puts it down as a proposal, as a
+  drop would (a repeating event's question follows), and Escape puts it back. VoiceOver hears
+  each step in the calendar's own formats: "Standup, Tuesday 9 to 9:30 AM, moving to Wednesday
+  9:15 AM", or "…, ending at 10 AM" for its end.
 - **Time zones:** times are shown in a display zone from chrono-tz, which bundles the IANA
   database, so a DST day doesn't depend on the machine's zone files. A second zone
   (`secondary_zone`) adds a column of its hours left of the day and week grids' own, under its

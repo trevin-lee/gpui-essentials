@@ -57,7 +57,7 @@ pub struct A11yItem {
 }
 
 /// "Tuesday 3 to 4 PM", "Tuesday, all day", "Monday to Wednesday, all day".
-fn when(time: &EventTime, tz: chrono_tz::Tz, hour12: bool) -> String {
+pub(crate) fn when(time: &EventTime, tz: chrono_tz::Tz, hour12: bool) -> String {
     let day = |d: NaiveDate| time::weekday_name(d.weekday(), false).to_string();
     match *time {
         EventTime::AllDay { start, end } => {
@@ -94,7 +94,7 @@ fn date_label(d: NaiveDate) -> String {
 }
 
 /// "Wednesday, November 18".
-fn day_label(d: NaiveDate) -> String {
+pub(crate) fn day_label(d: NaiveDate) -> String {
     format!(
         "{}, {}",
         time::weekday_name(d.weekday(), false),
