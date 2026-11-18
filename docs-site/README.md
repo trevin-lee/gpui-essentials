@@ -36,6 +36,12 @@ site on GitHub's macOS runner and uploads it as the `site` artifact (`gh run dow
 site`). Run it by hand from the Actions tab for any branch. Off macOS, `cargo clippy` still
 compiles the renderer and every demo; only drawing the pictures needs a Mac.
 
+## Publishing
+
+Every night, and when run by hand on main, the `pages` workflow renders the site, adds every
+crate's rustdoc (`cargo doc --workspace --no-deps`) as `api/`, and publishes it to GitHub Pages.
+Pages has to be on, with GitHub Actions as its source (Settings, Pages).
+
 ## Preview it
 
 ```sh
