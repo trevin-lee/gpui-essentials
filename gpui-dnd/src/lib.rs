@@ -64,7 +64,7 @@ pub use provider::{DndProvider, PREVIEW_PRIORITY};
 pub use sortable::{
     Placeholder, SLIDE_DURATION, Sortable, SortableDrag, SortableItem, SortableMove,
 };
-pub use source::{Backend, DragEnd, DragSource, Preview, TouchActivation};
+pub use source::{Backend, DragEnd, DragSource, Preview, SharedSource, TouchActivation};
 pub use state::RETURN_DURATION;
 pub use target::{DropOutcome, DropTarget};
 pub use virtual_list::VirtualSortable;

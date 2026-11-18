@@ -77,6 +77,18 @@ As the pointer moves, the provider's own view is notified, not the whole window:
 (`AnyView::cached`) that shows something about the drag collects it (`collect_dnd`) and is
 notified only when that changes.
 
+### A source costs little a frame
+
+Every source is drawn each frame its view is. So a `dnd` is one element round its div (not a
+`RenderOnce` and a wrapper), registers nothing when it's neither a source nor a target, and adds
+no listeners of its own: the active provider holds one press, long-press and touch-drag listener
+for the window and finds the source under the press among the registered hitboxes, the
+innermost first. Many sources of one view share one source built once
+(`DragSource::keyed(|key, cx| item)….shared()`, then `dnd(id).shared_source(&shared, key)`),
+each giving only its key; the item is made from the key when a drag begins. At 500 small
+elements a frame (release, ci-runner, `tests/source_cost.rs`), a plain div takes 1.30 µs each,
+a `dnd` with a shared source 2.07 µs, one with its own source 2.45 µs.
+
 ### Idle costs nothing
 
 No timer or frame request exists unless a drag is moving, an auto-scroll is scrolling, or a
