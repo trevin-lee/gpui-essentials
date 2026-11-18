@@ -25,6 +25,8 @@ type OnDrop = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropO
 type Anchor = Rc<dyn Fn(Bounds<Pixels>) -> Point<Pixels>>;
 type Slots = Rc<dyn Fn(&DragItem, Bounds<Pixels>) -> Vec<Point<Pixels>>>;
 type Describe = Rc<dyn Fn(&DragItem, &DropMonitor) -> SharedString>;
+type Step =
+    Rc<dyn Fn(&DragItem, &DropMonitor, Point<f32>, &mut Window, &mut App) -> Option<Point<Pixels>>>;
 
 /// A drop target (react-dnd's `useDrop`): which items a [`dnd`](crate::dnd) element takes, and
 /// what it does with them.
@@ -37,6 +39,7 @@ pub struct DropTarget {
     anchor: Option<Anchor>,
     slots: Option<Slots>,
     describe: Option<Describe>,
+    pub(crate) step: Option<Step>,
 }
 
 impl DropTarget {
@@ -95,6 +98,20 @@ impl DropTarget {
         f: impl Fn(&DragItem, Bounds<Pixels>) -> Vec<Point<Pixels>> + 'static,
     ) -> Self {
         self.slots = Some(Rc::new(f));
+        self
+    }
+
+    /// Moves a keyboard drag one place within this target when an arrow is pressed over it:
+    /// given the direction (a unit vector), it returns where the keyboard's pointer goes, or
+    /// None to leave the target the nearest way, as if it had no step. For a list longer than
+    /// its window: it can scroll the next place into view and point there, where slots would
+    /// have to be drawn to be found.
+    pub fn keyboard_step(
+        mut self,
+        f: impl Fn(&DragItem, &DropMonitor, Point<f32>, &mut Window, &mut App) -> Option<Point<Pixels>>
+        + 'static,
+    ) -> Self {
+        self.step = Some(Rc::new(f));
         self
     }
 

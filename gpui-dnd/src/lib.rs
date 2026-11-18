@@ -52,6 +52,7 @@ mod source;
 mod state;
 mod target;
 mod touch;
+mod virtual_list;
 
 pub use autoscroll::{AutoScroll, AutoScrollArea, AutoScrollExt, Scrollable};
 pub use collect::{CollectExt, Collected};
@@ -66,3 +67,4 @@ pub use sortable::{
 pub use source::{Backend, DragEnd, DragSource, Preview, TouchActivation};
 pub use state::RETURN_DURATION;
 pub use target::{DropOutcome, DropTarget};
+pub use virtual_list::VirtualSortable;
