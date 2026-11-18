@@ -44,6 +44,16 @@ string_enum! {
 }
 
 string_enum! {
+    /// What a gallery's cards show above their title (Notion's card preview): nothing, or the
+    /// row's page cover.
+    pub enum CardPreview {
+        None = "none",
+        /// The row doc's `cover`: its image, or its colour.
+        Cover = "cover",
+    }
+}
+
+string_enum! {
     /// A filter condition's operator. Which apply depends on the property's type (see
     /// [`FilterOp::applies_to`]).
     pub enum FilterOp {
@@ -398,6 +408,10 @@ pub struct View {
     /// each group's). A property without one shows none. Left out of the JSON when empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub calculations: BTreeMap<String, Calculation>,
+    /// What a gallery's cards show above their title. Absent (or null) is none; left out of
+    /// the JSON when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_preview: Option<CardPreview>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -423,6 +437,7 @@ impl View {
             card_properties: Vec::new(),
             collapsed_groups: Vec::new(),
             calculations: BTreeMap::new(),
+            card_preview: None,
             extra: Extra::new(),
         }
     }

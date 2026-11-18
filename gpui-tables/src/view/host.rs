@@ -1,7 +1,9 @@
 //! What the table asks of the app around it: its look, names it can't know, pickers' choices,
 //! optionally a text field of its own for typed values, and where its events go.
 
-use gpui::{App, Bounds, Pixels, WeakEntity, Window};
+use std::sync::Arc;
+
+use gpui::{App, Bounds, Image, Pixels, WeakEntity, Window};
 
 use super::TableTheme;
 use super::table::TableView;
@@ -111,6 +113,15 @@ pub trait TableHost {
     /// "Owner" and an agent as its id.
     fn person_name(&self, person: &Person) -> Option<String> {
         let _ = person;
+        None
+    }
+
+    /// An image the docs name by asset id (a row's cover, `{"style": "image", "assetId": ..}`),
+    /// when the host has it: the crate fetches nothing. Until it's there (None, the default),
+    /// its place is drawn empty; the host draws the table again once it has it (`cx.notify()`
+    /// on the table's entity).
+    fn image(&self, asset_id: &str, cx: &App) -> Option<Arc<Image>> {
+        let _ = (asset_id, cx);
         None
     }
 

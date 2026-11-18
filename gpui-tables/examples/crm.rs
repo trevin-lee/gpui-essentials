@@ -31,7 +31,7 @@
 //! `search` (People searched from the bar for a company's name, typed without its capital); and
 //! `calculations` (People grouped by stage, a calculation under each column of each group, a
 //! number's footer menu open); and `peek` (Imani's row peeked in the panel at the right) and
-//! `gallery` (Pipeline drawn as a gallery, its rows as cards).
+//! `gallery` (Pipeline drawn as a gallery, its rows as cards with their covers).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -897,11 +897,12 @@ mod shots {
                         });
                     }
                     "gallery" => {
-                        // Pipeline drawn as a gallery: the same rows as cards in a grid.
+                        // Pipeline drawn as a gallery: the same rows as cards in a grid, each
+                        // with its row's cover (colours here: the example has no images).
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| {
                             let mut db = t.database().clone();
-                            let rows = t.rows().to_vec();
+                            let mut rows = t.rows().to_vec();
                             if let Some(v) = db
                                 .database
                                 .as_mut()
@@ -909,6 +910,20 @@ mod shots {
                             {
                                 v.kind = gpui_tables::ViewType::Gallery;
                                 v.name = "Gallery".into();
+                                v.card_preview = Some(gpui_tables::CardPreview::Cover);
+                            }
+                            const COVERS: [&str; 5] = [
+                                "#3B4A6BFF",
+                                "#6B4A3BFF",
+                                "#2F5D50FF",
+                                "#5B3B6BFF",
+                                "#6B5E3BFF",
+                            ];
+                            for (i, r) in rows.iter_mut().enumerate() {
+                                r.cover = serde_json::json!({
+                                    "style": "solid",
+                                    "color": COVERS[i % COVERS.len()],
+                                });
                             }
                             t.set_docs(db, rows, cx);
                             t.set_view(PIPELINE, cx);

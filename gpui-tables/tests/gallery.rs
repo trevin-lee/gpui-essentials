@@ -162,3 +162,118 @@ fn the_keyboard_moves_and_deletes_a_card(cx: &mut TestAppContext) {
         host.last_edit()
     );
 }
+
+const ASSET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn picture() -> std::sync::Arc<Image> {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="9"><rect width="16" height="9" fill="#3b82f6"/></svg>"##;
+    std::sync::Arc::new(Image::from_bytes(ImageFormat::Svg, svg.as_bytes().to_vec()))
+}
+
+/// The gallery with its cards showing their rows' covers: Rowan's a colour, Imani's an image the
+/// host has, Theo none.
+fn open_covers<'a>(
+    cx: &'a mut TestAppContext,
+    host: &std::rc::Rc<TestHost>,
+    preview: Option<CardPreview>,
+) -> (Entity<TableView>, &'a mut VisualTestContext) {
+    let (mut db, mut rows) = load("people");
+    let v = db
+        .database
+        .as_mut()
+        .unwrap()
+        .views
+        .iter_mut()
+        .find(|v| v.id == ALL_PEOPLE)
+        .unwrap();
+    v.kind = ViewType::Gallery;
+    v.sort.clear();
+    v.card_properties = vec![COMPANY.into(), ROLE.into()];
+    v.card_preview = preview;
+    for r in &mut rows {
+        r.cover = match r.id.as_str() {
+            ROWAN => serde_json::json!({"style": "solid", "color": "#3B4A6BFF"}),
+            IMANI => serde_json::json!({"style": "image", "assetId": ASSET}),
+            _ => serde_json::json!({"style": "solid"}),
+        };
+    }
+    host.images.borrow_mut().insert(ASSET.into(), picture());
+    open_with(
+        cx,
+        host,
+        db,
+        rows,
+        Some(ALL_PEOPLE),
+        size(px(1400.), px(900.)),
+    )
+}
+
+#[gpui::test]
+fn with_the_card_preview_on_covers_each_card_starts_with_its_rows_cover(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (_, cx) = open_covers(cx, &host, Some(CardPreview::Cover));
+    draw(cx);
+    for row in [ROWAN, IMANI, THEO] {
+        let band = rect(cx, format!("cover:{row}"));
+        let card = rect(cx, card(row));
+        // A 16:9 band across the card's top.
+        assert!(
+            (band.top() - card.top()).abs() < px(2.),
+            "{band:?} {card:?}"
+        );
+        let ratio = band.size.width / band.size.height;
+        assert!((ratio - 16. / 9.).abs() < 0.1, "{row}: {band:?}");
+        assert!(card.size.height > band.size.height + px(40.), "{card:?}");
+    }
+    // Imani's image is the host's; the crate asked for it and fetched nothing.
+    assert!(host.images_asked.borrow().iter().any(|a| a == ASSET));
+}
+
+#[gpui::test]
+fn without_the_card_preview_cards_have_no_band(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    for preview in [
+        None,
+        Some(CardPreview::None),
+        Some(CardPreview::Other("big".into())),
+    ] {
+        let (_, cx) = open_covers(cx, &host, preview.clone());
+        assert!(drawn(cx, card(ROWAN)), "{preview:?}");
+        assert!(!drawn(cx, format!("cover:{ROWAN}")), "{preview:?}");
+    }
+    assert!(host.images_asked.borrow().is_empty());
+}
+
+/// The gallery's settings set its card preview, writing only none or cover.
+#[gpui::test]
+fn the_settings_set_the_card_preview(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_covers(cx, &host, None);
+    table.update(cx, |t, cx| t.set_view_bar(true, cx));
+    draw(cx);
+    let preview = |host: &TestHost| {
+        edits(host).into_iter().rev().find_map(|e| match e {
+            Edit::ViewChanged { view, .. } => Some(view.card_preview),
+            _ => None,
+        })
+    };
+    click(cx, "view-settings");
+    click(cx, "menu-item-Card preview");
+    click(cx, "menu-item-Page cover");
+    assert_eq!(preview(&host), Some(Some(CardPreview::Cover)));
+    click(cx, "menu-item-None");
+    assert_eq!(preview(&host), Some(Some(CardPreview::None)));
+    let written = edits(&host)
+        .into_iter()
+        .filter_map(|e| match e {
+            Edit::ViewChanged { view, .. } => {
+                Some(serde_json::to_value(&view).unwrap()["cardPreview"].clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        written,
+        [serde_json::json!("cover"), serde_json::json!("none")]
+    );
+}
