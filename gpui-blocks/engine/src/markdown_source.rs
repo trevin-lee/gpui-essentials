@@ -177,6 +177,9 @@ impl MarkdownSource {
                 ..Default::default()
             });
         }
+        if let Some(color) = mark.color {
+            layers.push(TextMark::default().color(color));
+        }
         if mark.underline {
             layers.push(TextMark::default().underline());
         }
@@ -322,6 +325,13 @@ fn wrap_layer(
     } else {
         ("", content, "")
     };
+    // No Markdown colours text: an inline `<span>` the importer reads back.
+    if let Some(color) = mark.color {
+        return format!(
+            "{lead}<span style=\"color:{}\">{core}</span>{trail}",
+            hex_color(color)
+        );
+    }
     let wrapped = match mark.highlight {
         Some(color) if options.highlight_as_html && !core.is_empty() => {
             if color == default_highlight_color() {
@@ -388,6 +398,9 @@ fn wrap_with_mark(text: &str, mark: &TextMark) -> String {
         // Markdown has no underline syntax, and `__` reads as bold to most
         // parsers, so fall back to the inline HTML `<u>` parses from.
         out = format!("<u>{}</u>", out);
+    }
+    if let Some(color) = mark.color {
+        out = format!("<span style=\"color:{}\">{}</span>", hex_color(color), out);
     }
     if mark.highlight.is_some() {
         out = format!("=={}==", out);
