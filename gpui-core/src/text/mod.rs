@@ -6,7 +6,7 @@ mod markdown;
 pub mod paragraph;
 mod view;
 
-pub use markdown::{Align, Block, Item, parse as parse_markdown};
+pub use markdown::{Align, Block, Item, MATH_LANGUAGE, parse as parse_markdown};
 pub use view::{
     BlockGap, BlockKind, CodeBlock, HeadingMargins, InlineCodeStyle, TextView, TextViewColors,
     TextViewStyle,

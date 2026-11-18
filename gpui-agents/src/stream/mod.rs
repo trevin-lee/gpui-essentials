@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::text::{CodeBlock, TextView, TextViewStyle};
+use gpui_core::text::{CodeBlock, MATH_LANGUAGE, TextView, TextViewStyle};
 use gpui_core::{ActiveTheme as _, Press};
 
 use crate::draw::{Glyph, GlyphElement};
@@ -382,6 +382,9 @@ impl CopyButton {
     fn over(&self, code: &CodeBlock, window: &mut Window, cx: &mut App) -> AnyElement {
         let at = (code.key, code.index);
         let copied = self.copied == Some(at);
+        // A display equation's button is beside its TeX, in room of its own, so it's always
+        // shown (it covers nothing).
+        let math = code.language.as_deref() == Some(MATH_LANGUAGE);
         let name = format!("{}/code/{}/{}", self.id, code.key, code.index);
         let group = SharedString::from(format!("{name}/box"));
         let theme = cx.theme();
@@ -401,7 +404,7 @@ impl CopyButton {
             .debug_selector(move || sel)
             // Hidden until the pointer is over the block, or while it says Copied, or has the
             // focus; always there for a finger.
-            .when(!self.touch && !copied, |p| {
+            .when(!self.touch && !copied && !math, |p| {
                 p.opacity(0.)
                     .group_hover(group.clone(), |s| s.opacity(1.))
                     .focus(|s| s.opacity(1.))
@@ -433,6 +436,15 @@ impl CopyButton {
                 ))
                 .child(if copied { "Copied" } else { "Copy" }),
         };
+        // Beside a display equation's TeX the button is laid out at its own width (gpui-core
+        // keeps that room clear); over any other code block, in its corner.
+        if math {
+            return div()
+                .p(rems(0.5))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(press)
+                .into_any_element();
+        }
         div()
             .group(group)
             .size_full()

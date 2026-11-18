@@ -636,6 +636,45 @@ fn fence(line: &str) -> Option<(char, usize, &str)> {
     (n >= 3).then(|| (c, n, &t[n..]))
 }
 
+/// Where the display equation the text ends inside starts (its opening `$$`), if it does: `$$`s
+/// outside code fences, code spans and backslash escapes, taken in pairs.
+fn open_display_math(s: &str) -> Option<usize> {
+    let mut open = None;
+    let mut fenced: Option<(char, usize)> = None;
+    let mut at = 0;
+    for line in s.split('\n') {
+        match (fenced, fence(line)) {
+            (None, Some((c, n, _))) => fenced = Some((c, n)),
+            (Some((c, n)), Some((c2, n2, rest)))
+                if c == c2 && n2 >= n && rest.trim().is_empty() =>
+            {
+                fenced = None;
+            }
+            (Some(_), _) => {}
+            (None, None) => {
+                let (code, _) = code_spans(line);
+                let b = line.as_bytes();
+                let mut i = 0;
+                while i < b.len() {
+                    if b[i] == b'\\' {
+                        i += 2;
+                    } else if !code[i] && b[i..].starts_with(b"$$") {
+                        open = match open {
+                            Some(_) => None,
+                            None => Some(at + i),
+                        };
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        at += line.len() + 1;
+    }
+    open
+}
+
 /// Where the code fence the text ends inside starts, if it does.
 fn open_fence(s: &str) -> Option<usize> {
     let mut open: Option<(char, usize, usize)> = None;
@@ -672,6 +711,8 @@ fn open_fence(s: &str) -> Option<usize> {
 ///   written are already bold (and never the rest of the text and back); a marker with nothing
 ///   after it yet isn't shown.
 /// - A link being written shows as its words.
+/// - A display equation being written (`$$` not closed yet) draws as one, its TeX as written:
+///   it's closed for now, and an opening `$$` with nothing after it yet isn't shown.
 pub(crate) fn display(tail: &str) -> String {
     let mut s = tail.to_string();
     // A last line still being written that's only marks.
@@ -687,6 +728,44 @@ pub(crate) fn display(tail: &str) -> String {
     hold_table_header(&mut s);
     let t = s.trim_end().len();
     s.truncate(t);
+    if let Some(at) = open_display_math(&s) {
+        if s[at + 2..].trim().is_empty() {
+            s.truncate(at);
+            let t = s.trim_end().len();
+            s.truncate(t);
+        } else {
+            hold_backslash(&mut s);
+            let braces = open_braces(&s[at..]);
+            s.push_str(&"}".repeat(braces));
+            s.push_str("$$");
+            return s;
+        }
+    }
+    let start = s.rfind('\n').map_or(0, |i| i + 1);
+    // Inline math open on the last line: its TeX as written, closed for now, and what's open
+    // before it closed after it. A `$` with nothing after it yet isn't shown.
+    if let Some(i) = open_inline_math(&s[start..]) {
+        let at = start + i;
+        if s[at + 1..].trim().is_empty() {
+            s.truncate(at);
+            let t = s.trim_end().len();
+            s.truncate(t.max(start));
+        } else {
+            hold_backslash(&mut s);
+            let math = s[at..].to_string();
+            let before = s[start..at].to_string();
+            let words = before.trim_end();
+            let (shown, closers) = close_line(words);
+            s.truncate(start);
+            s.push_str(&shown);
+            s.push_str(&before[words.len()..]);
+            s.push_str(&math);
+            s.push_str(&"}".repeat(open_braces(&math)));
+            s.push('$');
+            s.push_str(&closers);
+            return s;
+        }
+    }
     let start = s.rfind('\n').map_or(0, |i| i + 1);
     let last = &s[start..];
     // Nothing, or a closing fence or a rule: nothing's open.
@@ -698,6 +777,69 @@ pub(crate) fn display(tail: &str) -> String {
     s.push_str(&shown);
     s.push_str(&closers);
     s
+}
+
+/// Holds back a backslash the text ends with (a TeX command's, its name still to come), which
+/// would escape what closes the formula for now.
+fn hold_backslash(s: &mut String) {
+    let n = s.bytes().rev().take_while(|b| *b == b'\\').count();
+    if n % 2 == 1 {
+        s.pop();
+    }
+}
+
+/// How many of TeX's groups are open at the end of `tex` (`{` not closed by a `}`, escaped
+/// ones aside): pulldown-cmark reads math only with its braces balanced, so a formula being
+/// written is closed for now with them.
+fn open_braces(tex: &str) -> usize {
+    let b = tex.as_bytes();
+    let (mut depth, mut i) = (0usize, 0);
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 1,
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    depth
+}
+
+/// Where inline math the line ends inside starts (its `$`), if it does: a `$` outside code
+/// spans and escapes, not part of a `$$`, and not a price's (one before a digit or a space,
+/// which pulldown-cmark doesn't open math with either), not closed by a `$` after it.
+fn open_inline_math(line: &str) -> Option<usize> {
+    let (code, _) = code_spans(line);
+    let b = line.as_bytes();
+    let mut open = None;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if code[i] || b[i] != b'$' {
+            i += 1;
+            continue;
+        }
+        if b.get(i + 1) == Some(&b'$') {
+            i += 2;
+            continue;
+        }
+        open = match open {
+            Some(_) => None,
+            None if b
+                .get(i + 1)
+                .is_some_and(|c| c.is_ascii_digit() || c.is_ascii_whitespace()) =>
+            {
+                None
+            }
+            None => Some(i),
+        };
+        i += 1;
+    }
+    open
 }
 
 /// Holds back a last line that would start a table until its delimiter row comes.
@@ -927,6 +1069,115 @@ fn close_emphasis(s: &mut String, more: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_display_equation_being_written_draws_as_one() {
+        // Open: closed for now, its TeX as written.
+        assert_eq!(display("Text:\n$$x_{k+1} = F"), "Text:\n$$x_{k+1} = F$$");
+        // With its braces closed too: pulldown-cmark reads math only with them balanced.
+        assert_eq!(display("Text:\n$$\\frac{a}{b"), "Text:\n$$\\frac{a}{b}$$");
+        assert_eq!(display("Text:\n$$x_{k+"), "Text:\n$$x_{k+}$$");
+        // A command's backslash with its name still to come waits for it.
+        assert_eq!(display("Text:\n$$\\frac{a}{\\"), "Text:\n$$\\frac{a}{}$$");
+        assert_eq!(display("so $a \\"), "so $a $");
+        // Just opened, nothing after it: not shown yet.
+        assert_eq!(display("Text:\n$$"), "Text:");
+        assert_eq!(display("Some **bold** then $$"), "Some **bold** then");
+        // Closed, or in code: nothing to close.
+        assert_eq!(display("a $$x$$ b"), "a $$x$$ b");
+        assert_eq!(display("run `echo $$` now"), "run `echo $$` now");
+        assert_eq!(
+            display("```sh\necho $$\n```\nok"),
+            "```sh\necho $$\n```\nok"
+        );
+        // An escaped one is a dollar and a dollar.
+        assert_eq!(display(r"costs \$$5"), r"costs \$$5");
+        // Prices aren't touched.
+        assert_eq!(display("It costs $5 and $10"), "It costs $5 and $10");
+        // Inline math being written: closed for now, emphasis open before it closed after it.
+        assert_eq!(display("so $x_{k+1"), "so $x_{k+1}$");
+        assert_eq!(display("**so $x_{k"), "**so $x_{k}$**");
+        assert_eq!(
+            display("an $m \\times n$ matrix"),
+            "an $m \\times n$ matrix"
+        );
+        assert_eq!(display("so $"), "so");
+    }
+
+    /// Career's two replies, streamed a few characters at a time: what's drawn never shows an
+    /// equation's TeX as words (with its backslashes eaten), never loses the words before it,
+    /// and ends as the whole reply reads.
+    #[test]
+    fn a_streamed_reply_with_math_never_shows_its_tex_as_words() {
+        use gpui_core::text::{MATH_LANGUAGE, parse_markdown};
+        let reply = include_str!("../../examples/replies/career-math.md");
+        // A paragraph's words, with no TeX command in them.
+        fn words_only(b: &Block, at: usize) {
+            match b {
+                Block::Paragraph(p) | Block::Heading(_, p) => {
+                    let words: String = p
+                        .spans
+                        .iter()
+                        .filter(|(_, m)| !m.code)
+                        .map(|(r, _)| &p.text[r.clone()])
+                        .collect();
+                    for tex in ["\\frac", "\\partial", "\\begin", "\\cos", "\\Delta", "_{"] {
+                        assert!(!words.contains(tex), "at {at}: {tex} in {words:?}");
+                    }
+                }
+                Block::List { items, .. } => items
+                    .iter()
+                    .flat_map(|i| &i.blocks)
+                    .for_each(|b| words_only(b, at)),
+                Block::Quote(bs) => bs.iter().for_each(|b| words_only(b, at)),
+                _ => {}
+            }
+        }
+        let mut doc = Doc::default();
+        let mut at = 0;
+        let bytes: Vec<usize> = reply.char_indices().map(|(i, _)| i).collect();
+        while at < reply.len() {
+            let end = bytes
+                .iter()
+                .copied()
+                .find(|&i| i >= at + 5)
+                .unwrap_or(reply.len());
+            doc.append(&reply[at..end]);
+            doc.settle();
+            at = end;
+            let mut blocks = Vec::new();
+            for b in &doc.blocks {
+                blocks.extend(parse_markdown(&b.source));
+            }
+            blocks.extend(parse_markdown(&display(doc.tail())));
+            for b in &blocks {
+                words_only(b, at);
+            }
+        }
+        // Done: every display equation is a block of its own, its TeX intact.
+        let mut all = Vec::new();
+        for b in &doc.blocks {
+            all.extend(parse_markdown(&b.source));
+        }
+        all.extend(parse_markdown(doc.tail()));
+        let equations: Vec<&str> = all
+            .iter()
+            .filter_map(|b| match b {
+                Block::Code {
+                    lang: Some(l),
+                    text,
+                } if l == MATH_LANGUAGE => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(equations.len(), 4, "{equations:#?}");
+        assert_eq!(equations[1], r"J_{ij} = \frac{\partial f_i}{\partial x_j}");
+        assert!(
+            equations[3].contains(r"\cos\theta & -v\sin\theta \\ \sin\theta"),
+            "{}",
+            equations[3]
+        );
+    }
 
     #[test]
     fn open_things_close_for_now() {

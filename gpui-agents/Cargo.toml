@@ -54,6 +54,10 @@ required-features = ["gpui"]
 name = "stream"
 required-features = ["gpui"]
 
+[[example]]
+name = "math"
+required-features = ["gpui"]
+
 # GPUI's test support (a test window, simulated input) and the gallery's window are the Mac's,
 # so the parser-only build and its tests on Linux never pull GPUI in.
 [target.'cfg(target_os = "macos")'.dev-dependencies]

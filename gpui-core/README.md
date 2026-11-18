@@ -392,6 +392,13 @@ item](docs/gallery.png)
   search), so a delta at the end costs about the same after 1,400 lines as after 150. A
   selection in unchanged sources stays while later ones change. `trailing_caret(Some(colour))`
   draws a caret after the last source's text, painted only, so it never moves a line.
+  **Math** is kept as written, not typeset yet: inline `$…$` draws its TeX in the code font,
+  and a display equation (`$$…$$`, even on its own line inside a paragraph, or a ```` ```math ````
+  fence) is a block of its own in the code block's box, each of its lines kept on one line, the
+  box scrolling sideways (a trackpad, Shift and a wheel, a finger) when it's wider than the
+  view. The TeX keeps every backslash, brace, `&` and `*`, and prices (`$5 and $10`) stay
+  words, as pulldown-cmark's math rules read them. A display equation isn't selected with the
+  text around it; a host's `code_block_overlay` gets it (language `math`) for a Copy button.
 - **Sidebar.** `Sidebar::new(id, &state).header(…).group(SidebarGroup::new(id).label(…)
   .item(SidebarItem::new(id, label).icon(…).badge(…).action(icon, label, …)))….footer(…)
   .active(id).on_select(…).content(page)`: shadcn's app sidebar beside the page, with the host's
