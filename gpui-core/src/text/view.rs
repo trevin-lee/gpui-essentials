@@ -17,7 +17,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use gpui::TextAlign;
 use gpui::prelude::FluentBuilder as _;
 
-use super::markdown::{Align, Block, parse_with};
+use super::markdown::{Align, Block, MATH_LANGUAGE, parse_with};
 use super::paragraph::{Affinity, CodeStyle, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
 use crate::theme::{ActiveTheme as _, Theme};
 
@@ -278,6 +278,11 @@ impl TextView {
     /// on it, over the text: a Copy button in its corner, say. It's built for the blocks in
     /// view as the view is drawn, so it costs no frames of its own. Its listeners run before
     /// the view's: a press it stops (`cx.stop_propagation()`) doesn't start a selection.
+    ///
+    /// A display equation's block (language [`MATH_LANGUAGE`](super::MATH_LANGUAGE)) is the
+    /// exception: there the element is laid out beside the TeX, at the box's right and at its
+    /// own width (so give it one: the button, not a layer the size of the box), and the TeX
+    /// scrolls in the room left, so the element never covers it.
     pub fn code_block_overlay(
         mut self,
         f: impl Fn(&CodeBlock, &mut Window, &mut App) -> AnyElement + 'static,
@@ -643,6 +648,7 @@ impl ViewState {
         let ((l0, o0), (l1, o1)) = self.selection()?;
         let layout = self.layout.as_ref()?;
         let mut out = String::new();
+        let mut above: Option<Pixels> = None;
         for i in l0..=l1 {
             let leaf = layout.leaf(i)?;
             let t = &leaf.paragraph.text;
@@ -650,10 +656,18 @@ impl ViewState {
                 if i == l0 { o0 } else { 0 },
                 if i == l1 { o1 } else { t.len() },
             );
-            if i > l0 {
+            if let Some(bottom) = above {
+                // A display equation between this paragraph and the one before (it isn't a
+                // paragraph of the view's): its TeX, as it was written.
+                for tex in layout.math_between(bottom, leaf.origin.y) {
+                    out.push_str("\n\n$$");
+                    out.push_str(&tex);
+                    out.push_str("$$");
+                }
                 out.push_str(leaf.separator);
             }
             out.push_str(&t[s.min(t.len())..e.min(t.len())]);
+            above = Some(leaf.origin.y + leaf.layout.height);
         }
         Some(out)
     }
@@ -682,12 +696,29 @@ enum Deco {
         origin: Point<Pixels>,
         layout: Rc<ParagraphLayout>,
     },
-    /// Where a fenced code block's box is, and what's in it: for an overlay. Not painted.
+    /// Where a fenced code block's box is, and what's in it: for an overlay. Not painted (a
+    /// display equation's TeX is drawn by its own overlay, which scrolls sideways).
     Code {
         bounds: Bounds<Pixels>,
         language: Option<SharedString>,
         code: SharedString,
+        math: Option<Rc<MathLook>>,
     },
+}
+
+/// How a display equation's TeX is drawn: its lines, each on one line however wide, in the code
+/// block's font, inside its box's padding.
+#[derive(Debug)]
+struct MathLook {
+    lines: Vec<SharedString>,
+    font: gpui::Font,
+    size: Pixels,
+    line_height: Pixels,
+    color: Hsla,
+    /// Top, right, bottom and left, inside the border.
+    pad: [Pixels; 4],
+    /// The box's border, inside which the TeX is clipped as it scrolls.
+    border: Pixels,
 }
 
 impl Deco {
@@ -775,7 +806,8 @@ struct SourceLaid {
     leaves: Vec<Leaf>,
     decos: Vec<Deco>,
     /// Its code blocks' boxes, in order, with its key and their places among its code blocks.
-    codes: Vec<(CodeBlock, Bounds<Pixels>)>,
+    /// A display equation's has how its TeX is drawn.
+    codes: Vec<(CodeBlock, Bounds<Pixels>, Option<Rc<MathLook>>)>,
     leaf_reach: Reach,
     deco_reach: Reach,
     code_reach: Reach,
@@ -815,6 +847,7 @@ impl SourceLaid {
                     bounds,
                     language,
                     code,
+                    math,
                 } = &d
                 {
                     codes.push((
@@ -825,6 +858,7 @@ impl SourceLaid {
                             code: code.clone(),
                         },
                         *bounds,
+                        math.clone(),
                     ));
                 }
                 decos.push(d);
@@ -842,7 +876,7 @@ impl SourceLaid {
             let b = d.bounds();
             (b.top(), b.bottom())
         }));
-        let code_reach = Reach::new(codes.iter().map(|(_, b)| (b.top(), b.bottom())));
+        let code_reach = Reach::new(codes.iter().map(|(_, b, _)| (b.top(), b.bottom())));
         let spans = [leaf_reach.span(), deco_reach.span(), code_reach.span()];
         let span = spans
             .into_iter()
@@ -1288,6 +1322,9 @@ fn lay_code(
     window: &mut Window,
     mut cache: Option<&mut Vec<LineLaid>>,
 ) -> Pixels {
+    if lang == Some(MATH_LANGUAGE) {
+        return lay_math(text, x, width, y, cx, out);
+    }
     let (s, fill_, border, bw, radius, [pt, pr, pb, pl]) = cx.code();
     let top = y;
     let inner = (width - pl - pr - bw * 2.).max(px(8.));
@@ -1368,8 +1405,106 @@ fn lay_code(
         language: lang.map(|l| l.to_string().into()),
         // Without a trailing line end, whatever the parser kept.
         code: text.strip_suffix('\n').unwrap_or(text).to_string().into(),
+        math: None,
     });
     y
+}
+
+/// A display equation from `y`: the code block's box, as tall as its TeX's lines, each kept on
+/// one line. The TeX isn't a paragraph of the view's (it's drawn by an overlay that scrolls
+/// sideways when it's wider than the box, so it never wraps mid-formula, clips or overlaps), so
+/// it isn't selected with the text around it; its Copy button copies it.
+fn lay_math(
+    text: &str,
+    x: Pixels,
+    width: Pixels,
+    mut y: Pixels,
+    cx: &Ctx,
+    out: &mut ViewLayout,
+) -> Pixels {
+    // Nothing is shaped here (the overlay lays the TeX out as it's drawn), so a top-level
+    // block's line cache, which `lay_code` takes, has nothing to keep.
+    let (s, fill_, border, bw, radius, [pt, pr, pb, pl]) = cx.code();
+    let top = y;
+    let code = text.trim_end_matches('\n');
+    let lines: Vec<SharedString> = code.split('\n').map(|l| l.to_string().into()).collect();
+    y += pt + bw * 2. + pb + s.line_height * lines.len() as f32;
+    let bounds = Bounds::new(point(x, top), size(width, y - top));
+    out.decos.push(Deco::Box {
+        bounds,
+        fill: fill_,
+        border,
+        border_width: bw,
+        radius: Corners::all(radius),
+    });
+    out.decos.push(Deco::Code {
+        bounds,
+        language: Some(MATH_LANGUAGE.into()),
+        code: code.to_string().into(),
+        math: Some(Rc::new(MathLook {
+            lines,
+            font: s.font.clone(),
+            size: s.size,
+            line_height: s.line_height,
+            color: s.color,
+            pad: [pt, pr, pb, pl],
+            border: bw,
+        })),
+    });
+    y
+}
+
+/// A display equation's TeX in its box: a line each, scrolling sideways (by a trackpad, a
+/// wheel with Shift or a finger) when wider than the room it has; up and down go on to what's
+/// around it. The host's overlay (`beside`), if any, is at the box's right at its own width, and
+/// the TeX scrolls in what's left, so the overlay never covers it.
+fn math_overlay(code: &CodeBlock, m: &MathLook, beside: Option<AnyElement>) -> AnyElement {
+    let [pt, pr, pb, pl] = m.pad;
+    let (box_, tex) = (
+        format!("math:{}:{}", code.key, code.index),
+        format!("math-tex:{}:{}", code.key, code.index),
+    );
+    let scroller = div()
+        .id(ElementId::Name(
+            format!("gpui-core-math:{}:{}", code.key, code.index).into(),
+        ))
+        .debug_selector(move || box_)
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .flex()
+        .overflow_x_scroll()
+        .restrict_scroll_to_axis()
+        .font(m.font.clone())
+        .text_size(m.size)
+        .line_height(m.line_height)
+        .text_color(m.color)
+        .child(
+            div()
+                .debug_selector(move || tex)
+                .flex_none()
+                .flex()
+                .flex_col()
+                .pt(pt)
+                .pr(pr)
+                .pb(pb)
+                .pl(pl)
+                .children(m.lines.iter().map(|l| {
+                    div()
+                        .flex_none()
+                        .h(m.line_height)
+                        .whitespace_nowrap()
+                        .child(l.clone())
+                })),
+        );
+    // Inside the box's border, so what scrolls out of view goes under it, not over it.
+    div()
+        .size_full()
+        .p(m.border)
+        .flex()
+        .child(scroller)
+        .children(beside.map(|el| div().flex_none().h_full().child(el)))
+        .into_any_element()
 }
 
 /// A cached line or item looked at, counted in tests: always true.
@@ -1961,6 +2096,20 @@ impl Assembled {
         Some(leaf)
     }
 
+    /// The TeX of the display equations whose boxes are between `top` and `bottom`, from the
+    /// view's top, in order.
+    fn math_between(&self, top: Pixels, bottom: Pixels) -> Vec<SharedString> {
+        let mut out = Vec::new();
+        for c in self.chunks_in(top, bottom) {
+            for (code, b, math) in &c.laid.codes {
+                if math.is_some() && c.y + b.top() >= top && c.y + b.bottom() <= bottom {
+                    out.push(code.code.clone());
+                }
+            }
+        }
+        out
+    }
+
     /// The sources' blocks that could reach into `top..bottom`, from the view's top.
     fn chunks_in(&self, top: Pixels, bottom: Pixels) -> &[Chunk] {
         &self.chunks[self.reach.within(top, bottom)]
@@ -2145,13 +2294,20 @@ impl Element for ViewElement {
                     }
                 }
             }
-            if let Some(f) = &self.code_overlay {
-                for (code, b) in &c.laid.codes[c.laid.code_reach.within(top - c.y, bottom - c.y)] {
-                    let at = Bounds::new(o + b.origin, b.size);
-                    if !at.intersects(&seen) {
-                        continue;
-                    }
-                    let mut el = f(code, window, cx);
+            for (code, b, math) in &c.laid.codes[c.laid.code_reach.within(top - c.y, bottom - c.y)]
+            {
+                let at = Bounds::new(o + b.origin, b.size);
+                if !at.intersects(&seen) {
+                    continue;
+                }
+                // A display equation's TeX, with the host's element beside it (never over it);
+                // over any other code block, the host's element.
+                let host = self.code_overlay.as_ref().map(|f| f(code, window, cx));
+                let els: Vec<AnyElement> = match math {
+                    Some(m) => vec![math_overlay(code, m, host)],
+                    None => host.into_iter().collect(),
+                };
+                for mut el in els {
                     el.prepaint_as_root(
                         at.origin,
                         at.size.map(AvailableSpace::Definite),
@@ -2505,6 +2661,116 @@ mod tests {
         );
         // A new width: every line.
         assert_eq!(few(laid(vcx, &|s| s.width = 380.)), 302);
+    }
+
+    /// A display equation wider than the view (a phone's 402 points) stays on its line, in a
+    /// box no wider than the view, and scrolls sideways under a trackpad's swipe.
+    #[gpui::test]
+    fn a_wide_display_equation_scrolls_sideways_in_its_box(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let long = "f(x) = a_0 + a_1 x + a_2 x^2 + a_3 x^3 + a_4 x^4 + a_5 x^5 + a_6 x^6 + a_7 x^7 + a_8 x^8 + a_9 x^9 + a_{10} x^{10}";
+        let sources = vec![(0u64, format!("Before.\n\n$${long}$$\n\nAfter.").into())];
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Streamed {
+                sources,
+                width: 402.,
+            });
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        let b = vcx.debug_bounds("math:0:0").expect("the equation's box");
+        let tex = vcx.debug_bounds("math-tex:0:0").expect("its TeX");
+        assert!(b.size.width <= px(402.), "{b:?}");
+        assert!(
+            tex.size.width > b.size.width,
+            "one line, wider than the box: {tex:?}"
+        );
+        assert!(b.size.height < px(60.), "a line tall, not wrapped: {b:?}");
+        // A swipe to the left over it scrolls it, and only it.
+        vcx.simulate_event(gpui::ScrollEvent {
+            position: b.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(-120.), px(0.))),
+            ..Default::default()
+        });
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        let moved = vcx.debug_bounds("math-tex:0:0").unwrap();
+        assert!(moved.left() < tex.left(), "{tex:?} then {moved:?}");
+        assert_eq!(vcx.debug_bounds("math:0:0").unwrap(), b);
+    }
+
+    /// The host's overlay on a display equation (a Copy button) is beside its TeX, not over it:
+    /// the TeX's room ends where the button starts.
+    #[gpui::test]
+    fn a_display_equations_overlay_is_beside_its_tex(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        struct WithCopy;
+        impl Render for WithCopy {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(402.)).child(
+                    TextView::markdown(
+                        "with-copy",
+                        "$$f(x) = a_0 + a_1 x + a_2 x^2 + a_3 x^3 + a_4 x^4 + a_5 x^5 + a_6 x^6$$",
+                    )
+                    .code_block_overlay(|_, _, _| {
+                        div()
+                            .debug_selector(|| "copy".into())
+                            .w(px(70.))
+                            .h(px(26.))
+                            .into_any_element()
+                    }),
+                )
+            }
+        }
+        let (_, vcx) = cx.add_window_view(|window, cx| {
+            let v = cx.new(|_| WithCopy);
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        let tex = vcx.debug_bounds("math:0:0").expect("the TeX's room");
+        let copy = vcx.debug_bounds("copy").expect("the button");
+        assert!(tex.right() <= copy.left(), "{tex:?} and {copy:?}");
+        assert!(copy.right() <= px(402.), "{copy:?}");
+    }
+
+    /// A selection dragged across a paragraph, a display equation and a paragraph copies the
+    /// equation's TeX between them.
+    #[gpui::test]
+    fn a_selection_across_a_display_equation_copies_its_tex(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        struct Doc;
+        impl Render for Doc {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(402.)).child(
+                    TextView::markdown(
+                        "copied",
+                        "The first words.\n\n$$\\frac{a}{b} \\\\ c$$\n\nThe last words.",
+                    )
+                    .selectable(true),
+                )
+            }
+        }
+        let (_, vcx) = cx.add_window_view(|window, cx| {
+            let v = cx.new(|_| Doc);
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        let b = vcx.debug_bounds("math:0:0").expect("the equation");
+        let (from, to) = (
+            gpui::point(px(1.), b.top() - px(12.)),
+            gpui::point(px(390.), b.bottom() + px(12.)),
+        );
+        vcx.simulate_mouse_down(from, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_move(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.dispatch_action(super::CopySelection);
+        let copied = vcx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()));
+        assert_eq!(
+            copied.as_deref(),
+            Some("The first words.\n\n$$\\frac{a}{b} \\\\ c$$\n\nThe last words.")
+        );
     }
 
     #[gpui::test]

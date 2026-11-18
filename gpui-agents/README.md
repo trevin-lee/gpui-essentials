@@ -337,6 +337,12 @@ In the open block:
 - **A link being written draws as its words**, without its brackets or address, until it's
   whole: `[the docs](https://exa` draws `the docs`.
 - **An open code fence draws as code**, with nothing inside closed or read as Markdown.
+- **An equation being written draws as one** (gpui-core keeps math as its TeX, in the code
+  font, a display equation in a box of its own that scrolls sideways): a `$$` or a `$` not
+  closed yet is closed for now, with any TeX group (`{`) still open and without a last
+  backslash whose command's name hasn't come, so its TeX never shows as words with its
+  backslashes eaten and nothing after it is swallowed. A `$` before a digit or a space is a
+  price, never opened. A `$$` or `$` with nothing after it yet isn't drawn.
 - **A line of only Markdown marks waits for its words or its newline** (`1.`, `#`, `---`, a
   fence's backticks), so a paragraph doesn't flash as a heading and back, and **a table's first
   row waits for its delimiter row**, so it doesn't show as text first.

@@ -140,9 +140,16 @@ fn own_definitions(parser: &Parser, own: &std::ops::Range<usize>) -> String {
         .collect()
 }
 
-/// GitHub's flavour: tables, task lists, strikethrough and footnotes.
+/// The language a display equation's block has: `$$…$$`, or a fence of it (GitHub's
+/// ```` ```math ````). The TeX is kept as written and drawn as its source, on one line each line,
+/// in a box that scrolls sideways when it's wider than the view.
+pub const MATH_LANGUAGE: &str = "math";
+
+/// GitHub's flavour: tables, task lists, strikethrough, footnotes and math (`$…$` inline,
+/// `$$…$$` on a block of its own, the TeX in both kept as written).
 fn options() -> Options {
     Options::ENABLE_TABLES
+        | Options::ENABLE_MATH
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_FOOTNOTES
@@ -187,6 +194,9 @@ struct Builder {
     skipping: usize,
     /// How deep this reading is: an HTML block's text is read again, one deeper.
     depth: usize,
+    /// A display equation just ended a paragraph: the line end after it doesn't start the next
+    /// one with a space.
+    after_math: bool,
 }
 
 impl Builder {
@@ -205,6 +215,7 @@ impl Builder {
     /// Inline text, into the open paragraph, heading or cell, or a new paragraph (a tight list
     /// item's text).
     fn inline(&mut self, text: &str, marks: Marks) {
+        self.after_math = false;
         if self.text.is_none() {
             self.text = Some((Into_::Paragraph, Paragraph::default()));
         }
@@ -479,7 +490,9 @@ impl Builder {
                 };
                 self.inline(&format!("[{label}]"), marks);
             }
-            // A soft line break reads as a space, as CommonMark and the web read it.
+            // A soft line break reads as a space, as CommonMark and the web read it (but not
+            // right after a display equation: the next words start a paragraph of their own).
+            Event::SoftBreak if self.after_math && self.text.is_none() => {}
             Event::SoftBreak => {
                 if let Some(alt) = self.image.as_mut() {
                     alt.push(' ');
@@ -501,15 +514,51 @@ impl Builder {
                     item.checked = Some(checked);
                 }
             }
+            // A display equation is a block of its own, even written inside a paragraph (`$$…$$`
+            // on its own line after a line of words), but not in a heading or a table's cell,
+            // which hold only words: there, and inline, it's its TeX in the code font.
+            Event::DisplayMath(t)
+                if self.image.is_none()
+                    && matches!(self.text, None | Some((Into_::Paragraph, _))) =>
+            {
+                if let Some((_, p)) = self.text.as_mut() {
+                    trim_end(p);
+                }
+                self.flush();
+                self.push_block(Block::Code {
+                    lang: Some(MATH_LANGUAGE.into()),
+                    text: t.trim().to_string(),
+                });
+                self.after_math = true;
+            }
             Event::InlineMath(t) | Event::DisplayMath(t) => {
-                let marks = Marks {
-                    code: true,
-                    ..self.marks()
-                };
-                self.inline(&t, marks);
+                if let Some(alt) = self.image.as_mut() {
+                    alt.push_str(&t);
+                } else {
+                    let marks = Marks {
+                        code: true,
+                        ..self.marks()
+                    };
+                    self.inline(&t, marks);
+                }
             }
         }
     }
+}
+
+/// Takes the spaces and line ends off a paragraph's end (the soft break before a display
+/// equation that ends it).
+fn trim_end(p: &mut Paragraph) {
+    let end = p.text.trim_end_matches([' ', '\n']).len();
+    if end == p.text.len() {
+        return;
+    }
+    p.text.truncate(end);
+    p.spans.retain_mut(|(r, _)| {
+        r.end = r.end.min(end);
+        r.start < r.end
+    });
+    p.boxes.retain(|(at, _)| *at < end);
 }
 
 /// Reads `source`'s blocks (`depth` deep in re-readings of HTML blocks' text).
@@ -534,6 +583,7 @@ fn convert_events(
         image: None,
         skipping: 0,
         depth,
+        after_math: false,
     };
     let mut notes = Vec::new();
     for (e, at) in parser.into_offset_iter() {
@@ -726,6 +776,142 @@ fn bare_links(text: &str) -> Vec<(usize, usize, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The inline code spans of a paragraph: what's marked as code, in order.
+    fn code_spans(b: &Block) -> Vec<String> {
+        let Block::Paragraph(p) = b else {
+            panic!("not a paragraph: {b:?}")
+        };
+        p.spans
+            .iter()
+            .filter(|(_, m)| m.code)
+            .map(|(r, _)| p.text[r.clone()].to_string())
+            .collect()
+    }
+
+    fn math(text: &str) -> Block {
+        Block::Code {
+            lang: Some(MATH_LANGUAGE.into()),
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn inline_math_is_its_tex_as_written_in_the_code_font() {
+        let b = parse(
+            r"Here $x_{k+1} = F x_k + w$, the Jacobian $J_{ij}$ of $2n+1$ points, an $m \times n$ matrix ($J_{ij}$), and $a \\ b \, c \{ d \} e \_ f & g * h$.",
+        );
+        assert_eq!(b.len(), 1, "{b:?}");
+        assert_eq!(
+            code_spans(&b[0]),
+            [
+                r"x_{k+1} = F x_k + w",
+                r"J_{ij}",
+                r"2n+1",
+                r"m \times n",
+                r"J_{ij}",
+                r"a \\ b \, c \{ d \} e \_ f & g * h",
+            ]
+        );
+        let Block::Paragraph(p) = &b[0] else {
+            unreachable!()
+        };
+        assert!(p.text.contains(r"matrix (J_{ij}), and"), "{}", p.text);
+        assert!(
+            p.spans.iter().all(|(_, m)| !m.italic && !m.bold),
+            "no emphasis read in it: {:?}",
+            p.spans
+        );
+    }
+
+    #[test]
+    fn display_math_is_a_block_of_its_own_with_its_tex_as_written() {
+        let cases = [
+            (
+                r"$$\frac{\partial f_i}{\partial x_j}$$",
+                r"\frac{\partial f_i}{\partial x_j}",
+            ),
+            (r"$$a \qquad b$$", r"a \qquad b"),
+            (
+                r"$$f(x + \Delta x) \approx f(x) + J\,\Delta x$$",
+                r"f(x + \Delta x) \approx f(x) + J\,\Delta x",
+            ),
+            (
+                "$$J = \\begin{pmatrix} \\cos\\theta & -v\\sin\\theta \\\\ \\sin\\theta & v\\cos\\theta \\end{pmatrix}$$",
+                r"J = \begin{pmatrix} \cos\theta & -v\sin\theta \\ \sin\theta & v\cos\theta \end{pmatrix}",
+            ),
+            (
+                r"$$a \\ b \, c \{ d \} e \_ f & g * h$$",
+                r"a \\ b \, c \{ d \} e \_ f & g * h",
+            ),
+        ];
+        for (source, tex) in cases {
+            assert_eq!(parse(source), [math(tex)], "{source}");
+        }
+        // Over several lines (a matrix), its line ends kept.
+        let b = parse("$$f = \\begin{pmatrix} v\\cos\\theta \\\\\nv\\sin\\theta \\end{pmatrix}$$");
+        assert_eq!(
+            b,
+            [math(
+                "f = \\begin{pmatrix} v\\cos\\theta \\\\\nv\\sin\\theta \\end{pmatrix}"
+            )]
+        );
+        // A ```math fence is one too.
+        assert_eq!(parse("```math\na^2 + b^2\n```"), [math("a^2 + b^2")]);
+    }
+
+    #[test]
+    fn display_math_on_its_own_line_parts_the_paragraph_around_it() {
+        let b = parse(
+            "If $f$ takes $n$ inputs, the Jacobian is:\n$$J_{ij} = \\frac{\\partial f_i}{\\partial x_j}$$\nRow $i$ shows how output $i$ changes.",
+        );
+        assert_eq!(b.len(), 3, "{b:#?}");
+        let Block::Paragraph(p) = &b[0] else {
+            panic!("{b:?}")
+        };
+        assert_eq!(p.text, "If f takes n inputs, the Jacobian is:");
+        assert_eq!(b[1], math(r"J_{ij} = \frac{\partial f_i}{\partial x_j}"));
+        let Block::Paragraph(p) = &b[2] else {
+            panic!("{b:?}")
+        };
+        assert_eq!(p.text, "Row i shows how output i changes.");
+        // In a list item, the same.
+        let b = parse("- the model:\n  $$x_{k+1} = F x_k + w$$\n  and so on");
+        let Block::List { items, .. } = &b[0] else {
+            panic!("{b:?}")
+        };
+        assert_eq!(items[0].blocks.len(), 3, "{:#?}", items[0].blocks);
+        assert_eq!(items[0].blocks[1], math(r"x_{k+1} = F x_k + w"));
+    }
+
+    #[test]
+    fn prices_stay_words() {
+        for source in [
+            "$5",
+            "$5 and $10",
+            "It costs $5 and $10 a month.",
+            "**2 bags, about $230 a month.** Then roughly $53.",
+            "From $1,200 to $1,500.",
+        ] {
+            let b = parse(source);
+            assert_eq!(b.len(), 1, "{source}: {b:?}");
+            let Block::Paragraph(p) = &b[0] else {
+                panic!("{source}: {b:?}")
+            };
+            assert!(
+                p.spans.iter().all(|(_, m)| !m.code),
+                "{source}: {:?}",
+                p.spans
+            );
+            assert!(p.text.contains('$'), "{source}: {}", p.text);
+        }
+        // An escaped dollar, as the Mac app writes a price, is a dollar.
+        let b = parse(r"About \$230, then \$53.");
+        let Block::Paragraph(p) = &b[0] else {
+            panic!("{b:?}")
+        };
+        assert_eq!(p.text, "About $230, then $53.");
+    }
 
     #[test]
     fn blocks_and_marks() {
