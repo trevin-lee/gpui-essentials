@@ -553,6 +553,36 @@ pub enum PanelPosition {
 }
 
 type PanelRenderer = Rc<dyn Fn(&Flow, &mut Window, &mut App) -> AnyElement>;
+type ToolbarRenderer = Rc<dyn Fn(&Node, &Flow, &mut Window, &mut App) -> Option<AnyElement>>;
+
+/// Where a node's toolbar sits ([`Flow::with_node_toolbar`]): the side of the node, how it
+/// lines up along that side, and how far (in points on screen) from the node.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ToolbarPlace {
+    pub side: Side,
+    pub align: ToolbarAlign,
+    pub offset: f32,
+}
+
+impl Default for ToolbarPlace {
+    /// Above the node, centred, 10 points off, as React Flow's.
+    fn default() -> Self {
+        Self {
+            side: Side::Top,
+            align: ToolbarAlign::Center,
+            offset: 10.,
+        }
+    }
+}
+
+/// How a node's toolbar lines up along the node's side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ToolbarAlign {
+    Start,
+    #[default]
+    Center,
+    End,
+}
 type ConnectionCheck = Rc<dyn Fn(&Connection, &Flow) -> bool>;
 type DeleteCheck = Rc<dyn Fn(&[Node], &[Edge], &Flow) -> bool>;
 type NewNode = Rc<dyn Fn(Option<&Node>, &Flow) -> Node>;
@@ -688,6 +718,7 @@ pub struct Flow {
     controls: bool,
     minimap: bool,
     panels: Vec<(PanelPosition, PanelRenderer)>,
+    node_toolbar: Option<(ToolbarPlace, ToolbarRenderer)>,
     valid_connection: Option<ConnectionCheck>,
     delete_check: Option<DeleteCheck>,
     transform_listener: Option<TransformListener>,
@@ -925,6 +956,7 @@ impl Flow {
             controls: false,
             minimap: false,
             panels: Vec::new(),
+            node_toolbar: None,
             valid_connection: None,
             delete_check: None,
             transform_listener: None,
@@ -1041,6 +1073,99 @@ impl Flow {
     ) -> Self {
         self.panels.push((position, Rc::new(render)));
         self
+    }
+
+    /// A toolbar of the host's beside the selected node, as React Flow's `NodeToolbar`: shown
+    /// while exactly one node is selected and nothing is being dragged, where `place` says,
+    /// at its size on screen whatever the zoom. `render` gives its content for that node, or
+    /// none to show none for it. Presses on it are its own: they don't reach the canvas.
+    pub fn with_node_toolbar(
+        mut self,
+        place: ToolbarPlace,
+        render: impl Fn(&Node, &Flow, &mut Window, &mut App) -> Option<AnyElement> + 'static,
+    ) -> Self {
+        self.node_toolbar = Some((place, Rc::new(render)));
+        self
+    }
+
+    /// The host's toolbar for the one selected node, placed beside it in the pane.
+    fn render_node_toolbar(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
+        let (place, render) = self.node_toolbar.clone()?;
+        if self.drag.is_some() {
+            return None;
+        }
+        let mut selected = self.nodes.iter().filter(|n| n.selected && self.shown(n));
+        let node = selected.next()?;
+        if selected.next().is_some() {
+            return None;
+        }
+        let content = render(node, self, window, cx)?;
+        let r = self.node_rect(&node.id)?;
+        let v = self.viewport;
+        let (a, b) = (v.to_pane(xy(r.x, r.y)), v.to_pane(xy(r.x + r.w, r.y + r.h)));
+        let (pw, ph) = self.pane_size();
+        let gap = place.offset.max(0.);
+        // A box from the node's side to the pane's edge, the toolbar at its end nearest the
+        // node, lined up along the node.
+        let along = |d: Div| match place.align {
+            ToolbarAlign::Start => d.items_start(),
+            ToolbarAlign::Center => d.items_center(),
+            ToolbarAlign::End => d.items_end(),
+        };
+        let lane = match place.side {
+            Side::Top => along(
+                div()
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .left(px(a.x))
+                    .w(px(b.x - a.x))
+                    .top(px(a.y - gap - ph))
+                    .h(px(ph)),
+            ),
+            Side::Bottom => along(
+                div()
+                    .flex()
+                    .flex_col()
+                    .justify_start()
+                    .left(px(a.x))
+                    .w(px(b.x - a.x))
+                    .top(px(b.y + gap))
+                    .h(px(ph)),
+            ),
+            Side::Left => along(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_end()
+                    .top(px(a.y))
+                    .h(px(b.y - a.y))
+                    .left(px(a.x - gap - pw))
+                    .w(px(pw)),
+            ),
+            Side::Right => along(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_start()
+                    .top(px(a.y))
+                    .h(px(b.y - a.y))
+                    .left(px(b.x + gap))
+                    .w(px(pw)),
+            ),
+        };
+        Some(
+            lane.absolute()
+                .child(
+                    div()
+                        .debug_selector(|| "flow-node-toolbar".into())
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_scroll(|_, _, cx| cx.stop_propagation())
+                        .child(content),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Draws nodes of this `kind`, a new one or a built-in one's replacement.
@@ -6700,6 +6825,7 @@ impl Render for Flow {
             .child(overlay)
             .when(self.minimap, |d| d.child(self.render_minimap(colors, cx)))
             .when(self.controls, |d| d.child(self.render_controls(colors, cx)))
+            .children(self.render_node_toolbar(window, cx))
             .children(panels)
     }
 }
