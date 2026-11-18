@@ -32,7 +32,9 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   the long press's menu, with Color, which opens the colours in a sheet.
 - **Notion's keys:** ⌘B, ⌘I, ⌘U, ⌘⇧S and ⌘E mark the selection bold, italic, underlined, struck
   through or code. ⌘⌥0 to ⌘⌥8 turn the block, or each selected block, into text, heading 1 to 3,
-  a to-do, bulleted or numbered item, a toggle or code. Off the Mac, Ctrl takes ⌘'s place.
+  a to-do, bulleted or numbered item, a toggle or code. Esc selects the caret's block whole: ↑
+  and ↓ then step from block to block, ⇧↑ and ⇧↓ extend the selection, and Enter goes back into
+  the text. Off the Mac, Ctrl takes ⌘'s place.
 - **Columns:** "2 columns" or "3 columns" in the slash menu lays the line out beside empty
   columns (up to five). Or drag a block by its grip onto another block's left or right edge to
   make a row of the two, onto a row's edge or the gap between two columns for a new column, or

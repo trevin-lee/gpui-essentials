@@ -479,6 +479,119 @@ fn ctrl_home_and_end_jump_to_the_document_edges(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn escape_selects_the_block_and_arrows_move_the_selection(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "one\n\n- a\n- b\n\nthree");
+    let top: Vec<BlockId> = editor.read_with(cx, |e, _| {
+        e.model()
+            .document()
+            .root()
+            .children()
+            .map(|b| b.id())
+            .collect()
+    });
+    let items: Vec<BlockId> = editor.read_with(cx, |e, _| {
+        e.model()
+            .document()
+            .block(top[1])
+            .unwrap()
+            .children()
+            .map(|b| b.id())
+            .collect()
+    });
+    let selected = |cx: &mut VisualTestContext| editor.read_with(cx, |e, _| e.selection().clone());
+    caret_at(&editor, cx, 0, 1);
+    keys(cx, "escape");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: top[0],
+            head: top[0]
+        }
+    );
+    keys(cx, "down");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: top[1],
+            head: top[1]
+        }
+    );
+    keys(cx, "shift-down");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: top[1],
+            head: top[2]
+        }
+    );
+    keys(cx, "down");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: top[2],
+            head: top[2]
+        },
+        "stays at the last"
+    );
+    keys(cx, "up");
+    keys(cx, "up");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: top[0],
+            head: top[0]
+        }
+    );
+    // Enter: back into the text, at the block's end.
+    keys(cx, "enter");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::caret(BlockPosition::new(
+            editor.read_with(cx, |e, _| e
+                .model()
+                .document()
+                .leaves()
+                .next()
+                .unwrap()
+                .id()),
+            3
+        ))
+    );
+    assert_eq!(
+        source(&editor, cx),
+        "one\n\n- a\n- b\n\nthree",
+        "nothing typed"
+    );
+    // In a list, Esc selects the item, and the arrows step through the items.
+    caret_at(&editor, cx, 1, 0);
+    keys(cx, "escape");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: items[0],
+            head: items[0]
+        }
+    );
+    keys(cx, "down");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: items[1],
+            head: items[1]
+        }
+    );
+    // With blocks selected, a second Esc is the app's: the selection stays.
+    keys(cx, "escape");
+    assert_eq!(
+        selected(cx),
+        BlockSelection::Blocks {
+            anchor: items[1],
+            head: items[1]
+        }
+    );
+}
+
+#[gpui::test]
 fn arrows_collapse_whole_block_selection(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, "one\n\ntwo\n\nthree");
     editor.update(cx, |e, cx| {
