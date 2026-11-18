@@ -432,6 +432,8 @@ pub struct Editor {
     pub(crate) color_sheet: bool,
     /// The colour last picked in the Color menu, which ⌘⇧H gives again.
     pub(crate) last_paint: Option<crate::format_bar::Paint>,
+    /// The code block whose language menu is open (see `code_chrome.rs`).
+    pub(crate) code_menu: Option<BlockId>,
     scroll: ScrollHandle,
     pub(crate) menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
@@ -459,7 +461,7 @@ pub struct Editor {
     /// "+" puts a `/` on a new line).
     open_on_next_change: bool,
     /// The top-level block the side menu is beside.
-    hovered: Option<BlockId>,
+    pub(crate) hovered: Option<BlockId>,
     /// Embeds' heights while one is being resized.
     embed_heights: docs::Heights,
     /// The embed being resized.
@@ -643,6 +645,7 @@ impl Editor {
             format_color: false,
             color_sheet: false,
             last_paint: None,
+            code_menu: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -2303,6 +2306,7 @@ impl Render for Editor {
         });
         let edit_menu = self.edit_menu(window, cx);
         let format_bar = self.format_bar(window, cx);
+        let code_chrome = self.code_chrome(cx);
         let block_sheet = self.block_sheet(cx);
         let color_sheet = self.color_sheet(cx);
         let find_bar = self.find_bar(compact, cx);
@@ -2365,6 +2369,7 @@ impl Render for Editor {
                     ),
             )
             .children(side_menu)
+            .children(code_chrome)
             .children(slash_menu)
             .children(mention_menu)
             .children(handles)
@@ -2949,6 +2954,47 @@ mod tests {
         let at = ids(&editor, cx);
         pick(&editor, cx, at[0], "text-none");
         assert!(markdown(&editor, cx).starts_with("one **two**\n\n"));
+    }
+
+    /// A code block with the caret in it has its language, a menu of common ones, and Copy over
+    /// its top right; another block doesn't; a read-only document has Copy alone.
+    #[gpui::test]
+    fn a_code_blocks_chrome_sets_its_language_and_copies_it(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "```rust\nfn main() {}\n```\n\ntext");
+        caret_at_end(&editor, cx, 1);
+        assert!(cx.debug_bounds("blocks-code-copy").is_none(), "not on text");
+        caret_at_end(&editor, cx, 0);
+        assert!(cx.debug_bounds("blocks-code-copy").is_some(), "on code");
+        press(cx, "blocks-code-copy");
+        let copied = cx.read_from_clipboard().and_then(|item| item.text());
+        assert_eq!(copied.as_deref(), Some("fn main() {}"));
+        press(cx, "blocks-code-language");
+        let go = cx
+            .debug_bounds("menu-item-lang-go")
+            .expect("the language menu is open")
+            .center();
+        cx.simulate_click(go, gpui::Modifiers::none());
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "```go\nfn main() {}\n```\n\ntext");
+        let block = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .next()
+                .unwrap()
+                .id()
+        });
+        editor.update_in(cx, |e, window, cx| {
+            e.set_code_language(block, "", window, cx)
+        });
+        assert_eq!(markdown(&editor, cx), "```\nfn main() {}\n```\n\ntext");
+        editor.update(cx, |e, cx| e.set_readonly(true, cx));
+        draw(cx);
+        assert!(cx.debug_bounds("blocks-code-copy").is_some());
+        assert!(cx.debug_bounds("blocks-code-language").is_none());
     }
 
     /// Shift-clicks on grips select the blocks between, whole; a first one selects its block.
