@@ -137,3 +137,58 @@ fn a_label_sits_on_its_edge(cx: &mut TestAppContext) {
         assert!(geometry::distance_to_polyline(at, &line) < 1., "{at:?}");
     });
 }
+
+/// A kind of the host's runs where the host says, as React Flow's `edgeTypes`: drawn, taken
+/// by clicks and exported along its own path.
+#[gpui::test]
+fn a_hosts_kind_of_edge_runs_along_its_own_path(cx: &mut TestAppContext) {
+    use gpui_flow::geometry::{EdgePath, Segment};
+    let (flow, events, cx) = open(cx, |f| {
+        with_three(f)
+            .with_edge_kind("detour", |ends: &EdgeEnds| {
+                // Out to x 300 and back, whatever the bezier would do.
+                let mid = (ends.source.y + ends.target.y) / 2.;
+                EdgePath {
+                    start: ends.source,
+                    segments: vec![
+                        Segment::Line(xy(300., ends.source.y)),
+                        Segment::Line(xy(300., ends.target.y)),
+                        Segment::Line(ends.target),
+                    ],
+                    label: xy(300., mid),
+                }
+            })
+            .with_edges(vec![
+                Edge::new("a-b", "a", "b").kind(EdgeKind::Custom("detour".into())),
+            ])
+    });
+    let (a, b) = flow.read_with(cx, |f, _| {
+        (
+            f.handle_point("a", HandleKind::Source, None).unwrap(),
+            f.handle_point("b", HandleKind::Target, None).unwrap(),
+        )
+    });
+    // A click on the detour, far from where a bezier would run, takes the edge.
+    let on = screen(&flow, cx, xy(300., (a.y + b.y) / 2.));
+    cx.simulate_mouse_down(on, gpui::MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_up(on, gpui::MouseButton::Left, gpui::Modifiers::none());
+    draw(cx);
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, FlowEvent::EdgeClick(id) if id == "a-b"))
+    );
+    // A click where the bezier would run, between the two, doesn't.
+    events.borrow_mut().clear();
+    let off = screen(&flow, cx, xy(a.x, (a.y + b.y) / 2.));
+    cx.simulate_mouse_down(off, gpui::MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_up(off, gpui::MouseButton::Left, gpui::Modifiers::none());
+    draw(cx);
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, FlowEvent::EdgeClick(_)))
+    );
+}
