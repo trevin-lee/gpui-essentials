@@ -15,7 +15,7 @@ use gpui_core::{
 };
 
 use super::render::{icon, line};
-use super::table::{Popover, TableView};
+use super::table::{Popover, Reopen, TableView};
 use super::views::{VIEW_TYPES, ViewAction, ViewAnchor, ViewPage, view_icon};
 use crate::model::ViewType;
 
@@ -331,7 +331,8 @@ impl TableView {
             cx.listener(move |this, _: &ClickEvent, window, cx| open_settings(this, window, cx)),
         );
 
-        // The shown view's sort and filter, in a few words: pressing one opens its settings.
+        // The shown view's sort and filter, in a few words: pressing one opens its settings (the
+        // filter's, on its rules).
         // While the search field is open they're their icons alone, which leaves the field and
         // the tabs room on a narrow bar.
         let searching = self.search.open;
@@ -356,7 +357,11 @@ impl TableView {
                 .child(div().flex_none().child(icon(name, small, t.colors.accent)))
                 .when(!searching, |d| d.child(line(text)))
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                    open_settings(this, window, cx)
+                    open_settings(this, window, cx);
+                    // The filter's summary opens its rules.
+                    if id == "view-filter" {
+                        this.reopen = Reopen::at(vec![super::filter_rules::FILTER.into()], None);
+                    }
                 }))
         };
         let (sort, filter) = match self.shown.view.clone() {
@@ -502,11 +507,14 @@ impl TableView {
                         .child(self.add_view_picker(cx)),
                 )
                 .into_any_element(),
-            Popover::View { page, view_id, .. } if page.is_field() => popover
+            Popover::View { page, .. } if page.is_field() => popover
                 .take_focus(false)
-                .accessibility_label("Rename view")
+                .accessibility_label(match page {
+                    ViewPage::RuleValue(_) => "Filter rule's value",
+                    _ => "Rename view",
+                })
                 .p(t.px(4.))
-                .child(body.w(width).child(self.render_view_field(&view_id, cx)))
+                .child(body.w(width).child(self.render_view_field(&page, cx)))
                 .into_any_element(),
             _ => {
                 let label = match &open {
@@ -555,17 +563,21 @@ impl TableView {
         self.naming_picker("gpui-tables-add-view", "View name", types, pick)
     }
 
-    /// A view's name, typed: the field, a note, and Save and Back for a pointer or a finger
+    /// A view's name or a filter rule's value, typed: the field, a note, and Save and Back for a
+    /// pointer or a finger
     /// (Enter saves, Escape closes).
-    fn render_view_field(&self, view_id: &str, cx: &mut Context<Self>) -> AnyElement {
+    fn render_view_field(&self, page: &ViewPage, cx: &mut Context<Self>) -> AnyElement {
         let t = &self.theme;
         let Some(f) = &self.field else {
             return div().into_any_element();
         };
-        let id = view_id.to_owned();
+        let (title, label) = match page {
+            ViewPage::RuleValue(_) => ("Filter value", "Value"),
+            _ => ("Rename view", "View name"),
+        };
         let save = cx.listener(move |this, pick: &MenuSelect, window, cx| {
             if pick.id.as_ref() == "Save" {
-                this.rename_view(&id, window, cx);
+                this.commit_field(window, cx);
             } else {
                 this.activate_view(ViewAction::Back, window, cx);
             }
@@ -575,13 +587,13 @@ impl TableView {
             .flex_col()
             .gap(t.px(4.))
             .child(
-                line("Rename view")
+                line(title)
                     .px(t.px(8.))
                     .pt(t.px(4.))
                     .text_size(t.px(t.sizes.small))
                     .text_color(t.colors.text_muted),
             )
-            .child(self.field_box(&f.state, "View name".into()))
+            .child(self.field_box(&f.state, label.into()))
             .children(self.render_note(cx))
             .child(
                 self.small_menu("gpui-tables-view-field-menu")

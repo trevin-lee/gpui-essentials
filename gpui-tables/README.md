@@ -603,10 +603,21 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     Alt-Up and Alt-Down. Each is a `viewChanged` with `cardProperties`.
   - **Properties** (a table) opens the Properties menu the column headers have (Show and hide
     properties).
+  - **Filter**, the filter builder (Notion's advanced filter): the view's filter as rules,
+    Rule 1, Rule 2... each with what it tests beside it, then **Add a filter rule** (the
+    properties) and **Delete filter**. With two rules or more, **Match all** or **Match any**
+    (`and` or `or`). Each rule's submenu changes its **Property**, its **Condition** (the
+    operators its type takes) and its **Value**: options, people and related rows picked from a
+    list, a span (Today to Next year) for "is within", and text, numbers and dates (as
+    2026-11-15) typed on a step of their own. **Delete rule** takes it out. A new rule has no
+    value and filters nothing until it's given one, as in Notion; a condition changed to one
+    that takes no value (is empty, is checked) loses its value. A rule that's a group (from the
+    JSON or another app) stays whole, and can be deleted. Every change is a `viewChanged`.
   - **Remove sorts** and **Clear filter**, while it sorts or filters, each a `viewChanged`.
-    Sorts and filters are made from the headers; the bar sums up the shown view's (its sort's
-    first property and how many more, its filter's property or how many rules), and pressing
-    either opens the settings.
+    Sorts are made from the headers, and filters from the headers or the Filter submenu; the bar
+    sums up the shown view's (its sort's first property and how many more, its filter's
+    property or how many rules), and pressing either opens the settings (the filter's, on its
+    rules).
 - **Search.** The search button at the bar's right end, or ⌘F while the view has the keyboard,
   opens a field in its place ("Search", with a × to clear it). As it's typed, the table, board
   or list shows only the rows whose title or any shown property's text (a table's columns, a

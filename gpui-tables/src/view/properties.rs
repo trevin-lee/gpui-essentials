@@ -142,6 +142,8 @@ pub(crate) enum FieldFor {
     RenameOption(String, String),
     /// A view's name.
     RenameView(String),
+    /// A view's filter rule's value, by the view's id and the rule's index.
+    RuleValue(String, usize),
 }
 
 /// A menu's field: gpui-core's Input, what it names and its limit.
@@ -459,6 +461,7 @@ impl TableView {
             FieldFor::NewOption(pid) => self.add_option(&pid, &name, window, cx),
             FieldFor::RenameOption(pid, oid) => self.rename_option(&pid, &oid, &name, window, cx),
             FieldFor::RenameView(id) => self.rename_view(&id, window, cx),
+            FieldFor::RuleValue(id, i) => self.commit_rule_value(&id, i, &name, window, cx),
         }
     }
 
