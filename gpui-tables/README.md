@@ -1106,16 +1106,16 @@ nothing draws while nothing changes.
 
   | | median |
   |---|---|
-  | The first draw | 2.5 ms |
-  | A frame while scrolling down a page, or sideways | 2.8 ms |
-  | A sort, a filter and a group by select, worked out / and drawn | 11 / 18 ms |
-  | A filter's value typed a key at a time, worked out (the notes kept) | 2.8 ms |
-  | A value changed, regrouped by select / multi-select / date / person | 1.4 / 1.9 / 1.4 / 2.1 ms |
-  | The same, regrouped and drawn | 4.0 / 4.2 / 4.2 / 4.8 ms |
-  | Opening the search field, drawn (the rows' words then folded off the main thread, 11 ms) | 7.1 ms |
-  | A search's first key / with its frame | 0.2 / 7.2 ms |
-  | Each key after it / with its frame | 0.2 / 5.9 ms |
-  | A first key typed before the fold is done (folded then) | 15 ms |
+  | The first draw | 2.6 ms |
+  | A frame while scrolling down a page, or sideways | 2.6 ms |
+  | A sort, a filter and a group by select, worked out / and drawn | 5.7 / 17 ms |
+  | A filter's value typed a key at a time, worked out (the notes kept) | 1.9 ms |
+  | A value changed, regrouped by select / multi-select / date / person | 1.2 / 1.6 / 1.2 / 1.7 ms |
+  | The same, regrouped and drawn | 3.3 / 3.7 / 3.5 / 3.8 ms |
+  | Opening the search field, drawn (the rows' words then folded off the main thread, 11 ms) | 6.7 ms |
+  | A search's first key / with its frame | 0.2 / 6.2 ms |
+  | Each key after it / with its frame | 0.2 / 5.2 ms |
+  | A first key typed before the fold is done (folded then) | 14 ms |
 
   The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one), a
   regroup past 10 ms worked out and 25 ms drawn, opening the search past 25 ms, and a search's
@@ -1126,9 +1126,9 @@ nothing draws while nothing changes.
 
   | | median |
   |---|---|
-  | The first draw | 2.3 ms |
-  | A frame while scrolling a column down a page, or the board sideways | 2.3 ms |
-  | A frame while dragging a card across the columns | 2.7 ms |
+  | The first draw | 1.9 ms |
+  | A frame while scrolling a column down a page, or the board sideways | 1.8 ms |
+  | A frame while dragging a card across the columns | 2.0 ms |
 
   The test fails past 50, 12 and 12 ms in a release build.
 - **The list view** draws only the lines on screen (one `uniform_list`). Measured the same way,
@@ -1136,9 +1136,9 @@ nothing draws while nothing changes.
 
   | | median |
   |---|---|
-  | The first draw | 1.6 ms |
-  | A frame while scrolling down a page | 1.7 ms |
-  | A frame while dragging a row down the list | 1.7 ms |
+  | The first draw | 1.2 ms |
+  | A frame while scrolling down a page | 1.4 ms |
+  | A frame while dragging a row down the list | 1.4 ms |
 
   The test fails past 50, 12 and 12 ms in a release build.
 - **No text overflows its cell** at any width: cells, headers, group headers, menus and cards
