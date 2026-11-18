@@ -332,6 +332,8 @@ impl DragMonitor {
     pub fn is_over(&self, target: &ElementId, depth: Over) -> bool;
     pub fn can_drop_on(&self, target: &ElementId) -> bool;
     /// During a drop: whether a target inside already handled it, and its result.
+    /// Ended without a drop, its preview on the way back: still dragging until it lands.
+    pub fn is_returning(&self) -> bool;
     pub fn did_drop(&self) -> bool;
     pub fn drop_result(&self) -> Option<&DropResult>;
     pub fn modifiers(&self) -> Modifiers;
@@ -426,8 +428,10 @@ The provider draws the preview with `window.defer_draw` at priority 100, above g
 popovers (1), dialogs (2) and toasts (3). It takes no hitbox, so it never hides the targets
 from the pointer. The default preview keeps the grab point under the pointer and is drawn at
 the source's size. When a drag is cancelled, or dropped where nothing takes it, the preview
-goes back to the source's place in 200 ms, ease-out (at once if `cx.reduce_motion()`), and
-`on_end` runs when it lands. A drop on a target ends it at once; a sortable makes the preview
+goes back to the source's place in 200 ms (`RETURN_DURATION`), ease-out (at once if
+`cx.reduce_motion()` or the preview is `None`), and `on_end` runs when it lands, as a drag on the
+Mac ends once its image has slid back. Meanwhile no target is under it, moves and releases are
+ignored, and a press or a second Escape lands it at once. A drop on a target ends it at once; a sortable makes the preview
 settle into the gap first.
 
 ### Auto-scroll
