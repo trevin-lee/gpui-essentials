@@ -6,6 +6,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{ActiveTheme as _, Icon, IconName, Popover, PopupMenu, PopupMenuItem};
+use markdown_editor::Control as _;
 use markdown_editor::{BlockId, BlockKind, BlockPosition, BlockSelection, EditorCommand};
 
 use crate::Editor;
@@ -155,8 +156,7 @@ impl Editor {
         };
         let this = cx.entity().downgrade();
         let copy = chip("blocks-code-copy")
-            .role(Role::Button)
-            .aria_label("Copy code")
+            .control(module_path!(), Role::Button, "Copy code")
             .child(
                 Icon::new(IconName::Copy)
                     .size(px(12.))
@@ -182,8 +182,7 @@ impl Editor {
                 },
             );
             let trigger = chip("blocks-code-language")
-                .role(Role::Button)
-                .aria_label("Language")
+                .control(module_path!(), Role::Button, "Language")
                 .aria_expanded(self.code_menu.is_some())
                 .child(if lang.is_empty() {
                     "Plain text".into()

@@ -34,6 +34,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{ActiveTheme as _, Icon, IconName};
 use markdown::mdast::{Link, Node};
+use markdown_editor::Control as _;
 use markdown_editor::{BlockId, BlockKind, CustomNode, EditorCommand, Extension, InlineContext};
 
 use crate::{Editor, docs};
@@ -484,11 +485,14 @@ impl Extension for ChipPlugin {
                 move || format!("blocks-chip-{id}")
             })
             .id(SharedString::from(format!("blocks-chip-{}", mention.id)))
-            .role(Role::Link)
-            .aria_label(match mention.kind {
-                MentionKind::Date => mention.title.to_string(),
-                _ => format!("@{}", mention.title),
-            })
+            .control(
+                module_path!(),
+                Role::Link,
+                match mention.kind {
+                    MentionKind::Date => mention.title.to_string(),
+                    _ => format!("@{}", mention.title),
+                },
+            )
             .h(line)
             .max_w(px(480.))
             .flex()
@@ -711,8 +715,7 @@ impl Editor {
             rows.push(
                 div()
                     .id(("blocks-mention-row", ix))
-                    .role(Role::ListBoxOption)
-                    .aria_label(mention.title.clone())
+                    .control(module_path!(), Role::ListBoxOption, mention.title.clone())
                     .aria_description(mention.hint.clone())
                     .aria_selected(ix == menu.selected)
                     .debug_selector(move || format!("blocks-mention-option-{id}"))
@@ -782,8 +785,7 @@ impl Editor {
                 crate::editor::caret_menu(caret, height, window).child(
                     div()
                         .id("blocks-mention-menu")
-                        .role(Role::ListBox)
-                        .aria_label("Mentions")
+                        .control(module_path!(), Role::ListBox, "Mentions")
                         .debug_selector(|| "blocks-mention-menu".into())
                         .w(px(300.))
                         .max_h(px(crate::editor::MENU_HEIGHT))

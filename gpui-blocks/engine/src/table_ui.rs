@@ -10,7 +10,9 @@ use super::{
     state::BlockEditorState,
     table::{TableEdit, TableLine},
 };
+use crate::a11y::Control as _;
 use crate::kind::ColumnAlign;
+use gpui::StatefulInteractiveElement as _;
 
 /// Extra reach around a table where its grips still show.
 const REACH: f32 = 28.;
@@ -283,6 +285,7 @@ pub(crate) fn render_menu(
         let entity = state.clone();
         div()
             .id(id)
+            .control(module_path!(), gpui::Role::MenuItem, label)
             .flex()
             .flex_col()
             .px_2()
@@ -338,6 +341,16 @@ pub(crate) fn render_menu(
             let on = current == align;
             div()
                 .id(id)
+                .control(
+                    module_path!(),
+                    gpui::Role::RadioButton,
+                    format!("Align {}", label.to_lowercase()),
+                )
+                .aria_toggled(if on {
+                    gpui::accesskit::Toggled::True
+                } else {
+                    gpui::accesskit::Toggled::False
+                })
                 .px_2()
                 .py_0p5()
                 .rounded(px(4.))
@@ -384,6 +397,7 @@ pub(crate) fn render_menu(
                 .child(
                     div()
                         .id("block-editor-table-menu")
+                        .control(module_path!(), gpui::Role::Menu, "Table")
                         .occlude()
                         .min_w(px(220.))
                         .p_1()

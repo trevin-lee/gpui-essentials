@@ -21,6 +21,7 @@ use gpui::{
 };
 
 use super::{cull::Measured, id::BlockId, projection::Snapshot, state::*, style::BlockEditorStyle};
+use crate::a11y::Control as _;
 use crate::support::secondary_modifier;
 
 /// Items per cull unit of a long top-level list.
@@ -520,7 +521,11 @@ impl RenderOnce for BlockEditor {
             .id("block-editor")
             // D8: one multi-line text input over the document; the value is
             // built only while accessibility is active (cached per revision).
-            .role(Role::MultilineTextInput)
+            .control(
+                module_path!(),
+                Role::MultilineTextInput,
+                self.state.read(cx).a11y_label.clone(),
+            )
             .when(window.is_a11y_active() || cfg!(test), |this| {
                 this.aria_value(self.state.read(cx).accessible_value())
             })

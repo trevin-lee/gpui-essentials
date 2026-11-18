@@ -495,6 +495,8 @@ pub struct BlockEditorState {
     pub(crate) cull: Rc<RefCell<super::cull::CullState>>,
     /// The accessible value (document text), cached per revision (D8).
     pub(crate) a11y_value: RefCell<Option<(u64, SharedString)>>,
+    /// What assistive technology calls the editor (see `set_accessibility_label`).
+    pub(crate) a11y_label: SharedString,
     /// Scroll container to keep the caret in view (see `set_scroll_handle`).
     pub(crate) scroll_handle: Option<gpui::ScrollHandle>,
     /// The caret moved and should be scrolled into view after layout.
@@ -586,6 +588,7 @@ impl BlockEditorState {
             frame: Rc::default(),
             cull: Rc::default(),
             a11y_value: RefCell::default(),
+            a11y_label: "Editor".into(),
             scroll_handle: Some(gpui::ScrollHandle::new()),
             reveal: Default::default(),
             find: None,
@@ -858,6 +861,17 @@ impl BlockEditorState {
         self.selection_changed(cx);
         Ok(())
     }
+    /// What assistive technology calls the editor's text, "Editor" unless set: the document's
+    /// name or its kind ("Page", "Notes").
+    pub fn set_accessibility_label(
+        &mut self,
+        label: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
+        self.a11y_label = label.into();
+        cx.notify();
+    }
+
     /// Leaves the view where it is after the last edit, which would otherwise scroll the caret
     /// into view: for an edit the app makes away from the caret, such as a bookmark's page
     /// filled in while the reader has scrolled elsewhere.
