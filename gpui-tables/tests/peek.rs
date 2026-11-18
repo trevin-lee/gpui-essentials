@@ -108,3 +108,66 @@ fn with_peeking_off_opening_asks_the_host_and_a_deleted_row_closes_the_peek(
     assert!(!drawn(cx, "peek"));
     assert!(table.read_with(cx, |t, _| t.peeked_row().is_none()));
 }
+
+#[gpui::test]
+fn the_peek_edits_values_with_their_cells_editors(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_people(cx, &host);
+    table.update(cx, |t, cx| t.set_peek(true, cx));
+    click(cx, format!("open:{ROWAN}"));
+    let peek = rect(cx, "peek");
+    let changed = |host: &TestHost| {
+        host.edits()
+            .into_iter()
+            .filter_map(|e| match e {
+                Edit::RowValueChanged {
+                    row_id,
+                    property_id,
+                    value,
+                } if row_id == ROWAN => Some((property_id, value)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    // Text: a field over the value in the panel, Enter saves.
+    click(cx, format!("peek-value:{ROLE}"));
+    assert!(table.read_with(cx, |t, _| t.editor_state().is_some()));
+    select_all(&table, cx);
+    type_text(cx, "Chief of staff");
+    keys(cx, "enter");
+    assert_eq!(
+        changed(&host).last(),
+        Some(&(ROLE.to_owned(), Some(Value::text("Chief of staff"))))
+    );
+    assert!(drawn(cx, "peek"), "the panel stays");
+    // An option: the cell's picker, hung from the panel, not the table.
+    click(cx, format!("peek-value:{STAGE}"));
+    assert!(table.read_with(cx, |t, _| t.has_popover()));
+    let menu = rect(cx, "menu");
+    assert!(menu.left() >= peek.left() - px(1.), "{menu:?} {peek:?}");
+    click(cx, "menu-item-Warm");
+    assert_eq!(
+        changed(&host).last(),
+        Some(&(STAGE.to_owned(), Some(Value::text(WARM))))
+    );
+    assert!(
+        drawn(cx, "peek"),
+        "picking closed the picker, not the panel"
+    );
+    // A checkbox toggles at once.
+    let before = changed(&host).len();
+    click(cx, format!("peek-value:{FOLLOW_UP}"));
+    assert_eq!(changed(&host).len(), before + 1);
+    assert!(matches!(
+        changed(&host).last(),
+        Some((p, Some(Value::Bool(_)))) if p == FOLLOW_UP
+    ));
+    // The title too.
+    click(cx, "peek-title");
+    assert!(table.read_with(cx, |t, _| t.editor_state().is_some()));
+    keys(cx, "escape");
+    assert!(table.read_with(cx, |t, _| t.editor_state().is_none()));
+    assert!(drawn(cx, "peek"), "Escape left the field, not the panel");
+    keys(cx, "escape");
+    assert!(!drawn(cx, "peek"));
+}

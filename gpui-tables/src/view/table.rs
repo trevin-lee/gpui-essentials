@@ -421,6 +421,11 @@ pub struct TableView {
     /// The row in the peek panel ([`TableView::peek`]), and whether opening a row peeks it.
     pub(crate) peek: Option<String>,
     pub(crate) peek_mode: bool,
+    /// While a value is edited from the peek: where its editor hangs (the value in the panel)
+    /// in place of its cell, and each value's place as last drawn.
+    pub(crate) peek_anchor: Option<Bounds<Pixels>>,
+    pub(crate) peek_places:
+        Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
     /// The gallery's card with the keyboard, by place, and its grid as last drawn.
     pub(crate) gallery_focus: Option<usize>,
     pub(crate) gallery_grid: StdCell<super::gallery::GalleryGrid>,
@@ -489,6 +494,8 @@ impl TableView {
             hovered_row: None,
             peek: None,
             peek_mode: false,
+            peek_anchor: None,
+            peek_places: Default::default(),
             gallery_focus: None,
             gallery_grid: StdCell::new(Default::default()),
             card_drag: std::cell::OnceCell::new(),
@@ -1303,7 +1310,7 @@ impl TableView {
                     row_id: r.id.clone(),
                     property_id: p.id.clone(),
                 };
-                let bounds = self.cell_bounds(cell);
+                let bounds = self.peek_anchor.unwrap_or_else(|| self.cell_bounds(cell));
                 self.begin_text(target, &p, text, bounds, window, cx);
             }
             _ => {}

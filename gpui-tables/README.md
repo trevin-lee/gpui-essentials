@@ -625,7 +625,10 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   every property with its value as its cell shows it. The panel steps to the row above or below
   (in the view's order), has **Open as page** (the `openRow`, and the panel closes) and Close;
   Escape closes it too. A host can peek a row itself (`peek`, `close_peek`, `peeked_row`), and
-  the panel goes when its row leaves the docs. It's read-only for now.
+  the panel goes when its row leaves the docs. Pressing the title or a value edits it with its
+  cell's own editor, hung from the panel: a field (Enter saves, Escape leaves it), the options,
+  people or rows, the month, or a checkbox's toggle; each change is the cell's `rowValueChanged`.
+  A property the view hides as a column is shown and not edited there.
 - **Search.** The search button at the bar's right end, or ⌘F while the view has the keyboard,
   opens a field in its place ("Search", with a × to clear it). As it's typed, the table, board
   or list shows only the rows whose title or any shown property's text (a table's columns, a
