@@ -287,9 +287,13 @@ every event, and its views (tables, boards and lists) as tabs in the crate's bar
   `selected_rows` do the same for a host. Selected rows drag, duplicate, move and delete
   together.
 - **Dragging rows.** Dragging a handle moves its row, and the selected rows with it when it's
-  one of them (dragging a row that isn't selected lets go of the others). It's the board's and
-  the list's drag, by their rules and their code: with a mouse, GPUI's drag and drop; with a
-  finger, a long press on the handle picks the row up while a pan (from the handle too) scrolls.
+  one of them (dragging a row that isn't selected lets go of the others). Where it lands and the
+  move are the board's and the list's rules and code; the drag itself is
+  [gpui-dnd](../gpui-dnd)'s: the handle is its source and the table its target, with a mouse past
+  a few pixels or a finger's long press on the handle (a pan, from the handle too, scrolls).
+  gpui-dnd draws the picture of the rows, takes Escape, and slides the picture back when the
+  rows can't land where they're let go. A host with its own `DndProvider` round the window
+  keeps working: the table's own provider steps aside.
   The rows fade where they were, a picture of the row (and how many rows) follows the pointer,
   and a line shows where they'll land: above a row over its upper half, below it over its lower
   half, a group's top over its header, its end over its New row. Near the top or bottom each

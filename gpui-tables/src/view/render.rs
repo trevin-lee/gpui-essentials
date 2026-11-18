@@ -8,11 +8,11 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, BoxShadow, ClickEvent, Context, DispatchPhase, DragMoveEvent, ElementId,
-    Entity, FontWeight, Hsla, InteractiveElement, IntoElement, LongPressEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Render, Role, ScrollEvent,
-    SharedString, StatefulInteractiveElement, Styled, TextAlign, TouchDragEvent, TouchPhase,
-    Window, anchored, canvas, deferred, div, point, px, uniform_list,
+    AnyElement, App, BoxShadow, ClickEvent, Context, DispatchPhase, ElementId, Entity, FontWeight,
+    Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Pixels, Render, Role, ScrollEvent, SharedString,
+    StatefulInteractiveElement, Styled, TextAlign, TouchDragEvent, TouchPhase, Window, anchored,
+    canvas, deferred, div, point, px, uniform_list,
 };
 use gpui_core::{
     DatePickerColors, DismissReason, Icon, IconName, Input, InputState, MenuReorder, MenuSelect,
@@ -20,13 +20,13 @@ use gpui_core::{
     PopupMenuItem, Press, Selectable as _,
 };
 
-use super::board::DraggedCard;
 use super::format;
 use super::host::person_label;
 use super::list_render::Landing;
 use super::table::{Action, Drag, Entry, Item, Popover, Reopen, TableView, naive_day, type_icon};
 use crate::engine::{GroupKey, time};
 use crate::model::{Color, Doc, Person, Property, PropertyType, Value};
+use gpui_dnd::{DndProvider, DragMonitor};
 
 impl Render for TableView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -46,17 +46,22 @@ impl Render for TableView {
         } else {
             self.render_table(window, cx)
         };
-        // The bar of views over it (when it's on), and the bar's menus.
-        self.render_frame(body, window, cx)
+        // The bar of views over it (when it's on), and the bar's menus. gpui-dnd follows a table
+        // row's drag and draws its preview (a host's own provider round the window takes over).
+        DndProvider::new(self.render_frame(body, window, cx))
     }
 }
 
 impl TableView {
     fn render_table(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.clamp_scroll();
-        // A mouse drag of rows GPUI ended somewhere else (let go outside the table) is over.
-        if self.board.drag.as_ref().is_some_and(|d| !d.touch) && !cx.has_active_drag() {
-            self.board.drag = None;
+        // A row's drag that gpui-dnd ended (dropped where it couldn't land, Escape, a lost
+        // touch: its preview going back) is over for the table.
+        if self.board.drag.is_some() {
+            let m = DragMonitor::of(cx);
+            if !m.is_dragging() || m.is_returning() {
+                self.board.drag = None;
+            }
         }
         let t = self.theme.clone();
         let n = self.shown.items.len();
@@ -85,21 +90,6 @@ impl TableView {
         let probe = canvas(
             move |b, _, _| bounds.set(b),
             move |_, _, window, _| {
-                // A finger's long press on a row's handle picks the row up (and the selected
-                // rows with it); the finger then drags it. A plain pan scrolls.
-                let e = entity.clone();
-                window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
-                    if phase != DispatchPhase::Bubble {
-                        return;
-                    }
-                    let claimed = e
-                        .update(cx, |this, cx| this.long_press(ev, window, cx))
-                        .unwrap_or(false);
-                    if claimed {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                    }
-                });
                 if dragging {
                     let e = entity.clone();
                     window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
@@ -150,14 +140,8 @@ impl TableView {
         .size_full();
 
         let popover = self.render_popover(window, cx);
-        // A finger's row follows it (the mouse's is drawn by GPUI).
-        let origin = self.bounds.get().origin;
-        let ghost = self.board.drag.as_ref().filter(|d| d.touch).map(|d| {
-            let at = d.at - origin - d.offset;
-            div().absolute().left(at.x).top(at.y).child(d.ghost.clone())
-        });
         let note = self.render_drag_note();
-        div()
+        let root = div()
             .id("gpui-tables")
             .debug_selector(|| "table".into())
             .key_context(super::CONTEXT)
@@ -270,10 +254,6 @@ impl TableView {
             }))
             .on_action(cx.listener(|this, _: &super::PageUp, _, cx| this.on_page(-1, cx)))
             .on_action(cx.listener(|this, _: &super::PageDown, _, cx| this.on_page(1, cx)))
-            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<DraggedCard>, _, cx| {
-                this.drag_card_to(e.event.position, cx)
-            }))
-            .on_drop(cx.listener(|this, _: &DraggedCard, window, cx| this.drop_card(window, cx)))
             .on_scroll(cx.listener(|this, e: &ScrollEvent, window, cx| {
                 let d = e.delta.pixel_delta(window.line_height());
                 if d.x == px(0.) || d.y.abs() > d.x.abs() {
@@ -298,9 +278,8 @@ impl TableView {
             .child(list)
             .child(probe)
             .children(note)
-            .children(ghost)
-            .child(popover)
-            .into_any_element()
+            .child(popover);
+        self.row_drop_target(root, cx)
     }
 }
 

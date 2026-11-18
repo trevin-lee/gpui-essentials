@@ -2411,6 +2411,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "gpui-core",
+ "gpui-dnd",
  "gpui-pre",
  "gpui-pre-apple",
  "gpui-pre-macos",

@@ -173,7 +173,7 @@ impl TableView {
             .into_any_element()
     }
 
-    /// A finger's long press: on a card (a list's line, a table row's handle) it picks the card up, and the finger
+    /// A finger's long press: on a card (or a list's line) it picks the card up, and the finger
     /// then moves it. Returns whether it took the press (a plain pan, which never becomes a
     /// long press, scrolls instead).
     pub(crate) fn long_press(
@@ -221,10 +221,10 @@ impl TableView {
     }
 
     /// What a finger pressing at `at` picks up: the row's id, the key of the column (or group)
-    /// it's in, and the card's (or line's, or handle's) bounds.
+    /// it's in, and the card's (or line's) bounds. A table's rows are gpui-dnd's (`rows.rs`).
     fn pickup_at(&self, at: Point<Pixels>) -> Option<(String, String, gpui::Bounds<Pixels>)> {
         if self.shown.table.is_some() {
-            return self.handle_at(at);
+            return None;
         }
         if self.shown.list.is_some() {
             return self.line_at(at);
