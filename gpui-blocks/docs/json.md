@@ -53,7 +53,7 @@ stored text is read as a space.
 | `heading` | `level` (1 to 6), `text` | |
 | `quote` | | any blocks |
 | `callout` | `name`: GitHub's alert name in lowercase (`note`, `tip`, `important`, `warning`, `caution`) | any blocks |
-| `toggle` | `open` | the summary (a `paragraph`), then the body |
+| `toggle` | `open` | the summary (a `paragraph`, or a `heading` of level 1 to 3 for a toggle heading), then the body |
 | `list` | `ordered`, `start` (an ordered list's first number, absent when it's 1) | `item`s |
 | `item` | `checked` (`true` or `false` for a to-do item, absent otherwise), `spread` (`true` for an item written with blank lines between its blocks) | any blocks |
 | `code` | `language`, `meta` (the rest of the info string), `code` | |
@@ -99,6 +99,10 @@ than five columns.
 
 A `markdown` block is what the editor keeps as is: a link definition, an HTML block, and in
 later versions any type a reader doesn't know.
+
+A toggle heading's Markdown puts the level around the summary: `<details><summary><h2>Title</h2></summary>…</details>`.
+Tags are read in either case. A summary with mismatched tags, or `<h4>` to `<h6>`, stays a
+paragraph summary, as written.
 
 ## Links to other documents
 
@@ -147,6 +151,11 @@ is still refused.
 
 `Document::from_markdown` and `Document::to_markdown` convert without an editor, for importing
 and exporting. Markdown has no ids, so `from_markdown` makes new ones every time.
+
+The server's Markdown export writes each block's id in a comment line before it
+(`<!-- id:… -->`, inside a toggle too, with the title's id between `<details>` and
+`<summary>`). gpui-blocks writes no id lines and doesn't read them back: its ids live only in
+the JSON. Read from Markdown, id lines are HTML like any other, not ids.
 
 ## Merging two saves
 

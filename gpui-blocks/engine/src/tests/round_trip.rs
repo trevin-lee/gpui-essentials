@@ -780,3 +780,38 @@ fn fuzzed_markdown_never_panics() {
         assert!(pasted.is_ok(), "pasting {source:?} panicked");
     }
 }
+
+#[test]
+fn toggle_headings_round_trip() {
+    for source in [
+        "<details open>\n<summary><h2>Plan</h2></summary>\n\nThe body.\n\n</details>",
+        "<details>\n<summary><h1>Big **one**</h1></summary>\n\n</details>",
+        "<details open>\n<summary><h3>Small</h3></summary>\n\n- a\n- b\n\n</details>",
+    ] {
+        let m = model(source);
+        assert_eq!(m.source(), source);
+        let toggle = m.document().root().children().next().unwrap();
+        let summary = toggle.children().next().unwrap();
+        assert!(
+            matches!(summary.kind(), BlockKind::Heading { .. }),
+            "{source}"
+        );
+    }
+    // Deeper than 3, or anything else in the summary: a plain toggle, its text as it was.
+    let m = model("<details open>\n<summary><h4>Deep</h4></summary>\n\nx\n\n</details>");
+    let toggle = m.document().root().children().next().unwrap();
+    assert_eq!(
+        toggle.children().next().unwrap().kind(),
+        BlockKind::Paragraph
+    );
+}
+
+#[test]
+fn a_summary_heading_reads_strictly() {
+    use crate::import::summary_heading;
+    assert_eq!(summary_heading("<h2>Plan</h2>"), Some((2, "Plan")));
+    assert_eq!(summary_heading(" <H1>A</H1> "), Some((1, "A")));
+    assert_eq!(summary_heading("<h4>Deep</h4>"), None);
+    assert_eq!(summary_heading("<h2>Open"), None);
+    assert_eq!(summary_heading("Plain"), None);
+}

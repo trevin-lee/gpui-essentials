@@ -846,6 +846,16 @@ fn markdown(b: &Block) -> String {
                 Some((first, rest)) if matches!(first.kind, Kind::Paragraph { .. }) => {
                     (markdown(first), join(rest))
                 }
+                // A toggle heading.
+                Some((
+                    Block {
+                        kind: Kind::Heading { level, text },
+                        ..
+                    },
+                    rest,
+                )) if (1..=3).contains(level) => {
+                    (format!("<h{level}>{}</h{level}>", line(text)), join(rest))
+                }
                 _ => (String::new(), join(&b.children)),
             };
             let tag = if *open { "<details open>" } else { "<details>" };
@@ -1134,6 +1144,25 @@ mod tests {
         let mut got = Vec::new();
         ids_of(&back.blocks, &mut got);
         assert_eq!(got, ["cols", "c1", "p1", "c2", "p2"]);
+    }
+
+    /// A toggle heading goes to JSON (a toggle whose first child is a heading) and back, ids
+    /// and all.
+    #[test]
+    fn toggle_headings_keep_their_level_and_ids() {
+        round_trips("<details open>\n<summary><h2>Plan</h2></summary>\n\nThe body.\n\n</details>");
+        let doc = Document::from_markdown(
+            "<details open>\n<summary><h2>Plan</h2></summary>\n\nThe body.\n\n</details>",
+            &[],
+        );
+        assert!(matches!(
+            doc.blocks[0].children[0].kind,
+            Kind::Heading { level: 2, .. }
+        ));
+        assert!(
+            doc.to_markdown()
+                .contains("<summary><h2>Plan</h2></summary>")
+        );
     }
 
     /// Every kind's `type` is one this version reads.

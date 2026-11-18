@@ -629,7 +629,15 @@ impl<'a> Reader<'a> {
             return blocks;
         }
         let toggle = |open: bool, summary: &str, body: Vec<DetachedBlock>| {
-            let mut children = vec![DetachedBlock::paragraph(self.summary_inline(summary))];
+            // A toggle heading's summary is `<h1>`…`<h3>` around its text.
+            let first = match summary_heading(summary) {
+                Some((level, text)) => DetachedBlock::leaf(
+                    BlockKindData::Heading { level },
+                    BlockContent::Inline(self.summary_inline(text)),
+                ),
+                None => DetachedBlock::paragraph(self.summary_inline(summary)),
+            };
+            let mut children = vec![first];
             children.extend(body);
             DetachedBlock::container(BlockKindData::Toggle { open }, children)
         };
@@ -867,6 +875,24 @@ fn source_of(block: &DetachedBlock) -> Option<&str> {
         return None;
     };
     (node.name() == SOURCE_BLOCK).then(|| node.as_markdown())
+}
+
+/// A toggle heading's summary, `<h2>Title</h2>`: its level (1 to 3) and its text.
+pub(crate) fn summary_heading(summary: &str) -> Option<(u8, &str)> {
+    let summary = summary.trim();
+    let rest = summary
+        .strip_prefix("<h")
+        .or_else(|| summary.strip_prefix("<H"))?;
+    let level = rest.chars().next()?.to_digit(10)?;
+    if !(1..=3).contains(&level) {
+        return None;
+    }
+    let inner = rest[1..].strip_prefix('>')?;
+    let close = format!("</h{level}>");
+    let text = inner
+        .strip_suffix(close.as_str())
+        .or_else(|| inner.strip_suffix(close.to_uppercase().as_str()))?;
+    Some((level as u8, text.trim()))
 }
 
 fn details_tag(block: &DetachedBlock) -> Option<DetailsTag> {

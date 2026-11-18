@@ -1539,6 +1539,14 @@ impl Editor {
                         let _ = state.run(EditorCommand::InsertMarkdown(markdown.to_string()), cx);
                     }
                     SlashAction::Image => return state.model().caret(),
+                    SlashAction::ToggleHeading(level) => {
+                        let level = (*level).clamp(1, 3);
+                        let _ = state.run(
+                            EditorCommand::SetBlockKind(BlockKind::Heading { level }),
+                            cx,
+                        );
+                        let _ = state.run(EditorCommand::WrapInToggle, cx);
+                    }
                     SlashAction::Color { text, index } => paint_line(state, *text, *index, cx),
                     // The app answers with insert_page or insert_mention.
                     SlashAction::NewPage | SlashAction::LinkToPage | SlashAction::Embed => {}
@@ -3907,6 +3915,26 @@ mod tests {
         );
     }
 
+    /// The slash menu's Toggle heading makes the line a heading that folds, as one undo step.
+    #[gpui::test]
+    fn the_slash_menu_makes_a_toggle_heading(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("Plan");
+        cx.simulate_input(" /toggle heading 2");
+        draw(cx);
+        assert_eq!(menu(&editor, cx).unwrap()[0], "Toggle heading 2");
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).starts_with("<details open>\n<summary><h2>Plan"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        cx.simulate_keystrokes("secondary-z");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "Plan /toggle heading 2");
+    }
+
     #[gpui::test]
     fn slash_opens_narrows_and_picks_with_the_keyboard(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "First line");
@@ -3921,7 +3949,7 @@ mod tests {
         cx.simulate_input("head");
         draw(cx);
         assert_eq!(
-            menu(&editor, cx).unwrap(),
+            menu(&editor, cx).unwrap()[..3],
             ["Heading 1", "Heading 2", "Heading 3"]
         );
         // ↓ and Enter are the menu's while it's open, not the editor's.
