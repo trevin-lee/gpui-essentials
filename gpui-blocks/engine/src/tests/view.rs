@@ -4930,12 +4930,53 @@ fn a_long_press_selects_a_word_and_moving_extends_it(cx: &mut TestAppContext) {
     });
     draw(cx);
     assert_eq!(text_selection(&editor, cx), (6, 2));
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
     cx.simulate_event(gpui::LongPressEvent {
         phase: gpui::TouchPhase::Ended,
         start_position: start,
         position: back,
     });
     assert_eq!(source(&editor, cx), "hello world");
+}
+
+#[gpui::test]
+fn a_long_press_off_the_text_and_a_move_lift_its_block(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "hi\n\nnext");
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let press = |start, phase, position, cx: &mut VisualTestContext| {
+        cx.simulate_event(gpui::LongPressEvent {
+            phase,
+            start_position: start,
+            position,
+        });
+        draw(cx);
+    };
+    // Past the end of a short line: off the text.
+    let start = gpui::point(blocks[0].1.left() + px(200.), blocks[0].1.center().y);
+    press(start, gpui::TouchPhase::Started, start, cx);
+    // A tremor: nothing lifts.
+    press(
+        start,
+        gpui::TouchPhase::Moved,
+        start + gpui::point(px(3.), px(3.)),
+        cx,
+    );
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    let below = gpui::point(start.x, blocks[1].1.center().y + px(4.));
+    press(start, gpui::TouchPhase::Moved, below, cx);
+    assert!(editor.read_with(cx, |e, _| e.is_dragging_block()));
+    press(start, gpui::TouchPhase::Ended, below, cx);
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    assert_eq!(source(&editor, cx), "next\n\nhi");
+    // Cancelled by the system: back where it was, nothing moved.
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let start = gpui::point(blocks[0].1.left() + px(200.), blocks[0].1.center().y);
+    let below = gpui::point(start.x, blocks[1].1.center().y + px(4.));
+    press(start, gpui::TouchPhase::Started, start, cx);
+    press(start, gpui::TouchPhase::Moved, below, cx);
+    press(start, gpui::TouchPhase::Cancelled, below, cx);
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    assert_eq!(source(&editor, cx), "next\n\nhi");
 }
 
 #[gpui::test]

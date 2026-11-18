@@ -113,6 +113,15 @@ impl Editor {
     ) {
         self.block_menu = None;
         self.block_sheet = None;
+        // Move (the sheet's): the block lifts where it is, for the next finger drag to move.
+        if id == "move" {
+            self.state.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.lift_block(block, cx);
+            });
+            cx.notify();
+            return;
+        }
         if id == "copy-link" {
             if let Some(link) = self.block_link.clone() {
                 let id = self.lock_ids().id_of(block);
@@ -303,7 +312,8 @@ impl Editor {
 
 impl Editor {
     /// The block menu as a sheet across the bottom, for touch: Turn into's kinds listed in it
-    /// (a submenu has no room beside a phone's menu), Duplicate and Delete, then the colours.
+    /// (a submenu has no room beside a phone's menu), Move (the block lifts, for the next finger
+    /// drag to move), Duplicate and Delete, then the colours.
     /// Drawn closed too, so the focus goes back to the page when it closes.
     pub(crate) fn block_sheet(&self, cx: &mut Context<Self>) -> AnyElement {
         let block = self.block_sheet;
@@ -328,6 +338,7 @@ impl Editor {
                 );
             let menu = menu
                 .separator()
+                .item(PopupMenuItem::new("move", "Move").icon(IconName::Move))
                 .items(self.copy_link_item())
                 .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
                 .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash));
