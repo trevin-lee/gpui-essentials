@@ -260,7 +260,7 @@ impl Calendar {
         }
         match geo.kind {
             Kind::Grid => {
-                for i in 0..geo.days as i32 {
+                for i in (0..geo.days as i32).filter(|&i| geo.shown(i)) {
                     let date = geo.date(i);
                     let x = geo.col_x(i);
                     for h in 0..24u32 {
@@ -292,7 +292,7 @@ impl Calendar {
             }
             Kind::Month => {
                 for row in 0..geo.rows {
-                    for col in 0..7 {
+                    for col in (0..7).filter(|&c| geo.shown(c)) {
                         let date = geo.date(row as i32 * 7 + col);
                         let mut label = day_label(date);
                         if date == today {

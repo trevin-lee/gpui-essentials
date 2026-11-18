@@ -31,6 +31,10 @@ their look.
   day with events is shaded darker the more it has (in the find colour while finding). A
   click on a day opens that day, and a click on a month's name opens that month. The arrows
   move a day or a week, and Enter opens the selected day.
+- **Weekends** (`show_weekends`, on by default): off, the week and the month show the working
+  week, Monday to Friday, with the days sharing the width. A span over a weekend runs straight
+  from Friday into Monday, and the arrow keys and keyboard drags step from Friday to Monday.
+  The day, N-day, agenda and year views show every day either way.
 - **Agenda:** a list of the days that have events (and today), each under a header that stays
   at the top while its day scrolls by. A row has the time (or "All day", "Day 2 of 3",
   "Until 2 AM"), the calendar's colour, the title, the place and every link as a pill. Among
@@ -319,8 +323,8 @@ fn main() {
 - **Options** (`CalendarOptions`, through `with_options` or `set_options`): `time_zone`,
   `week_start`, `hour12`, `snap_minutes`, `slot_minutes`, `default_duration`, `hour_height`,
   `secondary_zone`, `scroll_time`, `default_calendar`, `dim_past`, `all_day_rows`, `touch`,
-  `event_panel`, `panel_style`, `mini_month` and `scopes`.
-- **The header:** the title, Today, previous and next, and Day / Week / Month / Agenda are
+  `event_panel`, `panel_style`, `mini_month`, `scopes` and `show_weekends`.
+- **The header:** the title, Today, previous and next, and Day / Week / Month / Year / Agenda are
   gpui-core's buttons. Turn it off with `.with_header(false)` and drive `go_to`, `next`, `previous` and
   `set_view` from your own.
 - **Keys:** the actions (`gpui_calendar::Today`, `SelectLeft` and the rest) work in the

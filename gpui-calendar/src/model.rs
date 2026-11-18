@@ -519,6 +519,10 @@ pub struct CalendarOptions {
     /// asked and the edit goes with that one. Empty counts as `[EditScope::This]`. All three
     /// by default.
     pub scopes: &'static [EditScope],
+    /// Saturday and Sunday in the week and the month. Off, those views show the working week:
+    /// the other days share the width, and the arrow keys and keyboard drags step over the
+    /// weekend. The day, N-day, agenda and year views show every day either way. On by default.
+    pub show_weekends: bool,
 }
 
 impl Default for CalendarOptions {
@@ -541,6 +545,7 @@ impl Default for CalendarOptions {
             all_day_rows: 3,
             touch: cfg!(any(target_os = "ios", target_os = "android")),
             scopes: &EditScope::ALL,
+            show_weekends: true,
         }
     }
 }
