@@ -95,7 +95,17 @@ pub mod actions {
             FindClose,
             /// Gives the selection the background colour last picked in the format bar's Color
             /// menu, yellow at first, or takes it off when the selection has it already (⌘⇧H).
-            HighlightAgain
+            HighlightAgain,
+            /// Scrolls a page down and moves the caret with it, to the same place in the
+            /// window (Page Down); at the end of the page, to its last line.
+            PageDown,
+            /// Scrolls a page up and moves the caret with it (Page Up); at the top, to the
+            /// first line.
+            PageUp,
+            /// Page Down, extending the selection (⇧Page Down).
+            SelectPageDown,
+            /// Page Up, extending the selection (⇧Page Up).
+            SelectPageUp
         ]
     );
 }
