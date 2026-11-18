@@ -2060,6 +2060,20 @@ impl BlockEditorState {
         }
     }
 
+    /// The custom inline node (a mention, a chip) right after the caret, else right before it:
+    /// for a key that opens what a click on it would.
+    pub fn custom_at_caret(&self) -> Option<super::CustomNode> {
+        let caret = self.model.caret()?;
+        let inline = self.model.doc.inline(caret.block)?;
+        let at = |offset: usize| {
+            inline.atoms().iter().find_map(|(o, atom)| match atom {
+                super::inline::InlineAtom::Custom(node) if *o == offset => Some(node.clone()),
+                _ => None,
+            })
+        };
+        at(caret.offset).or_else(|| inline.prev_grapheme(caret.offset).and_then(at))
+    }
+
     /// The url of the link at the caret (or the selection start).
     pub fn link_at_caret(&self) -> Option<SharedString> {
         self.link_range_at_caret().map(|(_, _, url)| url)
