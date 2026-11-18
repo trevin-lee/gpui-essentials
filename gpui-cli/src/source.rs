@@ -44,7 +44,7 @@ impl Source {
                 if !out.status.success() {
                     let why = String::from_utf8_lossy(&out.stderr);
                     return Err(format!(
-                        "fetching {url}: {} (gpui-core add needs a revision of {repo} \
+                        "fetching {url}: {} (gpui add needs a revision of {repo} \
                          that has gpui-core/components.toml)",
                         why.trim()
                     ));
@@ -67,7 +67,7 @@ pub fn crate_root(from: &Path) -> Result<PathBuf, String> {
         dir = d.parent();
     }
     Err(format!(
-        "no Cargo.toml with a [package] in {} or above: run gpui-core add in your crate",
+        "no Cargo.toml with a [package] in {} or above: run gpui add in your crate",
         from.display()
     ))
 }
@@ -140,7 +140,7 @@ mod tests {
 
     fn with_lock(lock: &str) -> Result<Source, String> {
         let dir = std::env::temp_dir().join(format!(
-            "gpui-core-cli-lock-{}-{}",
+            "gpui-cli-lock-{}-{}",
             std::process::id(),
             crate::sha256::hex(lock.as_bytes())
         ));

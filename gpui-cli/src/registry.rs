@@ -111,7 +111,7 @@ fn unknown(registry: &Registry, name: &str) -> String {
         .map(String::as_str)
         .collect();
     let hint = if close.is_empty() {
-        "`gpui-core list` shows them".to_string()
+        "`gpui list` shows them".to_string()
     } else {
         format!("did you mean {}?", close.join(", "))
     };

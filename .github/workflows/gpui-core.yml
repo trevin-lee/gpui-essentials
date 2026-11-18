@@ -6,7 +6,7 @@ on:
     branches: [main]
     paths:
       - "gpui-core/**"
-      - "gpui-core-cli/**"
+      - "gpui-cli/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -14,7 +14,7 @@ on:
   pull_request:
     paths:
       - "gpui-core/**"
-      - "gpui-core-cli/**"
+      - "gpui-cli/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -60,7 +60,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then printf 'own=true\nrun=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
-          python3 .github/scripts/changes.py '^(gpui\-core/|gpui\-core\-cli/|\.github/workflows/gpui\-core\.yml)' gpui-core gpui-core-cli >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/changes.py '^(gpui\-core/|gpui\-cli/|\.github/workflows/gpui\-core\.yml)' gpui-core gpui-cli >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
@@ -114,9 +114,9 @@ jobs:
       - run: cargo build -p gpui-core --locked --target aarch64-apple-ios-sim --features highlight
 
   copies:
-    # `gpui-core add`: its own tests, then every component copied into a new crate as a host
+    # `gpui add`: its own tests, then every component copied into a new crate as a host
     # would and built, and one copy run next to gpui-core's original in one app, to show the
-    # renamed actions and key contexts don't clash (gpui-core-cli/ci/check-copies.sh). On Linux,
+    # renamed actions and key contexts don't clash (gpui-cli/ci/check-copies.sh). On Linux,
     # where GPUI's core builds without a platform: the cheapest runner, and on every push too.
     runs-on: ubuntu-latest
     steps:
@@ -127,11 +127,11 @@ jobs:
         with:
           key: gpui-core-copies
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo fmt -p gpui-core-cli --check
-      - run: cargo clippy -p gpui-core-cli --locked --all-targets -- -D warnings
-      - run: cargo test -p gpui-core-cli --locked
+      - run: cargo fmt -p gpui-cli --check
+      - run: cargo clippy -p gpui-cli --locked --all-targets -- -D warnings
+      - run: cargo test -p gpui-cli --locked
       # The scratch crate builds into the workspace's target, which the cache keeps.
-      - run: gpui-core-cli/ci/check-copies.sh "$RUNNER_TEMP/copies"
+      - run: gpui-cli/ci/check-copies.sh "$RUNNER_TEMP/copies"
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
 

@@ -479,20 +479,23 @@ are copied, and change it however you like. A copy builds on `gpui_core::base`, 
 stays a dependency. Install the CLI from this repository:
 
 ```sh
-cargo install --locked --git https://github.com/trevin-lee/gpui-essentials gpui-core-cli
+cargo install --locked --git https://github.com/trevin-lee/gpui-essentials gpui-cli
 ```
+
+It's a git install only. The crates.io name `gpui-cli` belongs to an unrelated project
+(AprilNEA/gpui-cli 0.0.1), so a published version would need another name.
 
 Then, in your crate:
 
 ```sh
-gpui-core add select dialog
+gpui add select dialog
 ```
 
 That copies `select.rs` and `dialog.rs` into `src/ui/`, with `button.rs` because the dialog uses
 it, and writes `src/ui/mod.rs`. Add `mod ui;` to your crate root and call `ui::init(cx)` at
 startup. It runs `gpui_core::init` and binds the copies' keys. Then use `ui::Select` where you
-used `gpui_core::Select`. `gpui-core list` names every component (`date-picker` and
-`date_picker` both work), and `gpui-core add --all` copies them all.
+used `gpui_core::Select`. `gpui list` names every component (`date-picker` and
+`date_picker` both work), and `gpui add --all` copies them all.
 
 - **Which gpui-core.** The files come from GitHub at the gpui-core revision in your Cargo.lock,
   so a copy matches the base it builds on. A crates.io version maps to the tag
@@ -510,7 +513,7 @@ used `gpui_core::Select`. `gpui-core list` names every component (`date-picker` 
   own version.
 - **Updating.** Each copy starts with a header naming the revision it came from and a hash of
   what was written. Running `add` again changes nothing, and it never overwrites a copy unless
-  you pass `--force`. `gpui-core add select --diff` shows what a newer gpui-core would change in
+  you pass `--force`. `gpui add select --diff` shows what a newer gpui-core would change in
   your copy, and `--force` replaces it, your edits included.
 - **What it leaves to you.** It doesn't edit `Cargo.toml` or your crate root. It names the
   crates the copies need that `Cargo.toml` lacks: `gpui` and `gpui-core`, plus `chrono` for
@@ -527,7 +530,7 @@ themselves.
 `gpui_core::base` is **semver-stable**. Copied components are built on it: the theme, sizes,
 `Press`, icons, the overlays' layers and focus, menus, fields and `Root`. A breaking change to
 anything in it breaks copied code, so it's a breaking change for gpui-core. `components.toml`
-lists the components `gpui-core add` can copy, what each needs, and the keys and actions each
+lists the components `gpui add` can copy, what each needs, and the keys and actions each
 binds. It's generated from the source and checked in CI.
 
 ## The gallery
