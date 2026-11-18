@@ -29,6 +29,7 @@ use std::sync::Arc;
 use gpui::*;
 use gpui_core::ActiveTheme as _;
 use markdown::mdast::{Link, Node};
+use markdown_editor::Control as _;
 use markdown_editor::{CustomNode, Extension, InlineContext};
 
 /// The link destination's prefix that marks a link to a document.
@@ -270,8 +271,7 @@ impl Extension for MentionPlugin {
         let chip = div()
             .debug_selector(|| format!("blocks-mention-{}", doc.id))
             .id(SharedString::from(format!("blocks-mention-{}", doc.id)))
-            .role(Role::Link)
-            .aria_label(title.clone())
+            .control(module_path!(), Role::Link, title.clone())
             .h(line)
             .max_w(px(480.))
             .flex()
@@ -356,8 +356,7 @@ impl Extension for PagePlugin {
         div()
             .debug_selector(|| format!("blocks-page-{}", doc.id))
             .id(SharedString::from(format!("blocks-page-{}", doc.id)))
-            .role(Role::Link)
-            .aria_label(format!("Page {title}"))
+            .control(module_path!(), Role::Link, format!("Page {title}"))
             .w_full()
             .my(px(2.))
             .px(px(4.))
@@ -646,6 +645,7 @@ impl EmbedPlugin {
                 "blocks-embed-title-{}",
                 data.key
             )))
+            .control(module_path!(), Role::Link, format!("Open {title}"))
             .flex_none()
             .flex()
             .items_center()
@@ -711,6 +711,7 @@ impl EmbedPlugin {
                 data.key
             )))
             .debug_selector(|| "blocks-embed-grip".into())
+            .control(module_path!(), Role::Splitter, format!("Height of {title}"))
             .absolute()
             .left_0()
             .right_0()

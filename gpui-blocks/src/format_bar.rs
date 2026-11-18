@@ -21,6 +21,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{ActiveTheme as _, Icon, IconName, Popover, PopupMenu, PopupMenuItem, Sheet};
+use markdown_editor::Control as _;
 use markdown_editor::actions::EditLink;
 use markdown_editor::{
     BACKGROUNDS, BlockSelection, EditorCommand, MarkChange, MarkKind, MarkState, PaletteColor,
@@ -279,8 +280,7 @@ impl Editor {
         let trigger = div()
             .id("blocks-format-color")
             .debug_selector(|| "blocks-format-color".into())
-            .role(Role::Button)
-            .aria_label("Color")
+            .control(module_path!(), Role::Button, "Color")
             .aria_expanded(self.format_color)
             .h(px(28.))
             .px(px(6.))
@@ -347,8 +347,7 @@ impl Editor {
             div()
                 .id(SharedString::from(format!("blocks-format-{label}")))
                 .debug_selector(move || format!("blocks-format-{label}"))
-                .role(Role::Button)
-                .aria_label(label)
+                .control(module_path!(), Role::Button, label)
                 .aria_toggled(if on { Toggled::True } else { Toggled::False })
                 .size(size)
                 .flex_none()
@@ -442,8 +441,7 @@ impl Editor {
             let trigger = div()
                 .id("blocks-format-turn")
                 .debug_selector(|| "blocks-format-turn".into())
-                .role(Role::Button)
-                .aria_label("Turn into")
+                .control(module_path!(), Role::Button, "Turn into")
                 .aria_expanded(self.format_turn)
                 .h(px(28.))
                 .px(px(8.))
@@ -514,8 +512,7 @@ impl Editor {
             div()
                 .id("blocks-format-comment")
                 .debug_selector(|| "blocks-format-comment".into())
-                .role(Role::Button)
-                .aria_label("Comment")
+                .control(module_path!(), Role::Button, "Comment")
                 .h(px(28.))
                 .px(px(8.))
                 .flex()
@@ -553,8 +550,7 @@ impl Editor {
                         div()
                             .id("blocks-format-bar")
                             .debug_selector(|| "blocks-format-bar".into())
-                            .role(Role::Toolbar)
-                            .aria_label("Format")
+                            .control(module_path!(), Role::Toolbar, "Format")
                             .flex()
                             .items_center()
                             .gap(px(2.))

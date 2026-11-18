@@ -6,6 +6,7 @@
 
 use gpui::*;
 use gpui_core::ActiveTheme as _;
+use markdown_editor::Control as _;
 use markdown_editor::{BlockId, BlockKind, EditorCommand};
 
 use crate::Editor;
@@ -119,6 +120,11 @@ impl Editor {
                     div()
                         .id(("blocks-column-handle", at))
                         .debug_selector(move || format!("blocks-column-handle-{at}"))
+                        .control(
+                            module_path!(),
+                            Role::Splitter,
+                            format!("Width of columns {} and {}", at + 1, at + 2),
+                        )
                         .w(px(8.))
                         .h(bottom - top)
                         .flex()

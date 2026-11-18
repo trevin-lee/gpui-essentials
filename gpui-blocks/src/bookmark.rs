@@ -19,6 +19,7 @@ use std::sync::Arc;
 use gpui::*;
 use gpui_core::ActiveTheme as _;
 use markdown::mdast::Node;
+use markdown_editor::Control as _;
 use markdown_editor::{CustomNode, Extension};
 
 /// The link title that makes a link on a line of its own a bookmark.
@@ -352,8 +353,11 @@ fn card(bookmark: &Bookmark, hooks: &BookmarkHooks, cx: &mut App) -> AnyElement 
             bookmark.url
         )))
         .debug_selector(|| "blocks-bookmark".into())
-        .role(Role::Link)
-        .aria_label(format!("Bookmark {title}, {}", bookmark.site()))
+        .control(
+            module_path!(),
+            Role::Link,
+            format!("Bookmark {title}, {}", bookmark.site()),
+        )
         .w_full()
         .my(px(4.))
         .flex()
