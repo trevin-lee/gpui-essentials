@@ -668,16 +668,12 @@ impl TableView {
                     .hint(ops::view_type_label(&v.kind)),
             );
         }
-        // A gallery doesn't draw groups yet.
-        let groups = v.kind != ViewType::Gallery;
-        if groups {
-            out.push(
-                Entry::sub("Group by", self.group_entries(v))
-                    .icon(I::Group)
-                    .hint(group.map_or("None", |p| p.name.as_str())),
-            );
-        }
-        if groups && group.is_some_and(|p| p.kind.is_date()) {
+        out.push(
+            Entry::sub("Group by", self.group_entries(v))
+                .icon(I::Group)
+                .hint(group.map_or("None", |p| p.name.as_str())),
+        );
+        if group.is_some_and(|p| p.kind.is_date()) {
             out.push(
                 Entry::sub(DATE_GROUPING, self.group_date_entries(v))
                     .icon(I::CalendarDays)
