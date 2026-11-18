@@ -24,7 +24,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   blocks), Color (a text or background colour over all its text), Copy link to block (when your
   app makes links to blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips
   to select several blocks whole: Delete, ⌘D, ⌘⇧↑ or ↓ and a selected block's menu act on them
-  all.
+  all. A drag that starts in the page's margin, beside the blocks, selects the blocks it sweeps
+  over the same way.
 - **Format bar:** select text with the pointer for a bar above it: Turn into (every block the
   text runs through), bold, italic, underline, strikethrough, code, link (the app's link field,
   as ⌘K) and Color: Notion's nine text colours (stored as `<span style="color:#…">`) and nine
