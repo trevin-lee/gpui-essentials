@@ -176,6 +176,10 @@ pub struct PopupMenuItem {
     icon: Option<IconName>,
     pub(crate) checked: Option<bool>,
     pub(crate) disabled: bool,
+    /// What can't be undone (delete, remove): drawn in the destructive colour.
+    destructive: bool,
+    /// What a click on the row does by default: its label in semibold.
+    emphasized: bool,
     shortcut: Option<SharedString>,
     chip: Option<AnyElement>,
     label_element: Option<AnyElement>,
@@ -197,6 +201,8 @@ impl PopupMenuItem {
             icon: None,
             checked: None,
             disabled: false,
+            destructive: false,
+            emphasized: false,
             shortcut: None,
             chip: None,
             label_element: None,
@@ -224,6 +230,21 @@ impl PopupMenuItem {
         self
     }
 
+    /// What can't be undone (Delete, Remove): its label and icon in the destructive colour, and
+    /// its highlight that colour's fill (`destructive_fill`), as shadcn's destructive item.
+    /// Assistive tech hears its label as it is.
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
+    }
+
+    /// The entry a click on what the menu is for does by default (Open): its label in
+    /// semibold, as the Mac draws a menu's default item.
+    pub fn emphasized(mut self) -> Self {
+        self.emphasized = true;
+        self
+    }
+
     /// A shortcut's text at the end ("⌘C"), for show: the menu doesn't bind it.
     pub fn shortcut(mut self, text: impl Into<SharedString>) -> Self {
         self.shortcut = Some(text.into());
@@ -239,6 +260,8 @@ impl PopupMenuItem {
             icon: self.icon,
             checked: self.checked,
             disabled: self.disabled,
+            destructive: self.destructive,
+            emphasized: self.emphasized,
             shortcut: self.shortcut.clone(),
             chip: None,
             label_element: None,
@@ -1607,6 +1630,7 @@ fn rows_with(
             let set_highlight = set_highlight.clone();
             // A disabled entry can't be highlighted, so Enter can't pick it.
             let disabled = item.disabled;
+            let destructive = item.destructive;
             let on_select = on_select.clone();
             let rest = subs.as_ref().map(|s| s.rest.clone());
             // In a reorder group (with a drag starting on it unless it's disabled), lifted, and
@@ -1647,7 +1671,14 @@ fn rows_with(
                 .px(css(8.))
                 .rounded(theme.radius_sm())
                 .text_size(text_size)
-                .when(on, |r| r.bg(highlight).text_color(highlight_text))
+                .when(destructive, |r| r.text_color(theme.destructive))
+                .when(on && !destructive, |r| {
+                    r.bg(highlight).text_color(highlight_text)
+                })
+                .when(on && destructive, |r| r.bg(theme.destructive_fill))
+                .when(item.emphasized, |r| {
+                    r.font_weight(gpui::FontWeight::SEMIBOLD)
+                })
                 .when(item.disabled, |r| r.text_color(muted).opacity(0.6))
                 .when(opens, |r| r.aria_expanded(open_now))
                 .on_hover(move |hovered, window, cx| {
@@ -1757,7 +1788,13 @@ fn rows_with(
                 })
                 .when_some(item.chip, |r, chip| r.child(chip))
                 .when_some(item.icon, |r, icon| {
-                    r.child(Icon::new(icon).color(if on { highlight_text } else { muted }))
+                    r.child(Icon::new(icon).color(if destructive {
+                        theme.destructive
+                    } else if on {
+                        highlight_text
+                    } else {
+                        muted
+                    }))
                 })
                 .child(
                     // As wide as its text, filling the row: a long hint gives way first.
