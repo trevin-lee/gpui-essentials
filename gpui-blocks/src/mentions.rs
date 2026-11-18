@@ -680,6 +680,7 @@ impl Editor {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let touch = self.touch_sized(window);
         let menu = self.mention.as_ref()?;
         let caret = self.state.read(cx).caret_bounds()?;
         let theme = cx.theme();
@@ -716,6 +717,7 @@ impl Editor {
                 div()
                     .id(("blocks-mention-row", ix))
                     .control(module_path!(), Role::ListBoxOption, mention.title.clone())
+                    .when(touch, |d| d.min_h(px(44.)))
                     .aria_description(mention.hint.clone())
                     .aria_selected(ix == menu.selected)
                     .debug_selector(move || format!("blocks-mention-option-{id}"))

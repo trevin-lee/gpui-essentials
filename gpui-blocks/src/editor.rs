@@ -1344,7 +1344,7 @@ impl Editor {
     }
 
     /// The offer's menu, under the pasted line.
-    fn paste_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+    fn paste_menu(&self, touch: bool, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
         let offer = self.paste_offer.as_ref()?;
         let state = self.state.read(cx);
         if state.is_readonly() {
@@ -1382,6 +1382,8 @@ impl Editor {
                 )
                 .px(px(10.))
                 .py(px(5.))
+                // A finger's target on touch.
+                .when(touch, |d| d.h(px(44.)).flex().items_center())
                 .rounded(px(5.))
                 .cursor_pointer()
                 .hover(move |s| s.bg(accent))
@@ -2082,6 +2084,12 @@ impl Editor {
         .detach();
     }
 
+    /// Whether controls are sized for a finger, 44 points each way: on a phone's layout, or
+    /// after a touch.
+    pub(crate) fn touch_sized(&self, window: &Window) -> bool {
+        self.compact(window) || window.last_input_was_touch()
+    }
+
     /// Whether the editor is laid out for a phone: narrower than [`Options::compact_below`], by
     /// its width when it was last drawn (the window's before that).
     pub(crate) fn compact(&self, window: &Window) -> bool {
@@ -2325,6 +2333,7 @@ impl Editor {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement + use<>> {
+        let touch = self.touch_sized(window);
         let slash = self.slash.as_ref()?;
         let caret = self.state.read(cx).caret_bounds()?;
         let theme = cx.theme();
@@ -2350,9 +2359,11 @@ impl Editor {
             rows.push(
                 div()
                     .id(("blocks-slash", ix))
+                    .debug_selector(move || format!("blocks-slash-{n}"))
                     .control(module_path!(), Role::ListBoxOption, item.title.clone())
                     .aria_description(item.hint.clone())
                     .aria_selected(selected)
+                    .when(touch, |d| d.min_h(px(44.)))
                     .mx_1()
                     .px_2()
                     .py_1()
@@ -3061,7 +3072,8 @@ impl Render for Editor {
         let slash_menu = self.slash_menu(window, cx);
         let mention_menu = self.mention_menu(window, cx);
         let handles = self.selection_handles(window, cx);
-        let paste_menu = self.paste_menu(cx);
+        let touch = self.touch_sized(window);
+        let paste_menu = self.paste_menu(touch, cx);
         let resize = self.resizing.is_some().then(|| {
             // While an embed's height is dragged, the pointer is followed anywhere in the window.
             let this = cx.entity().downgrade();
@@ -3087,7 +3099,7 @@ impl Render for Editor {
         });
         let edit_menu = self.edit_menu(window, cx);
         let format_bar = self.format_bar(window, cx);
-        let code_chrome = self.code_chrome(cx);
+        let code_chrome = self.code_chrome(touch, cx);
         let column_handles = if self.shows_side_menu(window) {
             self.column_handles(cx)
         } else {
@@ -3095,7 +3107,7 @@ impl Render for Editor {
         };
         let block_sheet = self.block_sheet(cx);
         let color_sheet = self.color_sheet(cx);
-        let find_bar = self.find_bar(compact, cx);
+        let find_bar = self.find_bar(compact, touch, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
         // While blocks are dragged, the page scrolls when the pointer (or finger) nears its top
         // or bottom edge, a frame at a time. A step asks for the next frame only when it
@@ -3432,6 +3444,57 @@ mod tests {
             heading.top() >= view.top() && heading.top() < view.top() + gpui::px(100.),
             "near the top: {heading:?} in {view:?}"
         );
+    }
+
+    /// On a phone every control is a finger's target, 44 points each way: the slash menu's
+    /// rows, a code block's chrome and the find bar's buttons.
+    #[gpui::test]
+    fn a_phones_controls_are_a_fingers_size(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "Words\n\n```rust\nfn main() {}\n```");
+        cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(844.)));
+        draw(cx);
+        let tall = |cx: &mut VisualTestContext, name: &'static str| {
+            let b = cx
+                .debug_bounds(name)
+                .unwrap_or_else(|| panic!("{name} isn't drawn"));
+            assert!(b.size.height >= gpui::px(44.), "{name}: {b:?}");
+        };
+        // The slash menu, on a new line after the words.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let id = s.model().document().leaves().next().unwrap().id();
+                let _ = s.set_selection(BlockSelection::caret(BlockPosition::new(id, 5)), cx);
+            })
+        });
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("/");
+        draw(cx);
+        tall(cx, "blocks-slash-0");
+        cx.simulate_keystrokes("escape");
+        // The code block's chrome, with the caret in it.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let id = s
+                    .model()
+                    .document()
+                    .leaves()
+                    .find(|l| l.kind() == BlockKind::CodeBlock)
+                    .unwrap()
+                    .id();
+                let _ = s.set_selection(BlockSelection::caret(BlockPosition::new(id, 2)), cx);
+            })
+        });
+        draw(cx);
+        draw(cx);
+        tall(cx, "blocks-code-copy");
+        // The find bar.
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-f"
+        } else {
+            "ctrl-f"
+        });
+        draw(cx);
+        tall(cx, "find-next");
     }
 
     /// Page Down and Up move the caret a page with the view, ⇧ extending the selection; past
