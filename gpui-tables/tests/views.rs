@@ -625,6 +625,93 @@ fn card_properties_are_ordered_by_a_long_press_on_touch(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+fn the_filter_builder_adds_changes_and_deletes_rules(cx: &mut TestAppContext) {
+    use serde_json::{Value as Json, json};
+    let host = TestHost::new();
+    let (_, cx) = open_people_bar(cx, &host);
+    let filter = |host: &TestHost| changed(&last_batch(host)[0]).filter.clone();
+    // All people has no filter: its settings' Filter has a rule to add and nothing to delete.
+    click(cx, "view-settings");
+    click(cx, item("Filter"));
+    assert!(drawn(cx, item("Add a filter rule")));
+    assert!(!drawn(cx, item("Delete filter")) && !drawn(cx, item("Rule 1")));
+    // A rule for Stage: "is", no value yet (which filters nothing), then Lead picked.
+    click(cx, item("Add a filter rule"));
+    click(cx, item("Stage"));
+    assert_eq!(
+        filter(&host),
+        Some(Filter::condition(STAGE, FilterOp::Is, Json::Null))
+    );
+    click(cx, item("Rule 1"));
+    click(cx, item("Value"));
+    click(cx, item("Lead"));
+    assert_eq!(
+        filter(&host),
+        Some(Filter::condition(STAGE, FilterOp::Is, json!(LEAD)))
+    );
+    // A second rule, for Role: "contains", its value typed on a step of its own; back, the
+    // rule's submenu is open again.
+    click(cx, item("Add a filter rule"));
+    click(cx, item("Role"));
+    click(cx, item("Rule 2"));
+    click(cx, item("Value"));
+    assert!(drawn(cx, "menu-field"));
+    type_name(cx, "eng");
+    keys(cx, "enter");
+    let stage = Filter::condition(STAGE, FilterOp::Is, json!(LEAD));
+    let role = Filter::condition(ROLE, FilterOp::Contains, json!("eng"));
+    assert_eq!(
+        filter(&host),
+        Some(Filter::And {
+            and: vec![stage.clone(), role.clone()]
+        })
+    );
+    assert!(
+        drawn(cx, item("Delete rule")),
+        "Rule 2's submenu, open again"
+    );
+    // Any rule rather than all.
+    click(cx, item("Match any"));
+    assert_eq!(
+        filter(&host),
+        Some(Filter::Or {
+            or: vec![stage.clone(), role]
+        })
+    );
+    // Rule 2's condition changed to one that takes no value: its value goes.
+    click(cx, item("Rule 2"));
+    click(cx, item("Condition"));
+    click(cx, item("is empty"));
+    let empty = Filter::condition(ROLE, FilterOp::IsEmpty, Json::Null);
+    assert_eq!(
+        filter(&host),
+        Some(Filter::Or {
+            or: vec![stage, empty.clone()]
+        })
+    );
+    // Rule 1 deleted: the other alone. Then the whole filter.
+    click(cx, item("Rule 1"));
+    click(cx, item("Delete rule"));
+    assert_eq!(filter(&host), Some(empty));
+    click(cx, item("Delete filter"));
+    assert_eq!(filter(&host), None);
+    keys(cx, "escape escape escape");
+
+    // Follow up's filter has a group: it stays one rule, and a rule added goes after it.
+    click(cx, tab(FOLLOW_UP_VIEW));
+    click(cx, "view-filter");
+    assert!(drawn(cx, item("Rule 2")), "the summary opens the rules");
+    click(cx, item("Add a filter rule"));
+    click(cx, item("Warmth"));
+    let Some(Filter::And { and }) = filter(&host) else {
+        panic!("{:?}", filter(&host))
+    };
+    assert_eq!(and.len(), 3);
+    assert!(matches!(&and[1], Filter::Or { or } if or.len() == 2));
+    assert_eq!(and[2], Filter::condition(WARMTH, FilterOp::Is, Json::Null));
+}
+
+#[gpui::test]
 fn sorts_and_filters_are_summed_up_in_the_bar(cx: &mut TestAppContext) {
     let host = TestHost::new();
     let (table, cx) = open_people_bar(cx, &host);
