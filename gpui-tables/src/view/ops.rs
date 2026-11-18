@@ -295,6 +295,108 @@ pub fn filter(view: &View, condition: Condition) -> View {
     view
 }
 
+/// A view's filter as a filter builder lists it (Notion's "Advanced filter"): its rules, each a
+/// condition or a group of them, and whether a row passes when it passes all of them or any.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rules {
+    /// Any rule (`or`), rather than all of them (`and`).
+    pub any: bool,
+    pub rules: Vec<Filter>,
+}
+
+/// The view's filter as rules: none for no filter, one for a lone condition, and an `and`'s or
+/// an `or`'s children.
+pub fn rules(view: &View) -> Rules {
+    match &view.filter {
+        None => Rules {
+            any: false,
+            rules: Vec::new(),
+        },
+        Some(Filter::And { and }) => Rules {
+            any: false,
+            rules: and.clone(),
+        },
+        Some(Filter::Or { or }) => Rules {
+            any: true,
+            rules: or.clone(),
+        },
+        Some(c @ Filter::Condition(_)) => Rules {
+            any: false,
+            rules: vec![c.clone()],
+        },
+    }
+}
+
+/// The view with `rules` as its filter: none when there are none, a lone rule on its own, and
+/// otherwise an `or` (any) or an `and` (all) of them.
+pub fn with_rules(view: &View, mut rules: Rules) -> View {
+    let mut view = view.clone();
+    view.filter = match rules.rules.len() {
+        0 => None,
+        1 => rules.rules.pop(),
+        _ if rules.any => Some(Filter::Or { or: rules.rules }),
+        _ => Some(Filter::And { and: rules.rules }),
+    };
+    view
+}
+
+/// The view with `rule` added after its other rules.
+pub fn add_rule(view: &View, rule: Filter) -> View {
+    let mut r = rules(view);
+    r.rules.push(rule);
+    with_rules(view, r)
+}
+
+/// The view with its rule `index` in place of what it was (unchanged past the last rule).
+pub fn set_rule(view: &View, index: usize, rule: Filter) -> View {
+    let mut r = rules(view);
+    match r.rules.get_mut(index) {
+        Some(at) => *at = rule,
+        None => return view.clone(),
+    }
+    with_rules(view, r)
+}
+
+/// The view without its rule `index`.
+pub fn remove_rule(view: &View, index: usize) -> View {
+    let mut r = rules(view);
+    if index >= r.rules.len() {
+        return view.clone();
+    }
+    r.rules.remove(index);
+    with_rules(view, r)
+}
+
+/// The view passing rows by any of its rules, or by all of them.
+pub fn set_any(view: &View, any: bool) -> View {
+    let mut r = rules(view);
+    r.any = any;
+    with_rules(view, r)
+}
+
+/// A new rule for `property`, as a filter builder adds one: the operator Notion starts with for
+/// its type and no value, which filters nothing until a value is given (the engine leaves a
+/// condition without one out). Text starts on "contains", a checkbox on "is checked" (which
+/// needs no value), and the rest on their first operator.
+pub fn new_rule(property: &Property) -> Condition {
+    let op = if property.kind.is_text() {
+        FilterOp::Contains
+    } else if property.kind == PropertyType::Checkbox {
+        FilterOp::IsChecked
+    } else {
+        FilterOp::ALL
+            .iter()
+            .find(|op| op.applies_to(&property.kind))
+            .cloned()
+            .unwrap_or(FilterOp::IsNotEmpty)
+    };
+    Condition {
+        property_id: property.id.clone(),
+        op,
+        value: Json::Null,
+    }
+}
+
 /// The view without the conditions at the top of its filter that test `property_id` (ones
 /// deeper in an `or` are the filter's own business and stay).
 pub fn clear_filter(view: &View, property_id: &str) -> View {
@@ -726,4 +828,102 @@ pub fn move_card_property(db: &DatabaseFields, view: &View, property_id: &str, b
     }
     view.card_properties = shown;
     view
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use super::*;
+    use crate::model::ViewType;
+    use serde_json::json;
+
+    fn cond(p: &str, v: &str) -> Filter {
+        Filter::condition(p, FilterOp::Is, json!(v))
+    }
+
+    fn view(filter: Option<Filter>) -> View {
+        let mut v = View::new("v", "All", ViewType::Table, "a0");
+        v.filter = filter;
+        v
+    }
+
+    #[test]
+    fn a_filter_reads_as_rules_and_writes_back_the_same() {
+        let (a, b) = (cond("p", "a"), cond("q", "b"));
+        let and = Filter::And {
+            and: vec![a.clone(), b.clone()],
+        };
+        let or = Filter::Or {
+            or: vec![a.clone(), and.clone()],
+        };
+        for f in [None, Some(a.clone()), Some(and.clone()), Some(or.clone())] {
+            let v = view(f.clone());
+            assert_eq!(with_rules(&v, rules(&v)).filter, f);
+        }
+        assert_eq!(rules(&view(None)).rules, Vec::<Filter>::new());
+        assert_eq!(rules(&view(Some(a.clone()))).rules, vec![a.clone()]);
+        let r = rules(&view(Some(or)));
+        assert!(r.any);
+        assert_eq!(r.rules, vec![a, and], "a group stays one rule");
+    }
+
+    #[test]
+    fn rules_are_added_changed_removed_and_switched_between_all_and_any() {
+        let (a, b, c) = (cond("p", "a"), cond("q", "b"), cond("r", "c"));
+        let v = add_rule(&view(None), a.clone());
+        assert_eq!(v.filter, Some(a.clone()), "one rule is the condition alone");
+        let v = add_rule(&v, b.clone());
+        assert_eq!(
+            v.filter,
+            Some(Filter::And {
+                and: vec![a.clone(), b.clone()]
+            })
+        );
+        let v = set_any(&v, true);
+        assert_eq!(
+            v.filter,
+            Some(Filter::Or {
+                or: vec![a.clone(), b.clone()]
+            })
+        );
+        let v = set_rule(&v, 1, c.clone());
+        assert_eq!(
+            v.filter,
+            Some(Filter::Or {
+                or: vec![a.clone(), c.clone()]
+            })
+        );
+        assert_eq!(
+            set_rule(&v, 5, b.clone()),
+            v,
+            "past the last rule: unchanged"
+        );
+        let v = remove_rule(&v, 0);
+        assert_eq!(v.filter, Some(c.clone()));
+        assert_eq!(remove_rule(&v, 3), v);
+        assert_eq!(remove_rule(&v, 0).filter, None);
+        // All or any of one rule is the rule.
+        assert_eq!(set_any(&view(Some(a.clone())), true).filter, Some(a));
+    }
+
+    #[test]
+    fn a_new_rule_starts_on_its_types_first_operator_with_no_value() {
+        let p = |kind: PropertyType| Property::new("p", "P", kind, "a0");
+        for (kind, op) in [
+            (PropertyType::Title, FilterOp::Contains),
+            (PropertyType::Text, FilterOp::Contains),
+            (PropertyType::Number, FilterOp::Is),
+            (PropertyType::Select, FilterOp::Is),
+            (PropertyType::MultiSelect, FilterOp::Contains),
+            (PropertyType::Date, FilterOp::Is),
+            (PropertyType::Checkbox, FilterOp::IsChecked),
+            (PropertyType::Person, FilterOp::Contains),
+            (PropertyType::Relation, FilterOp::Contains),
+            (PropertyType::CreatedTime, FilterOp::Is),
+        ] {
+            let c = new_rule(&p(kind.clone()));
+            assert_eq!(c.op, op, "{kind:?}");
+            assert!(c.op.applies_to(&kind));
+            assert_eq!(c.value, Json::Null);
+        }
+    }
 }
