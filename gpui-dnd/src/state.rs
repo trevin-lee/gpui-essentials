@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
+use std::time::{Duration, Instant};
 
 use gpui::{
     App, Bounds, ElementId, EntityId, Global, KeystrokeEvent, Modifiers, Pixels, Point,
@@ -12,7 +13,7 @@ use gpui::{
 
 use crate::item::{DragItem, DropResult};
 use crate::monitor::{DragMonitor, DropMonitor, Snapshot, TargetSnap};
-use crate::source::{Backend, EndInfo, SourceSpec};
+use crate::source::{Backend, EndInfo, PreviewSpec, SourceSpec};
 use crate::target::{DropOutcome, DropTarget};
 
 /// A source as last drawn. Its element holds the `Rc` in its element state, so it lives as long
@@ -45,6 +46,14 @@ pub(crate) struct Registry {
 }
 
 impl Registry {
+    pub fn source(&self, id: &ElementId) -> Option<Rc<SourceRecord>> {
+        self.sources
+            .iter()
+            .rev()
+            .filter_map(Weak::upgrade)
+            .find(|s| &s.id == id)
+    }
+
     pub fn add_source(&mut self, source: &Rc<SourceRecord>) {
         self.sources.push(Rc::downgrade(source));
         self.prune();
@@ -105,6 +114,47 @@ pub(crate) struct ActiveDrag {
     pub snap: Rc<Snapshot>,
     /// The targets under the pointer, as `snap.targets`.
     pub targets: Vec<Rc<TargetRecord>>,
+    /// Set once it's ended without a drop and its preview is going back to the source.
+    pub returning: Option<Returning>,
+}
+
+/// How long a preview takes to go back to its source after a cancel.
+pub const RETURN_DURATION: Duration = Duration::from_millis(200);
+
+/// A preview on its way back to its source. The drag ends (the source hears `on_end`) when it
+/// lands, as a drag on the Mac ends once its image has slid back.
+pub(crate) struct Returning {
+    pub from: Point<Pixels>,
+    pub to: Point<Pixels>,
+    pub started: Instant,
+    pub end: EndInfo,
+    /// Tells this return's timer from an earlier one's.
+    pub generation: u64,
+}
+
+impl Returning {
+    /// How far back it is, from 0 to 1.
+    pub fn progress(&self, now: Instant) -> f32 {
+        (now.saturating_duration_since(self.started).as_secs_f32() / RETURN_DURATION.as_secs_f32())
+            .min(1.)
+    }
+
+    /// Where the preview is: an ease-out from where it was let go to the source.
+    pub fn origin(&self, now: Instant) -> Point<Pixels> {
+        let t = self.progress(now);
+        let eased = 1. - (1. - t).powi(3);
+        self.from + (self.to - self.from) * eased
+    }
+}
+
+impl ActiveDrag {
+    /// Where the preview's top-left is now.
+    pub fn preview_origin(&self, now: Instant) -> Point<Pixels> {
+        match &self.returning {
+            Some(r) => r.origin(now),
+            None => self.snap.current - self.snap.grab(),
+        }
+    }
 }
 
 pub(crate) trait Collector {
@@ -151,7 +201,7 @@ pub(crate) fn shared(cx: &mut App) -> Rc<RefCell<DndState>> {
     let state = Rc::new(RefCell::new(DndState::default()));
     // Escape cancels a drag whatever has the focus, before any binding sees it.
     let keys = cx.intercept_keystrokes(|event: &KeystrokeEvent, window, cx| {
-        if event.keystroke.key == "escape" && is_dragging_in(window, cx) {
+        if event.keystroke.key == "escape" && drag_in(window, cx).is_some() {
             cancel(window, cx);
             cx.stop_propagation();
         }
@@ -167,10 +217,13 @@ pub(crate) fn snapshot(cx: &App) -> Option<Rc<Snapshot>> {
     state.drag.as_ref().map(|d| d.snap.clone())
 }
 
-fn is_dragging_in(window: &Window, cx: &App) -> bool {
+/// The drag in this window, if there is one: whether its preview is on its way back.
+pub(crate) fn drag_in(window: &Window, cx: &App) -> Option<bool> {
     let id = window.window_handle().window_id();
-    cx.try_global::<DndGlobal>()
-        .is_some_and(|g| g.0.borrow().drag.as_ref().is_some_and(|d| d.window == id))
+    let global = cx.try_global::<DndGlobal>()?;
+    let state = global.0.borrow();
+    let drag = state.drag.as_ref().filter(|d| d.window == id)?;
+    Some(drag.returning.is_some())
 }
 
 pub(crate) fn window_id(window: &Window) -> WindowId {
@@ -204,6 +257,7 @@ pub(crate) fn begin(
         modifiers: window.modifiers(),
         did_drop: false,
         drop_result: None,
+        returning: false,
     };
     let state = shared(cx);
     {
@@ -214,6 +268,7 @@ pub(crate) fn begin(
             spec: spec.clone(),
             snap: Rc::new(snap),
             targets: Vec::new(),
+            returning: None,
         });
     }
     if let Some(on_begin) = &spec.on_begin {
@@ -229,7 +284,7 @@ pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Wind
     let state = shared(cx);
     let (records, mut snap) = {
         let mut state = state.borrow_mut();
-        let Some(drag) = state.drag.as_ref() else {
+        let Some(drag) = state.drag.as_ref().filter(|d| d.returning.is_none()) else {
             return;
         };
         let window_id = drag.window;
@@ -286,7 +341,7 @@ fn drop_monitor(monitor: &DragMonitor, record: &TargetRecord) -> DropMonitor {
 /// Lets go at `at`: the targets there that can take the item are asked, innermost first.
 /// Returns whether one took it.
 pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> bool {
-    if !is_dragging_in(window, cx) {
+    if drag_in(window, cx) != Some(false) {
         return false;
     }
     move_to(at, window.modifiers(), window, cx);
@@ -329,38 +384,116 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
             break;
         }
     }
-    let dropped = taken_by.is_some();
-    finish(
-        EndInfo {
-            dropped,
-            target: taken_by,
-            result,
-            cancelled: !dropped,
-            backend: snap.backend,
-        },
-        window,
-        cx,
-    );
+    let end = EndInfo {
+        dropped: taken_by.is_some(),
+        target: taken_by,
+        result,
+        cancelled: false,
+        backend: snap.backend,
+    };
+    if end.dropped {
+        finish(end, window, cx);
+    } else {
+        go_back(end, window, cx);
+    }
     true
 }
 
-/// Ends the drag without a drop.
+/// Ends the drag without a drop: the preview goes back to the source. A drag already going
+/// back lands at once.
 pub(crate) fn cancel(window: &mut Window, cx: &mut App) {
-    let backend = match snapshot(cx) {
-        Some(snap) => snap.backend,
-        None => return,
+    let Some(returning) = drag_in(window, cx) else {
+        return;
     };
-    finish(
+    if returning {
+        land(None, window, cx);
+        return;
+    }
+    let Some(snap) = snapshot(cx) else { return };
+    go_back(
         EndInfo {
             dropped: false,
             target: None,
             result: None,
             cancelled: true,
-            backend,
+            backend: snap.backend,
         },
         window,
         cx,
     );
+}
+
+/// Sends the preview back to where the source is now, and ends the drag when it lands; at once
+/// when motion is reduced or nothing is drawn to go back.
+fn go_back(mut end: EndInfo, window: &mut Window, cx: &mut App) {
+    end.cancelled = true;
+    let state = shared(cx);
+    let now = cx.background_executor().now();
+    let animate = !cx.reduce_motion();
+    let plan = {
+        let state = state.borrow();
+        let Some(drag) = state.drag.as_ref() else {
+            return;
+        };
+        let drawn = !matches!(drag.spec.preview, PreviewSpec::None);
+        let to = state
+            .registries
+            .get(&drag.window)
+            .and_then(|r| r.source(&drag.snap.source))
+            .map_or(drag.snap.source_origin, |s| s.bounds.origin);
+        let from = drag.preview_origin(now);
+        (animate && drawn && from != to).then_some((from, to))
+    };
+    let Some((from, to)) = plan else {
+        finish(end, window, cx);
+        return;
+    };
+    let generation = {
+        let mut state = state.borrow_mut();
+        let generation = state.next_seq();
+        let Some(drag) = state.drag.as_mut() else {
+            return;
+        };
+        let mut snap = (*drag.snap).clone();
+        snap.targets.clear();
+        snap.returning = true;
+        drag.snap = Rc::new(snap);
+        drag.targets.clear();
+        drag.returning = Some(Returning {
+            from,
+            to,
+            started: now,
+            end,
+            generation,
+        });
+        generation
+    };
+    window
+        .spawn(cx, async move |cx| {
+            cx.background_executor().timer(RETURN_DURATION).await;
+            cx.update(|window, cx| land(Some(generation), window, cx))
+                .ok();
+        })
+        .detach();
+    publish(cx);
+    redraw(window, cx);
+}
+
+/// Ends a drag whose preview was going back: the one `generation` started, or whichever.
+pub(crate) fn land(generation: Option<u64>, window: &mut Window, cx: &mut App) {
+    let state = shared(cx);
+    let end = {
+        let mut state = state.borrow_mut();
+        let Some(drag) = state.drag.as_mut() else {
+            return;
+        };
+        match &drag.returning {
+            Some(r) if generation.is_none_or(|g| g == r.generation) => {}
+            _ => return,
+        }
+        drag.returning.take().expect("matched above").end
+    };
+    finish(end, window, cx);
 }
 
 fn finish(end: EndInfo, window: &mut Window, cx: &mut App) {

@@ -8,9 +8,14 @@ use gpui::{
 };
 use gpui_core::ActiveTheme as _;
 
+use std::rc::Rc;
+
 use crate::item::DragItem;
+use crate::monitor::{DragLayerMonitor, DragMonitor};
 use crate::source::{Backend, PreviewSpec};
 use crate::state;
+
+type Layer = Rc<dyn Fn(&DragLayerMonitor, &mut Window, &mut App) -> Option<AnyElement>>;
 
 /// The preview's place among deferred draws: above gpui-core's popovers (1), dialogs (2) and
 /// toasts (3), and anything else drawn in the window.
@@ -34,6 +39,7 @@ pub const PREVIEW_PRIORITY: usize = 100;
 pub struct DndProvider {
     child: Option<AnyElement>,
     mouse: bool,
+    layer: Option<Layer>,
 }
 
 impl DndProvider {
@@ -41,7 +47,21 @@ impl DndProvider {
         Self {
             child: Some(child.into_any_element()),
             mouse: true,
+            layer: None,
         }
+    }
+
+    /// A custom drag layer (react-dnd's `useDragLayer`), for sources whose preview is
+    /// [`Preview::Layer`](crate::Preview::Layer). It's called on each frame of their drag, and
+    /// what it returns is drawn above everything over the whole window: place it with
+    /// `.absolute()` at [`preview_origin`](DragLayerMonitor::preview_origin), which also follows
+    /// the preview back to its source after a cancel. It takes no presses.
+    pub fn layer(
+        mut self,
+        layer: impl Fn(&DragLayerMonitor, &mut Window, &mut App) -> Option<AnyElement> + 'static,
+    ) -> Self {
+        self.layer = Some(Rc::new(layer));
+        self
     }
 
     /// Whether the mouse and trackpad start drags. On unless turned off.
@@ -107,7 +127,7 @@ impl Element for DndProvider {
         child.prepaint(window, cx);
         shared.borrow_mut().provider_depth -= 1;
         if outermost {
-            draw_preview(window, cx);
+            draw_preview(self.layer.as_ref(), window, cx);
         }
         outermost
     }
@@ -127,7 +147,7 @@ impl Element for DndProvider {
             return;
         }
         let window_id = state::window_id(window);
-        if state::snapshot(cx).is_some() {
+        if state::drag_in(window, cx) == Some(false) {
             window.set_window_cursor_style(gpui::CursorStyle::ClosedHand);
         }
         if self.mouse {
@@ -148,9 +168,13 @@ impl Element for DndProvider {
 }
 
 fn listen_to_mouse(window: &mut Window) {
-    // A new press forgets an old one, before the sources under it hear it.
+    // A new press forgets an old one, before the sources under it hear it, and lands a preview
+    // on its way back.
     window.on_mouse_event(|_: &MouseDownEvent, phase, window, cx| {
         if phase == DispatchPhase::Capture {
+            if state::drag_in(window, cx) == Some(true) {
+                state::land(None, window, cx);
+            }
             let shared = state::shared(cx);
             let mut state = shared.borrow_mut();
             if state
@@ -225,13 +249,12 @@ fn listen_to_mouse(window: &mut Window) {
     });
 }
 
-/// Draws the drag's preview, if it has one in this window, above everything else.
-fn draw_preview(window: &mut Window, cx: &mut App) {
-    let Some(snap) = state::snapshot(cx) else {
-        return;
-    };
+/// Draws the drag's preview, if it has one in this window, above everything else, and asks
+/// for the next frame while it's on its way back.
+fn draw_preview(layer: Option<&Layer>, window: &mut Window, cx: &mut App) {
     let shared = state::shared(cx);
-    let build = {
+    let now = cx.background_executor().now();
+    let (snap, build, origin, returning) = {
         let state = shared.borrow();
         let Some(drag) = state.drag.as_ref() else {
             return;
@@ -239,27 +262,65 @@ fn draw_preview(window: &mut Window, cx: &mut App) {
         if drag.window != state::window_id(window) {
             return;
         }
-        match &drag.spec.preview {
-            PreviewSpec::Default(build) => build.clone(),
+        let returning = drag.returning.as_ref().map(|r| r.progress(now) < 1.);
+        let build = match &drag.spec.preview {
+            PreviewSpec::Default(build) => Some(build.clone()),
+            PreviewSpec::Layer => None,
             PreviewSpec::None => return,
+        };
+        (
+            drag.snap.clone(),
+            build,
+            drag.preview_origin(now),
+            returning,
+        )
+    };
+    if returning == Some(true) {
+        window.request_animation_frame();
+    }
+    let (preview, at, space) = match build {
+        Some(build) => {
+            let preview = match build {
+                Some(build) => build(&snap.item, window, cx),
+                None => default_preview(&snap.item, snap.source_size, cx),
+            };
+            let preview = div()
+                .debug_selector(|| "dnd-preview".into())
+                .child(preview)
+                .into_any_element();
+            (preview, origin, AvailableSpace::min_size())
+        }
+        None => {
+            let Some(layer) = layer else { return };
+            let monitor = DragLayerMonitor {
+                monitor: DragMonitor { snap: Some(snap) },
+                origin,
+            };
+            let Some(element) = layer(&monitor, window, cx) else {
+                return;
+            };
+            let viewport = window.viewport_size();
+            let layer = div()
+                .debug_selector(|| "dnd-layer".into())
+                .w(viewport.width)
+                .h(viewport.height)
+                .child(element)
+                .into_any_element();
+            let space = Size {
+                width: AvailableSpace::Definite(viewport.width),
+                height: AvailableSpace::Definite(viewport.height),
+            };
+            (layer, Point::default(), space)
         }
     };
-    let preview = match build {
-        Some(build) => build(&snap.item, window, cx),
-        None => default_preview(&snap.item, snap.source_size, cx),
-    };
-    let origin = snap.current - snap.grab();
-    let preview = div()
-        .debug_selector(|| "dnd-preview".into())
-        .child(preview)
-        .into_any_element();
     let mut floating = Floating {
         child: preview,
-        origin,
+        origin: at,
+        space,
     }
     .into_any_element();
     floating.request_layout(window, cx);
-    window.defer_draw(floating, origin, PREVIEW_PRIORITY, None);
+    window.defer_draw(floating, at, PREVIEW_PRIORITY, None);
 }
 
 /// An element laid out on its own at a place in the window, as GPUI lays out its own drag's
@@ -268,6 +329,7 @@ fn draw_preview(window: &mut Window, cx: &mut App) {
 struct Floating {
     child: AnyElement,
     origin: Point<Pixels>,
+    space: Size<AvailableSpace>,
 }
 
 impl IntoElement for Floating {
@@ -310,7 +372,7 @@ impl Element for Floating {
         cx: &mut App,
     ) {
         self.child
-            .prepaint_as_root(self.origin, AvailableSpace::min_size(), window, cx);
+            .prepaint_as_root(self.origin, self.space, window, cx);
     }
 
     fn paint(
