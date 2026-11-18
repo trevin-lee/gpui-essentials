@@ -367,7 +367,8 @@ impl ParagraphLayout {
             }
         };
         let shape = |range: Range<usize>| -> ShapedLine {
-            let runs = style.runs(p, range.clone());
+            let mut runs = style.runs(p, range.clone());
+            super::italic::italic_runs(&mut runs, &ts);
             let size = size_at(range.start);
             ts.shape_line(
                 SharedString::from(p.text[range].to_string()),
