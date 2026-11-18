@@ -2774,6 +2774,79 @@ mod tests {
         );
     }
 
+    /// With blocks selected, a selected block's menu acts on all of them, as Notion's does:
+    /// Turn into turns each, Duplicate and Delete take them all. Another block's menu acts on
+    /// its own block. The format bar's Turn into turns every block the text runs through.
+    #[gpui::test]
+    fn the_block_menu_acts_on_every_selected_block(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "a\n\nb\n\nc");
+        let ids = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                e.state()
+                    .read(cx)
+                    .model()
+                    .document()
+                    .root()
+                    .children()
+                    .map(|b| b.id())
+                    .collect::<Vec<markdown_editor::BlockId>>()
+            })
+        };
+        let select = |editor: &Entity<Editor>, cx: &mut VisualTestContext, anchor, head| {
+            editor.update(cx, |e, cx| {
+                e.state().update(cx, |s, cx| {
+                    s.set_selection(BlockSelection::Blocks { anchor, head }, cx)
+                        .unwrap();
+                })
+            });
+        };
+        let pick = |editor: &Entity<Editor>, cx: &mut VisualTestContext, block, id: &str| {
+            editor.update_in(cx, |e, window, cx| e.block_menu_pick(block, id, window, cx));
+        };
+        let at = ids(&editor, cx);
+        select(&editor, cx, at[0], at[1]);
+        // Heading 2 (the slash menu's third built-in block), from the second block's menu.
+        pick(&editor, cx, at[1], "turn-2");
+        assert_eq!(markdown(&editor, cx), "## a\n\n## b\n\nc");
+        let at = ids(&editor, cx);
+        select(&editor, cx, at[0], at[1]);
+        pick(&editor, cx, at[0], "duplicate");
+        assert_eq!(markdown(&editor, cx), "## a\n\n## b\n\n## a\n\n## b\n\nc");
+        // The last block isn't selected: its menu acts on it alone.
+        let at = ids(&editor, cx);
+        select(&editor, cx, at[0], at[1]);
+        pick(&editor, cx, at[4], "turn-1");
+        assert_eq!(markdown(&editor, cx), "## a\n\n## b\n\n## a\n\n## b\n\n# c");
+        let at = ids(&editor, cx);
+        select(&editor, cx, at[2], at[3]);
+        pick(&editor, cx, at[3], "delete");
+        assert_eq!(markdown(&editor, cx), "## a\n\n## b\n\n# c");
+        // The format bar's Turn into, on text from the first block to the third.
+        let (first, last) = editor.update(cx, |e, cx| {
+            let doc = e.state().read(cx).model().document();
+            let leaves: Vec<_> = doc.leaves().map(|l| l.id()).collect();
+            (leaves[0], leaves[2])
+        });
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                s.set_selection(
+                    BlockSelection::Text {
+                        anchor: BlockPosition::new(first, 0),
+                        head: BlockPosition::new(last, 1),
+                    },
+                    cx,
+                )
+                .unwrap();
+            })
+        });
+        let top = editor
+            .update(cx, |e, cx| e.selection_top_block(cx))
+            .unwrap();
+        // Text (the first built-in block).
+        pick(&editor, cx, top, "turn-0");
+        assert_eq!(markdown(&editor, cx), "a\n\nb\n\nc");
+    }
+
     /// Shift-clicks on grips select the blocks between, whole; a first one selects its block.
     #[gpui::test]
     fn shift_clicks_on_grips_select_blocks(cx: &mut TestAppContext) {

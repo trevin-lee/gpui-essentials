@@ -105,9 +105,10 @@ impl Editor {
     ) {
         self.block_menu = None;
         self.block_sheet = None;
+        let (first, last) = self.menu_blocks(block, cx);
         let whole = BlockSelection::Blocks {
-            anchor: block,
-            head: block,
+            anchor: first,
+            head: last,
         };
         let command = match id {
             "duplicate" => Some((whole, EditorCommand::DuplicateBlocks)),
@@ -116,7 +117,7 @@ impl Editor {
                 .strip_prefix("turn-")
                 .and_then(|ix| ix.parse::<usize>().ok())
                 .and_then(|ix| turn_into_items().into_iter().nth(ix))
-                .and_then(|command| Some((self.text_of(block, cx)?, command))),
+                .and_then(|command| Some((self.text_of(first, last, cx)?, command))),
         };
         if let Some((selection, command)) = command {
             self.state.update(cx, |state, cx| {
@@ -129,15 +130,63 @@ impl Editor {
         cx.notify();
     }
 
-    /// A selection of all of `block`'s text, from its first line's start to its last's end:
-    /// `None` for a block with no text (a divider, a widget).
-    fn text_of(&self, block: BlockId, cx: &App) -> Option<BlockSelection> {
+    /// The blocks `block`'s menu acts on, first and last: the selected blocks when `block` is
+    /// one of them, as Notion's does, else `block` alone. A text selection's blocks are the
+    /// top-level ones it runs through (the format bar's Turn into).
+    pub(crate) fn menu_blocks(&self, block: BlockId, cx: &App) -> (BlockId, BlockId) {
         let state = self.state.read(cx);
         let doc = state.model().document();
+        let top = |id: BlockId| {
+            let mut at = doc.block(id)?;
+            while let Some(parent) = at.parent()
+                && parent.parent().is_some()
+            {
+                at = parent;
+            }
+            Some(at.id())
+        };
+        let ends = match *state.model().selection() {
+            BlockSelection::Blocks { anchor, head } => Some((anchor, head)),
+            BlockSelection::Text { anchor, head } => top(anchor.block).zip(top(head.block)),
+            _ => None,
+        };
+        let parent = |id| doc.block(id).and_then(|b| b.parent());
+        if let Some((anchor, head)) = ends
+            && let Some(siblings) = parent(block)
+            && parent(anchor).map(|p| p.id()) == Some(siblings.id())
+            && parent(head).map(|p| p.id()) == Some(siblings.id())
+        {
+            let ids: Vec<_> = siblings.children().map(|b| b.id()).collect();
+            let at = |id| ids.iter().position(|b| *b == id);
+            if let (Some(a), Some(h), Some(b)) = (at(anchor), at(head), at(block)) {
+                let (lo, hi) = (a.min(h), a.max(h));
+                if (lo..=hi).contains(&b) {
+                    return (ids[lo], ids[hi]);
+                }
+            }
+        }
+        (block, block)
+    }
+
+    /// A selection of the text of the blocks `first` to `last` (siblings, or the same block),
+    /// from the first line's start to the last's end: `None` when they have no text (a
+    /// divider, a widget).
+    fn text_of(&self, first: BlockId, last: BlockId, cx: &App) -> Option<BlockSelection> {
+        let state = self.state.read(cx);
+        let doc = state.model().document();
+        let blocks: Vec<BlockId> = match doc.block(first).and_then(|b| b.parent()) {
+            Some(parent) if first != last => {
+                let ids: Vec<_> = parent.children().map(|b| b.id()).collect();
+                let at = |id| ids.iter().position(|b| *b == id);
+                let (a, b) = (at(first)?, at(last)?);
+                ids[a.min(b)..=a.max(b)].to_vec()
+            }
+            _ => vec![first],
+        };
         let inside = |id: BlockId| {
             let mut at = doc.block(id);
             while let Some(b) = at {
-                if b.id() == block {
+                if blocks.contains(&b.id()) {
                     return true;
                 }
                 at = b.parent();
@@ -165,7 +214,8 @@ impl Editor {
         if self.block_menu != Some(block) {
             return grip;
         }
-        let has_text = self.text_of(block, cx).is_some();
+        let (first, last) = self.menu_blocks(block, cx);
+        let has_text = self.text_of(first, last, cx).is_some();
         let turn = turn_into_titles()
             .into_iter()
             .enumerate()
@@ -215,7 +265,10 @@ impl Editor {
     /// too, so the focus goes back to the page when it closes.
     pub(crate) fn block_sheet(&self, cx: &mut Context<Self>) -> AnyElement {
         let block = self.block_sheet;
-        let has_text = block.is_some_and(|block| self.text_of(block, cx).is_some());
+        let has_text = block.is_some_and(|block| {
+            let (first, last) = self.menu_blocks(block, cx);
+            self.text_of(first, last, cx).is_some()
+        });
         let this = cx.entity().downgrade();
         let dismiss = this.clone();
         let menu = block.map(|block| {

@@ -1,8 +1,9 @@
 //! The format bar: a text selection made with the pointer shows, above it, Turn into (the slash
-//! menu's blocks, for the block the selection starts in), bold, italic, underline,
-//! strikethrough, code, link and Color, as Notion's does. A mark's button is pressed while the
-//! whole selection has it, and a press toggles it over the selection; Link asks the app for the
-//! link, as ⌘K does ([`EditorEvent::EditLinkRequested`](crate::EditorEvent::EditLinkRequested)).
+//! menu's blocks, for each top-level block the selection runs through), bold, italic,
+//! underline, strikethrough, code, link and Color, as Notion's does. A mark's button is pressed
+//! while the whole selection has it, and a press toggles it over the selection; Link asks the
+//! app for the link, as ⌘K does
+//! ([`EditorEvent::EditLinkRequested`](crate::EditorEvent::EditLinkRequested)).
 //!
 //! It shows once the selection is made (not while the pointer is still dragging it out), and
 //! goes with the selection. On touch the marks and Link are a second row of the long press's
