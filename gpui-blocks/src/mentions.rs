@@ -671,7 +671,11 @@ impl Editor {
     }
 
     /// The @ menu under the caret, when it's open: grouped rows, 44 points tall for touch.
-    pub(crate) fn mention_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn mention_menu(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let menu = self.mention.as_ref()?;
         let caret = self.state.read(cx).caret_bounds()?;
         let theme = cx.theme();
@@ -771,30 +775,29 @@ impl Editor {
                     .into_any_element(),
             );
         }
+        let height = (px(crate::editor::MENU_ROW) * rows.len() as f32 + px(8.))
+            .min(px(crate::editor::MENU_HEIGHT));
         Some(
             deferred(
-                anchored()
-                    .position(point(caret.left() - px(4.), caret.bottom() + px(6.)))
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div()
-                            .id("blocks-mention-menu")
-                            .role(Role::ListBox)
-                            .aria_label("Mentions")
-                            .debug_selector(|| "blocks-mention-menu".into())
-                            .w(px(300.))
-                            .max_h(px(340.))
-                            .overflow_y_scroll()
-                            .track_scroll(&self.menu_scroll)
-                            .py_1()
-                            .rounded(px(10.))
-                            .border_1()
-                            .border_color(theme.border)
-                            .bg(theme.popover)
-                            .text_color(theme.popover_foreground)
-                            .shadow_lg()
-                            .children(rows),
-                    ),
+                crate::editor::caret_menu(caret, height, window).child(
+                    div()
+                        .id("blocks-mention-menu")
+                        .role(Role::ListBox)
+                        .aria_label("Mentions")
+                        .debug_selector(|| "blocks-mention-menu".into())
+                        .w(px(300.))
+                        .max_h(px(crate::editor::MENU_HEIGHT))
+                        .overflow_y_scroll()
+                        .track_scroll(&self.menu_scroll)
+                        .py_1()
+                        .rounded(px(10.))
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.popover)
+                        .text_color(theme.popover_foreground)
+                        .shadow_lg()
+                        .children(rows),
+                ),
             )
             .with_priority(2)
             .into_any_element(),
