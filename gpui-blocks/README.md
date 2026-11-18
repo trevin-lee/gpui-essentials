@@ -54,7 +54,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
 - **Markdown shortcuts as you type:** `# `, `- `, `1. `, `[ ] `, `> `, `**bold**`, `*italic*`,
   `~~strike~~`, `` `code` `` and `[text](url)`, and three backticks, `---` or `| a | b |`
   followed by Enter.
-- **Editing:** undo and redo, selection across blocks, IME, and copy and paste as Markdown.
+- **Editing:** ⌘A selects the caret's line, and again the whole page, as Notion's does; undo and
+  redo, selection across blocks, IME, and copy and paste as Markdown.
   Pasting from a web page or Google Docs keeps headings, lists, quotes, code, tables, links and
   marks when your app reads the clipboard's HTML (`Options::html_clipboard`); ⇧⌘V pastes plain
   text.

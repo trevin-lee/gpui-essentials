@@ -974,6 +974,41 @@ impl Editor {
         true
     }
 
+    /// ⌘A's first step: with the caret (or part of one line's text) in a page of more than
+    /// one line, the whole of that line's text is selected. Returns false when it's selected
+    /// already, or there's nothing smaller than the page to select, for ⌘A to select it all.
+    fn select_block_text(&mut self, cx: &mut Context<Self>) -> bool {
+        self.state.update(cx, |state, cx| {
+            let model = state.model();
+            let BlockSelection::Text { anchor, head } = *model.selection() else {
+                return false;
+            };
+            let doc = model.document();
+            if anchor.block != head.block || doc.leaves().nth(1).is_none() {
+                return false;
+            }
+            let Some(len) = doc.block(head.block).and_then(|b| b.text()).map(str::len) else {
+                return false;
+            };
+            let (from, to) = (
+                anchor.offset.min(head.offset),
+                anchor.offset.max(head.offset),
+            );
+            if from == 0 && to == len {
+                return false;
+            }
+            state
+                .set_selection(
+                    BlockSelection::Text {
+                        anchor: BlockPosition::new(head.block, 0),
+                        head: BlockPosition::new(head.block, len),
+                    },
+                    cx,
+                )
+                .is_ok()
+        })
+    }
+
     /// Blocks or allows edits. A read-only document can still be selected and copied, and shows
     /// no side menu.
     pub fn set_readonly(&mut self, readonly: bool, cx: &mut Context<Self>) {
@@ -2549,6 +2584,15 @@ impl Render for Editor {
             .relative()
             .size_full()
             // Before the document's own paste: the clipboard's HTML, when the app reads it.
+            // ⌘A in two steps, as Notion's: the caret's block's text first, then everything.
+            // The touch menu's Select all selects everything at once, as iOS's does.
+            .capture_action(cx.listener(
+                |this, _: &markdown_editor::actions::SelectAll, window, cx| {
+                    if !window.last_input_was_touch() && this.select_block_text(cx) {
+                        cx.stop_propagation();
+                    }
+                },
+            ))
             .capture_action(
                 cx.listener(|this, _: &markdown_editor::actions::Paste, window, cx| {
                     if this.paste_html(window, cx) {
@@ -2663,6 +2707,50 @@ mod tests {
         cx.simulate_input("a -> b");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "a -\\> b");
+    }
+
+    /// ⌘A selects the caret's line first, then the whole page, as Notion's does.
+    #[gpui::test]
+    fn select_all_takes_the_line_then_the_page(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "first\n\nsecond line\n\nthird");
+        caret_at_end(&editor, cx, 1);
+        let selection = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| e.state().read(cx).model().selection().clone())
+        };
+        let second = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .leaves()
+                .nth(1)
+                .unwrap()
+                .id()
+        });
+        cx.simulate_keystrokes("secondary-a");
+        draw(cx);
+        assert_eq!(
+            selection(&editor, cx),
+            BlockSelection::Text {
+                anchor: BlockPosition::new(second, 0),
+                head: BlockPosition::new(second, 11),
+            }
+        );
+        cx.simulate_keystrokes("secondary-a");
+        draw(cx);
+        let BlockSelection::Text { anchor, head } = selection(&editor, cx) else {
+            panic!("a text selection");
+        };
+        assert_ne!(anchor.block, head.block, "the whole page");
+        // A one-line page: everything at once.
+        let (editor, cx) = open(cx, "only");
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_keystrokes("secondary-a");
+        draw(cx);
+        let BlockSelection::Text { anchor, head } = selection(&editor, cx) else {
+            panic!("a text selection");
+        };
+        assert_eq!((anchor.offset, head.offset), (0, 4));
     }
 
     /// A comment's quote, tinted from its anchor, follows its words as the text around them is
