@@ -33,7 +33,7 @@ Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconT
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
 A table shows ten rows to a page, with Previous and Next at its right and "1 / 3" between them,
 as react-ui's does. An accordion opens one section at a time, the newest one open until someone
-presses one, as react-ui's does.
+presses one, as react-ui's does. A step's details are Markdown, as react-ui's are.
 
 Text fields and text areas are gpui-core's `Input` (in this workspace), with the platform's
 input methods (on iOS, a tap raises the keyboard); the slider, an icon button's tooltip and the
