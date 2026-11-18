@@ -1,6 +1,6 @@
 # gpui-calendar
 
-Day, week, N-day, month and agenda calendar views for [GPUI](https://www.gpui.rs) apps built on
+Day, week, N-day, month, year and agenda calendar views for [GPUI](https://www.gpui.rs) apps built on
 [gpui-core](../gpui-core): the time grid and the views a calendar app needs. You drag empty time to make
 an event, drag an event to move it, drag its edge to change its length, and press Delete to
 delete it, and every change comes back to your app as a proposal. Your app supplies the calendars
@@ -16,7 +16,7 @@ their look.
 
 ## What it does
 
-- **Views:** day, week, N days (`CalendarView::Days(n)`), month and agenda
+- **Views:** day, week, N days (`CalendarView::Days(n)`), month, year and agenda
   (`CalendarView::Agenda(n)`, two weeks from the header's button). Day and week share a time
   grid. It has a row of day names with today marked, an all-day row (three rows of spans, then
   "+N more", which opens the row; open or not, it never takes more than 40% of the calendar
@@ -26,6 +26,11 @@ their look.
   all that day's events in a popover beside it (a sheet on touch), as Google Calendar does; a
   click on one opens it. `open_more(date)` opens it from your app. A span is one bar across a week's days; where it goes on past the week (into the
   month's next row, or the next period), that end is square with a chevron pointing on.
+- **Year:** the whole year as twelve small months, as many across as makes the days biggest
+  (two or three on a phone, four or six on a desktop). Today is marked as in the month, and a
+  day with events is shaded darker the more it has (in the find colour while finding). A
+  click on a day opens that day, and a click on a month's name opens that month. The arrows
+  move a day or a week, and Enter opens the selected day.
 - **Agenda:** a list of the days that have events (and today), each under a header that stays
   at the top while its day scrolls by. A row has the time (or "All day", "Day 2 of 3",
   "Until 2 AM"), the calendar's colour, the title, the place and every link as a pill. Among
@@ -84,7 +89,7 @@ their look.
   from event to event; ← and → cross into the next or previous day (and period) in the day,
   week and month views. With nothing selected, ← and → change the period. `j` goes to the next
   period and `k` or `p` to the previous one. `t` goes to today, `g` opens the mini month, and
-  `d`, `w`, `m` and `a` switch views. In the agenda the arrows go from event to event down the list. `n` proposes a new event
+  `d`, `w`, `m`, `y` and `a` switch views. In the agenda the arrows go from event to event down the list. `n` proposes a new event
   at the selected slot, or at the next round half hour today. Enter opens the selected event or
   makes one in the selected slot, Delete or Backspace asks to delete the selected event, and
   Escape drops a drag or the selection.
@@ -455,7 +460,7 @@ gpui-core's README says.
 Not done yet:
 - Editing a recurrence rule itself (expanding recurring events, and applying a scoped edit to
   the series, is the app's job, as above).
-- Year, resource and timeline views.
+- Resource and timeline views.
 - In narrow columns, titles are cut to one line with "…" rather than wrapped.
 
 ## License

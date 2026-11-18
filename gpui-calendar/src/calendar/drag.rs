@@ -251,7 +251,8 @@ impl Calendar {
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
-        if geo.kind == paint::Kind::Agenda {
+        // The agenda is a list, and the year draws no events.
+        if matches!(geo.kind, paint::Kind::Agenda | paint::Kind::Year) {
             return;
         }
         let Some(id) = self.selected_event().cloned() else {

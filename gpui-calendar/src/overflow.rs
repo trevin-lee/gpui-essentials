@@ -208,6 +208,7 @@ fn no_text_runs_over_at_desktop_widths() {
         CalendarView::Days(3),
         CalendarView::Week,
         CalendarView::Month,
+        CalendarView::Year,
         CalendarView::AGENDA,
     ];
     check_widths(&views, &[720., 900., 1024., 1280., 1600., 2200.], 820.);
@@ -221,6 +222,7 @@ fn no_text_runs_over_at_phone_widths() {
         CalendarView::Days(3),
         CalendarView::Week,
         CalendarView::Month,
+        CalendarView::Year,
         CalendarView::AGENDA,
     ];
     check_widths(&views, &[320., 375., 390., 430., 520.], 844.);
@@ -259,6 +261,7 @@ fn check_header(touch: bool) {
             CalendarView::Week,
             CalendarView::Days(3),
             CalendarView::Month,
+            CalendarView::Year,
             CalendarView::AGENDA,
             CalendarView::Agenda(1),
             CalendarView::Agenda(40),
@@ -460,6 +463,7 @@ fn a_query_fits_at_every_width() {
         CalendarView::Day,
         CalendarView::Week,
         CalendarView::Month,
+        CalendarView::Year,
         CalendarView::AGENDA,
     ];
     let mut cx = context();

@@ -712,7 +712,7 @@ pub fn crates() -> Vec<Crate> {
             slug: "calendar",
             dir: "gpui-calendar",
             lib: "gpui_calendar",
-            about: "Day, week, month and agenda views with a time grid, dragging, a mini month and time zones.",
+            about: "Day, week, month, year and agenda views with a time grid, dragging, a mini month and time zones.",
             pictures: vec![
                 (
                     "week.png",

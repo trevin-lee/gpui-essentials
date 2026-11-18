@@ -1,7 +1,7 @@
 [package]
 name = "gpui-calendar"
 version = "0.1.0"
-description = "Day, week, month and agenda calendar views with a time grid, in GPUI"
+description = "Day, week, month, year and agenda calendar views with a time grid, in GPUI"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
