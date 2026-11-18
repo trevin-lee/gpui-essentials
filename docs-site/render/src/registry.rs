@@ -13,10 +13,30 @@
 //!
 //! Both are compiled with `use gpui::*; use gpui_core::*;` and nothing else, so they use only
 //! what those crates export.
+//!
+//! A variant ending in `.click()`, `.right_click()` or `.hover()` has the pointer do that in the
+//! middle of what the demo drew before its picture is taken, to show a menu, a hover card or a
+//! tooltip open: `view("Default", "default").click()`.
 
 use gpui::{AnyElement, AnyView, App, AppContext as _, Window};
 
-use crate::site::{Component, Demo, Family, Variant};
+use crate::site::{Act, Component, Demo, Family, Variant};
+
+/// What the pointer does before a variant's picture: none, `click`, `right_click` or `hover`.
+macro_rules! act {
+    () => {
+        Act::None
+    };
+    (click) => {
+        Act::Click
+    };
+    (right_click) => {
+        Act::RightClick
+    };
+    (hover) => {
+        Act::Hover
+    };
+}
 
 /// A demo file's path, from this crate's manifest.
 macro_rules! demo_path {
@@ -34,11 +54,12 @@ macro_rules! demo_path {
 
 /// One variant of the component `$component` (its slug).
 macro_rules! variant {
-    (@demo $component:literal, $name:literal, $slug:literal) => {
+    (@demo $component:literal, $name:literal, $slug:literal, $act:expr) => {
         Variant {
             name: $name,
             slug: $slug,
             code: include_str!(demo_path!($component, $slug)),
+            act: $act,
             // The file wrapped in `fn render(window, cx)` by build.rs.
             demo: Demo::Element(include!(concat!(
                 env!("OUT_DIR"),
@@ -50,11 +71,12 @@ macro_rules! variant {
             ))),
         }
     };
-    (@view $component:literal, $name:literal, $slug:literal) => {
+    (@view $component:literal, $name:literal, $slug:literal, $act:expr) => {
         Variant {
             name: $name,
             slug: $slug,
             code: include_str!(demo_path!($component, $slug)),
+            act: $act,
             demo: Demo::View({
                 mod demo {
                     #[allow(unused_imports)]
@@ -80,7 +102,9 @@ macro_rules! component {
         slug: $slug:literal,
         about: $about:literal,
         docs: $docs:literal,
-        variants: [$($kind:ident($vname:literal, $vslug:literal)),* $(,)?] $(,)?
+        variants: [
+            $($kind:ident($vname:literal, $vslug:literal) $(. $act:ident())?),* $(,)?
+        ] $(,)?
     ) => {
         Component {
             family: Family::$family,
@@ -88,7 +112,7 @@ macro_rules! component {
             slug: $slug,
             about: $about,
             docs: $docs,
-            variants: vec![$(variant!(@$kind $slug, $vname, $vslug)),*],
+            variants: vec![$(variant!(@$kind $slug, $vname, $vslug, act!($($act)?))),*],
         }
     };
 }
@@ -199,6 +223,7 @@ pub fn components() -> Vec<Component> {
             variants: [
                 view("Default", "default"),
                 demo("Groups", "groups"),
+                demo("Open", "open").click(),
                 demo("Disabled", "disabled"),
                 demo("Invalid", "invalid"),
             ],
@@ -259,6 +284,7 @@ pub fn components() -> Vec<Component> {
             docs: "gpui_core/struct.DatePicker.html",
             variants: [
                 view("Default", "default"),
+                view("Open", "open").click(),
                 view("Month", "month"),
             ],
         },
@@ -273,6 +299,119 @@ pub fn components() -> Vec<Component> {
                 view("With an error", "error"),
                 view("Field set", "fieldset"),
             ],
+        },
+        component! {
+            family: Overlays,
+            name: "Dialog",
+            slug: "dialog",
+            about: "A modal panel in the middle of the window, over a scrim.",
+            docs: "gpui_core/struct.Dialog.html",
+            variants: [view("Default", "default").click()],
+        },
+        component! {
+            family: Overlays,
+            name: "Alert Dialog",
+            slug: "alert-dialog",
+            about: "A dialog asking for a decision, which a press outside doesn't close.",
+            docs: "gpui_core/struct.AlertDialog.html",
+            variants: [view("Default", "default").click()],
+        },
+        component! {
+            family: Overlays,
+            name: "Popover",
+            slug: "popover",
+            about: "A panel hanging from what opens it, floating over everything else.",
+            docs: "gpui_core/struct.Popover.html",
+            variants: [view("Default", "default").click()],
+        },
+        component! {
+            family: Overlays,
+            name: "Hover Card",
+            slug: "hover-card",
+            about: "More about something, shown while the pointer rests on it.",
+            docs: "gpui_core/struct.HoverCard.html",
+            variants: [demo("Default", "default").hover()],
+        },
+        component! {
+            family: Overlays,
+            name: "Drawer",
+            slug: "drawer",
+            about: "A modal panel from an edge of the window, with a header and a footer.",
+            docs: "gpui_core/struct.Drawer.html",
+            variants: [
+                view("Default", "default").click(),
+                view("From the right", "right").click(),
+            ],
+        },
+        component! {
+            family: Overlays,
+            name: "Sheet",
+            slug: "sheet",
+            about: "A plain panel of rows across the bottom of the window, for touch.",
+            docs: "gpui_core/struct.Sheet.html",
+            variants: [view("Default", "default").click()],
+        },
+        component! {
+            family: Overlays,
+            name: "Tooltip",
+            slug: "tooltip",
+            about: "A few words shown while the pointer rests on what they explain.",
+            docs: "gpui_core/struct.Tooltip.html",
+            variants: [demo("Default", "default").hover()],
+        },
+        component! {
+            family: Overlays,
+            name: "Toast",
+            slug: "toast",
+            about: "A short note at the bottom of the window that goes by itself.",
+            docs: "gpui_core/struct.Toast.html",
+            variants: [
+                demo("Default", "default").click(),
+                demo("With an action", "action").click(),
+            ],
+        },
+        component! {
+            family: Overlays,
+            name: "Command Dialog",
+            slug: "command-dialog",
+            about: "A command palette: a search over grouped commands, in a dialog.",
+            docs: "gpui_core/struct.CommandDialog.html",
+            variants: [view("Default", "default").click()],
+        },
+        component! {
+            family: Menus,
+            name: "Dropdown Menu",
+            slug: "dropdown-menu",
+            about: "A button that opens a menu of actions hung from it.",
+            docs: "gpui_core/struct.DropdownMenu.html",
+            variants: [
+                demo("Default", "default").click(),
+                view("Checks and a submenu", "checks").click(),
+            ],
+        },
+        component! {
+            family: Menus,
+            name: "Context Menu",
+            slug: "context-menu",
+            about: "A menu that opens where something is right-clicked or held.",
+            docs: "gpui_core/struct.ContextMenu.html",
+            variants: [demo("Default", "default").right_click()],
+        },
+        component! {
+            family: Menus,
+            name: "Menubar",
+            slug: "menubar",
+            about: "A row of menus, as at the top of a desktop app's window.",
+            docs: "gpui_core/struct.Menubar.html",
+            variants: [demo("Default", "default").click()],
+        },
+        component! {
+            family: Menus,
+            name: "Combobox",
+            slug: "combobox",
+            about: "A button that opens a search over its options, to pick one.",
+            docs: "gpui_core/struct.Combobox.html",
+            variants: [view("Default", "default").click()],
         },
         component! {
             family: Containers,

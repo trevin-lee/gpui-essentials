@@ -10,13 +10,15 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, bail};
 use color_quant::NeuQuant;
 use gpui::{
-    AnyElement, AnyView, App, AppContext as _, AsyncApp, Bounds, Context, IntoElement,
-    ParentElement as _, Render, Styled as _, Window, WindowBounds, WindowOptions, div, px, size,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, AsyncApp, Bounds, Context,
+    IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement as _, Pixels, PlatformInput, Point, Render, Styled as _, Window, WindowBounds,
+    WindowOptions, div, point, px, size,
 };
 use gpui_core::Theme;
 use image::RgbaImage;
 
-use crate::site::Demo;
+use crate::site::{Act, Demo};
 
 /// The stage's width in points: every picture is this wide, at the screen's scale.
 pub const STAGE_WIDTH: f32 = 720.;
@@ -60,8 +62,9 @@ impl Render for Stage {
     }
 }
 
-/// Draws `demo` in the light or the dark theme in a hidden window, and returns the picture.
-pub async fn capture(demo: Demo, dark: bool, cx: &mut AsyncApp) -> Result<RgbaImage> {
+/// Draws `demo` in the light or the dark theme in a hidden window, has the pointer `act` on
+/// it, and returns the picture.
+pub async fn capture(demo: Demo, act: Act, dark: bool, cx: &mut AsyncApp) -> Result<RgbaImage> {
     let window = cx.update(|cx| {
         Theme::set(if dark { Theme::dark() } else { Theme::light() }, cx);
         let bounds = Bounds::centered(None, size(px(STAGE_WIDTH), px(STAGE_HEIGHT)), cx);
@@ -81,22 +84,78 @@ pub async fn capture(demo: Demo, dark: bool, cx: &mut AsyncApp) -> Result<RgbaIm
         .map(|(window, _)| window)
     })?;
     // A few frames, for icons and fonts to load and anything that settles on the next frame.
+    settle(window, Duration::from_millis(60), cx).await?;
+    if act != Act::None {
+        // The pointer goes to the middle of what was drawn, in points.
+        let drawn = picture(window, cx)?;
+        let Some([top, bottom, left, right]) = content_box(&drawn) else {
+            bail!("nothing was drawn to act on");
+        };
+        let scale = drawn.width() as f32 / STAGE_WIDTH;
+        let at = point(
+            px((left + right) as f32 / 2. / scale),
+            px((top + bottom) as f32 / 2. / scale),
+        );
+        cx.update_window(window, |_, window, cx| perform(act, at, window, cx))?;
+        // Long enough for a hover card's or a tooltip's delay, and for anything opened to draw.
+        let wait = if act == Act::Hover { 400 } else { 60 };
+        settle(window, Duration::from_millis(wait), cx).await?;
+    }
+    let image = picture(window, cx)?;
+    cx.update_window(window, |_, window, _| window.remove_window())?;
+    Ok(image)
+}
+
+/// Draws three frames, `pause` apart.
+async fn settle(window: AnyWindowHandle, pause: Duration, cx: &mut AsyncApp) -> Result<()> {
     for _ in 0..3 {
         cx.update_window(window, |_, window, cx| {
             window.refresh();
             let _ = window.draw(cx);
         })?;
-        cx.background_executor()
-            .timer(Duration::from_millis(60))
-            .await;
+        cx.background_executor().timer(pause).await;
     }
-    let image = cx.update_window(window, |_, window, cx| {
+    Ok(())
+}
+
+/// Draws a frame and returns it.
+fn picture(window: AnyWindowHandle, cx: &mut AsyncApp) -> Result<RgbaImage> {
+    cx.update_window(window, |_, window, cx| {
         window.refresh();
         let _ = window.draw(cx);
         window.render_to_image()
-    })??;
-    cx.update_window(window, |_, window, _| window.remove_window())?;
-    Ok(image)
+    })?
+}
+
+/// Moves the pointer to `at` and, for a click, presses and releases a button there.
+fn perform(act: Act, at: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    let modifiers = Modifiers::default();
+    let moved = MouseMoveEvent {
+        position: at,
+        pressed_button: None,
+        modifiers,
+    };
+    let _ = window.dispatch_event(PlatformInput::MouseMove(moved), cx);
+    let button = match act {
+        Act::Click => MouseButton::Left,
+        Act::RightClick => MouseButton::Right,
+        Act::None | Act::Hover => return,
+    };
+    let down = MouseDownEvent {
+        button,
+        position: at,
+        modifiers,
+        click_count: 1,
+        first_mouse: false,
+    };
+    let _ = window.dispatch_event(PlatformInput::MouseDown(down), cx);
+    let up = MouseUpEvent {
+        button,
+        position: at,
+        modifiers,
+        click_count: 1,
+    };
+    let _ = window.dispatch_event(PlatformInput::MouseUp(up), cx);
 }
 
 /// The first and last rows (inclusive) and columns holding content: pixels unlike the
