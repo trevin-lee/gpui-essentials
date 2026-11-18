@@ -93,6 +93,25 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  wasm:
+    # Apps can run the flow canvas as wasm on GPUI's web platform, so gpui-flow must build for
+    # the browser too: caught here rather than in its dependents.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # Caches the registry and the build, keyed on Cargo.lock and the toolchain; only main
+      # saves, so pull requests don't push main's caches out of the 10 GB.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: gpui-flow-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Into the toolchain rust-toolchain.toml pins, which rustup installs here first.
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo check -p gpui-flow --locked --target wasm32-unknown-unknown
+      # --no-deps: gpui-flow's own lints; gpui-core's and gpui-dnd's wasm builds are linted by
+      # their own workflows.
+      - run: cargo clippy -p gpui-flow --locked --lib --no-deps --target wasm32-unknown-unknown -- -D warnings
+
   ios:
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.own == 'true'

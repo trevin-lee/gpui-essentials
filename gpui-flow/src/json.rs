@@ -248,13 +248,18 @@ pub fn valid_id(id: &str) -> bool {
 /// A new id: 12 characters from 62, about 71 bits, so two people (or a person and an agent)
 /// adding at once don't make the same one.
 pub fn new_id() -> String {
+    // In a browser std's clock panics; web-time's reads the browser's.
+    #[cfg(not(target_family = "wasm"))]
+    use std::time::{SystemTime, UNIX_EPOCH};
+    #[cfg(target_family = "wasm")]
+    use web_time::{SystemTime, UNIX_EPOCH};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     let mut hasher = std::hash::RandomState::new().build_hasher();
     hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
     hasher.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default(),
     );
