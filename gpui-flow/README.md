@@ -361,8 +361,11 @@ made.
   content beside the one selected node, at its size on screen whatever the zoom, on any side,
   lined up at its start, middle or end, 10 points off by default (`ToolbarPlace`). It hides
   while nothing or several are selected and during a drag, and presses on it stay its own.
-- **Not yet.** Edge renderers of the host's own (a custom type is drawn as a bezier);
-  `dragHandle`; undo.
+- **Drag handles** (`Node::drag_handle`, saved as React Flow's `dragHandle`): a node that has
+  one moves only by the part its renderer wraps in `NodeContext::drag_handle`, with a grab
+  cursor; a press elsewhere on it selects it and leaves the rest to the renderer (text to
+  select, controls to press).
+- **Not yet.** Edge renderers of the host's own (a custom type is drawn as a bezier); undo.
 
 ## License
 
