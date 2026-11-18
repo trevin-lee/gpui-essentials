@@ -3283,19 +3283,26 @@ impl Render for Calendar {
                 CONTEXT
             })
             .capture_key_down(cx.listener(|c, e: &KeyDownEvent, _, cx| c.query_key(e, cx)))
-            .on_action(cx.listener(|c, _: &SelectLeft, _, cx| c.move_selection(-1, 0, cx)))
-            .on_action(cx.listener(|c, _: &SelectRight, _, cx| c.move_selection(1, 0, cx)))
+            // Left and right leave a "+N" list for the days; up and down go through its rows.
+            .on_action(cx.listener(|c, _: &SelectLeft, _, cx| {
+                c.close_crowd(cx);
+                c.move_selection(-1, 0, cx)
+            }))
+            .on_action(cx.listener(|c, _: &SelectRight, _, cx| {
+                c.close_crowd(cx);
+                c.move_selection(1, 0, cx)
+            }))
             .on_action(cx.listener(|c, _: &SelectUp, _, cx| {
                 if c.asking.is_some() {
                     c.highlight_answer(-1, cx)
-                } else {
+                } else if !c.move_in_list(-1, cx) {
                     c.move_selection(0, -1, cx)
                 }
             }))
             .on_action(cx.listener(|c, _: &SelectDown, _, cx| {
                 if c.asking.is_some() {
                     c.highlight_answer(1, cx)
-                } else {
+                } else if !c.move_in_list(1, cx) {
                     c.move_selection(0, 1, cx)
                 }
             }))
@@ -3314,7 +3321,11 @@ impl Render for Calendar {
                         let scopes = c.options.edit_scopes();
                         c.answer(scopes[i.min(scopes.len() - 1)], cx)
                     }
-                    None => c.open_selected(cx),
+                    None => {
+                        if !c.open_list_row(cx) {
+                            c.open_selected(cx)
+                        }
+                    }
                 }
             }))
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
