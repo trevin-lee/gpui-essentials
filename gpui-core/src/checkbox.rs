@@ -190,7 +190,14 @@ impl RenderOnce for Checkbox {
             .border_color(border)
             .when(on, |d| d.bg(theme.primary))
             .when(!on && dark, |d| d.bg(theme.input.opacity(0.3)))
-            .shadow(shadows)
+            // The ring (or an invalid box's red one) drawn just outside it, not under it.
+            .relative()
+            .children({
+                let radius = css(4.).to_pixels(window.rem_size());
+                shadows
+                    .into_iter()
+                    .map(move |s| crate::base::ring_outside(s, radius, gpui::px(1.)))
+            })
             .when_some(mark, |d, m| {
                 d.child(Icon::new(m).size(css(14.)).color(theme.primary_foreground))
             });

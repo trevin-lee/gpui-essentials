@@ -1403,7 +1403,7 @@ fn keyboard(
     let ring = focus_ring(cx);
     let state = state.clone();
     root.track_focus(&focus.clone().tab_stop(true))
-        .focus_visible(move |s| s.shadow(vec![ring]))
+        .focus_visible(move |s| s.shadow(vec![crate::base::ring_inside(ring)]))
         .aria_description("Left and Right move between values; Escape hides them.")
         .on_action(move |_: &NextPoint, w, cx| next(w, cx))
         .on_action(move |_: &PreviousPoint, w, cx| prev(w, cx))

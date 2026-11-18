@@ -505,7 +505,7 @@ impl RenderOnce for Carousel {
             .flex()
             .flex_col()
             .track_focus(&focus.tab_stop(true))
-            .focus_visible(move |s| s.shadow(vec![ring]))
+            .focus_visible(move |s| s.shadow(vec![crate::base::ring_inside(ring)]))
             .on_key_down({
                 let mover = mover.clone();
                 move |e: &KeyDownEvent, window, cx| {

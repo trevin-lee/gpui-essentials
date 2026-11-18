@@ -262,7 +262,7 @@ impl Styled for Slider {
 }
 
 impl RenderOnce for Slider {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme().clone();
         let state = self.state.clone();
         let focus = state.update(cx, |s, cx| {
@@ -311,12 +311,20 @@ impl RenderOnce for Slider {
             .when(disabled, |d| d.opacity(0.5));
         gpui::Refineable::refine(el.style(), &self.style);
 
+        let ring_on = crate::base::focus_visible(&focus, window);
         if !disabled {
             el = el
                 .track_focus(&focus.tab_stop(true))
                 // The ring goes round the whole slider, when the keyboard put the focus there.
                 .rounded_full()
-                .focus_visible(move |s| s.shadow(vec![ring]))
+                // Drawn just outside it, not under it.
+                .when(ring_on, |d| {
+                    d.child(crate::base::ring_outside(
+                        ring,
+                        gpui::px(9999.),
+                        gpui::px(0.),
+                    ))
+                })
                 .cursor_pointer()
                 .on_key_down({
                     let state = state.clone();

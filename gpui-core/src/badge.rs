@@ -258,15 +258,7 @@ impl RenderOnce for Badge {
             .when(touch, |b| b.min_hit(theme.touch_target))
             .hover(move |s| s.bg(hover_fill).text_color(hover_text))
             .on_click(move |e, w, cx| on_click(e, w, cx));
-        dress(
-            press,
-            !touch,
-            &p,
-            self.label,
-            self.icon,
-            &theme,
-            &self.style,
-        )
-        .into_any_element()
+        // Not clipped: its focus ring is drawn just outside it (the label clips itself).
+        dress(press, false, &p, self.label, self.icon, &theme, &self.style).into_any_element()
     }
 }

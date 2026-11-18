@@ -382,7 +382,14 @@ impl RenderOnce for Select {
         .rounded(theme.radius_md())
         .border_1()
         .border_color(border)
-        .shadow(shadows)
+        // The ring (or an invalid field's red one) drawn just outside it, not under it.
+        .relative()
+        .children({
+            let radius = theme.radius_md().to_pixels(window.rem_size());
+            shadows
+                .into_iter()
+                .map(move |s| crate::base::ring_outside(s, radius, gpui::px(1.)))
+        })
         .when(dark, |p| p.bg(theme.input.opacity(0.3)))
         .when(dark && !self.disabled, |p| {
             let hover = theme.input.opacity(0.5);

@@ -365,7 +365,9 @@ impl RenderOnce for InputOtp {
                         .when(last, |d| d.rounded_r(radius))
                         .border_color(if on { theme.ring } else { border })
                         .when(dark, |d| d.bg(theme.input.opacity(0.3)))
-                        .when(on, |d| d.shadow(vec![focus_ring(cx)]))
+                        .when(on, |d| {
+                            d.shadow(vec![crate::base::ring_inside(focus_ring(cx))])
+                        })
                         .text_size(theme.text.sm)
                         .when_some(ch, |d, c| d.child(c.to_string()))
                         // Where the next character goes, while empty: a caret that doesn't blink

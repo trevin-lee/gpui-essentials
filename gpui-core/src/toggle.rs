@@ -305,7 +305,7 @@ impl RenderOnce for Toggle {
             .text_size(theme.text.sm)
             .font_weight(FontWeight::MEDIUM)
             .whitespace_nowrap()
-            .overflow_hidden()
+            // No clip here: its focus ring is drawn just outside it. The label clips itself.
             .line_height(relative(1.))
             .map(|p| match joined {
                 Joined::Alone => p.rounded(radius),
@@ -321,7 +321,29 @@ impl RenderOnce for Toggle {
             .when(self.disabled, |p| p.opacity(0.5))
             .when(!self.disabled, |p| p.hover(move |s| s.bg(hover)));
         gpui::Refineable::refine(press.style(), &self.style);
-        let press = press
+        // Its contents are laid out and clipped in a box of their own (as a Button's): the
+        // toggle itself doesn't clip, so its focus ring shows just outside it.
+        let mut inner = div()
+            .flex()
+            .flex_grow(1.)
+            .flex_shrink(1.)
+            .min_w_0()
+            .h_full()
+            .overflow_hidden();
+        {
+            let from = press.style();
+            let padding = std::mem::take(&mut from.padding);
+            let gap = std::mem::take(&mut from.gap);
+            let (direction, justify, align) =
+                (from.flex_direction, from.justify_content, from.align_items);
+            let to = inner.style();
+            to.padding = padding;
+            to.gap = gap;
+            to.flex_direction = direction;
+            to.justify_content = justify;
+            to.align_items = align;
+        }
+        let inner = inner
             .when_some(self.icon, |p, icon| {
                 p.child(Icon::new(icon).size(css(16.)).color(text))
             })
@@ -338,6 +360,7 @@ impl RenderOnce for Toggle {
                         .child(label),
                 )
             });
+        let press = press.child(inner);
         // Drawn here rather than as a component of its own, so its role and state are this
         // element's.
         RenderOnce::render(press, window, cx)

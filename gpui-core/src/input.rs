@@ -1902,6 +1902,7 @@ impl RenderOnce for Input {
             },
             None => focus_ring(cx),
         };
+        let ring_radius = theme.radius_md().to_pixels(window.rem_size());
         crate::a11y::audit(
             "Input",
             if multiline {
@@ -1989,8 +1990,19 @@ impl RenderOnce for Input {
                     .border_color(theme.input)
                     .when(dark, |d| d.bg(theme.input.opacity(0.3)))
                     .text_size(theme.text.sm)
-                    .focus_visible(move |s| s.border_color(theme.ring).shadow(vec![ring]))
-            });
+                    .focus_visible(move |s| s.border_color(theme.ring))
+            })
+            // The ring drawn just outside the field, not under its see-through fill.
+            .when(
+                self.appearance && crate::press::focus_visible(&focus, window),
+                |d| {
+                    crate::press::hold_ring(d).child(crate::press::ring_outside(
+                        ring,
+                        ring_radius,
+                        gpui::px(1.),
+                    ))
+                },
+            );
         el.style().refine(&self.style);
         // A code editor's find bar, over its top right while it's open.
         let find = s.read(cx).find_bar();
