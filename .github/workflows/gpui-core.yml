@@ -134,3 +134,18 @@ jobs:
       - run: gpui-core-cli/ci/check-copies.sh "$RUNNER_TEMP/copies"
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
+  wasm:
+    # gpui-core must build for the browser too: the docs site's live demos run it as wasm.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # Caches the registry and the build, keyed on Cargo.lock and the toolchain; only main
+      # saves, so pull requests don't push main's caches out of the 10 GB.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: gpui-core-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Into the toolchain rust-toolchain.toml pins, which rustup installs here first.
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo check -p gpui-core --locked --target wasm32-unknown-unknown
