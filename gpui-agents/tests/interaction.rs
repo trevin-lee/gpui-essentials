@@ -66,6 +66,24 @@ fn only_web_links_reach_the_host(cx: &mut TestAppContext) {
     assert_eq!(host.opened.borrow().len(), 1);
 }
 
+/// A step's details are Markdown, as react-ui draws them: its link goes to the host.
+#[gpui::test]
+fn a_steps_details_are_markdown(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    let program = r#"root = Stack([Steps([StepsItem("Sign up", "[Open the form](https://example.com/form) and **fill it in**"), StepsItem("Wait", "A day.")])])"#;
+    let (_, cx) = open(cx, program, &host, Some(400.));
+    let b = cx
+        .debug_bounds("t:md:r.c0.s0.d")
+        .expect("the first step's details, as Markdown");
+    assert!(drawn(cx, "md:r.c0.s1.d"));
+    cx.simulate_click(b.origin + point(px(4.), px(8.)), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        host.opened.borrow().as_slice(),
+        ["https://example.com/form"]
+    );
+}
+
 #[gpui::test]
 fn a_markdown_link_goes_to_the_host_and_markdown_copies(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
