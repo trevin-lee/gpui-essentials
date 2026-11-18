@@ -3580,6 +3580,58 @@ mod tests {
         assert!(cx.debug_bounds("blocks-code-language").is_none());
     }
 
+    /// A drag from the page's margin, beside the blocks, selects the blocks it sweeps over,
+    /// whole, as Notion's does; a drag on the text still selects text.
+    #[gpui::test]
+    fn a_drag_from_the_margin_selects_the_blocks_it_sweeps(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "one\n\ntwo\n\nthree\n\nfour");
+        cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(800.)));
+        draw(cx);
+        draw(cx);
+        let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks());
+        let selection = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| e.state().read(cx).model().selection().clone())
+        };
+        let sweep = |cx: &mut VisualTestContext, from: gpui::Point<gpui::Pixels>, to| {
+            cx.simulate_mouse_down(from, gpui::MouseButton::Left, gpui::Modifiers::none());
+            cx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+            cx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+            draw(cx);
+        };
+        // In the right margin, past every block's text.
+        let x = blocks
+            .iter()
+            .map(|(_, b)| b.right())
+            .fold(gpui::px(0.), gpui::Pixels::max)
+            + gpui::px(20.);
+        let at = |ix: usize| gpui::point(x, blocks[ix].1.center().y);
+        sweep(cx, at(1), at(3));
+        assert_eq!(
+            selection(&editor, cx),
+            BlockSelection::Blocks {
+                anchor: blocks[1].0,
+                head: blocks[3].0
+            }
+        );
+        sweep(cx, at(3), at(0));
+        assert_eq!(
+            selection(&editor, cx),
+            BlockSelection::Blocks {
+                anchor: blocks[3].0,
+                head: blocks[0].0
+            },
+            "upward"
+        );
+        // On the text: text.
+        let text =
+            |ix: usize| gpui::point(blocks[ix].1.left() + gpui::px(2.), blocks[ix].1.center().y);
+        sweep(cx, text(0), text(1));
+        assert!(matches!(
+            selection(&editor, cx),
+            BlockSelection::Text { .. }
+        ));
+    }
+
     /// Shift-clicks on grips select the blocks between, whole; a first one selects its block.
     #[gpui::test]
     fn shift_clicks_on_grips_select_blocks(cx: &mut TestAppContext) {
