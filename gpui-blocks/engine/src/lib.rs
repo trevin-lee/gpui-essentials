@@ -44,6 +44,7 @@
 // Resolve existing GPUI paths and macro expansions through the Kit facade.
 
 mod callout;
+mod clock;
 mod columns;
 mod command;
 mod cull;

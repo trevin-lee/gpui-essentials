@@ -12,8 +12,8 @@
 //! top, in editor-local y), not what was drawn, so the slot under the pointer can't feed back
 //! on the motion. Nothing here asks for a frame once everything has settled.
 
+use crate::clock::Instant;
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 
 use super::id::BlockId;
 

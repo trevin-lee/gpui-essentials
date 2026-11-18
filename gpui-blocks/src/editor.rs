@@ -2647,15 +2647,14 @@ impl Render for Editor {
         let find_bar = self.find_bar(compact, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
         // While blocks are dragged, the page scrolls when the pointer (or finger) nears its top
-        // or bottom edge, a frame at a time.
+        // or bottom edge, a frame at a time. A step asks for the next frame only when it
+        // scrolled, so a block held still asks for none.
         let edge_scroll = self.state.read(cx).block_drag_pointer().map(|_| {
             let this = cx.entity().downgrade();
             canvas(
                 |_, _, _| {},
                 move |_, _, window, cx| {
                     let this = this.clone();
-                    // Frames while blocks are dragged, each a step when near an edge.
-                    window.request_animation_frame();
                     window.defer(cx, move |_, cx| {
                         let _ = this.update(cx, |this, cx| this.scroll_near_edge(cx));
                     });

@@ -420,7 +420,7 @@ pub(crate) struct BlockDrag {
     pub(crate) drop: Option<usize>,
     /// The pointer now, and when it got there.
     pub(crate) at: Point<Pixels>,
-    pub(crate) moved: std::time::Instant,
+    pub(crate) moved: crate::clock::Instant,
     /// The pointer's vertical speed, in points a second, smoothed over the last few moves.
     pub(crate) velocity: f32,
     /// The top of the editor's content in window y at the press. Scrolling
@@ -453,7 +453,7 @@ impl BlockDrag {
             active: false,
             drop: None,
             at,
-            moved: std::time::Instant::now(),
+            moved: crate::clock::Instant::now(),
             velocity: 0.,
             start_top: top,
             revision,
@@ -2606,7 +2606,7 @@ impl BlockEditorState {
             self.activate_block_drag(&mut drag, cx);
         }
         // The pointer's speed, weighted toward the latest move, for the drop to start at.
-        let now = std::time::Instant::now();
+        let now = crate::clock::Instant::now();
         let dt = now.duration_since(drag.moved).as_secs_f32();
         if dt > 0.0005 {
             let speed = f32::from(at.y - drag.at.y) / dt;
