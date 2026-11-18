@@ -64,7 +64,7 @@ mod virtual_list;
 pub use autoscroll::{AutoScroll, AutoScrollArea, AutoScrollExt, Scrollable, auto_scroll_zone};
 pub use collect::{CollectExt, Collected};
 pub use element::{Dnd, PICK_UP_HINT, dnd};
-pub use host::{Press, begin_at, cancel, drag_cursor, press_at};
+pub use host::{Press, TargetHold, begin_at, cancel, drag_cursor, press_at, register_target};
 pub use item::{DragItem, DropResult, ItemType};
 pub use keyboard::{Announcements, SayAt, announcement, item_name};
 pub use monitor::{DragLayerMonitor, DragMonitor, DropMonitor, Over};

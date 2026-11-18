@@ -6,7 +6,7 @@
 //!
 //! Each drop is one undo step, and normalization keeps the rules after it: the column the blocks
 //! left goes when it's empty, and a row left with one column unwraps. Kept apart from the
-//! vertical reordering in `reorder.rs`, so it can move to a drag-and-drop crate on its own.
+//! vertical reordering (gpui-dnd's `SortableState`).
 
 use gpui::{Bounds, Pixels, Point, point, px, size};
 
@@ -83,7 +83,7 @@ impl BlockEditorState {
     }
 
     /// Where `run` (the dragged blocks, siblings, in order) drops with the pointer at `p`, when
-    /// it isn't a gap between top-level blocks: `None` leaves that to `reorder`, or, for blocks
+    /// it isn't a gap between top-level blocks: `None` leaves that to the `SortableState` gap, or, for blocks
     /// dragged out of a column (`nested`), to [`SideDrop::TopLevel`].
     pub(crate) fn side_target(
         &self,

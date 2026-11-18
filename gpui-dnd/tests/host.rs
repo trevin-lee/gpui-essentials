@@ -841,3 +841,61 @@ fn an_empty_sentence_leaves_the_moment_to_the_providers_words(cx: &mut TestAppCo
         "Cancelled. Standup is back where it was."
     );
 }
+
+#[gpui::test]
+fn a_target_an_element_registers_from_its_prepaint_takes_drops_while_held(cx: &mut TestAppContext) {
+    let log = log();
+    let keep = Rc::new(Cell::new(true));
+    let held: Rc<std::cell::RefCell<Option<TargetHold>>> = Rc::default();
+    let (l, d, k, h) = (log.clone(), log.clone(), keep.clone(), held.clone());
+    let mut o = open(cx, move |_, _| {
+        let (d, k, h) = (d.clone(), k.clone(), h.clone());
+        div()
+            .p(px(20.))
+            .flex()
+            .gap(px(40.))
+            .child(
+                dnd("src")
+                    .debug_selector(|| "src".into())
+                    .size(px(50.))
+                    .source(source(&l, 1)),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "canvas".into())
+                    .size(px(200.))
+                    .child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                let d = d.clone();
+                                let target = DropTarget::new().accept::<Ev>().on_drop(
+                                    move |item, _, _, _| {
+                                        d.borrow_mut()
+                                            .push(format!("drop {}", item.get::<Ev>().unwrap().0));
+                                        DropOutcome::Handled(None)
+                                    },
+                                );
+                                let hold = register_target(window, cx, "drawn", bounds, target);
+                                // Kept until the next frame's, or let go.
+                                *h.borrow_mut() = k.get().then_some(hold);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .size_full(),
+                    ),
+            )
+            .into_any_element()
+    });
+    let from = o.center("src");
+    let to = o.center("canvas");
+    o.drag(from, to);
+    assert_eq!(with(&log, "drop"), ["drop 1"]);
+
+    // Not held: not a target.
+    keep.set(false);
+    o.draw();
+    o.drag(from, to);
+    o.wait(300);
+    assert_eq!(with(&log, "drop"), ["drop 1"], "no second drop");
+    assert!(held.borrow().is_none());
+}

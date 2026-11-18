@@ -32,6 +32,9 @@ doctest = false
 gpui = { workspace = true }
 # The theme, icons and paragraph layer the engine draws with (see docs/drawing.md).
 gpui-core = { path = "../../gpui-core" }
+# Block drags: gpui-dnd runs a drag's life (the pointer, the finger, Escape, the release, edge
+# scrolling); the editor decides what's dragged and where it drops (see src/dnd.rs).
+gpui-dnd = { path = "../../gpui-dnd" }
 markdown = "1.0.0"
 unicode-segmentation = "1.12.0"
 

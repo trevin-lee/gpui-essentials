@@ -11,7 +11,8 @@ use gpui::{
 
 use crate::monitor::DragMonitor;
 use crate::source::{Backend, DragSource};
-use crate::state::{self, Pending, SourceRecord};
+use crate::state::{self, Pending, SourceRecord, TargetRecord};
+use crate::target::DropTarget;
 
 /// How a host-started drag was pressed: see [`press_at`].
 #[derive(Clone, Debug)]
@@ -200,3 +201,37 @@ fn record<T: 'static>(
         focus: None,
     })
 }
+
+/// A target an element registers from its own prepaint, for a view that draws itself in one
+/// element and can't be wrapped in a [`dnd`](crate::dnd) div without changing its layout (an
+/// editor whose padding is part of its own hitbox). `bounds` is where it takes drops this
+/// frame, in window coordinates; it's cut by the content mask as a `dnd` target's is.
+///
+/// The target lives as long as the returned [`TargetHold`]: keep it until the element's next
+/// prepaint replaces it, as a `dnd` element keeps its record in its element state. Register it
+/// every frame the element is drawn.
+pub fn register_target(
+    window: &mut Window,
+    cx: &mut App,
+    id: impl Into<ElementId>,
+    bounds: Bounds<Pixels>,
+    target: DropTarget,
+) -> TargetHold {
+    let shared = state::shared(cx);
+    let mut state = shared.borrow_mut();
+    let parent = state.target_stack.last().map(Rc::downgrade);
+    let record = Rc::new(TargetRecord {
+        id: id.into(),
+        bounds,
+        visible: bounds.intersect(&window.content_mask().bounds),
+        seq: state.next_seq(),
+        parent,
+        spec: Rc::new(target),
+        label: None,
+    });
+    state.registry(state::window_id(window)).add_target(&record);
+    TargetHold(record)
+}
+
+/// A target registered with [`register_target`]: it takes drops while this is kept.
+pub struct TargetHold(#[allow(dead_code)] Rc<TargetRecord>);
