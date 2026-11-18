@@ -178,7 +178,18 @@ impl Editor {
 
     /// The bar, pinned to the page's top right corner, when it's open; across the top in the
     /// compact layout, where it would be wider than the page.
-    pub(crate) fn find_bar(&self, compact: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn find_bar(
+        &self,
+        compact: bool,
+        touch: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        // A finger's targets on touch: 44 points each way.
+        let size = if touch {
+            gpui_core::ControlSize::Touch
+        } else {
+            gpui_core::ControlSize::Small
+        };
         let bar = self.find.as_ref()?;
         let theme = cx.theme().clone();
         let (matches, current) = {
@@ -200,9 +211,10 @@ impl Editor {
         };
         let icon = |id: &'static str, icon: IconName, label: &'static str| {
             Button::new(id)
+                .debug_selector(move || id.to_string())
                 .icon(icon)
                 .ghost()
-                .small()
+                .with_size(size)
                 .accessibility_label(label)
         };
         // A fixed width, or, across a phone, what the buttons leave.
@@ -278,14 +290,14 @@ impl Editor {
                     Button::new("replace-one")
                         .label("Replace")
                         .outline()
-                        .small()
+                        .with_size(size)
                         .on_click(act(|e, _, cx| e.replace_one(cx))),
                 )
                 .child(
                     Button::new("replace-all")
                         .label("All")
                         .outline()
-                        .small()
+                        .with_size(size)
                         .on_click(act(|e, _, cx| e.replace_all(cx))),
                 )
         });
