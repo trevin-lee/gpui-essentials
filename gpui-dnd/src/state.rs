@@ -50,6 +50,10 @@ pub(crate) struct TargetRecord {
 pub(crate) struct Registry {
     pub sources: Vec<Weak<SourceRecord>>,
     pub targets: Vec<Weak<TargetRecord>>,
+    /// The targets that [catch](DropTarget::catch_outside) drags outside their bounds, also in
+    /// `targets`: kept apart so a move scans them only when nothing under the pointer takes
+    /// the item, and only if there are any.
+    catching: Vec<Weak<TargetRecord>>,
     // When to drop the dead entries next.
     prune_at: usize,
 }
@@ -96,6 +100,9 @@ impl Registry {
 
     pub fn add_target(&mut self, target: &Rc<TargetRecord>) {
         self.targets.push(Rc::downgrade(target));
+        if target.spec.catch_outside {
+            self.catching.push(Rc::downgrade(target));
+        }
         self.prune();
     }
 
@@ -106,6 +113,7 @@ impl Registry {
         if len >= self.prune_at.max(64) {
             self.sources.retain(|s| s.strong_count() > 0);
             self.targets.retain(|t| t.strong_count() > 0);
+            self.catching.retain(|t| t.strong_count() > 0);
             self.prune_at = 2 * (self.sources.len() + self.targets.len());
         }
     }
@@ -115,14 +123,10 @@ impl Registry {
     pub fn catchers(&self, item: &DragItem, under: &[Rc<TargetRecord>]) -> Vec<Rc<TargetRecord>> {
         let ty = item.item_type();
         let mut found: Vec<_> = self
-            .targets
+            .catching
             .iter()
             .filter_map(Weak::upgrade)
-            .filter(|t| {
-                t.spec.catch_outside
-                    && t.spec.accepts(ty)
-                    && !under.iter().any(|u| Rc::ptr_eq(u, t))
-            })
+            .filter(|t| t.spec.accepts(ty) && !under.iter().any(|u| Rc::ptr_eq(u, t)))
             .collect();
         found.sort_by_key(|t| std::cmp::Reverse(t.seq));
         found
@@ -166,7 +170,7 @@ pub(crate) struct ActiveDrag {
     pub spec: Rc<SourceSpec>,
     pub snap: Rc<Snapshot>,
     /// The targets under the pointer, as `snap.targets`.
-    pub targets: Vec<Rc<TargetRecord>>,
+    pub targets: Rc<[Rc<TargetRecord>]>,
     /// Set once it's ended without a drop and its preview is going back to the source.
     pub returning: Option<Returning>,
     /// What a keyboard drag last said about where it is.
@@ -374,7 +378,7 @@ pub(crate) fn begin(
             window: window_id(window),
             spec: spec.clone(),
             snap: Rc::new(snap),
-            targets: Vec::new(),
+            targets: Rc::new([]),
             returning: None,
             said_over: None,
         });
@@ -390,16 +394,15 @@ pub(crate) fn begin(
 /// take the item and tells them it's hovering, and tells the views that collect.
 pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Window, cx: &mut App) {
     let state = shared(cx);
-    let (mut records, mut snap, catchers) = {
+    let (mut records, mut snap, window_id) = {
         let mut state = state.borrow_mut();
         let Some(drag) = state.drag.as_ref().filter(|d| d.returning.is_none()) else {
             return;
         };
         let window_id = drag.window;
-        let item = drag.snap.item.clone();
         let mut snap = (*drag.snap).clone();
         state.sort_landing = None;
-        let records = state.registry(window_id).targets_at(at, &item);
+        let records = state.registry(window_id).targets_at(at, &snap.item);
         snap.current = at;
         snap.modifiers = modifiers;
         snap.targets = records
@@ -410,33 +413,46 @@ pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Wind
                 outside: false,
             })
             .collect();
-        let catchers = state.registry(window_id).catchers(&item, &records);
-        (records, snap, catchers)
+        (records, snap, window_id)
     };
-    // Each target is asked with the pointer already where it is.
-    let asking = DragMonitor {
-        snap: Some(Rc::new(snap.clone())),
-    };
-    for (t, record) in snap.targets.iter_mut().zip(&records) {
-        t.can_drop = record.spec.takes(&snap.item, &asking, cx);
+    // Each target that asks is asked with the pointer already where it is; one that doesn't
+    // (it accepts the item's type, as all of these do) takes it.
+    if records.iter().any(|r| r.spec.can_drop.is_some()) {
+        let asking = DragMonitor {
+            snap: Some(Rc::new(snap.clone())),
+        };
+        for (t, record) in snap.targets.iter_mut().zip(&records) {
+            t.can_drop = record.spec.takes(&snap.item, &asking, cx);
+        }
     }
     // None under the pointer can take it: a target that catches it outside does, as the
-    // outermost.
-    if !snap.targets.iter().any(|t| t.can_drop)
-        && let Some(catcher) = catchers
-            .into_iter()
-            .find(|c| c.spec.takes(&snap.item, &asking, cx))
-    {
-        snap.targets.insert(
-            0,
-            TargetSnap {
-                id: catcher.id.clone(),
-                can_drop: true,
-                outside: !catcher.visible.contains(&at),
-            },
-        );
-        records.insert(0, catcher);
+    // outermost. Most windows have none, and the scan is skipped.
+    if !snap.targets.iter().any(|t| t.can_drop) {
+        let catchers = state
+            .borrow_mut()
+            .registry(window_id)
+            .catchers(&snap.item, &records);
+        if !catchers.is_empty() {
+            let asking = DragMonitor {
+                snap: Some(Rc::new(snap.clone())),
+            };
+            if let Some(catcher) = catchers
+                .into_iter()
+                .find(|c| c.spec.takes(&snap.item, &asking, cx))
+            {
+                snap.targets.insert(
+                    0,
+                    TargetSnap {
+                        id: catcher.id.clone(),
+                        can_drop: true,
+                        outside: !catcher.visible.contains(&at),
+                    },
+                );
+                records.insert(0, catcher);
+            }
+        }
     }
+    let records: Rc<[Rc<TargetRecord>]> = records.into();
     let snap = Rc::new(snap);
     {
         let mut state = state.borrow_mut();
@@ -591,7 +607,7 @@ fn go_back(mut end: EndInfo, window: &mut Window, cx: &mut App) {
         snap.targets.clear();
         snap.returning = true;
         drag.snap = Rc::new(snap);
-        drag.targets.clear();
+        drag.targets = Rc::new([]);
         drag.returning = Some(Returning {
             from,
             to,
