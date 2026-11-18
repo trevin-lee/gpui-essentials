@@ -2,7 +2,10 @@
 //! button, a card, a list's line, Enter) shows it in a panel at the view's right instead of
 //! asking the host to open its page. The panel has the row's title and every property with its
 //! value, buttons to go to the row above or below (in the view's order), Open as page (the
-//! host's `OpenRow`, as opening did before), and Close (Escape too).
+//! host's `OpenRow`, as opening did before), and Close (Escape too). Pressing the title or a
+//! value edits it with its cell's own editor (a field, the options, people or rows, the month,
+//! or a checkbox's toggle), hung from the panel; a property the view hides as a column is shown
+//! and not edited.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -155,13 +158,18 @@ impl TableView {
             r.title.clone()
         };
         let name_width = t.px(132.);
-        let properties = fields
+        let shown: Vec<crate::model::Property> = fields
             .properties_in_order()
             .into_iter()
             .filter(|p| p.kind != PropertyType::Title)
+            .cloned()
+            .collect();
+        let properties: Vec<_> = shown
+            .iter()
             .map(|p| {
                 let text = self.peek_value(&r, p);
                 let empty = text.is_empty();
+                let editable = self.peek_cell(&id, Some(&p.id)).is_some();
                 let sel = format!("peek-value:{}", p.id);
                 div()
                     .flex()
@@ -186,9 +194,23 @@ impl TableView {
                     )
                     .child(
                         div()
+                            .id(SharedString::from(format!("peek-press:{}", p.id)))
                             .debug_selector(move || sel)
                             .flex_1()
                             .min_w_0()
+                            .relative()
+                            .rounded(t.px(t.sizes.chip_radius))
+                            .when(editable, |d| {
+                                d.cursor_pointer()
+                                    .hover(|s| s.bg(t.colors.hover))
+                                    .child(self.peek_place(&p.id, cx))
+                                    .on_click(cx.listener({
+                                        let (id, pid) = (id.clone(), p.id.clone());
+                                        move |this, _: &ClickEvent, window, cx| {
+                                            this.edit_peeked(&id, Some(&pid), window, cx)
+                                        }
+                                    }))
+                            })
                             .when(empty, |d| d.text_color(t.colors.text_muted))
                             .child(SharedString::from(if empty {
                                 "Empty".to_owned()
@@ -196,7 +218,12 @@ impl TableView {
                                 text
                             })),
                     )
-            });
+            })
+            .collect();
+        // An edit from the panel is over once its editor is: its anchor goes.
+        if self.popover.is_none() && self.editor.is_none() {
+            self.peek_anchor = None;
+        }
         Some(
             div()
                 .id("gpui-tables-peek")
@@ -227,6 +254,15 @@ impl TableView {
                         .gap(t.px(4.))
                         .child(
                             div()
+                                .id("peek-title-press")
+                                .cursor_pointer()
+                                .child(self.peek_place("title", cx))
+                                .on_click(cx.listener({
+                                    let id = id.clone();
+                                    move |this, _: &ClickEvent, window, cx| {
+                                        this.edit_peeked(&id, None, window, cx)
+                                    }
+                                }))
                                 .debug_selector(|| "peek-title".into())
                                 .pb(t.px(8.))
                                 .text_size(t.px(t.sizes.text * 1.6))
@@ -238,6 +274,58 @@ impl TableView {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// A probe recording where a value (or the title) was drawn, for its editor to hang from.
+    fn peek_place(&self, key: &str, _: &mut Context<Self>) -> impl IntoElement {
+        let places = self.peek_places.clone();
+        let key = key.to_owned();
+        gpui::canvas(
+            move |b, _, _| {
+                places.borrow_mut().insert(key.clone(), b);
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    /// The cell of row `row_id`'s property `pid` (its title when None) in the view as shown, if
+    /// it has one: a property the view hides as a column has none.
+    fn peek_cell(&self, row_id: &str, pid: Option<&str>) -> Option<super::table::CellRef> {
+        let fields = self.database.database.as_ref()?;
+        let p = match pid {
+            Some(pid) => fields.properties.iter().position(|p| p.id == pid)?,
+            None => fields
+                .properties
+                .iter()
+                .position(|p| p.kind == PropertyType::Title)?,
+        };
+        let item = self.shown.items.iter().position(|i| {
+            matches!(*i, Item::Row { row, .. } if self.rows.get(row).is_some_and(|r| r.id == row_id))
+        })?;
+        let column = self.shown.columns.iter().position(|c| c.property == p)?;
+        Some(super::table::CellRef { item, column })
+    }
+
+    /// Edits the peeked row's property `pid` (its title when None) with its cell's editor, hung
+    /// from where the panel draws it.
+    pub(crate) fn edit_peeked(
+        &mut self,
+        row_id: &str,
+        pid: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure();
+        let Some(cell) = self.peek_cell(row_id, pid) else {
+            return;
+        };
+        let key = pid.unwrap_or("title");
+        self.peek_anchor = self.peek_places.borrow().get(key).copied();
+        self.edit_cell(cell, window, cx);
     }
 
     /// The panel's width: two fifths of the view, between 320 and 480 points (all of it when
