@@ -78,7 +78,7 @@ pub struct Block {
 }
 
 /// The `type`s this version reads: [`Kind`]'s.
-const TYPES: [&str; 19] = [
+const TYPES: [&str; 20] = [
     "paragraph",
     "heading",
     "quote",
@@ -94,6 +94,7 @@ const TYPES: [&str; 19] = [
     "page",
     "toc",
     "embed",
+    "bookmark",
     "widget",
     "columns",
     "column",
@@ -238,6 +239,18 @@ pub enum Kind {
         title: String,
         view: String,
         height: u32,
+    },
+    /// A web page as a card (see [`crate::bookmark`]): its address, and its title,
+    /// description (at most [`crate::bookmark::MAX_DESCRIPTION`] characters written) and
+    /// picture (an `asset:<sha256>`; anything else is dropped) when known.
+    Bookmark {
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        image: Option<String>,
     },
     /// A widget (see [`crate::widget`]): its name, the rest of its info string, and its body.
     Widget {
@@ -587,6 +600,7 @@ fn same_kind(b: BlockRef<'_>, kind: &Kind) -> bool {
                 Kind::Page { .. }
                     | Kind::Toc
                     | Kind::Embed { .. }
+                    | Kind::Bookmark { .. }
                     | Kind::Widget { .. }
                     | Kind::Markdown { .. }
             )
@@ -732,6 +746,14 @@ fn custom(markdown: &str) -> Kind {
     }
     if let Some(page) = page_of(markdown) {
         return page;
+    }
+    if let Some(b) = crate::bookmark::Bookmark::of_markdown(markdown) {
+        return Kind::Bookmark {
+            url: b.url,
+            title: b.title,
+            description: b.description,
+            image: b.image,
+        };
     }
     if let Some(widget) = widget_of(markdown) {
         return widget;
@@ -928,6 +950,25 @@ fn markdown(b: &Block) -> String {
             Some(id) => docs::page(id, title),
             None => line(title),
         },
+        Kind::Bookmark {
+            url,
+            title,
+            description,
+            image,
+        } => {
+            if crate::bookmark::web_url(url) {
+                crate::bookmark::Bookmark {
+                    url: url.clone(),
+                    title: title.clone(),
+                    description: description.clone(),
+                    image: image.clone(),
+                }
+                .markdown()
+            } else {
+                // Not a web page's address: kept as its text, never a link.
+                line(title.as_deref().unwrap_or(url))
+            }
+        }
         Kind::Widget { name, meta, body } => {
             let name: String = name
                 .chars()
@@ -1199,6 +1240,43 @@ mod tests {
         assert_eq!(doc.to_markdown(), "> [!NOTE]\n> a");
     }
 
+    #[test]
+    fn bookmarks_keep_their_page() {
+        let image = format!("asset:{}", "ab".repeat(32));
+        let source = format!(
+            "Before\n\n[A page](https://example.com/a \"bookmark\") <!-- {{\"description\":\"What it says.\",\"image\":\"{image}\"}} -->\n\n[https://example.com/b](https://example.com/b \"bookmark\")"
+        );
+        round_trips(&source);
+        let doc = Document::from_markdown(&source, &[]);
+        assert_eq!(
+            doc.blocks[1].kind,
+            Kind::Bookmark {
+                url: "https://example.com/a".into(),
+                title: Some("A page".into()),
+                description: Some("What it says.".into()),
+                image: Some(image.clone()),
+            }
+        );
+        let json = doc.to_json();
+        assert!(json.contains(r#""type":"bookmark""#), "{json}");
+        // From elsewhere: a picture that isn't an asset is dropped, a long description is cut,
+        // and an address that isn't a web page's is only text.
+        let json = format!(
+            r#"{{"format":"gpui-blocks","version":1,"blocks":[
+            {{"id":"b","type":"bookmark","url":"https://example.com","image":"https://x.test/i.png","description":"{}"}},
+            {{"id":"c","type":"bookmark","url":"javascript:alert(1)","title":"Bad"}}]}}"#,
+            "d".repeat(400)
+        );
+        let doc = Document::from_json(&json).unwrap();
+        let markdown = doc.to_markdown();
+        assert!(!markdown.contains("x.test"), "{markdown}");
+        assert!(
+            markdown.contains(&format!("\"{}\"", "d".repeat(300))),
+            "{markdown}"
+        );
+        assert!(markdown.ends_with("\n\nBad"), "{markdown}");
+    }
+
     /// Every kind's `type` is one this version reads.
     #[test]
     fn every_kind_is_a_known_type() {
@@ -1246,6 +1324,12 @@ mod tests {
                 title: String::new(),
                 view: "page".into(),
                 height: 1,
+            },
+            Kind::Bookmark {
+                url: "https://example.com".into(),
+                title: None,
+                description: None,
+                image: None,
             },
             Kind::Widget {
                 name: "w".into(),

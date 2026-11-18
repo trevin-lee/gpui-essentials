@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format|callouts|callouts-light]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format|callouts|callouts-light|bookmarks|bookmarks-light]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -15,8 +15,9 @@
 //! a picture of the window without showing it: `doc` (the sample), `slash` (the slash menu
 //! open), `hover` (the side menu beside a block), `drag` (a block carried mid-drag) or `end`
 //! (the sample's end). `phone` is the find bar open in a phone-sized window, where the editor lays
-//! itself out compact. `callouts` is a page of callouts with their own icons and colours, every
-//! colour, and `callouts-light` the same in the light theme.
+//! itself out compact. `bookmarks` is a page of bookmark cards. `callouts` is a page of
+//! callouts with their own icons and colours, every colour. `-light` after either is the same
+//! in the light theme.
 
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
@@ -106,6 +107,54 @@ fn apply_theme(cx: &mut App) {
     );
 }
 
+/// The address of the example's one stored picture, as an app's server stores a bookmark's.
+const DEMO_ASSET: &str = "asset:5f1c0a9e3b7d4c2a8e6f0b1d3c5a7e9f2b4d6c8a0e1f3b5d7c9a2e4f6b8d0c1a";
+
+/// The example's server: what it would say about a page, a moment later. A real app asks its
+/// own server, which fetches the page and stores its picture.
+fn demo_unfurl(url: &str, cx: &mut App) -> Task<Option<gpui_blocks::bookmark::Unfurl>> {
+    let url = url.to_string();
+    cx.background_spawn(async move {
+        pause(Duration::from_millis(400)).await;
+        let name = url
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .replace(['-', '_'], " ");
+        Some(gpui_blocks::bookmark::Unfurl {
+            title: Some(format!("Learn {name}")),
+            description: Some("What the page says about itself, as the server read it.".into()),
+            image: Some(DEMO_ASSET.into()),
+        })
+    })
+}
+
+/// Waits without a runtime: the example's server answers after `d`.
+async fn pause(d: Duration) {
+    let (tx, rx) = futures::channel::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        std::thread::sleep(d);
+        let _ = tx.send(());
+    });
+    let _ = rx.await;
+}
+
+/// The `bookmarks` scene's page: a bookmark with a description and picture, one with only a
+/// title, and one the server hasn't answered for.
+fn bookmarks() -> String {
+    [
+        "# Bookmarks".to_string(),
+        format!(
+            "[The Rust Programming Language](https://doc.rust-lang.org/book/ \"bookmark\") <!-- {{\"description\":\"An introductory book about Rust, the programming language that helps you write faster, more reliable software.\",\"image\":\"{DEMO_ASSET}\"}} -->"
+        ),
+        "[GPUI](https://www.gpui.rs/ \"bookmark\") <!-- {\"description\":\"A fast, productive UI framework for Rust from the creators of Zed.\"} -->".to_string(),
+        "[https://example.com/a/long/address/that/goes/on](https://example.com/a/long/address/that/goes/on \"bookmark\")".to_string(),
+        "A paragraph after them.".to_string(),
+    ]
+    .join("\n\n")
+}
+
 /// The `callouts` scene's page: each of the nine colours with an icon (a joined emoji among
 /// them), then a callout with only an icon and one with neither.
 fn callouts() -> String {
@@ -191,6 +240,7 @@ impl Root {
             .docs(DemoDocs)
             .mentions(DemoMentions)
             .images(local_images(file.clone()))
+            .unfurl(demo_unfurl)
             .embeds(|embed, _, cx| (embed.view == "board").then(|| demo_board(cx)));
         let editor = cx.new(|cx| Editor::with_options(source, options, window, cx));
         let subscription = cx.subscribe(&editor, |this, editor, event: &EditorEvent, cx| {
@@ -206,6 +256,12 @@ impl Root {
                 }
                 EditorEvent::DocLinkRequested => {
                     editor.update(cx, |e, cx| e.insert_mention("roadmap", "Roadmap", cx));
+                }
+                // An app asks for the page's address; the example bookmarks one.
+                EditorEvent::BookmarkRequested => {
+                    editor.update(cx, |e, cx| {
+                        e.insert_bookmark("https://www.rust-lang.org/learn", cx)
+                    });
                 }
                 _ => {}
             }
@@ -317,6 +373,7 @@ fn main() {
             Err(e) => exit(&format!("{} can't be opened: {e}", path.display())),
         },
         None if args.scene.starts_with("callouts") => callouts(),
+        None if args.scene.starts_with("bookmarks") => bookmarks(),
         None => SAMPLE.trim_end().to_string(),
     };
     let light = args.scene.ends_with("-light");
@@ -917,6 +974,13 @@ fn local_images(file: Option<PathBuf>) -> impl Fn(&str) -> ImageSource + Send + 
             );
             (path.starts_with(folder) && image).then_some(path)
         });
+        if address == DEMO_ASSET {
+            // The stored picture: a gradient, as a page's preview might be.
+            return ImageSource::Image(std::sync::Arc::new(Image::from_bytes(
+                ImageFormat::Svg,
+                b"<svg xmlns='http://www.w3.org/2000/svg' width='440' height='240'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#f74c00'/><stop offset='1' stop-color='#3b2b8f'/></linearGradient></defs><rect width='440' height='240' fill='url(#g)'/><circle cx='220' cy='120' r='60' fill='white' fill-opacity='0.85'/></svg>".to_vec(),
+            )));
+        }
         match inside {
             Some(path) => ImageSource::Resource(Resource::Path(path.into())),
             None => ImageSource::Image(std::sync::Arc::new(Image::from_bytes(

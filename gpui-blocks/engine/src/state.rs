@@ -858,6 +858,13 @@ impl BlockEditorState {
         self.selection_changed(cx);
         Ok(())
     }
+    /// Leaves the view where it is after the last edit, which would otherwise scroll the caret
+    /// into view: for an edit the app makes away from the caret, such as a bookmark's page
+    /// filled in while the reader has scrolled elsewhere.
+    pub fn keep_view(&mut self) {
+        self.reveal.set(false);
+    }
+
     /// Reveal the current caret after viewport/layout changes without moving it.
     pub fn reveal_caret(&mut self, cx: &mut Context<Self>) {
         self.reveal.set(true);
