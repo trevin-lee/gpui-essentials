@@ -33,6 +33,19 @@ enum Node {
 }
 
 impl Node {
+    /// Whether its `class` names `class`, or one starting with it when it ends in `-`.
+    fn has_class(&self, class: &str) -> bool {
+        self.attr("class").is_some_and(|c| {
+            c.split_whitespace().any(|name| {
+                if class.ends_with('-') {
+                    name.starts_with(class)
+                } else {
+                    name == class
+                }
+            })
+        })
+    }
+
     fn attr(&self, key: &str) -> Option<&str> {
         match self {
             Node::Element { attrs, .. } => attrs
@@ -376,6 +389,7 @@ struct Marks {
     bold: bool,
     italic: bool,
     strike: bool,
+    underline: bool,
 }
 
 /// `nodes` as Markdown blocks, pushed onto `out`.
@@ -497,8 +511,151 @@ fn block(node: &Node, marks: &Marks, out: &mut Vec<String>) {
                 out.push(table);
             }
         }
+        // A toggle: its summary, then the rest folded under it.
+        "details" => {
+            let summary = children
+                .iter()
+                .find(|c| matches!(c, Node::Element { name, .. } if name == "summary"));
+            let title = summary
+                .and_then(|s| match s {
+                    Node::Element { children, .. } => {
+                        let refs: Vec<&Node> = children.iter().collect();
+                        Some(paragraph(&refs, marks).replace('\n', " "))
+                    }
+                    Node::Text(_) => None,
+                })
+                .unwrap_or_default();
+            let mut body = Vec::new();
+            let rest: Vec<&Node> = children
+                .iter()
+                .filter(|c| !matches!(c, Node::Element { name, .. } if name == "summary"))
+                .collect();
+            for child in rest {
+                blocks(std::slice::from_ref(child), marks, &mut body);
+            }
+            let open = if node.attr("open").is_some() {
+                " open"
+            } else {
+                ""
+            };
+            let body = body.join("\n\n");
+            out.push(if body.is_empty() {
+                format!("<details{open}>\n<summary>{title}</summary>\n\n</details>")
+            } else {
+                format!("<details{open}>\n<summary>{title}</summary>\n\n{body}\n\n</details>")
+            });
+        }
+        // Notion's callout (an `<aside>`, its icon first) and GitHub's alert (a
+        // `markdown-alert-…` div, its title first): a callout.
+        "aside" => out.push(callout(children, "NOTE", marks)),
+        "div" if node.has_class("markdown-alert") => {
+            let kind = node
+                .attr("class")
+                .unwrap_or_default()
+                .split_whitespace()
+                .find_map(|c| c.strip_prefix("markdown-alert-"))
+                .filter(|k| matches!(*k, "note" | "tip" | "important" | "warning" | "caution"))
+                .unwrap_or("note")
+                .to_ascii_uppercase();
+            out.push(callout(children, &kind, marks));
+        }
+        // Notion's columns: `column-list` around `column`s, each with its width.
+        "div" if node.has_class("column-list") => match columns(children, marks) {
+            Some(columns) => out.push(columns),
+            None => blocks(children, marks, out),
+        },
         // Everything else block-level: its content, as blocks.
         _ => blocks(children, marks, out),
+    }
+}
+
+/// A callout of `kind` (`NOTE`…) holding `children`'s blocks: an icon Notion leads with (a
+/// `span.icon`) becomes its icon, and GitHub's title line (`p.markdown-alert-title`) goes.
+fn callout(children: &[Node], kind: &str, marks: &Marks) -> String {
+    let mut icon = None;
+    let rest: Vec<Node> = children
+        .iter()
+        .filter(|c| {
+            if c.has_class("icon") {
+                let mut text = String::new();
+                raw_text(c, &mut text);
+                icon = Some(text.trim().to_string());
+                return false;
+            }
+            !c.has_class("markdown-alert-title")
+        })
+        .map(clone_node)
+        .collect();
+    let mut inner = Vec::new();
+    blocks(&rest, marks, &mut inner);
+    let look = markdown_editor::callout_look_comment(icon.as_deref(), None);
+    let mut lines = vec![format!("> [!{kind}]{look}")];
+    let body = inner.join("\n\n");
+    for line in body.split('\n').filter(|_| !body.is_empty()) {
+        lines.push(if line.is_empty() {
+            ">".to_string()
+        } else {
+            format!("> {line}")
+        });
+    }
+    lines.join("\n")
+}
+
+/// Notion's columns as a columns block, each column's share from its `width: N%`; `None` for
+/// fewer than two columns or more than five.
+fn columns(children: &[Node], marks: &Marks) -> Option<String> {
+    let cols: Vec<&Node> = children.iter().filter(|c| c.has_class("column")).collect();
+    if !(2..=5).contains(&cols.len()) {
+        return None;
+    }
+    let mut out = vec!["<!-- columns -->".to_string()];
+    let shares: Vec<f32> = cols
+        .iter()
+        .map(|c| {
+            let style = c.attr("style").unwrap_or_default().to_ascii_lowercase();
+            style
+                .split(';')
+                .find_map(|d| {
+                    let (k, v) = d.split_once(':')?;
+                    (k.trim() == "width")
+                        .then(|| v.trim().strip_suffix('%')?.trim().parse::<f32>().ok())?
+                })
+                .unwrap_or(0.)
+        })
+        .collect();
+    let total: f32 = shares.iter().sum();
+    for (col, share) in cols.iter().zip(&shares) {
+        let marker = if total > 0. && *share > 0. {
+            format!(
+                "<!-- column {} -->",
+                ((share / total) * 1000.).round() / 1000.
+            )
+        } else {
+            "<!-- column -->".to_string()
+        };
+        out.push(marker);
+        if let Node::Element { children, .. } = col {
+            let mut inner = Vec::new();
+            blocks(children, marks, &mut inner);
+            out.extend(inner);
+        }
+    }
+    out.push("<!-- /columns -->".to_string());
+    Some(out.join("\n\n"))
+}
+
+fn clone_node(node: &Node) -> Node {
+    match node {
+        Node::Element {
+            name,
+            attrs,
+            children,
+        } => Node::Element {
+            name: name.clone(),
+            attrs: attrs.clone(),
+            children: children.iter().map(clone_node).collect(),
+        },
+        Node::Text(t) => Node::Text(t.clone()),
     }
 }
 
@@ -514,6 +671,9 @@ fn list(node: &Node, marks: &Marks) -> String {
         .unwrap_or(1);
     let mut items = Vec::new();
     for child in children {
+        // Google Docs' checklist: the item itself is a checkbox.
+        let role_checked = (child.attr("role") == Some("checkbox"))
+            .then(|| child.attr("aria-checked") == Some("true"));
         let item_children: &[Node] = match child {
             Node::Element { name, children, .. } if name == "li" => children,
             // A list straight inside a list (no item around it): part of the previous item.
@@ -531,16 +691,20 @@ fn list(node: &Node, marks: &Marks) -> String {
             Node::Text(t) if t.trim().is_empty() => continue,
             _ => std::slice::from_ref(child),
         };
-        // A checkbox first makes a to-do item.
-        let task = item_children.iter().find_map(|c| match c {
-            Node::Element { name, .. }
-                if name == "input"
-                    && c.attr("type")
-                        .is_some_and(|t| t.eq_ignore_ascii_case("checkbox")) =>
-            {
-                Some(c.attr("checked").is_some())
-            }
-            _ => None,
+        // A checkbox first makes a to-do item: an `<input>`, or Notion's `checkbox-on`/`-off`.
+        let task = role_checked.or_else(|| {
+            item_children.iter().find_map(|c| match c {
+                Node::Element { name, .. }
+                    if name == "input"
+                        && c.attr("type")
+                            .is_some_and(|t| t.eq_ignore_ascii_case("checkbox")) =>
+                {
+                    Some(c.attr("checked").is_some())
+                }
+                _ if c.has_class("checkbox-on") => Some(true),
+                _ if c.has_class("checkbox-off") => Some(false),
+                _ => None,
+            })
         });
         let marker = if ordered {
             let m = format!("{n}. ");
@@ -724,6 +888,8 @@ fn inline(node: &Node, marks: &Marks, out: &mut String) {
                 || style_has(&style, "text-decoration-line", |v| {
                     v.contains("line-through")
                 });
+            let style_underline = style_has(&style, "text-decoration", |v| v.contains("underline"))
+                || style_has(&style, "text-decoration-line", |v| v.contains("underline"));
             match name.as_str() {
                 "br" => out.push_str("\\\n"),
                 "img" => {
@@ -771,10 +937,12 @@ fn inline(node: &Node, marks: &Marks, out: &mut String) {
                     let italic =
                         matches!(name.as_str(), "i" | "em" | "cite" | "dfn") || style_italic;
                     let strike = matches!(name.as_str(), "s" | "del" | "strike") || style_strike;
+                    let underline = matches!(name.as_str(), "u" | "ins") || style_underline;
                     let new = Marks {
                         bold: marks.bold || bold,
                         italic: marks.italic || italic,
                         strike: marks.strike || strike,
+                        underline: marks.underline || underline,
                     };
                     let mut text = inner(&new);
                     // A block inside inline content (a `<div>` in a `<span>`) is a line of its own.
@@ -792,11 +960,52 @@ fn inline(node: &Node, marks: &Marks, out: &mut String) {
                     wrap(strike, marks.strike, "~~");
                     wrap(italic, marks.italic, "*");
                     wrap(bold, marks.bold, "**");
+                    if underline && !marks.underline {
+                        let (lead, body, trail) = split_space(&text);
+                        if !body.is_empty() {
+                            text = format!("{lead}<u>{body}</u>{trail}");
+                        }
+                    }
+                    // Notion's colours, by name: `highlight-yellow_background` a background,
+                    // `highlight-red` a text colour.
+                    if let Some(paint) = notion_colour(node) {
+                        let (lead, body, trail) = split_space(&text);
+                        if !body.is_empty() {
+                            text = format!("{lead}{}{trail}", paint(body));
+                        }
+                    }
                     out.push_str(&text);
                 }
             }
         }
     }
+}
+
+/// Wraps text in a colour.
+type Paint = Box<dyn Fn(&str) -> String>;
+
+/// How Notion's colour class on `node` wraps text, when it has one of the nine.
+fn notion_colour(node: &Node) -> Option<Paint> {
+    let class = node
+        .attr("class")?
+        .split_whitespace()
+        .find_map(|c| c.strip_prefix("highlight-"))?;
+    let (name, background) = match class.strip_suffix("_background") {
+        Some(name) => (name, true),
+        None => (class, false),
+    };
+    let palette: &[markdown_editor::PaletteColor] = if background {
+        &markdown_editor::BACKGROUNDS
+    } else {
+        &markdown_editor::TEXT_COLORS
+    };
+    let colour = palette.iter().find(|c| c.name.eq_ignore_ascii_case(name))?;
+    let hex = format!("#{:06x}", colour.light);
+    Some(if background {
+        Box::new(move |text: &str| format!("<mark color=\"{hex}\">{text}</mark>"))
+    } else {
+        Box::new(move |text: &str| format!("<span style=\"color:{hex}\">{text}</span>"))
+    })
 }
 
 /// Whether the CSS `style` sets `property` to a value `test` accepts.
@@ -980,6 +1189,103 @@ mod tests {
         // Google Docs wraps everything in a `<b>` that isn't bold, and marks text with styles.
         let html = r#"<b style="font-weight:normal;" id="docs-internal-guid-1"><p dir="ltr"><span style="font-weight:700;">Bold</span><span style="font-weight:400;"> and </span><span style="font-style:italic;">italic</span></p><ul><li dir="ltr"><p dir="ltr"><span>Item</span></p></li></ul></b>"#;
         assert_eq!(md(html), "**Bold** and *italic*\n\n- Item");
+    }
+
+    #[test]
+    fn toggles_callouts_columns_and_to_dos_from_notion_github_and_google_docs() {
+        // A toggle.
+        assert_eq!(
+            md(
+                r#"<details open=""><summary style="font-weight:600">Title</summary><p>Body</p></details>"#
+            ),
+            "<details open>\n<summary>Title</summary>\n\nBody\n\n</details>"
+        );
+        // Notion's callout, its icon kept.
+        assert_eq!(
+            md(
+                r#"<aside><span class="icon">💡</span><div>Remember <strong>this</strong></div></aside>"#
+            ),
+            "> [!NOTE] <!-- icon:💡 -->\n> Remember **this**"
+        );
+        // GitHub's alert, its title line gone.
+        assert_eq!(
+            md(
+                r#"<div class="markdown-alert markdown-alert-warning"><p class="markdown-alert-title"><svg></svg>Warning</p><p>Careful.</p></div>"#
+            ),
+            "> [!WARNING]\n> Careful."
+        );
+        // Notion's columns, with their widths.
+        assert_eq!(
+            md(
+                r#"<div class="column-list"><div class="column" style="width:25%"><p>left</p></div><div class="column" style="width:75%"><p>right</p></div></div>"#
+            ),
+            "<!-- columns -->\n\n<!-- column 0.25 -->\n\nleft\n\n<!-- column 0.75 -->\n\nright\n\n<!-- /columns -->"
+        );
+        // To-dos: Notion's checkbox divs and Google Docs' checklist items.
+        assert_eq!(
+            md(
+                r#"<ul class="to-do-list"><li><div class="checkbox checkbox-on"></div> <span>Done</span></li><li><div class="checkbox checkbox-off"></div> <span>Open</span></li></ul>"#
+            ),
+            "- [x] Done\n- [ ] Open"
+        );
+        assert_eq!(
+            md(
+                r#"<ul><li role="checkbox" aria-checked="true"><p><span>done</span></p></li><li role="checkbox" aria-checked="false"><p><span>todo</span></p></li></ul>"#
+            ),
+            "- [x] done\n- [ ] todo"
+        );
+    }
+
+    #[test]
+    fn underline_and_notions_colours() {
+        assert_eq!(
+            md(r#"<p><span style="text-decoration:underline">under</span> and <u>u</u></p>"#),
+            "<u>under</u> and <u>u</u>"
+        );
+        let yellow = markdown_editor::BACKGROUNDS
+            .iter()
+            .find(|c| c.name == "Yellow")
+            .unwrap()
+            .light;
+        let red = markdown_editor::TEXT_COLORS
+            .iter()
+            .find(|c| c.name == "Red")
+            .unwrap()
+            .light;
+        assert_eq!(
+            md(
+                r#"<p><mark class="highlight-yellow_background">bg</mark> <mark class="highlight-red">text</mark> <mark class="highlight-teal">unknown</mark></p>"#
+            ),
+            format!(
+                "<mark color=\"#{yellow:06x}\">bg</mark> <span style=\"color:#{red:06x}\">text</span> unknown"
+            )
+        );
+    }
+
+    /// What these pastes become reads back as the editor's own blocks.
+    #[test]
+    fn pasted_blocks_are_the_editors_own() {
+        use crate::json::{Document, Kind};
+        let html = r#"<details><summary>T</summary><p>b</p></details><aside><span class="icon">💡</span><p>c</p></aside><div class="column-list"><div class="column"><p>l</p></div><div class="column"><p>r</p></div></div><ul><li role="checkbox" aria-checked="true">x</li></ul>"#;
+        let doc = Document::from_markdown(&md(html), &[]);
+        let kinds: Vec<&Kind> = doc.blocks.iter().map(|b| &b.kind).collect();
+        assert!(
+            matches!(kinds[0], Kind::Toggle { open: false }),
+            "{kinds:?}"
+        );
+        assert!(
+            matches!(kinds[1], Kind::Callout { icon: Some(i), .. } if i == "💡"),
+            "{kinds:?}"
+        );
+        assert!(matches!(kinds[2], Kind::Columns), "{kinds:?}");
+        assert!(matches!(kinds[3], Kind::List { .. }), "{kinds:?}");
+        assert!(matches!(
+            doc.blocks[3].children[0].kind,
+            Kind::Item {
+                checked: Some(true),
+                ..
+            }
+        ));
     }
 
     #[test]
