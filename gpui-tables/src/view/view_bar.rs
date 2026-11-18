@@ -74,6 +74,8 @@ impl TableView {
         } else {
             body
         };
+        // A peeked row's panel over the body's right side (Escape closes it first).
+        let peek = self.render_peek(cx);
         div()
             .on_action(cx.listener(|this, _: &super::Search, window, cx| this.find(window, cx)))
             .size_full()
@@ -88,8 +90,16 @@ impl TableView {
                     .w_full()
                     .flex()
                     .flex_col()
-                    .child(body),
+                    .relative()
+                    .child(body)
+                    .children(peek),
             )
+            .capture_action(cx.listener(|this, _: &super::Cancel, _, cx| {
+                if this.peek.is_some() && this.popover.is_none() {
+                    this.close_peek(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(popover)
             .into_any_element()
     }
