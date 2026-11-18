@@ -55,9 +55,9 @@ pub use flow::{
     CutSelection, DeleteSelected, Distribute, DuplicateSelection, EdgeDefaults, EdgeEnds,
     EdgePathFn, FitView, Flow, FlowEvent, FlowItem, FlowOptions, FocusPrevious, FrameSelection,
     Guide, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar,
-    MoveUp, MoveUpFar, OpenLink, PanelPosition, PasteClipboard, Pen, PointerMode, Redo, SelectAll,
-    SelectFocused, Tool, ToolbarAlign, ToolbarPlace, Undo, Unframe, ZoomIn, ZoomOut, ZoomReset,
-    bind_keys,
+    MoveUp, MoveUpFar, OpenLink, PanelPosition, PasteClipboard, Pen, PointerMode, Redo,
+    ResizeFocused, SelectAll, SelectFocused, Tool, ToolbarAlign, ToolbarPlace, Undo, Unframe,
+    ZoomIn, ZoomOut, ZoomReset, bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, ImageLoader, NodeContext, NodeInput, NodeRenderer, drawing_node,

@@ -241,6 +241,10 @@ pub(crate) struct MinimapMap {
 /// document can pick ids that collide.
 pub(crate) type FastMap<K, V> = HashMap<K, V, foldhash::fast::RandomState>;
 
+/// What a node's resizer allows: the least width and height, and whether it keeps the
+/// node's proportions.
+pub(crate) type ResizerInfo = ((f32, f32), bool);
+
 #[derive(Default)]
 pub(crate) struct Shared {
     /// The pane's bounds in the window.
@@ -274,6 +278,9 @@ pub(crate) struct Shared {
     /// The handle a click began a connection from, which a click on another finishes
     /// ([`crate::FlowOptions::connect_on_click`]): drawn in the selection's colour.
     pub click_connect: RefCell<Option<crate::HandleRef>>,
+    /// Each node drawn with its resizer this frame: the least size it may take, and whether it
+    /// keeps its proportions (for a resize from the keyboard).
+    pub resizers: RefCell<FastMap<NodeId, ResizerInfo>>,
 }
 
 /// An ink node's stroke as read, and what it was read from: the points by their text's length
@@ -490,6 +497,12 @@ impl NodeContext {
         min_height: f32,
         keep: bool,
     ) -> impl IntoElement + use<> {
+        if self.selected {
+            self.shared
+                .resizers
+                .borrow_mut()
+                .insert(self.id.clone(), ((min_width, min_height), keep));
+        }
         let grip = units(8.);
         let out = units(-4.);
         let color = self.colors.selected;

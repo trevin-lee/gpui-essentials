@@ -79,10 +79,13 @@ actions!(
         PasteClipboard,
         /// Adds a copy of the selected nodes a step along, leaving the clipboard alone.
         DuplicateSelection,
+        /// Resizes the node the keyboard is on (or the one selected) with the arrows.
+        ResizeFocused,
     ]
 );
 
 mod clipboard;
+mod key_resize;
 
 const CONTEXT: &str = "Flow";
 
@@ -124,6 +127,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-x", CutSelection, c),
         KeyBinding::new("cmd-v", PasteClipboard, c),
         KeyBinding::new("cmd-d", DuplicateSelection, c),
+        KeyBinding::new("r", ResizeFocused, c),
     ]);
 }
 
@@ -769,6 +773,8 @@ pub struct Flow {
     /// What was last copied, cut or pasted (a hash of its JSON), and how many times it's been
     /// pasted since: each paste lands a step further along.
     pastes: Option<(u64, i32)>,
+    /// A node being resized from the keyboard.
+    key_resize: Option<key_resize::KeyResize>,
     delete_check: Option<DeleteCheck>,
     transform_listener: Option<TransformListener>,
     image_loader: Option<crate::node::ImageLoader>,
@@ -1014,6 +1020,7 @@ impl Flow {
             node_toolbar: None,
             valid_connection: None,
             pastes: None,
+            key_resize: None,
             delete_check: None,
             transform_listener: None,
             image_loader: None,
@@ -2372,7 +2379,8 @@ impl Flow {
         if matches!(
             self.drag,
             Some(Drag::Nodes { .. } | Drag::Resize { .. } | Drag::Erase { .. })
-        ) {
+        ) || matches!(self.key_resize, Some(key_resize::KeyResize::On { .. }))
+        {
             return false;
         }
         self.follow_ink();
@@ -3612,6 +3620,7 @@ impl Flow {
         if let Some(took) = self.press_on_content(event, window, cx) {
             return took;
         }
+        self.end_keyboard_resize(true, cx);
         self.let_go_of_click_connect(cx);
         self.keyboard_on = None;
         // Inside a frame, the press is the pane's.
@@ -3779,6 +3788,7 @@ impl Flow {
         if self.drag.is_some() {
             return true;
         }
+        self.end_keyboard_resize(true, cx);
         window.focus(&self.focus, cx);
         let (Some(n), Some(size)) = (self.node(node), self.node_size(node)) else {
             return true;
@@ -4648,6 +4658,7 @@ impl Flow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.end_keyboard_resize(true, cx);
         let mode = self.options.pointer_mode;
         if self.drag.is_some() || mode == PointerMode::Off {
             return;
@@ -6435,6 +6446,8 @@ fn endpoint(
 impl Render for Flow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = self.colors.unwrap_or_else(|| FlowColors::from_theme(cx));
+        // The resizers drawn this frame, as the nodes' renderers draw them.
+        self.shared.resizers.borrow_mut().clear();
         let window_size = window.viewport_size();
         self.shared
             .window
@@ -6678,6 +6691,7 @@ impl Render for Flow {
         if !boxes.is_empty() {
             layers.push(box_layer(boxes));
         }
+        self.settle_key_resize(cx);
         for (level, list) in levels {
             layers.push(self.edge_layer(level, list, colors, flow_id));
         }
@@ -6911,7 +6925,15 @@ impl Render for Flow {
                     cx.propagate();
                 }
             }))
+            .on_action(cx.listener(|flow, _: &ResizeFocused, _, cx| {
+                if !flow.start_keyboard_resize(cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|flow, _: &Cancel, _, cx| {
+                if flow.end_keyboard_resize(false, cx) {
+                    return;
+                }
                 if !flow.cancel(cx) {
                     cx.propagate();
                 }
@@ -6921,6 +6943,7 @@ impl Render for Flow {
             .on_action(cx.listener(|flow, _: &ZoomReset, _, cx| flow.zoom_to(1., cx)))
             .on_action(cx.listener(|flow, _: &FitView, _, cx| flow.fit_view(cx)))
             .on_action(cx.listener(|flow, _: &Undo, _, cx| {
+                flow.end_keyboard_resize(true, cx);
                 if !flow.undo(cx) {
                     cx.propagate();
                 }
@@ -6965,6 +6988,9 @@ impl Render for Flow {
                 }
             }))
             .on_action(cx.listener(|flow, _: &AddSibling, _, cx| {
+                if flow.end_keyboard_resize(true, cx) {
+                    return;
+                }
                 if !flow.add_sibling(cx) && !flow.select_focused(cx) {
                     cx.propagate();
                 }
@@ -7144,6 +7170,9 @@ impl Render for Flow {
 impl Flow {
     /// An arrow key: moves the selected nodes, or with none to move lets the key go on.
     fn nudge_or_pass(&mut self, dx: f32, dy: f32, far: bool, cx: &mut Context<Self>) {
+        if self.key_resize_step(dx, dy, far, cx) {
+            return;
+        }
         // In a tree the layout places nodes: the arrows move the selection instead.
         let done = if self.tree_layout().is_some() {
             self.select_toward(xy(dx, dy), cx)
