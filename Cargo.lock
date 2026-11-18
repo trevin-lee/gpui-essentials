@@ -1928,6 +1928,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-dnd"
+version = "0.1.0"
+dependencies = [
+ "gpui-core",
+ "gpui-pre",
+]
+
+[[package]]
 name = "gpui-flow"
 version = "0.1.0"
 dependencies = [
