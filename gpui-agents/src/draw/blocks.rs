@@ -41,35 +41,75 @@ impl Draw<'_, '_> {
                 .when(shown > 1, |d| d.child(pager))
                 .into_any_element();
         }
-        let min = match b.kind {
-            CardBlockKind::Snippet => 240.,
-            CardBlockKind::Overview => 158.,
-            CardBlockKind::Context => 196.,
-            CardBlockKind::Composite => 240.,
-            CardBlockKind::Visual => 200.,
+        // As react-ui lays a block out: rows of at most two (snippet, composite) or three cards,
+        // balanced so no row is left alone, each row's cards the same width. A responsive block
+        // narrower than 48rem goes to two columns (an odd last card across both), and narrower
+        // than 30rem to one. The width is the block's last laid out (a frame behind on resize).
+        let max = match b.kind {
+            CardBlockKind::Snippet | CardBlockKind::Composite => 2,
+            CardBlockKind::Overview | CardBlockKind::Context | CardBlockKind::Visual => 3,
         };
-        let mut grid = div()
+        let rem = self.window.rem_size();
+        let width = self.v.widths.borrow().get(path).copied();
+        let columns = match width {
+            Some(w) if b.responsive && w < rem * 30. => Some(1),
+            Some(w) if b.responsive && w < rem * 48. => Some(2),
+            _ => None,
+        };
+        let rows: Vec<usize> = match columns {
+            Some(c) => {
+                let mut rows = vec![c; shown / c];
+                if !shown.is_multiple_of(c) {
+                    rows.push(shown % c);
+                }
+                rows
+            }
+            None => row_configuration(shown, max),
+        };
+        let gap = self.px(t.space.m);
+        let mut grid = div().w_full().min_w_0().flex().flex_col().gap(gap);
+        let mut at = 0;
+        for n in rows {
+            let mut row = div().w_full().min_w_0().flex().flex_row().gap(gap);
+            for i in at..at + n {
+                let card = self.card_item(b.kind, &b.items[i], &format!("{path}.i{i}"));
+                row = row.child(
+                    div()
+                        .flex_1()
+                        .flex_basis(px(0.))
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(card),
+                );
+            }
+            grid = grid.child(row);
+            at += n;
+        }
+        // The block's width, for its next layout: drawn again when it changes.
+        let widths = self.v.widths.clone();
+        let key = path.to_owned();
+        let probe = canvas(
+            move |b, window, _| {
+                let changed =
+                    widths.borrow_mut().insert(key.clone(), b.size.width) != Some(b.size.width);
+                if changed {
+                    window.refresh();
+                }
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
+        div()
+            .relative()
             .w_full()
             .min_w_0()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap(self.px(t.space.m));
-        for (i, it) in b.items.iter().take(shown).enumerate() {
-            let card = self.card_item(b.kind, it, &format!("{path}.i{i}"));
-            grid = grid.child(
-                div()
-                    .flex_basis(self.px(min))
-                    .flex_grow(1.)
-                    .flex_shrink(1.)
-                    .max_w_full()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(card),
-            );
-        }
-        grid.into_any_element()
+            .child(grid)
+            .child(probe)
+            .into_any_element()
     }
 
     fn card_item(&mut self, kind: CardBlockKind, it: &CardItem, path: &str) -> AnyElement {
@@ -309,6 +349,58 @@ impl Draw<'_, '_> {
                     .into_any_element()
             }
             None => inner.into_any_element(),
+        }
+    }
+}
+
+/// react-ui's rows for `n` cards, at most `max` (2 or 3) a row: equal rows when they divide, and
+/// otherwise rows of three with a two (or two twos) so no card is alone on a row.
+pub(crate) fn row_configuration(n: usize, max: usize) -> Vec<usize> {
+    match n {
+        0 => Vec::new(),
+        1 => vec![1],
+        _ if max == 2 => {
+            let mut rows = vec![2; n / 2];
+            if n % 2 == 1 {
+                rows.push(1);
+            }
+            rows
+        }
+        _ if n.is_multiple_of(3) => vec![3; n / 3],
+        _ if n % 3 == 2 => {
+            let mut rows = vec![3; n / 3];
+            rows.insert(rows.len().div_ceil(2), 2);
+            rows
+        }
+        _ => {
+            let mut rows = vec![3; (n - 4) / 3];
+            rows.extend([2, 2]);
+            rows
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_configuration;
+
+    #[test]
+    fn rows_are_split_as_react_ui_splits_them() {
+        for (n, max, rows) in [
+            (0, 3, vec![]),
+            (1, 3, vec![1]),
+            (2, 3, vec![2]),
+            (3, 3, vec![3]),
+            (4, 3, vec![2, 2]),
+            (5, 3, vec![3, 2]),
+            (7, 3, vec![3, 2, 2]),
+            (8, 3, vec![3, 2, 3]),
+            (9, 3, vec![3, 3, 3]),
+            (5, 2, vec![2, 2, 1]),
+            (4, 2, vec![2, 2]),
+        ] {
+            assert_eq!(row_configuration(n, max), rows, "{n} at most {max}");
+            assert_eq!(row_configuration(n, max).iter().sum::<usize>(), n);
         }
     }
 }

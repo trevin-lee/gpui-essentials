@@ -509,6 +509,9 @@ pub struct CardBlock {
     pub kind: CardBlockKind,
     pub items: Vec<CardItem>,
     pub carousel: bool,
+    /// Its grid goes to two columns, then one, as its room narrows (react-ui's `responsive`,
+    /// on unless `false`).
+    pub responsive: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1344,6 +1347,7 @@ impl Build {
             kind,
             items: out,
             carousel,
+            responsive: !matches!(prop(el, "responsive"), V::Bool(false)),
         })
     }
 
