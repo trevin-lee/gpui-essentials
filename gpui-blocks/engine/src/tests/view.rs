@@ -535,6 +535,56 @@ fn paste_multiline_splits_blocks(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn a_web_address_pasted_over_words_links_them(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "read the plan today");
+    select_in(&editor, cx, (0, 9), (0, 13));
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+        " https://example.com/plan \n".into(),
+    ));
+    keys(cx, "M-v");
+    assert_eq!(
+        source(&editor, cx),
+        "read the [plan](https://example.com/plan) today"
+    );
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), "read the plan today", "one undo step");
+    // Plain paste, a caret, more than an address, or not an address: pasted as text.
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+        "https://example.com/plan".into(),
+    ));
+    select_in(&editor, cx, (0, 9), (0, 13));
+    keys(cx, "M-shift-v");
+    assert_eq!(
+        source(&editor, cx),
+        "read the https://example.com/plan today"
+    );
+    keys(cx, "M-z");
+    caret_at(&editor, cx, 0, 4);
+    keys(cx, "M-v");
+    assert!(
+        source(&editor, cx).starts_with("readhttps://example.com/plan"),
+        "{}",
+        source(&editor, cx)
+    );
+    keys(cx, "M-z");
+    for text in [
+        "see https://example.com",
+        "example.com",
+        "javascript:alert(1)",
+    ] {
+        select_in(&editor, cx, (0, 9), (0, 13));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.into()));
+        keys(cx, "M-v");
+        assert!(
+            !source(&editor, cx).contains("]("),
+            "{text}: {}",
+            source(&editor, cx)
+        );
+        keys(cx, "M-z");
+    }
+}
+
+#[gpui::test]
 fn readonly_blocks_edits_but_not_navigation(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, "ab\n\ncd");
     editor.update(cx, |e, cx| e.set_readonly(true, cx));

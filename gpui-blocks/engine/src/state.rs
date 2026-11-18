@@ -3337,7 +3337,48 @@ impl BlockEditorState {
         }
         true
     }
+    /// Whether pasting `text` links the selection rather than replacing it, as Notion does: a
+    /// web address alone (or `mailto:`), pasted over words selected in one line of text.
+    pub fn pastes_as_link(&self, text: &str) -> bool {
+        use super::kind::BlockKindData;
+        let BlockSelection::Text { anchor, head } = self.model.selection() else {
+            return false;
+        };
+        let url = text.trim();
+        anchor != head
+            && anchor.block == head.block
+            && matches!(
+                self.model.doc.kind(anchor.block),
+                Some(
+                    BlockKindData::Paragraph
+                        | BlockKindData::Heading { .. }
+                        | BlockKindData::TableCell
+                )
+            )
+            && url.len() <= 2048
+            && !url.chars().any(char::is_whitespace)
+            && ["https://", "http://", "mailto:"].iter().any(|scheme| {
+                url.len() > scheme.len() && url[..scheme.len()].eq_ignore_ascii_case(scheme)
+            })
+    }
+
     fn paste_text(&mut self, text: &str, plain: bool, copy: CopyKind, cx: &mut Context<Self>) {
+        // A web address over selected words links them (⇧⌘V still pastes it as text).
+        if !plain && self.pastes_as_link(text) {
+            let url = text.trim().to_string();
+            self.edit(
+                EditOrigin::Paste,
+                |model| {
+                    model
+                        .run(EditorCommand::ApplyMark(
+                            super::marks::MarkChange::new().with_link(url, None),
+                        ))
+                        .map(|_| ())
+                },
+                cx,
+            );
+            return;
+        }
         self.edit(
             EditOrigin::Paste,
             |model| {
