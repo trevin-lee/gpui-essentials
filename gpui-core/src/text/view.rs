@@ -527,6 +527,9 @@ struct ViewState {
     press: Option<(Point<Pixels>, Pos)>,
     layout: Option<Rc<Assembled>>,
     bounds: Bounds<Pixels>,
+    /// The width it was last drawn at: what a measure with no definite width (a flex item's
+    /// content size) is answered at, so its layout is the cached one.
+    width: Option<Pixels>,
 }
 
 impl ViewState {
@@ -1850,6 +1853,7 @@ impl RenderOnce for TextView {
             press: None,
             layout: None,
             bounds: Bounds::default(),
+            width: None,
         });
         state.update(cx, |s, _| s.sync(&self.sources));
         let focus = state.read(cx).focus.clone();
@@ -2043,11 +2047,26 @@ impl Element for ViewElement {
         let caret = self.caret.is_some();
         let text_style = window.text_style();
         let id = window.request_measured_layout(style, move |known, available, window, cx| {
-            let width = known.width.or(match available.width {
+            let definite = known.width.or(match available.width {
                 AvailableSpace::Definite(w) => Some(w),
                 _ => None,
             });
-            let width = width.unwrap_or(px(400.));
+            // Without a definite width (a flex item asked its content size), the width it was
+            // last drawn at. Laying it out at another width (400) would put every block
+            // together at that width and then again at the drawn one: twice a frame, as long as
+            // the text.
+            let width = match definite {
+                Some(w) => w,
+                None => state.read(cx).width.unwrap_or(px(400.)),
+            };
+            // A flex layout also asks at no width at all (a definite 0). Laid out there, every
+            // word on a line of its own, it would be put together again for each frame too: the
+            // drawn layout's height answers it instead.
+            if width <= px(1.)
+                && let Some(l) = state.read(cx).layout.clone()
+            {
+                return size(width, l.height);
+            }
             let key = style_key(&text_style, window.rem_size(), fingerprint);
             let cached = state.read(cx).layout.clone().filter(|l| {
                 l.width == width && l.key == key && l.generation == state.read(cx).generation
@@ -2089,6 +2108,7 @@ impl Element for ViewElement {
         cx: &mut App,
     ) -> Prepainted {
         let width = bounds.size.width;
+        self.state.update(cx, |s, _| s.width = Some(width));
         let text_style = window.text_style();
         let key = style_key(&text_style, window.rem_size(), self.fingerprint);
         let generation = self.state.read(cx).generation;
@@ -2751,6 +2771,60 @@ mod tests {
                 .h(px(300.))
                 .overflow_hidden()
                 .child(TextView::blocks("clipped", self.0.clone()))
+        }
+    }
+
+    /// A reply as a flex item, as a chat draws one: in a column whose width is its content's,
+    /// in a row. Each frame it's measured for its content size, with no definite width, and
+    /// laid out at the row's width.
+    struct InARow(Vec<(u64, gpui::SharedString)>);
+
+    impl Render for InARow {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(640.))
+                .h(px(300.))
+                .overflow_hidden()
+                .flex()
+                .flex_row()
+                .child(
+                    div().flex().flex_col().child(
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .child(TextView::blocks("in-a-row", self.0.clone())),
+                    ),
+                )
+        }
+    }
+
+    /// As a flex item, a delta still puts together only the open block: the measure for its
+    /// content size is answered at the width it's drawn at, not laid out again at another.
+    #[gpui::test]
+    fn as_a_flex_item_a_delta_puts_together_only_the_open_block(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut sources = reply(300);
+        sources.push((u64::MAX, "The open block".into()));
+        let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let m = made.clone();
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| InARow(sources));
+            *m.borrow_mut() = Some(v.clone());
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        let v = made.borrow().clone().unwrap();
+        for grown in ["The open block, grown", "The open block, grown again"] {
+            ASSEMBLED.with(|n| n.set(0));
+            vcx.update(|_, cx| {
+                v.update(cx, |s, cx| {
+                    s.0.last_mut().unwrap().1 = grown.into();
+                    cx.notify();
+                })
+            });
+            vcx.run_until_parked();
+            // Not every block again, at the content size's width and then at the row's.
+            assert_eq!(ASSEMBLED.with(|n| n.get()), 1, "{grown}");
         }
     }
 
