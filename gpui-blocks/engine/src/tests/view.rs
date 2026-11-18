@@ -9,7 +9,7 @@ use gpui::{
 };
 
 use crate::support::secondary_modifier;
-use crate::{BlockEditor, BlockEditorState, BlockKind, BlockPosition, BlockSelection};
+use crate::{BlockEditor, BlockEditorState, BlockId, BlockKind, BlockPosition, BlockSelection};
 
 struct Root(Entity<BlockEditorState>);
 
@@ -5167,4 +5167,201 @@ fn cmd_d_duplicates_the_caret_block(cx: &mut TestAppContext) {
     caret_at(&editor, cx, 0, 1);
     keys(cx, "M-d");
     assert_eq!(source(&editor, cx), "first\n\nfirst\n\nsecond");
+}
+
+/// Drags `block` from its left edge to `to` and lets go there.
+fn drag_block(
+    editor: &Entity<BlockEditorState>,
+    cx: &mut VisualTestContext,
+    block: BlockId,
+    from: gpui::Point<Pixels>,
+    to: gpui::Point<Pixels>,
+) {
+    editor.update(cx, |e, _| e.begin_block_drag(block, from));
+    // Past the threshold first, then to where it drops.
+    let nudge = gpui::point(from.x, from.y + px(6.));
+    cx.simulate_mouse_move(nudge, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+}
+
+const ROW: &str = "<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->";
+
+#[gpui::test]
+fn a_block_dragged_straight_down_from_its_edge_reorders_rather_than_making_a_row(
+    cx: &mut TestAppContext,
+) {
+    let (editor, cx) = open(cx, "first\n\nsecond\n\nthird");
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (first, b) = blocks[0];
+    let from = gpui::point(b.left() + px(2.), b.center().y);
+    let to = gpui::point(from.x, blocks[2].1.center().y + px(4.));
+    drag_block(&editor, cx, first, from, to);
+    assert_eq!(source(&editor, cx), "second\n\nthird\n\nfirst");
+}
+
+#[gpui::test]
+fn a_block_dropped_on_anothers_side_makes_a_row(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\nthird";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (third, b) = blocks[2];
+    let from = gpui::point(b.left() + px(2.), b.center().y);
+    // The first block's right edge: a vertical line there while dragging.
+    let to = gpui::point(blocks[0].1.right() - px(4.), blocks[0].1.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(third, from));
+    cx.simulate_mouse_move(
+        gpui::point(from.x, from.y + px(6.)),
+        Some(MouseButton::Left),
+        Modifiers::none(),
+    );
+    draw(cx);
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    let line = editor
+        .read_with(cx, |e, _| e.drop_line())
+        .expect("a drop line");
+    assert!(line.size.height > line.size.width, "vertical: {line:?}");
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        source(&editor, cx),
+        "<!-- columns -->\n\n<!-- column 0.5 -->\n\nfirst\n\n<!-- column 0.5 -->\n\nthird\n\n<!-- /columns -->\n\nsecond"
+    );
+    // One undo step.
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), src);
+    // On the left side: the dragged block is the left column.
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (third, b) = blocks[2];
+    // From a handle in the margin, as the page's grip is.
+    let from = gpui::point(b.left() - px(20.), b.center().y);
+    let to = gpui::point(blocks[0].1.left() + px(10.), blocks[0].1.center().y);
+    drag_block(&editor, cx, third, from, to);
+    assert!(
+        source(&editor, cx).starts_with("<!-- columns -->\n\n<!-- column 0.5 -->\n\nthird"),
+        "{}",
+        source(&editor, cx)
+    );
+}
+
+#[gpui::test]
+fn blocks_drop_into_a_row_as_a_new_column_or_into_a_column(cx: &mut TestAppContext) {
+    let src = format!("{ROW}\n\nnew\n\nmore");
+    let (editor, cx) = open(cx, &src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (columns, row) = blocks[0];
+    let (new, b) = blocks[1];
+    let from = gpui::point(b.left() + px(2.), b.center().y);
+    // The row's right edge: a third column.
+    let to = gpui::point(row.right() - px(4.), row.center().y);
+    drag_block(&editor, cx, new, from, to);
+    let s = source(&editor, cx);
+    assert!(
+        s.contains("<!-- column 0.333 -->\n\nnew\n\n<!-- /columns -->"),
+        "{s}"
+    );
+    assert_eq!(s.matches("<!-- column ").count(), 3, "{s}");
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), src);
+    // Into the left column, below its line.
+    let cols = editor.read_with(cx, |e, _| e.children_bounds(columns));
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (more, b) = blocks[2];
+    let from = gpui::point(b.left() + px(2.), b.center().y);
+    let to = gpui::point(cols[0].1.center().x, cols[0].1.bottom() + px(2.));
+    drag_block(&editor, cx, more, from, to);
+    assert_eq!(
+        source(&editor, cx),
+        "<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\nmore\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->\n\nnew"
+    );
+}
+
+#[gpui::test]
+fn a_block_dragged_out_of_a_column_leaves_the_row_in_shape(cx: &mut TestAppContext) {
+    let src = format!("top\n\n{ROW}");
+    let (editor, cx) = open(cx, &src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let columns = blocks[1].0;
+    let cols = editor.read_with(cx, |e, _| e.children_bounds(columns));
+    let right_column = cols[1].0;
+    let right = editor.read_with(cx, |e, _| e.children_bounds(right_column))[0];
+    let from = gpui::point(right.1.left() + px(2.), right.1.center().y);
+    // Above the first block: out to the top level; the row is left with one column, which
+    // unwraps.
+    let to = gpui::point(blocks[0].1.center().x, blocks[0].1.top() - px(2.));
+    drag_block(&editor, cx, right.0, from, to);
+    assert_eq!(source(&editor, cx), "right\n\ntop\n\nleft");
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), src);
+}
+
+#[gpui::test]
+fn a_selected_run_drops_beside_as_one_column_and_columns_never_nest(cx: &mut TestAppContext) {
+    let src = "a\n\nb\n\nc";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let run = BlockSelection::Blocks {
+        anchor: blocks[1].0,
+        head: blocks[2].0,
+    };
+    editor.update(cx, |e, _| e.model.set_selection(run).unwrap());
+    let from = gpui::point(blocks[1].1.left() + px(2.), blocks[1].1.center().y);
+    let to = gpui::point(blocks[0].1.right() - px(4.), blocks[0].1.center().y);
+    drag_block(&editor, cx, blocks[1].0, from, to);
+    assert_eq!(
+        source(&editor, cx),
+        "<!-- columns -->\n\n<!-- column 0.5 -->\n\na\n\n<!-- column 0.5 -->\n\nb\n\nc\n\n<!-- /columns -->"
+    );
+    // A whole row dragged onto another block's side: no row in a row, so no side drop.
+    let (editor, cx) = open(cx, &format!("x\n\n{ROW}"));
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (row, b) = blocks[1];
+    let from = gpui::point(b.left() + px(2.), b.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(row, from));
+    cx.simulate_mouse_move(
+        gpui::point(from.x, from.y + px(6.)),
+        Some(MouseButton::Left),
+        Modifiers::none(),
+    );
+    draw(cx);
+    let to = gpui::point(blocks[0].1.right() - px(4.), blocks[0].1.center().y);
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    assert_eq!(editor.read_with(cx, |e, _| e.drop_line()), None);
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.model.doc.check_invariants()),
+        Ok(())
+    );
+}
+
+#[gpui::test]
+fn a_long_press_beside_a_line_in_a_column_lifts_that_block(cx: &mut TestAppContext) {
+    let src = format!("top\n\n{ROW}");
+    let (editor, cx) = open(cx, &src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let columns = blocks[1].0;
+    let cols = editor.read_with(cx, |e, _| e.children_bounds(columns));
+    let right = editor.read_with(cx, |e, _| e.children_bounds(cols[1].0))[0].1;
+    // Past the end of "right": off the text, in the right column.
+    let start = gpui::point(right.left() + px(120.), right.center().y);
+    let to = gpui::point(blocks[0].1.center().x, blocks[0].1.top() - px(2.));
+    for (phase, at) in [
+        (gpui::TouchPhase::Started, start),
+        (gpui::TouchPhase::Moved, to),
+        (gpui::TouchPhase::Ended, to),
+    ] {
+        cx.simulate_event(gpui::LongPressEvent {
+            phase,
+            start_position: start,
+            position: at,
+        });
+        draw(cx);
+    }
+    assert_eq!(source(&editor, cx), "right\n\ntop\n\nleft");
 }

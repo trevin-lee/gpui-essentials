@@ -306,7 +306,7 @@ impl RenderOnce for BlockEditor {
             let reduce_motion = cx.reduce_motion();
             let (offsets, moving, held, by_touch) = self.state.update(cx, |state, _| {
                 let top = state.content_top();
-                let dragged = state.live_block_drag().filter(|d| d.active);
+                let dragged = state.live_block_drag().filter(|d| d.active && !d.nested);
                 let (offsets, moving) = state.reorder.frame(
                     slots,
                     dragged.map(|d| d.dragged(top)),
@@ -814,6 +814,7 @@ impl Element for EditorRoot {
         let caret = state.model.caret();
         let show_caret = state.show_caret(window, cx) && collapsed;
         let frame = state.frame.clone();
+        let drop_line = state.drop_line();
         let menu_line = state.table_menu.as_ref().map(|m| (m.table, m.line));
         let grips = state.table_grips_at(window.mouse_position());
         // Whole-table corner handles to show: the hovered table's, and any
@@ -958,6 +959,9 @@ impl Element for EditorRoot {
                 size((b.x - a.x).max(thickness), thickness),
             );
             window.paint_quad(fill(underline, style.composition_underline()));
+        }
+        if let Some(line) = drop_line {
+            window.paint_quad(fill(line, style.caret()).corner_radii(px(1.5)));
         }
         if show_caret
             && let Some(pos) = caret

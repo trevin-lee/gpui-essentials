@@ -1,5 +1,6 @@
 //! A columns block's width handles, as Notion's: while the pointer is over the block, a thin
-//! bar sits in each gap between its columns; dragging one moves the line between the two columns
+//! bar sits at the left of each gap between its columns (the right of the gap holds the grips
+//! of the next column's blocks); dragging one moves the line between the two columns
 //! beside it, shown as the pointer goes, and letting go gives them their new widths as one undo
 //! step. Columns stacked one under another (a narrow row) have none.
 
@@ -105,10 +106,10 @@ impl Editor {
         let bottom = bounds.iter().map(|(_, b)| b.bottom()).reduce(Pixels::max)?;
         let dragging = self.column_drag.as_ref().map(|d| (d.at, d.x));
         let handles = bounds.windows(2).enumerate().map(|(at, pair)| {
-            let gap_middle = (pair[0].1.right() + pair[1].1.left()) / 2.;
+            // At the left of the gap: its right is the grip of the blocks in the next column.
             let x = match dragging {
                 Some((dragged, x)) if dragged == at => x,
-                _ => gap_middle,
+                _ => pair[0].1.right() + px(3.),
             };
             let active = dragging.is_some_and(|(dragged, _)| dragged == at);
             let this = cx.entity().downgrade();

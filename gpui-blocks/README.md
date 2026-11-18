@@ -34,8 +34,11 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   through or code. ⌘⌥0 to ⌘⌥8 turn the block, or each selected block, into text, heading 1 to 3,
   a to-do, bulleted or numbered item, a toggle or code. Off the Mac, Ctrl takes ⌘'s place.
 - **Columns:** "2 columns" or "3 columns" in the slash menu lays the line out beside empty
-  columns (up to five). Drag the bar in the gap between two columns to share the room between
-  them differently. On a phone, or wherever the row is too narrow, columns stack one under
+  columns (up to five). Or drag a block by its grip onto another block's left or right edge to
+  make a row of the two, onto a row's edge or the gap between two columns for a new column, or
+  into a column among its blocks; a vertical line shows where. Blocks in columns have their own
+  grips, to drag them out again. Drag the bar in the gap between two columns to share the room
+  between them differently. On a phone, or wherever the row is too narrow, columns stack one under
   another, in order.
 - **Code blocks:** over a code block the pointer is on, or the caret is in, its language opens a
   menu of common ones, and Copy copies its code, as Notion's do.
