@@ -353,8 +353,12 @@ made.
   nothing is selected, delete removes it, and escape leaves it for the canvas. A click takes
   the keyboard off. In a tree, Tab and enter add nodes as before, once one is selected.
   `Flow::keyboard_on` and `set_keyboard_on` read and set it.
+- **What changes is said** in a live region, which assistive technology reads out without the
+  focus moving: a node moved by keyboard and where to ("Moved Start. New position, x: 105,
+  y: 100", as React Flow's), a connection made ("Connected Start to Ship it") or moved, and
+  what was deleted. `Flow::announce` says something of the host's; `announcement` reads it.
 - **Not yet.** A node toolbar; edge renderers of the host's own (a custom type is drawn as a
-  bezier); `dragHandle`; announcing changes as they happen; undo.
+  bezier); `dragHandle`; undo.
 
 ## License
 

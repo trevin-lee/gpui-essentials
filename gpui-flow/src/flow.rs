@@ -703,6 +703,9 @@ pub struct Flow {
     /// The node or edge the keyboard is on, with a focus ring round it; none while the
     /// canvas itself has the keyboard, or the mouse was used last.
     keyboard_on: Option<FlowItem>,
+    /// What the canvas last said to assistive technology (a node moved, a connection made),
+    /// in its live region.
+    announcement: SharedString,
     /// Where the pointer of the drag under way last was, in the pane, and when the viewport
     /// last moved for it being near the pane's edge (see [`FlowOptions::auto_pan_on_node_drag`]).
     drag_pane: Option<XY>,
@@ -932,6 +935,7 @@ impl Flow {
             focus: cx.focus_handle(),
             drag: None,
             keyboard_on: None,
+            announcement: SharedString::default(),
             drag_pane: None,
             auto_panned: None,
             drag_button: MouseButton::Left,
@@ -2665,6 +2669,24 @@ impl Flow {
         }
     }
 
+    /// What the canvas last said to assistive technology, in its live region: a node moved by
+    /// keyboard and where to, a connection made or moved, what was deleted.
+    pub fn announcement(&self) -> &str {
+        &self.announcement
+    }
+
+    /// Says something to assistive technology, which reads it out without the focus moving.
+    pub fn announce(&mut self, words: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.announcement = words.into();
+        cx.notify();
+    }
+
+    /// A node's name by its id, or the id.
+    fn name_of(&self, id: &NodeId) -> SharedString {
+        self.node(id)
+            .map_or_else(|| id.clone(), Node::accessible_name)
+    }
+
     /// The node or edge the keyboard is on, if any.
     pub fn keyboard_on(&self) -> Option<&FlowItem> {
         self.keyboard_on.as_ref()
@@ -2832,6 +2854,16 @@ impl Flow {
                 .aria_active_descendant()
                 .into_any_element(),
         )
+    }
+
+    /// Says a connection was made, between which nodes.
+    fn announce_connection(&mut self, edge: &Edge, cx: &mut Context<Self>) {
+        let words = format!(
+            "Connected {} to {}",
+            self.name_of(&edge.source),
+            self.name_of(&edge.target)
+        );
+        self.announce(words, cx);
     }
 
     /// What assistive technology calls an edge: its `ariaLabel` (see [`Edge::aria_label`]),
@@ -4905,6 +4937,8 @@ impl Flow {
                         .and_then(|s| self.reconnect(&edge, s.connection, cx));
                     let reconnected = moved.is_some();
                     if let Some((old, new)) = moved {
+                        let words = format!("Reconnected: {}", self.edge_name(&new));
+                        self.announce(words, cx);
                         cx.emit(FlowEvent::Reconnect { old, new });
                     }
                     cx.emit(FlowEvent::ReconnectEnd { edge, reconnected });
@@ -4928,6 +4962,7 @@ impl Flow {
                         .and_then(|s| self.connect(s.connection, cx));
                     let connected = made.is_some();
                     if let Some(edge) = made {
+                        self.announce_connection(&edge, cx);
                         cx.emit(FlowEvent::Connect(edge));
                     }
                     cx.emit(FlowEvent::ConnectEnd {
@@ -5036,6 +5071,20 @@ impl Flow {
             let to = self.within_extent(node, to);
             self.nodes[i].position = to;
         }
+        // Where to, as React Flow says it.
+        let words = match moving.as_slice() {
+            [one] => {
+                let at = self.node(one).map_or(xy(0., 0.), |n| n.position);
+                format!(
+                    "Moved {}. New position, x: {}, y: {}",
+                    self.name_of(one),
+                    at.x.round(),
+                    at.y.round()
+                )
+            }
+            many => format!("Moved {} nodes", many.len()),
+        };
+        self.announce(words, cx);
         cx.emit(FlowEvent::NodeMove(moving));
         cx.notify();
         true
@@ -5091,6 +5140,7 @@ impl Flow {
                     .and_then(|s| self.connect(s.connection, cx));
                 let connected = made.is_some();
                 if let Some(edge) = made {
+                    self.announce_connection(&edge, cx);
                     cx.emit(FlowEvent::Connect(edge));
                 }
                 cx.emit(FlowEvent::ConnectEnd {
@@ -6442,11 +6492,30 @@ impl Render for Flow {
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|flow, _: &DeleteSelected, _, cx| {
+                let before = (flow.nodes.len(), flow.edges.len());
                 if !(flow.options.deletable
                     && (flow.delete_selected(cx) || flow.delete_focused(cx)))
                 {
                     cx.propagate();
+                    return;
                 }
+                let gone = (
+                    before.0.saturating_sub(flow.nodes.len()),
+                    before.1.saturating_sub(flow.edges.len()),
+                );
+                let count = |n: usize, one: &str| {
+                    if n == 1 {
+                        format!("1 {one}")
+                    } else {
+                        format!("{n} {one}s")
+                    }
+                };
+                let words = match gone {
+                    (0, e) => format!("Deleted {}", count(e, "edge")),
+                    (n, 0) => format!("Deleted {}", count(n, "node")),
+                    (n, e) => format!("Deleted {} and {}", count(n, "node"), count(e, "edge")),
+                };
+                flow.announce(words, cx);
             }))
             .on_action(cx.listener(|flow, _: &FocusPrevious, _, cx| {
                 if !flow.move_keyboard(false, cx) {
@@ -6526,7 +6595,17 @@ impl Render for Flow {
             .on_action(cx.listener(|f, _: &MoveUpFar, _, cx| f.nudge_or_pass(0., -1., true, cx)))
             .on_action(cx.listener(|f, _: &MoveDownFar, _, cx| f.nudge_or_pass(0., 1., true, cx)))
             .child(pane)
-            .children(self.focus_ring(&colors));
+            .children(self.focus_ring(&colors))
+            // The live region: what the canvas says, read out as it changes.
+            .child(crate::a11y::Live::new(
+                div()
+                    .id("flow-announcer")
+                    .absolute()
+                    .size_0()
+                    .overflow_hidden()
+                    .role(Role::Status)
+                    .aria_label(self.announcement.clone()),
+            ));
 
         // Each edge drawn, as assistive technology gets it: a group named for it, where its line
         // was last painted. Edges are painted, not elements, so they're nodes of the canvas's own.

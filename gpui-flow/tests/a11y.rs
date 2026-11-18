@@ -71,3 +71,22 @@ fn names_are_saved_as_react_flows_aria_label(cx: &mut TestAppContext) {
     );
     let _ = cx;
 }
+
+/// What the canvas says in its live region, which assistive technology reads out as it changes:
+/// a node moved by keyboard and where to, a connection made, what was deleted.
+#[gpui::test]
+fn moves_connections_and_deletions_are_announced(cx: &mut TestAppContext) {
+    let (flow, _, cx) = open(cx, with_three);
+    let said =
+        |cx: &gpui::VisualTestContext| flow.read_with(cx, |f, _| f.announcement().to_string());
+    assert_eq!(said(cx), "");
+    cx.simulate_keystrokes("tab right");
+    assert_eq!(said(cx), "Moved A. New position, x: 105, y: 100");
+    let from = handle(&flow, cx, "a", HandleKind::Source);
+    let to = handle(&flow, cx, "c", HandleKind::Target);
+    drag(cx, from, to, gpui::Modifiers::none());
+    assert_eq!(said(cx), "Connected A to C");
+    // B, and the edge from A to it.
+    cx.simulate_keystrokes("escape tab tab delete");
+    assert_eq!(said(cx), "Deleted 1 node and 1 edge");
+}
