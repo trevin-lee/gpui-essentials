@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format|callouts|callouts-light|bookmarks|bookmarks-light]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format|callouts|callouts-light|bookmarks|bookmarks-light|sheet]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -17,7 +17,7 @@
 //! (the sample's end). `phone` is the find bar open in a phone-sized window, where the editor lays
 //! itself out compact. `bookmarks` is a page of bookmark cards. `callouts` is a page of
 //! callouts with their own icons and colours, every colour. `-light` after either is the same
-//! in the light theme.
+//! in the light theme. `sheet` is the block menu in a sheet on the smallest phone (375×667).
 
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
@@ -396,10 +396,11 @@ fn main() {
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.on_action(|_: &Quit, cx| cx.quit());
             // An iPhone's size for the phone scene; the editor goes compact below 600 wide.
-            let window_size = if args.scene == "phone" {
-                size(px(402.), px(874.))
-            } else {
-                size(px(1280.), px(820.))
+            let window_size = match args.scene.as_str() {
+                "phone" => size(px(402.), px(874.)),
+                // The smallest phone the apps run on (an iPhone SE).
+                "sheet" => size(px(375.), px(667.)),
+                _ => size(px(1280.), px(820.)),
             };
             let bounds = Bounds::centered(None, window_size, cx);
             let options = WindowOptions {
@@ -828,6 +829,27 @@ fn shot(window: AnyWindowHandle, root: Entity<Root>, path: PathBuf, scene: Strin
                             }
                         });
                     });
+                });
+                settle(window, cx).await;
+            }
+            // The block menu as a phone shows it, in a sheet, on the smallest phone: ⌘/ with the
+            // caret in the to-do list's heading.
+            "sheet" => {
+                settle(window, cx).await;
+                let _ = cx.update_window(window, |_, window, cx| {
+                    root.update(cx, |root, cx| {
+                        root.editor.update(cx, |e, cx| {
+                            e.focus(window, cx);
+                            e.state().update(cx, |s, cx| {
+                                let Some(leaf) = s.model().document().leaves().nth(2).map(|l| l.id()) else {
+                                    return;
+                                };
+                                let _ = s.set_selection(markdown_editor_selection(leaf, 0), cx);
+                            });
+                        });
+                    });
+                    let open = if cfg!(target_os = "macos") { "cmd-/" } else { "ctrl-/" };
+                    window.dispatch_keystroke(Keystroke::parse(open).unwrap(), cx);
                 });
                 settle(window, cx).await;
             }
