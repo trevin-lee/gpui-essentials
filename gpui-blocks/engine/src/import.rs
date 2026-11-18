@@ -77,7 +77,7 @@ pub(crate) fn parse_document(
     };
     let reader = Reader::new(source, &extensions, &root);
     let nodes = root.children().map(Vec::as_slice).unwrap_or_default();
-    let blocks = reader.blocks(nodes);
+    let blocks = group_columns(reader.blocks(nodes));
     let mut doc = EditorDocument::empty(extensions.clone());
     let root_id = doc.root;
     // Drop the placeholder paragraph of the empty document.
@@ -164,7 +164,9 @@ pub(crate) fn parse_blocks(markdown: &str, extensions: &Extensions) -> Option<Ve
         }
     };
     let reader = Reader::new(markdown, extensions, &root);
-    Some(reader.blocks(root.children().map(Vec::as_slice).unwrap_or_default()))
+    Some(group_columns(reader.blocks(
+        root.children().map(Vec::as_slice).unwrap_or_default(),
+    )))
 }
 
 /// Link reference definitions, by their normalized identifier.
@@ -836,6 +838,35 @@ enum DetailsTag {
         closed: bool,
     },
     Close,
+}
+
+/// Top-level blocks with their column markers made columns (see `columns.rs`). Only the top
+/// level: markers inside a quote or a list stay the HTML they are.
+fn group_columns(blocks: Vec<DetachedBlock>) -> Vec<DetachedBlock> {
+    crate::columns::group(
+        blocks,
+        |block| crate::columns::marker(source_of(block)?),
+        |columns| {
+            let columns = columns
+                .into_iter()
+                .map(|(width, mut blocks)| {
+                    if blocks.is_empty() {
+                        blocks.push(DetachedBlock::paragraph(InlineText::new()));
+                    }
+                    DetachedBlock::container(BlockKindData::Column { width }, blocks)
+                })
+                .collect();
+            DetachedBlock::container(BlockKindData::Columns, columns)
+        },
+    )
+}
+
+/// The source of a block kept as the HTML (or footnote) it was written as.
+fn source_of(block: &DetachedBlock) -> Option<&str> {
+    let DetachedContent::Leaf(BlockContent::Atom(AtomData::Custom(node))) = &block.content else {
+        return None;
+    };
+    (node.name() == SOURCE_BLOCK).then(|| node.as_markdown())
 }
 
 fn details_tag(block: &DetachedBlock) -> Option<DetailsTag> {

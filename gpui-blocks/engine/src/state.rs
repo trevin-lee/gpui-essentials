@@ -2304,6 +2304,37 @@ impl BlockEditorState {
         out
     }
 
+    /// Where each column of the top-level columns block `columns` was last drawn: the union of
+    /// its lines', in window coordinates, in order. Empty for any other block, or columns not
+    /// drawn.
+    pub fn column_bounds(&self, columns: BlockId) -> Vec<(BlockId, Bounds<Pixels>)> {
+        use super::kind::BlockKindData;
+        let doc = &self.model.doc;
+        let ids = doc.children(columns);
+        if doc.kind(columns) != Some(&BlockKindData::Columns) {
+            return Vec::new();
+        }
+        let frame = self.frame.borrow();
+        let mut out: Vec<(BlockId, Option<Bounds<Pixels>>)> =
+            ids.iter().map(|id| (*id, None)).collect();
+        for leaf in &frame.leaves {
+            let path = doc.path(leaf.info.block);
+            if path.get(1) != Some(&columns) {
+                continue;
+            }
+            let Some(column) = path.get(2) else {
+                continue;
+            };
+            if let Some((_, bounds)) = out.iter_mut().find(|(id, _)| id == column) {
+                let b = leaf.bounds();
+                *bounds = Some(bounds.map_or(b, |a| a.union(&b)));
+            }
+        }
+        out.into_iter()
+            .filter_map(|(id, b)| Some((id, b?)))
+            .collect()
+    }
+
     /// D22: the top-level table or code block whose edge handle
     /// (`block_handle_at`) is under `at`; only those can be dragged.
     pub(crate) fn drag_handle_at(&self, at: Point<Pixels>) -> Option<BlockId> {
@@ -3537,6 +3568,8 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::SelectAll => "select_all",
         EditorCommand::DeleteSelection => "delete_selection",
         EditorCommand::SetCodeBlock { .. } => "code_block",
+        EditorCommand::InsertColumns { .. } => "insert_columns",
+        EditorCommand::SetColumnWidths { .. } => "set_column_widths",
         EditorCommand::InsertTable { .. } => "insert_table",
         EditorCommand::EditTable(_) => "edit_table",
     }
