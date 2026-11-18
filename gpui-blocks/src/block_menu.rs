@@ -256,12 +256,17 @@ impl Editor {
         }
         let (first, last) = self.menu_blocks(block, cx);
         let has_text = self.text_of(first, last, cx).is_some();
-        let turn = turn_into_titles()
-            .into_iter()
-            .enumerate()
-            .fold(PopupMenu::new("block-menu-turn"), |menu, (ix, title)| {
-                menu.item(PopupMenuItem::new(format!("turn-{ix}"), title))
-            });
+        let turn = turn_into_titles().into_iter().enumerate().fold(
+            PopupMenu::new("block-menu-turn"),
+            |menu, (ix, title)| {
+                let keys = crate::slash::turn_into_keys(&title);
+                let item = PopupMenuItem::new(format!("turn-{ix}"), title);
+                menu.item(match keys {
+                    Some(keys) => item.shortcut(keys),
+                    None => item,
+                })
+            },
+        );
         let this = cx.entity().downgrade();
         let pick = this.clone();
         let menu = PopupMenu::new("block-menu")

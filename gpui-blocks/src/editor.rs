@@ -1858,6 +1858,15 @@ impl Editor {
                                     .child(item.hint.clone()),
                             ),
                     )
+                    .children(item.shortcut.clone().map(|keys| {
+                        div()
+                            .ml_auto()
+                            .pl(px(8.))
+                            .flex_none()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(keys)
+                    }))
                     .into_any_element(),
             );
         }
