@@ -1920,6 +1920,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-core-cli"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "gpui-flow"
 version = "0.1.0"
 dependencies = [
