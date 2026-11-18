@@ -339,14 +339,33 @@ fn options_are_renamed_recoloured_reordered_added_and_deleted(cx: &mut TestAppCo
     click(cx, item("Red"));
     let p = first_property(&host);
     assert_eq!(p.option(LEAD).unwrap().color, Color::Red);
-    // Moved down: the options in their new order, Lead's submenu still open beside it, now
-    // with Move up too.
-    click(cx, item("Move down"));
+    // Its submenu has no Move entries: the options are reordered in place. Alt-Down and
+    // Alt-Up move the highlighted one, each a propertyChanged with the options' new order.
+    assert!(!drawn(cx, item("Move down")) && !drawn(cx, item("Move up")));
+    keys(cx, "left");
+    keys(cx, "alt-down");
     let after = names(&table, cx);
-    assert_eq!(after[1], "Lead");
-    assert_eq!(after[0], start[1]);
+    assert_eq!(
+        (after[0].as_str(), after[1].as_str()),
+        (start[1].as_str(), "Lead")
+    );
+    assert_eq!(first_property(&host).options()[1].name, "Lead");
+    keys(cx, "alt-up");
+    assert_eq!(names(&table, cx), start);
+    // Dragged: dropped low on the next option's row, it goes after it.
+    let from = rect(cx, item("Lead")).center();
+    let next = rect(cx, item(&start[1]));
+    let to = point(next.center().x, next.top() + next.size.height * 0.75);
+    drag(cx, from, to);
+    let after = names(&table, cx);
+    assert_eq!(
+        (after[0].as_str(), after[1].as_str()),
+        (start[1].as_str(), "Lead")
+    );
+    assert_eq!(first_property(&host).options()[1].name, "Lead");
+    // A click still opens its submenu.
+    click(cx, item("Lead"));
     assert!(drawn(cx, "menu-submenu-Lead"));
-    assert!(drawn(cx, item("Move up")));
     // Renamed, in a step of its own, then back on the column's menu where it came from: the
     // options open, the option's submenu open, the keyboard on Rename option.
     click(cx, item("Rename option"));
