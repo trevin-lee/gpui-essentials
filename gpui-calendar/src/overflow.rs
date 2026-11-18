@@ -1046,3 +1046,67 @@ fn the_agenda_marks_the_time_now_among_todays_events() {
     let (_, now) = frame(vcx);
     assert_eq!(now, None);
 }
+
+/// In a narrow column a chip's title wraps between words, and a word wider than the chip keeps
+/// its title to one line, cut with "…", rather than break the word apart.
+#[test]
+fn narrow_titles_wrap_only_between_words() {
+    let mut cx = context();
+    let (_calendar, vcx) = cx.add_window_view(|_, cx| {
+        let mut c = Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_view(CalendarView::Week)
+            .with_events(vec![
+                Event::timed(
+                    "lunch",
+                    "Lunch with Maya",
+                    at(day(1), 12, 0),
+                    at(day(1), 14, 0),
+                ),
+                Event::timed("team", "Team lunch", at(day(2), 15, 0), at(day(2), 16, 0)),
+                Event::timed(
+                    "long",
+                    "Interdisciplinary",
+                    at(day(3), 12, 0),
+                    at(day(3), 14, 0),
+                ),
+            ]);
+        c.scroll_to_minute(11. * 60.);
+        c
+    });
+    // A phone's week: columns far narrower than a chip that wraps anyway.
+    vcx.simulate_resize(size(px(520.), px(844.)));
+    vcx.run_until_parked();
+    drawn::record();
+    vcx.update(|window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+    });
+    let texts = drawn::take();
+    // A wrapped title is noted once, as tall as its lines: a title's line is 15 points at the
+    // test window's 16-pixel rem.
+    let line = 15. * 16. / 15.;
+    let lines = |title: &str| -> usize {
+        texts
+            .iter()
+            .filter(|t| t.text == title || t.text.starts_with(&title[..4]))
+            .map(|t| (f32::from(t.bounds.size.height) / line).round() as usize)
+            .sum()
+    };
+    assert!(lines("Lunch with Maya") >= 2, "the lunch wraps: {texts:#?}");
+    // An hour long: its title takes the time's line, as the narrow columns of Google
+    // Calendar do.
+    assert_eq!(lines("Team lunch"), 2, "the hour wraps");
+    assert!(
+        !texts.iter().any(|t| t.text == "3 – 4 PM"),
+        "and has no time"
+    );
+    assert_eq!(
+        lines("Interdisciplinary"),
+        1,
+        "the long word stays one line"
+    );
+}

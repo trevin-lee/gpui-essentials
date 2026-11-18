@@ -57,7 +57,9 @@ their look.
   for even one such column beside the strip (a phone's week) keeps one column and a narrower
   strip. Events a day or longer, and all-day ones, are spans
   stacked in the lowest free row, longer first. A shorter event that crosses midnight is drawn as
-  a piece on each day.
+  a piece on each day. A chip's title takes as many lines (up to three) as leave room for its
+  time. In a narrow column it wraps only between words: a word wider than the chip keeps the
+  title to one line, cut with "…".
 - **Dragging:** drag empty time to make an event, drag an event to move it (to other days too),
   and drag its bottom edge to change its end (an all-day event's right edge, in the all-day row
   and the month). On the grid a move crosses between the all-day row and the hours: an all-day
@@ -484,7 +486,6 @@ Not done yet:
 - Editing a recurrence rule itself (expanding recurring events, and applying a scoped edit to
   the series, is the app's job, as above).
 - Resource and timeline views.
-- In narrow columns, titles are cut to one line with "…" rather than wrapped.
 
 ## License
 
