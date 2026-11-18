@@ -23,7 +23,9 @@ use gpui::{
     UniformListScrollHandle, Window, div, point, px,
 };
 
-use gpui_dnd::{Backend, DragMonitor, DragSource, DropOutcome, DropTarget, Preview, dnd};
+use gpui_dnd::{
+    Backend, DragMonitor, DragSource, DropOutcome, DropTarget, Preview, SharedSource, dnd,
+};
 
 use super::host::person_label;
 use super::ops;
@@ -1111,22 +1113,25 @@ impl TableView {
         cx.notify();
     }
 
-    /// What a row's drag starts from (a table row's handle, a board's card, a list's line): a
-    /// gpui-dnd source by the mouse past a few pixels or a finger's long press. The view takes it
-    /// up as its own drag when it begins (with a table's selected rows), draws its picture, and
-    /// lets go when it ends.
-    pub(crate) fn card_source(
-        &self,
-        row_id: String,
-        from: String,
-        cx: &mut Context<Self>,
-    ) -> DragSource<DraggedCard> {
+    /// What a row's drag starts from (a table row's handle, a board's card, a list's line): one
+    /// gpui-dnd source for the whole view, built on first use, each element giving only its row
+    /// and group (`dnd(..).shared_source(&self.card_source(cx), DraggedCard { .. })`). The mouse
+    /// past a few pixels or a finger's long press picks one up; the view takes it up as its own
+    /// drag when it begins (with a table's selected rows), draws its picture, and lets go when
+    /// it ends.
+    pub(crate) fn card_source(&self, cx: &mut Context<Self>) -> SharedSource<DraggedCard> {
+        self.card_drag
+            .get_or_init(|| Self::build_card_source(cx))
+            .clone()
+    }
+
+    fn build_card_source(cx: &mut Context<Self>) -> SharedSource<DraggedCard> {
         let (began, ended, preview) = (
             cx.entity().downgrade(),
             cx.entity().downgrade(),
             cx.entity().downgrade(),
         );
-        DragSource::item(DraggedCard { row_id, from })
+        DragSource::keyed(|card: &DraggedCard, _| card.clone())
             .keyboard(false)
             .on_begin(move |m, window, cx| {
                 let (Some(d), Some(at)) = (
@@ -1164,6 +1169,7 @@ impl TableView {
                     None => div().into_any_element(),
                 }
             }))
+            .shared()
     }
 
     /// The view (a table, board or list) as the target of its rows' drags: where a row would land

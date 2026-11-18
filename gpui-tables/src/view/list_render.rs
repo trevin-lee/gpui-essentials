@@ -13,6 +13,7 @@ use gpui::{
 use gpui_core::{IconName, Press, Selectable as _};
 use gpui_dnd::dnd;
 
+use super::board::DraggedCard;
 use super::list::ListMetrics;
 use super::render::{icon, line};
 use super::table::{CellRef, Item, TableView};
@@ -376,7 +377,7 @@ impl TableView {
         ))
         .size_full()
         .drop_indicator(false)
-        .source(self.card_source(rid, from, cx))
+        .shared_source(&self.card_source(cx), DraggedCard { row_id: rid, from })
         .child(press)
         .into_any_element()
     }
