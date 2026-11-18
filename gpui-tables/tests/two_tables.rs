@@ -3,7 +3,8 @@
 //! by that table's host alone; a row dropped on the other table goes back, nothing emitted by
 //! either; and the other table can then drag its own rows.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 

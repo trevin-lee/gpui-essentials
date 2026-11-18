@@ -129,10 +129,22 @@ pub const CONTEXT: &str = "GpuiTablesTable";
 /// along the tabs, ⌥↓ opens the focused tab's menu, Down and Escape go back to the view.
 pub const VIEW_BAR: &str = "GpuiTablesViewBar";
 
+/// ⌘ on the Mac and iOS, Ctrl elsewhere (as gpui-core's fields bind their keys).
+macro_rules! cmd {
+    ($rest:literal) => {
+        if cfg!(any(target_os = "macos", target_os = "ios")) {
+            concat!("cmd-", $rest)
+        } else {
+            concat!("ctrl-", $rest)
+        }
+    };
+}
+
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
 /// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; a table's rows' (Space and
 /// Shift-arrows to select, ⌘⌫ to delete, ⌘D to duplicate, ⌘/ for their menu, ⌘⇧↑ and ⌘⇧↓ to
-/// move); ⌘F to search the rows from the bar; and the bar of views' ([`VIEW_BAR`]).
+/// move); ⌘F to search the rows from the bar; and the bar of views' ([`VIEW_BAR`]). ⌘ is Ctrl
+/// off the Mac and iOS.
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -154,12 +166,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("space", SelectRow, c),
         KeyBinding::new("shift-up", SelectUp, c),
         KeyBinding::new("shift-down", SelectDown, c),
-        KeyBinding::new("cmd-backspace", DeleteRows, c),
-        KeyBinding::new("cmd-d", DuplicateRows, c),
-        KeyBinding::new("cmd-/", RowMenu, c),
-        KeyBinding::new("cmd-shift-up", MoveRowsUp, c),
-        KeyBinding::new("cmd-shift-down", MoveRowsDown, c),
-        KeyBinding::new("cmd-f", Search, c),
+        KeyBinding::new(cmd!("backspace"), DeleteRows, c),
+        KeyBinding::new(cmd!("d"), DuplicateRows, c),
+        KeyBinding::new(cmd!("/"), RowMenu, c),
+        KeyBinding::new(cmd!("shift-up"), MoveRowsUp, c),
+        KeyBinding::new(cmd!("shift-down"), MoveRowsDown, c),
+        KeyBinding::new(cmd!("f"), Search, c),
     ]);
     let b = Some(VIEW_BAR);
     cx.bind_keys([
@@ -168,6 +180,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("down", Down, b),
         KeyBinding::new("escape", Cancel, b),
         KeyBinding::new("alt-down", TabMenu, b),
-        KeyBinding::new("cmd-f", Search, b),
+        KeyBinding::new(cmd!("f"), Search, b),
     ]);
 }

@@ -484,7 +484,7 @@ fn no_cell_header_group_or_menu_lets_its_text_out() {
                 cx.update(|_, cx| {
                     table.update(cx, |t, cx| t.select_row(IMANI, Select::Toggle, cx))
                 });
-                keys(cx, "cmd-backspace");
+                keys(cx, "secondary-backspace");
                 assert!(drawn(cx, "menu-item-Delete 2 rows"), "{case}: asked");
                 for o in overflows(cx) {
                     found.push(format!("{case}, asking to delete two rows: {o}"));
