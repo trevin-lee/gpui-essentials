@@ -23,6 +23,8 @@ pub struct TextMark {
     pub code: bool,
     /// A fill behind the text (`<mark>`), or `None`.
     pub highlight: Option<Hsla>,
+    /// The text's own colour (`<span style="color:#…">`), or `None` for the theme's.
+    pub color: Option<Hsla>,
     pub link: Option<LinkMark>,
 }
 
@@ -58,7 +60,13 @@ impl TextMark {
         self
     }
 
-    /// Adds `other`'s marks; its highlight and link replace these.
+    /// In `color` (`<span style="color:#…">`).
+    pub fn color(mut self, color: Hsla) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    /// Adds `other`'s marks; its highlight, colour and link replace these.
     pub fn merge(&mut self, other: TextMark) {
         self.bold |= other.bold;
         self.italic |= other.italic;
@@ -67,6 +75,9 @@ impl TextMark {
         self.code |= other.code;
         if other.highlight.is_some() {
             self.highlight = other.highlight;
+        }
+        if other.color.is_some() {
+            self.color = other.color;
         }
         if let Some(link) = other.link {
             self.link = Some(link);

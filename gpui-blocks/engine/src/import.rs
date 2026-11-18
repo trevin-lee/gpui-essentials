@@ -772,6 +772,18 @@ fn inline_html_mark(name: &str, attrs: &str) -> Option<TextMark> {
                 .unwrap_or_else(super::marks::default_highlight);
             TextMark::default().highlight(color)
         }
+        // A span is a mark only when it colours the text; any other is kept as it was written.
+        "span" => {
+            let style = inline_html_attr(attrs, "style")?;
+            let color = style.split(';').find_map(|decl| {
+                let (key, value) = decl.split_once(':')?;
+                key.trim()
+                    .eq_ignore_ascii_case("color")
+                    .then(|| mark_color(value.trim()))
+                    .flatten()
+            })?;
+            TextMark::default().color(color)
+        }
         _ => return None,
     })
 }

@@ -8,9 +8,10 @@
 //! goes with the selection. On touch the marks and Link are a second row of the long press's
 //! edit menu instead, whose Block… has Turn into.
 //!
-//! Color gives the selection one of Notion's background colours ([`BACKGROUNDS`]), stored as
-//! `<mark color="#…">`, or takes it off; ⌘⇧H gives the last one picked again. A dark theme
-//! draws each with a darker twin.
+//! Color gives the selection one of Notion's text colours ([`TEXT_COLORS`]), stored as
+//! `<span style="color:#…">`, or background colours ([`BACKGROUNDS`]), stored as
+//! `<mark color="#…">`, or takes either off; ⌘⇧H gives the last one picked again. A dark theme
+//! draws each with a twin made for it.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -18,11 +19,37 @@ use gpui_core::{ActiveTheme as _, Icon, IconName, Popover, PopupMenu, PopupMenuI
 use markdown_editor::actions::EditLink;
 use markdown_editor::{
     BACKGROUNDS, BlockSelection, EditorCommand, MarkChange, MarkKind, MarkState, PaletteColor,
-    background_of,
+    TEXT_COLORS, background_of, text_color_of,
 };
 
 use crate::Editor;
 use crate::block_menu::turn_into_titles;
+
+/// A colour the Color menu gives: the text's own, or the fill behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Paint {
+    Text(&'static PaletteColor),
+    Background(&'static PaletteColor),
+}
+
+impl Paint {
+    /// The colour a Color menu entry gives, and whether it gives it (`false`: its Default,
+    /// which takes the colour of its kind off).
+    fn of_menu_item(id: &str) -> Option<(Self, bool)> {
+        let (kind, rest) = id.split_once('-')?;
+        let (palette, paint): (&'static [PaletteColor], fn(&'static PaletteColor) -> Self) =
+            match kind {
+                "text" => (&TEXT_COLORS, Self::Text),
+                "background" => (&BACKGROUNDS, Self::Background),
+                _ => return None,
+            };
+        if rest == "none" {
+            return Some((paint(&palette[0]), false));
+        }
+        let color = palette.get(rest.parse::<usize>().ok()?)?;
+        Some((paint(color), true))
+    }
+}
 
 /// The marks the bar toggles, with their labels.
 const MARKS: [(MarkKind, &str); 5] = [
@@ -64,47 +91,74 @@ impl Editor {
         cx.notify();
     }
 
-    /// Gives the selection `background`, or takes its colour off (`None`).
-    pub(crate) fn set_highlight(
-        &mut self,
-        background: Option<&'static PaletteColor>,
-        cx: &mut Context<Self>,
-    ) {
-        let change = match background {
-            Some(background) => MarkChange::new().with_highlight(background.color()),
-            None => MarkChange::new().clear(MarkKind::Highlight),
+    /// Gives the selection `paint`'s colour, or takes the colour of `paint`'s kind off when
+    /// `on` is false.
+    pub(crate) fn set_paint(&mut self, paint: Paint, on: bool, cx: &mut Context<Self>) {
+        let change = match (paint, on) {
+            (Paint::Text(color), true) => MarkChange::new().with_color(color.color()),
+            (Paint::Text(_), false) => MarkChange::new().clear(MarkKind::Color),
+            (Paint::Background(color), true) => MarkChange::new().with_highlight(color.color()),
+            (Paint::Background(_), false) => MarkChange::new().clear(MarkKind::Highlight),
         };
         self.state.update(cx, |state, cx| {
             let _ = state.run(EditorCommand::ApplyMark(change), cx);
         });
-        if background.is_some() {
-            self.last_highlight = background;
+        if on {
+            self.last_paint = Some(paint);
         }
         cx.notify();
     }
 
-    /// The background colour all of the selection has, if it's one of [`BACKGROUNDS`].
-    pub(crate) fn selection_background(&self, cx: &App) -> Option<&'static PaletteColor> {
-        let color = self.state.read(cx).model().selection_highlight()?;
-        background_of(color)
+    /// The palette colours all of the selection has: its text's and its background's.
+    pub(crate) fn selection_paints(
+        &self,
+        cx: &App,
+    ) -> (Option<&'static PaletteColor>, Option<&'static PaletteColor>) {
+        let model = self.state.read(cx).model();
+        (
+            model.selection_color().and_then(text_color_of),
+            model.selection_highlight().and_then(background_of),
+        )
     }
 
-    /// ⌘⇧H: the last colour picked again (yellow before one is), or off when the selection
-    /// has it.
+    /// ⌘⇧H: the last colour picked again (a yellow background before one is), or off when the
+    /// selection has it.
     pub(crate) fn highlight_again(&mut self, cx: &mut Context<Self>) {
-        let background = self.last_highlight.unwrap_or(&BACKGROUNDS[3]);
-        let has = self.selection_background(cx) == Some(background);
-        self.set_highlight((!has).then_some(background), cx);
+        let paint = self
+            .last_paint
+            .unwrap_or(Paint::Background(&BACKGROUNDS[3]));
+        let (text, background) = self.selection_paints(cx);
+        let has = match paint {
+            Paint::Text(color) => text == Some(color),
+            Paint::Background(color) => background == Some(color),
+        };
+        self.set_paint(paint, !has, cx);
     }
 
-    /// The Color button and its menu: Default, then each background colour, the selection's
-    /// own checked.
+    /// Runs the Color menu's entry `id` and closes the menu.
+    pub(crate) fn color_menu_pick(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.format_color = false;
+        if let Some((paint, on)) = Paint::of_menu_item(id) {
+            self.set_paint(paint, on, cx);
+        }
+        self.state.update(cx, |state, cx| state.focus(window, cx));
+        cx.notify();
+    }
+
+    /// The Color button and its menu, as Notion's: Default text and each text colour, then
+    /// Default background and each background colour, the selection's own checked.
     fn color_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let dark = theme.mode.is_dark();
-        let current = self.selection_background(cx);
-        let none = self.state.read(cx).model().mark_state(MarkKind::Highlight) == MarkState::Off;
-        let swatch = |fill: Hsla| {
+        let (text, background) = self.selection_paints(cx);
+        let off = |kind| self.state.read(cx).model().mark_state(kind) == MarkState::Off;
+        let (no_text, no_background) = (off(MarkKind::Color), off(MarkKind::Highlight));
+        let swatch = |ink: Hsla, fill: Hsla| {
             div()
                 .size(px(20.))
                 .flex()
@@ -116,24 +170,37 @@ impl Editor {
                 .bg(fill)
                 .text_xs()
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(theme.popover_foreground)
+                .text_color(ink)
                 .child("A")
         };
+        let ink = theme.popover_foreground;
         let mut menu = PopupMenu::new("blocks-format-color-menu")
-            .heading("Background color")
+            .heading("Text color")
             .item(
-                PopupMenuItem::new("color-none", "Default background")
-                    .chip(swatch(transparent_black()))
-                    .checked(none),
+                PopupMenuItem::new("text-none", "Default text")
+                    .chip(swatch(ink, transparent_black()))
+                    .checked(no_text),
             );
-        for (ix, background) in BACKGROUNDS.iter().enumerate() {
+        for (ix, color) in TEXT_COLORS.iter().enumerate() {
+            menu = menu.item(
+                PopupMenuItem::new(format!("text-{ix}"), format!("{} text", color.name))
+                    .chip(swatch(color.fill(dark), transparent_black()))
+                    .checked(text == Some(color)),
+            );
+        }
+        menu = menu.heading("Background color").item(
+            PopupMenuItem::new("background-none", "Default background")
+                .chip(swatch(ink, transparent_black()))
+                .checked(no_background),
+        );
+        for (ix, color) in BACKGROUNDS.iter().enumerate() {
             menu = menu.item(
                 PopupMenuItem::new(
-                    format!("color-{ix}"),
-                    format!("{} background", background.name),
+                    format!("background-{ix}"),
+                    format!("{} background", color.name),
                 )
-                .chip(swatch(background.fill(dark)))
-                .checked(current == Some(background)),
+                .chip(swatch(ink, color.fill(dark)))
+                .checked(background == Some(color)),
             );
         }
         let trigger = div()
@@ -156,8 +223,10 @@ impl Editor {
                     .font_weight(FontWeight::MEDIUM)
                     .px(px(3.))
                     .rounded(px(3.))
-                    .when_some(self.last_highlight, |d, background| {
-                        d.bg(background.fill(dark))
+                    .map(|d| match self.last_paint {
+                        Some(Paint::Text(color)) => d.text_color(color.fill(dark)),
+                        Some(Paint::Background(color)) => d.bg(color.fill(dark)),
+                        None => d,
                     })
                     .child("A"),
             )
@@ -188,16 +257,7 @@ impl Editor {
             .trigger(trigger)
             .p(px(4.))
             .child(menu.on_select(move |picked, window, cx| {
-                let color = picked
-                    .id
-                    .strip_prefix("color-")
-                    .and_then(|ix| ix.parse::<usize>().ok())
-                    .and_then(|ix| BACKGROUNDS.get(ix));
-                let _ = pick.update(cx, |this, cx| {
-                    this.format_color = false;
-                    this.set_highlight(color, cx);
-                    this.state.update(cx, |state, cx| state.focus(window, cx));
-                });
+                let _ = pick.update(cx, |this, cx| this.color_menu_pick(&picked.id, window, cx));
             }))
             .into_any_element()
     }

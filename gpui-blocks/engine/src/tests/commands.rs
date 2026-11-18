@@ -187,6 +187,40 @@ fn selection_highlight_is_the_colour_all_of_it_has() {
 }
 
 #[test]
+fn text_colour_is_a_mark_of_its_own() {
+    let red = crate::TEXT_COLORS[8];
+    let mut m = model("one two");
+    select(&mut m, 0, 0..3);
+    m.run(EditorCommand::ApplyMark(
+        crate::MarkChange::new().with_color(red.color()),
+    ))
+    .unwrap();
+    assert_eq!(m.source(), "<span style=\"color:#d44c47\">one</span> two");
+    assert_eq!(m.mark_state(MarkKind::Color), MarkState::On);
+    assert_eq!(
+        m.selection_color().and_then(crate::text_color_of),
+        Some(&red)
+    );
+    assert_eq!(m.selection_highlight(), None);
+    // Typing at its end goes on in red.
+    caret_in(&mut m, 0, 3);
+    m.insert_text("s", EditOrigin::Typing).unwrap();
+    assert_eq!(m.source(), "<span style=\"color:#d44c47\">ones</span> two");
+    // Drawn with its twin in a dark theme.
+    assert_eq!(
+        crate::marks::drawn_text_color(red.color(), true),
+        red.fill(true)
+    );
+    select(&mut m, 0, 0..8);
+    assert_eq!(m.mark_state(MarkKind::Color), MarkState::Mixed);
+    m.run(EditorCommand::ApplyMark(
+        crate::MarkChange::new().clear(MarkKind::Color),
+    ))
+    .unwrap();
+    assert_eq!(m.source(), "ones two");
+}
+
+#[test]
 fn link_does_not_extend_at_trailing_edge() {
     let mut m = model("[ab](https://x.dev)");
     caret_at_end(&mut m, 0);

@@ -39,6 +39,28 @@ fn highlight_color_survives() {
 }
 
 #[test]
+fn text_color_round_trips_as_a_span() {
+    for source in [
+        r##"a <span style="color:#d44c47">x</span> b"##,
+        r##"<span style="color:#337ea9">**bold** blue</span>"##,
+        r##"<mark color="#e7f3f8"><span style="color:#d44c47">both</span></mark>"##,
+    ] {
+        assert_eq!(round_trip(source), source);
+    }
+    // Read leniently: spaces, a name, other declarations.
+    assert_eq!(
+        round_trip(r##"<span style="font-weight: 400; color: #D44C47">x</span>"##),
+        r##"<span style="color:#d44c47">x</span>"##
+    );
+    // A span that doesn't colour its text isn't a mark: it's kept as it was written, and its
+    // words with it.
+    let other = r##"a <span class="x">y</span> b"##;
+    assert_eq!(round_trip(other), other);
+    let m = model(r##"<span style="color:#d44c47">x</span>"##);
+    assert_eq!(m.document().leaves().next().unwrap().text(), Some("x"));
+}
+
+#[test]
 fn whitespace_hoisted_out_of_emphasis() {
     // Build runs `a `{bold} + `b` through the model.
     let mut m = model("");

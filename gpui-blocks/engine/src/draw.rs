@@ -364,11 +364,16 @@ fn marks(mark: &TextMark, style: &ParagraphStyle) -> Marks {
         link: mark.link.as_ref().map(|l| l.url.clone()),
         muted: false,
         highlight,
-        // A highlight sets the text's colour with its fill, as HTML's `mark` does, so a light
-        // fill stays readable in a dark theme.
-        color: highlight
-            .filter(|c| c.a > 0.)
-            .map(|c| readable_on(c, style.color)),
+        // The text's own colour, else a highlight sets it with its fill, as HTML's `mark` does,
+        // so a light fill stays readable in a dark theme.
+        color: mark
+            .color
+            .map(|c| crate::marks::drawn_text_color(c, dark))
+            .or_else(|| {
+                highlight
+                    .filter(|c| c.a > 0.)
+                    .map(|c| readable_on(c, style.color))
+            }),
     }
 }
 

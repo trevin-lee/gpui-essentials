@@ -182,16 +182,26 @@ impl BlockEditorModel {
     /// The highlight colour all of the selection has: `None` when some of it has none, or
     /// another colour. A caret has the colour typing there gets.
     pub fn selection_highlight(&self) -> Option<Hsla> {
+        self.selection_shared(|marks| marks.highlight)
+    }
+
+    /// The text colour all of the selection has, as [`Self::selection_highlight`].
+    pub fn selection_color(&self) -> Option<Hsla> {
+        self.selection_shared(|marks| marks.color)
+    }
+
+    /// The colour `of` gives all of the selection's text, or the caret's typing marks.
+    fn selection_shared(&self, of: impl Fn(&TextMark) -> Option<Hsla>) -> Option<Hsla> {
         let range = self.doc.resolve_selection(&self.selection).ok()?;
         if range.is_collapsed() {
-            return self.active_marks().highlight();
+            return of(&self.active_marks().0);
         }
         let mut color = None;
         for (block, lo, hi) in self.text_ranges(range) {
             let inline = self.doc.inline(block)?;
             for (piece, marks, _) in inline.pieces() {
                 if piece.start < hi && piece.end > lo {
-                    let here = marks.highlight?;
+                    let here = of(marks)?;
                     if *color.get_or_insert(here) != here {
                         return None;
                     }

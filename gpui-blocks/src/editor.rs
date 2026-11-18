@@ -414,8 +414,8 @@ pub struct Editor {
     pub(crate) format_turn: bool,
     /// Whether the format bar's Color menu is open.
     pub(crate) format_color: bool,
-    /// The background colour last picked in the Color menu, which ⌘⇧H gives again.
-    pub(crate) last_highlight: Option<&'static markdown_editor::PaletteColor>,
+    /// The colour last picked in the Color menu, which ⌘⇧H gives again.
+    pub(crate) last_paint: Option<crate::format_bar::Paint>,
     scroll: ScrollHandle,
     pub(crate) menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
@@ -622,7 +622,7 @@ impl Editor {
             block_sheet: None,
             format_turn: false,
             format_color: false,
-            last_highlight: None,
+            last_paint: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -3270,31 +3270,62 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "# hello world");
     }
 
-    /// Color gives the selection a background colour, stored as `<mark color>`, shows it
-    /// checked, and takes it off again; ⌘⇧H gives the last colour again, or takes it off.
+    /// Color gives the selection a text colour, stored as `<span style="color">`, or a
+    /// background colour, stored as `<mark color>`, shows them checked, and takes them off
+    /// again; ⌘⇧H gives the last colour again, or takes it off.
     #[gpui::test]
     fn the_format_bar_colours_the_selection(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "hello world again");
         drag_select(&editor, cx, 6, 11);
         press(cx, "blocks-format-color");
-        // Blue background: the menu's entries are Default, then Gray, Brown, Orange, Yellow,
-        // Green and Blue.
-        press(cx, "menu-item-color-5");
+        assert!(
+            cx.debug_bounds("menu-item-text-none").is_some(),
+            "the menu is open"
+        );
+        // The menu scrolls to its backgrounds: pick as its rows do. Blue: each section's
+        // entries are Default, then Gray, Brown, Orange, Yellow, Green and Blue.
+        let pick = |editor: &Entity<Editor>, cx: &mut VisualTestContext, id: &str| {
+            editor.update_in(cx, |e, window, cx| e.color_menu_pick(id, window, cx));
+            draw(cx);
+        };
+        pick(&editor, cx, "background-5");
         assert_eq!(
             markdown(&editor, cx),
             "hello <mark color=\"#e7f3f8\">world</mark> again"
         );
-        let blue = editor.update(cx, |e, cx| e.selection_background(cx));
-        assert_eq!(blue.map(|b| b.name), Some("Blue"), "the selection stays");
+        let paints = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                let (text, background) = e.selection_paints(cx);
+                (text.map(|c| c.name), background.map(|c| c.name))
+            })
+        };
+        assert_eq!(
+            paints(&editor, cx),
+            (None, Some("Blue")),
+            "the selection stays"
+        );
+        // Red text, over the blue.
         press(cx, "blocks-format-color");
-        press(cx, "menu-item-color-none");
+        press(cx, "menu-item-text-8");
+        assert_eq!(
+            markdown(&editor, cx),
+            "hello <mark color=\"#e7f3f8\"><span style=\"color:#d44c47\">world</span></mark> again"
+        );
+        assert_eq!(paints(&editor, cx), (Some("Red"), Some("Blue")));
+        pick(&editor, cx, "background-none");
+        assert_eq!(
+            markdown(&editor, cx),
+            "hello <span style=\"color:#d44c47\">world</span> again"
+        );
+        press(cx, "blocks-format-color");
+        press(cx, "menu-item-text-none");
         assert_eq!(markdown(&editor, cx), "hello world again");
-        // ⌘⇧H: the last colour picked, then off.
+        // ⌘⇧H: the last colour picked (red text), then off.
         let key = "secondary-shift-h";
         cx.simulate_keystrokes(key);
         assert_eq!(
             markdown(&editor, cx),
-            "hello <mark color=\"#e7f3f8\">world</mark> again"
+            "hello <span style=\"color:#d44c47\">world</span> again"
         );
         cx.simulate_keystrokes(key);
         assert_eq!(markdown(&editor, cx), "hello world again");
