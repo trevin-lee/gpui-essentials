@@ -215,8 +215,10 @@ impl Element for DndProvider {
             }
             state.zone_stamp += 1;
         }
-        if state::drag_in(window, cx) == Some(false) {
-            window.set_window_cursor_style(gpui::CursorStyle::ClosedHand);
+        if state::drag_in(window, cx) == Some(false)
+            && let Some(cursor) = crate::host::drag_cursor(cx)
+        {
+            window.set_window_cursor_style(cursor);
         }
         if self.touch {
             crate::touch::listen(window);
