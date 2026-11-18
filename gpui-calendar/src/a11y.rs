@@ -280,7 +280,11 @@ impl Calendar {
                                 point(x, top),
                                 point(x + geo.col_w, bottom),
                             ),
-                            selected: selected_slot.is_some_and(|(d, m)| d == date && m / 60 == h),
+                            selected: selected_slot.is_some_and(|(d, m)| {
+                                // Every hour a stretched slot covers.
+                                let to = self.stretch.map_or(m, |(_, t)| t);
+                                d == date && (m.min(to) / 60..=m.max(to) / 60).contains(&h)
+                            }),
                             read_only: false,
                             target: A11yTarget::Slot {
                                 date,
@@ -305,7 +309,10 @@ impl Calendar {
                                 point(geo.col_x(col), geo.row_top(row)),
                                 size(geo.col_w, geo.row_h),
                             ),
-                            selected: selected_slot.is_some_and(|(d, _)| d == date),
+                            selected: selected_slot.is_some_and(|(d, _)| {
+                                let to = self.stretch.map_or(d, |(t, _)| t);
+                                (d.min(to)..=d.max(to)).contains(&date)
+                            }),
                             read_only: false,
                             target: A11yTarget::Slot { date, minute: 0 },
                         });

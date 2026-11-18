@@ -100,7 +100,9 @@ their look.
   week and month views. With nothing selected, ← and → change the period. `j` goes to the next
   period and `k` or `p` to the previous one. `t` goes to today, `g` opens the mini month, and
   `d`, `w`, `m`, `y` and `a` switch views. In the agenda the arrows go from event to event down the list. `n` proposes a new event
-  at the selected slot, or at the next round half hour today. Enter opens the selected event or
+  at the selected slot, or at the next round half hour today. Shift and the arrows stretch the
+  selected slot, a slot at a time on the grid and a day or a week in the month, as dragging
+  empty time does; Enter or `n` then proposes an event over all of it. Enter opens the selected event or
   makes one in the selected slot, Delete or Backspace asks to delete the selected event, and
   Escape drops a drag or the selection.
 - **Moving by keyboard:** with the days focused, Space picks the selected event up and
