@@ -99,6 +99,20 @@ text, backticks in a code block's info string and odd callout names are neutrali
 block can come back as another type (a callout with an unknown name is a quote), and then gets
 a new id.
 
+### Types from a later version
+
+A later version may add block types within version 1. This version never refuses a document
+for one:
+- A block of a type it doesn't know that has blocks inside is read as those blocks, in its place
+  and in order, at any depth. For example, a later `columns` block reads as its columns' blocks,
+  one after another.
+- One with nothing inside is kept as a `markdown` block: its own `markdown` or `text` if it has
+  one, else a comment naming it (`<!-- a sparkle block, from a newer version -->`).
+
+Nothing is lost from view. Saving writes the reduced form, so a document with newer blocks should
+be edited with the version that wrote them. A block of a known type that's missing what it needs
+is still refused.
+
 ## Markdown
 
 `Document::from_markdown` and `Document::to_markdown` convert without an editor, for importing

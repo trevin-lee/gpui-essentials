@@ -58,6 +58,7 @@ pub struct Document {
     /// YAML front matter, written back as it was, `---` lines included.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub front_matter: String,
+    #[serde(deserialize_with = "blocks_of")]
     pub blocks: Vec<Block>,
 }
 
@@ -68,8 +69,96 @@ pub struct Block {
     pub id: String,
     #[serde(flatten)]
     pub kind: Kind,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "blocks_of"
+    )]
     pub children: Vec<Block>,
+}
+
+/// The `type`s this version reads: [`Kind`]'s.
+const TYPES: [&str; 17] = [
+    "paragraph",
+    "heading",
+    "quote",
+    "callout",
+    "toggle",
+    "list",
+    "item",
+    "code",
+    "divider",
+    "table",
+    "row",
+    "cell",
+    "page",
+    "toc",
+    "embed",
+    "widget",
+    "markdown",
+];
+
+/// A list of blocks, where a block of a type this version doesn't know (one a later version
+/// writes) never fails the document: one with blocks inside is read as those blocks, in its
+/// place and in order, and one without is kept as a line of Markdown that says what it was.
+/// Nothing in it is lost from view, though saving writes it back in this reduced form.
+fn blocks_of<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Block>, D::Error> {
+    let values = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        read_block(value, &mut out).map_err(serde::de::Error::custom)?;
+    }
+    Ok(out)
+}
+
+/// Reads `value` into `out`: a block, or, for a type this version doesn't know, its children or
+/// a placeholder.
+fn read_block(value: serde_json::Value, out: &mut Vec<Block>) -> Result<(), serde_json::Error> {
+    let kind = value
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or_default();
+    if TYPES.contains(&kind) || !value.is_object() {
+        out.push(serde_json::from_value(value)?);
+        return Ok(());
+    }
+    let kind = kind.to_string();
+    let mut value = value;
+    let children = match value.get_mut("children").map(serde_json::Value::take) {
+        Some(serde_json::Value::Array(children)) => children,
+        _ => Vec::new(),
+    };
+    if !children.is_empty() {
+        for child in children {
+            read_block(child, out)?;
+        }
+        return Ok(());
+    }
+    let id = value
+        .get("id")
+        .and_then(|id| id.as_str())
+        .unwrap_or_default()
+        .to_string();
+    // What it says, when it has words of its own; else what it was. HTML comment syntax inside
+    // the name is taken out, so the line stays one comment.
+    let text = ["markdown", "text"]
+        .iter()
+        .find_map(|field| value.get(*field).and_then(|v| v.as_str()))
+        .map(str::to_string);
+    let markdown = text.unwrap_or_else(|| {
+        let name: String = kind
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ' '))
+            .take(64)
+            .collect();
+        format!("<!-- a {name} block, from a newer version -->")
+    });
+    out.push(Block {
+        id,
+        kind: Kind::Markdown { markdown },
+        children: Vec::new(),
+    });
+    Ok(())
 }
 
 /// What a block is, with what it holds besides its children.
@@ -901,6 +990,124 @@ mod tests {
             }
         }
         vec![Arc::new(Chart)]
+    }
+
+    /// A block of a type a later version writes never fails the document: with blocks inside,
+    /// it's read as those blocks, in its place and in order, at any depth; without, as a line
+    /// of Markdown that says what it was, or its own words.
+    #[test]
+    fn a_newer_type_is_read_as_what_it_holds() {
+        let json = r#"{"format":"gpui-blocks","version":1,"blocks":[
+            {"id":"a","type":"paragraph","text":"before"},
+            {"id":"cols","type":"columns","children":[
+                {"id":"c1","type":"column","width":0.5,"children":[
+                    {"id":"p1","type":"paragraph","text":"left"}]},
+                {"id":"c2","type":"column","width":0.5,"children":[
+                    {"id":"p2","type":"heading","level":2,"text":"right"},
+                    {"id":"p3","type":"paragraph","text":"more"}]}]},
+            {"id":"q","type":"quote","children":[
+                {"id":"x","type":"sparkle","children":[
+                    {"id":"p4","type":"paragraph","text":"inside"}]}]},
+            {"id":"e","type":"sparkle","color":"red"},
+            {"id":"t","type":"sparkle","text":"its words"},
+            {"id":"z","type":"paragraph","text":"after"}]}"#;
+        let doc = Document::from_json(json).expect("the page reads");
+        let ids: Vec<&str> = doc.blocks.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(ids, ["a", "p1", "p2", "p3", "q", "e", "t", "z"]);
+        assert_eq!(doc.blocks[4].children[0].id, "p4", "nested too");
+        assert_eq!(
+            doc.blocks[5].kind,
+            Kind::Markdown {
+                markdown: "<!-- a sparkle block, from a newer version -->".into()
+            }
+        );
+        assert_eq!(
+            doc.blocks[6].kind,
+            Kind::Markdown {
+                markdown: "its words".into()
+            }
+        );
+        assert_eq!(
+            doc.to_markdown(),
+            "before\n\nleft\n\n## right\n\nmore\n\n> inside\n\n\
+             <!-- a sparkle block, from a newer version -->\n\nits words\n\nafter"
+        );
+        // A type's name can't end the comment early.
+        let odd = r#"{"format":"gpui-blocks","version":1,"blocks":[
+            {"id":"o","type":"x --> <b>"}]}"#;
+        let doc = Document::from_json(odd).unwrap();
+        assert_eq!(
+            doc.blocks[0].kind,
+            Kind::Markdown {
+                markdown: "<!-- a x  b block, from a newer version -->".into()
+            }
+        );
+        // A known type with what it needs missing is still refused.
+        let bad = r#"{"format":"gpui-blocks","version":1,"blocks":[{"id":"h","type":"heading"}]}"#;
+        assert!(Document::from_json(bad).is_err());
+    }
+
+    /// Every kind's `type` is one this version reads.
+    #[test]
+    fn every_kind_is_a_known_type() {
+        let kinds = [
+            Kind::Paragraph {
+                text: String::new(),
+            },
+            Kind::Heading {
+                level: 1,
+                text: String::new(),
+            },
+            Kind::Quote,
+            Kind::Callout {
+                name: "note".into(),
+            },
+            Kind::Toggle { open: true },
+            Kind::List {
+                ordered: false,
+                start: None,
+            },
+            Kind::Item {
+                checked: None,
+                spread: false,
+            },
+            Kind::Code {
+                language: None,
+                meta: None,
+                code: String::new(),
+            },
+            Kind::Divider,
+            Kind::Table { align: Vec::new() },
+            Kind::Row,
+            Kind::Cell {
+                text: String::new(),
+            },
+            Kind::Page {
+                doc: "d".into(),
+                title: String::new(),
+            },
+            Kind::Toc,
+            Kind::Embed {
+                doc: "d".into(),
+                title: String::new(),
+                view: "page".into(),
+                height: 1,
+            },
+            Kind::Widget {
+                name: "w".into(),
+                meta: None,
+                body: String::new(),
+            },
+            Kind::Markdown {
+                markdown: String::new(),
+            },
+        ];
+        assert_eq!(kinds.len(), TYPES.len());
+        for kind in kinds {
+            let value = serde_json::to_value(&kind).unwrap();
+            let name = value["type"].as_str().unwrap().to_string();
+            assert!(TYPES.contains(&name.as_str()), "{name}");
+        }
     }
 
     /// Markdown to JSON to Markdown, and JSON to Markdown to JSON with the same ids.
