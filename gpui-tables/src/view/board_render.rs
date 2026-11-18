@@ -468,7 +468,7 @@ impl TableView {
             .map(|(ix, row)| {
                 let focused = spot == Some(BoardSpot::Card { column, index: ix });
                 let lifted = dragged.as_deref() == Some(self.rows[row].id.as_str());
-                let card = self.render_card(column, ix, row, &key, focused, lifted, &m, cx);
+                let card = self.render_card(column, ix, row, &key, focused, lifted, None, &m, cx);
                 let bar = |top: bool| {
                     div()
                         .absolute()
@@ -502,10 +502,12 @@ impl TableView {
         key: &str,
         focused: bool,
         lifted: bool,
+        band: Option<Pixels>,
         m: &BoardMetrics,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = self.theme.clone();
+        let cover = band.map(|h| self.cover_band(&self.rows[row], h, cx));
         let r = &self.rows[row];
         let title = self.card_title(r);
         let empty = r.title.is_empty();
@@ -582,11 +584,8 @@ impl TableView {
             .accessibility_label(words)
             .debug_selector(move || sel.clone())
             .size_full()
-            .px(m.card_pad)
-            .py(m.card_pad)
             .flex()
             .flex_col()
-            .gap(m.line_gap)
             .overflow_hidden()
             .rounded(t.px(t.sizes.radius))
             .bg(t.colors.card)
@@ -596,21 +595,34 @@ impl TableView {
             .hover(|s| s.border_color(t.colors.line_strong))
             .when(focused, |d| d.border_2().border_color(t.colors.focus))
             .when(lifted, |d| d.opacity(0.35))
+            .children(cover)
             .child(
                 div()
-                    .h(m.title)
+                    .flex_1()
+                    .min_h_0()
                     .w_full()
-                    .min_w_0()
+                    .px(m.card_pad)
+                    .py(m.card_pad)
                     .flex()
-                    .items_center()
+                    .flex_col()
+                    .gap(m.line_gap)
+                    .overflow_hidden()
                     .child(
-                        line(title)
-                            .flex_1()
-                            .font_weight(FontWeight(t.sizes.medium))
-                            .when(empty, |d| d.text_color(t.colors.text_faint)),
-                    ),
+                        div()
+                            .h(m.title)
+                            .w_full()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .child(
+                                line(title)
+                                    .flex_1()
+                                    .font_weight(FontWeight(t.sizes.medium))
+                                    .when(empty, |d| d.text_color(t.colors.text_faint)),
+                            ),
+                    )
+                    .children(lines),
             )
-            .children(lines)
             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                 if !this.still_shown(shown) {
                     return;
@@ -625,7 +637,7 @@ impl TableView {
             format!("gpui-tables-card:{rid}:{from}").into(),
         ))
         .w_full()
-        .h(m.card)
+        .h(m.card + band.unwrap_or_default())
         .drop_indicator(false)
         .shared_source(&self.card_source(cx), DraggedCard { row_id: rid, from })
         .child(press)

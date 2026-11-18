@@ -771,7 +771,7 @@ by, so renaming a property changes no row. The value's JSON depends on the type:
 ## Views
 
 A database has several saved views, each `{id, name, type, order, sort, filter, groupBy,
-columns, cardProperties, collapsedGroups, calculations}`. They're tabs above the database, in `order`, and
+columns, cardProperties, collapsedGroups, calculations, cardPreview}`. They're tabs above the database, in `order`, and
 every person (and agent) sees the same ones.
 
 - **`sort`** is a list of `{propertyId, direction}` (`ascending` or `descending`), applied in
@@ -783,6 +783,11 @@ every person (and agent) sees the same ones.
   show after the others at the default width; `width` null means the default.
 - **`cardProperties`** are the properties a board card shows under the title, or a list line
   beside it.
+- **`cardPreview`** is what a gallery's cards show above their title: `none`, or `cover` for each
+  row doc's `cover` (an addition to the first proposal). Absent or null is none, and it's left
+  out of the JSON when absent. A value the crate doesn't know draws nothing and is kept as
+  written, but `Limits` refuses it (`not none or cover (view <id>)`), as the server does, and the
+  view's settings only ever write `none` or `cover`.
 - **`calculations`** are a table's footer: `{propertyId: calculation}`, at most one per
   property, left out when there are none (an addition to the first proposal). A calculation is
   one of `countAll`, `countValues`, `countUnique`, `countEmpty`, `countNotEmpty`,
@@ -843,8 +848,12 @@ How each type behaves:
   ⌘⇧← and ⌘⇧→ move the focused card a place back or on (with no sort), ⌘⇧↑ and ⌘⇧↓ a line,
   and ⌘D and ⌘⌫ duplicate and delete it.
   A card dragged to another place (with no sort) is a `rowsMoved`, the board's drag, with a line
-  where it'll land. Grouping isn't drawn in a gallery yet (its settings have no Group by), and
-  cards have no cover image.
+  where it'll land. With the view's **Card preview** on Page cover (`cardPreview: "cover"`), each
+  card starts with a 16:9 band showing its row's `cover`: the image (`{"style": "image",
+  "assetId": ..}`, which the host gives through `TableHost::image`, as the crate fetches
+  nothing) or the colour (`{"style": "solid", "color": "#rrggbbaa"}`). A row with neither, or
+  whose image the host doesn't have yet, gets an empty band, so the cards line up. Grouping isn't
+  drawn in a gallery yet (its settings have no Group by).
 
   ![The Pipeline view as a gallery: the people as cards in a grid, three to a line, each with its company, last contact and owner](docs/gallery.png)
 
@@ -1102,6 +1111,8 @@ The host is the app around the views. It:
   next time with `with_view`.
 - **Lists the databases a relation can point at**, with their properties
   (`TableHost::databases`), for the relation menu and a two-way relation's other side.
+- **Gives images** by asset id (`TableHost::image`), for a gallery's covers, and draws the table
+  again once one it didn't have is loaded.
 - **Checks agents' writes** against `Limits`.
 
 ## Performance
@@ -1238,7 +1249,7 @@ tests fail on any control without them.
 - **Templates.** A template is a page with content, which belongs to the docs app and its editor;
   the crate would only pass a template id through `rowCreated`. Prefilled values for a new row in a
   view are in v1.
-- **Also later:** a gallery's groups and cover images, files, a status type, unique ids, and linked views of a
+- **Also later:** a gallery's groups and card sizes, files, a status type, unique ids, and linked views of a
   database on another page.
 
 ## Tests

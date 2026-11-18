@@ -25,7 +25,9 @@ use gpui::{App, Bounds, Context, FocusHandle, Pixels, ScrollHandle, Window};
 use super::ops;
 use super::properties::FieldFor;
 use super::table::{Action, Entry, Popover, Reopen, TableView, type_icon};
-use crate::model::{DateBucket, Edit, PropertyType, View, ViewType, new_id, truncate_chars};
+use crate::model::{
+    CardPreview, DateBucket, Edit, PropertyType, View, ViewType, new_id, truncate_chars,
+};
 
 /// The types a view can be made as or changed to.
 pub(crate) const VIEW_TYPES: &[ViewType] = &[
@@ -130,6 +132,8 @@ pub(crate) enum ViewAction {
     Delete,
     GroupBy(Option<String>),
     GroupDate(DateBucket),
+    /// A gallery's cards show their row's cover (true) or nothing above their title.
+    CardPreview(bool),
     /// Shown on cards or lines, or not.
     ToggleCard(String),
     /// A table's columns: the Properties menu.
@@ -218,6 +222,10 @@ pub(crate) const CARD_ORDER: &str = "card-properties";
 
 /// The settings' entry for a date grouping's buckets, highlighted as it appears.
 const DATE_GROUPING: &str = "Date grouping";
+/// A gallery's settings entry for what its cards show above their title, and its choice of
+/// the row's cover.
+const CARD_PREVIEW: &str = "Card preview";
+const PAGE_COVER: &str = "Page cover";
 
 /// Why a board can't be made: nothing to group by.
 const NO_GROUP: &str = "A board groups cards by a select, multi-select, checkbox, person or \
@@ -678,6 +686,14 @@ impl TableView {
                     )),
             );
         }
+        if v.kind == ViewType::Gallery {
+            let cover = v.card_preview == Some(CardPreview::Cover);
+            out.push(
+                Entry::sub(CARD_PREVIEW, self.card_preview_entries(v))
+                    .icon(I::PanelTop)
+                    .hint(if cover { PAGE_COVER } else { "None" }),
+            );
+        }
         match v.kind {
             ViewType::Board | ViewType::List | ViewType::Gallery => {
                 let n = ops::card_properties(fields, v).len();
@@ -760,6 +776,27 @@ impl TableView {
     }
 
     /// How a date grouping buckets, the current one checked.
+    /// What a gallery's cards show above their title: nothing, or their row's cover.
+    fn card_preview_entries(&self, v: &View) -> Vec<Entry> {
+        let cover = v.card_preview == Some(CardPreview::Cover);
+        let mut out = vec![Entry::heading(CARD_PREVIEW)];
+        for (label, on, icon) in [
+            ("None", !cover, gpui_core::IconName::X),
+            (PAGE_COVER, cover, gpui_core::IconName::Image),
+        ] {
+            out.push(
+                Entry::act(
+                    label,
+                    Action::View(ViewAction::CardPreview(label == PAGE_COVER)),
+                )
+                .icon(icon)
+                .checked(on)
+                .highlighted(on),
+            );
+        }
+        out
+    }
+
     fn group_date_entries(&self, v: &View) -> Vec<Entry> {
         let mut out = vec![Entry::heading("Date grouping")];
         let current = v.group_date.clone().unwrap_or(DateBucket::Relative);
@@ -976,6 +1013,20 @@ impl TableView {
             ViewAction::GroupDate(b) => {
                 let Some(mut v) = current else { return };
                 v.group_date = (b != DateBucket::Relative).then_some(b);
+                self.emit_views(vec![self.view_changed(v)], None, window, cx);
+            }
+            ViewAction::CardPreview(cover) => {
+                let Some(mut v) = current else { return };
+                // Only ever none or cover, written out.
+                let preview = if cover {
+                    CardPreview::Cover
+                } else {
+                    CardPreview::None
+                };
+                if v.card_preview.as_ref() == Some(&preview) {
+                    return;
+                }
+                v.card_preview = Some(preview);
                 self.emit_views(vec![self.view_changed(v)], None, window, cx);
             }
             ViewAction::ToggleCard(pid) => {

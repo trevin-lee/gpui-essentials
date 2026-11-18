@@ -2,21 +2,27 @@
 //! each the board's card (its title and the view's card properties). Pressing a card opens its
 //! row (or peeks it); the arrows move between cards and Enter opens one; a card is dragged (the
 //! board's gpui-dnd source) to another place in the manual order, and New at the end makes a
-//! row. Grouping isn't drawn in a gallery yet: its rows are one grid.
+//! row. With the view's card preview on its rows' covers (`cardPreview: "cover"`), each card
+//! starts with a 16:9 band: the row's cover image (which the host gives, `TableHost::image`) or
+//! its colour, and an empty band for a row with neither. Grouping isn't drawn in a gallery
+//! yet: its rows are one grid.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Pixels, Point,
-    Styled, Window, canvas, div, point, px, uniform_list,
+    AnyElement, ClickEvent, Context, Hsla, ImageSource, InteractiveElement, IntoElement, ObjectFit,
+    ParentElement, Pixels, Point, Styled, StyledImage, Window, canvas, div, img, point, px,
+    uniform_list,
 };
 use gpui_core::{IconName, Press};
 
 use super::board::BoardMetrics;
 use super::render::{icon, line};
 use super::table::{Item, TableView};
+use crate::model::{CardPreview, Doc};
 
 /// Where the gallery's grid was drawn: its top left (inside its padding), the cards a line, a
-/// card's width and a line's height (a card and the gap under it), and the gap between cards.
+/// card's width and a line's height (a card and the gap under it), the gap between cards, and
+/// the height of the cover band atop each card (zero without one).
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GalleryGrid {
     pub origin: Point<Pixels>,
@@ -24,6 +30,41 @@ pub(crate) struct GalleryGrid {
     pub card_width: Pixels,
     pub item: Pixels,
     pub gap: Pixels,
+    pub band: Pixels,
+}
+
+/// A row's cover as a card's band shows it.
+pub(crate) enum Cover {
+    /// `{"style": "image", "assetId": ..}`.
+    Image(String),
+    /// `{"style": "solid", "color": "#rrggbb" or "#rrggbbaa"}`.
+    Color(Hsla),
+}
+
+impl Cover {
+    /// A row doc's `cover`, if it's one the band can show.
+    pub(crate) fn of(r: &Doc) -> Option<Self> {
+        let c = r.cover.as_object()?;
+        match c.get("style")?.as_str()? {
+            "image" => Some(Self::Image(c.get("assetId")?.as_str()?.to_owned())),
+            "solid" => color(c.get("color")?.as_str()?).map(Self::Color),
+            _ => None,
+        }
+    }
+}
+
+/// `#rrggbb` or `#rrggbbaa` as a colour.
+fn color(s: &str) -> Option<Hsla> {
+    let hex = s.strip_prefix('#')?;
+    if !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let v = u32::from_str_radix(hex, 16).ok()?;
+    match hex.len() {
+        6 => Some(gpui::rgb(v).into()),
+        8 => Some(gpui::rgba(v).into()),
+        _ => None,
+    }
 }
 
 impl TableView {
@@ -50,12 +91,19 @@ impl TableView {
         let card_width = m.column_width - m.inset * 2.;
         let room = (width - m.pad * 2. + m.gap).max(px(0.));
         let per_line = ((room / (card_width + m.gap)).floor() as usize).max(1);
+        let band = if self.view().and_then(|v| v.card_preview.as_ref()) == Some(&CardPreview::Cover)
+        {
+            (card_width * (9. / 16.)).round()
+        } else {
+            px(0.)
+        };
         GalleryGrid {
             origin: self.bounds.get().origin + point(m.pad, m.pad),
             per_line,
             card_width,
-            item: m.card + m.gap,
+            item: m.card + band + m.gap,
             gap: m.gap,
+            band,
         }
     }
 
@@ -122,6 +170,7 @@ impl TableView {
                                 "all",
                                 focused == Some(at),
                                 lifted_now,
+                                (grid.band > px(0.)).then_some(grid.band),
                                 &m,
                                 cx,
                             );
@@ -286,4 +335,33 @@ fn drop_line(accent: gpui::Hsla, gap: Pixels, after: bool) -> impl IntoElement {
         .w(px(2.))
         .bg(accent)
         .debug_selector(|| "gallery-landing".into())
+}
+
+impl TableView {
+    /// The band atop a gallery's card: the row's cover image or colour, else empty.
+    pub(crate) fn cover_band(&self, r: &Doc, height: Pixels, cx: &gpui::App) -> AnyElement {
+        let t = &self.theme;
+        let rid = r.id.clone();
+        let band = div()
+            .debug_selector(move || format!("cover:{rid}"))
+            .flex_none()
+            .w_full()
+            .h(height)
+            .overflow_hidden()
+            .bg(t.colors.hover);
+        match Cover::of(r) {
+            Some(Cover::Color(c)) => band.bg(c).into_any_element(),
+            Some(Cover::Image(asset)) => match self.host.image(&asset, cx) {
+                Some(image) => band
+                    .child(
+                        img(ImageSource::Image(image))
+                            .size_full()
+                            .object_fit(ObjectFit::Cover),
+                    )
+                    .into_any_element(),
+                None => band.into_any_element(),
+            },
+            None => band.into_any_element(),
+        }
+    }
 }
