@@ -41,6 +41,7 @@
 //! ```
 
 mod block_menu;
+mod code_chrome;
 mod comments;
 pub mod docs;
 mod editor;

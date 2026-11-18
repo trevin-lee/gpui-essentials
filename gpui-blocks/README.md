@@ -32,6 +32,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
 - **Notion's keys:** ⌘B, ⌘I, ⌘U, ⌘⇧S and ⌘E mark the selection bold, italic, underlined, struck
   through or code. ⌘⌥0 to ⌘⌥8 turn the block, or each selected block, into text, heading 1 to 3,
   a to-do, bulleted or numbered item, a toggle or code. Off the Mac, Ctrl takes ⌘'s place.
+- **Code blocks:** over a code block the pointer is on, or the caret is in, its language opens a
+  menu of common ones, and Copy copies its code, as Notion's do.
 - **Motion:** while you drag, the blocks you pass slide aside to open a gap, and the block
   springs into it when you let go. Moving a top-level block with ⌘⇧↑ or ↓ (Ctrl on Linux and
   Windows), or undoing a move, slides the blocks to their new places. List items move within
