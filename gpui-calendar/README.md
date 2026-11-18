@@ -432,8 +432,9 @@ moves once a minute.
 
 Early, and used for one app so far. It's tested on macOS, and CI builds it for the iOS
 simulator (`aarch64-apple-ios-sim`): the crate takes no platform, and on iOS the app links
-`gpui-pre-ios` itself. GPUI also runs on Linux and Windows, but this crate hasn't been tried
-there.
+`gpui-pre-ios` itself. Its tests also pass on Linux. It builds for the browser
+(`wasm32-unknown-unknown`, with GPUI's web platform), where an app brings its own fonts, as
+gpui-core's README says.
 
 Not done yet:
 - Editing a recurrence rule itself (expanding recurring events, and applying a scoped edit to
