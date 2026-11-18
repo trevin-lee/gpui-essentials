@@ -199,6 +199,10 @@ pub struct FlowOptions {
     /// as React Flow's `connectOnClick`: no drag needed, which suits a finger. A click on the
     /// same handle again, on the pane or on a node, or escape, lets it go. On by default.
     pub connect_on_click: bool,
+    /// An edge's end can be dragged to another handle, the other end staying put, as React
+    /// Flow's `edgesReconnectable`: a press within 10 points of the end (a finger's reach on
+    /// touch) takes it. On by default.
+    pub edges_reconnectable: bool,
 }
 
 impl Default for FlowOptions {
@@ -242,6 +246,7 @@ impl Default for FlowOptions {
             auto_pan_on_connect: true,
             auto_pan_speed: 15.,
             connect_on_click: true,
+            edges_reconnectable: true,
         }
     }
 }
@@ -412,6 +417,20 @@ pub enum FlowEvent {
         connected: bool,
         pointer: XY,
     },
+    /// An end of this edge was taken hold of, to move to another handle
+    /// ([`FlowOptions::edges_reconnectable`]).
+    ReconnectStart(EdgeId),
+    /// The edge's end was dropped on a handle it can join: `old` is the edge as it was, `new`
+    /// as it is now, with the same id.
+    Reconnect {
+        old: Edge,
+        new: Edge,
+    },
+    /// The end was let go of, moved or not.
+    ReconnectEnd {
+        edge: EdgeId,
+        reconnected: bool,
+    },
     NodeClick(NodeId),
     NodeDoubleClick(NodeId),
     /// The mouse began moving these nodes; [`FlowEvent::NodeDrag`] follows each move, and
@@ -571,6 +590,8 @@ enum Drag {
         pointer: XY,
         snap: Option<Snap>,
         started: bool,
+        /// The edge whose other end is being moved, from this end, which stays.
+        reconnecting: Option<EdgeId>,
     },
     Resize {
         node: NodeId,
@@ -620,6 +641,9 @@ struct TouchPress {
 /// How far (in points) a finger may move and still tap, and how long it must stay put for a
 /// context menu: UIKit's.
 const TOUCH_SLOP: f32 = 8.;
+/// How near (in points) a press must be to an edge's end to take hold of it, as React Flow's
+/// reconnect anchors' 10.
+const RECONNECT_REACH: f32 = 10.;
 const LONG_PRESS: Duration = Duration::from_millis(500);
 /// How soon a second tap must follow the first, and how near, to be a double tap.
 const DOUBLE_TAP: Duration = Duration::from_millis(350);
@@ -3190,6 +3214,7 @@ impl Flow {
             pointer,
             snap: None,
             started: false,
+            reconnecting: None,
         });
         cx.notify();
         true
@@ -3273,12 +3298,124 @@ impl Flow {
             }
             self.selection_changed(cx);
         }
+        let pane = self.shared.pane_point(event.position);
         cx.emit(if event.click_count >= 2 {
-            FlowEvent::EdgeDoubleClick(id)
+            FlowEvent::EdgeDoubleClick(id.clone())
         } else {
-            FlowEvent::EdgeClick(id)
+            FlowEvent::EdgeClick(id.clone())
         });
+        self.start_reconnect(&id, pane, event);
         cx.notify();
+    }
+
+    /// A press near an end of an edge takes hold of that end, to move to another handle; the
+    /// other end stays, and the drag is a connection from it ([`Drag::Connect`]). Says whether
+    /// it did.
+    fn start_reconnect(&mut self, id: &EdgeId, pane: XY, event: &MouseDownEvent) -> bool {
+        if !self.options.edges_reconnectable
+            || self.options.pointer_mode != PointerMode::Edit
+            || event.button != MouseButton::Left
+        {
+            return false;
+        }
+        let Some((first, last)) = self
+            .shared
+            .edges
+            .borrow()
+            .iter()
+            .find(|l| &l.id == id)
+            .and_then(|l| Some((*l.points.first()?, *l.points.last()?)))
+        else {
+            return false;
+        };
+        let reach = if self.shared.touch.get() {
+            self.options.touch_target_size / 2.
+        } else {
+            RECONNECT_REACH
+        };
+        let (to_target, to_source) = (pane.distance(last), pane.distance(first));
+        let Some(edge) = self.edge(id).cloned() else {
+            return false;
+        };
+        // The end nearer the press moves; the other is where the connection is dragged from.
+        let from = if to_target <= reach && to_target <= to_source {
+            HandleRef {
+                node: edge.source.clone(),
+                handle: edge.source_handle.clone(),
+                kind: HandleKind::Source,
+            }
+        } else if to_source <= reach {
+            HandleRef {
+                node: edge.target.clone(),
+                handle: edge.target_handle.clone(),
+                kind: HandleKind::Target,
+            }
+        } else {
+            return false;
+        };
+        let Some(at) = self.handle_point(&from.node, from.kind, from.handle.as_deref()) else {
+            return false;
+        };
+        let position = {
+            let measured = self.shared.measured.borrow();
+            measured.get(&from.node).and_then(|m| {
+                m.handles
+                    .iter()
+                    .find(|h| h.kind == from.kind && h.id == from.handle)
+                    .map(|h| h.position)
+            })
+        };
+        let Some(position) = position else {
+            return false;
+        };
+        self.drag_button = event.button;
+        self.drag = Some(Drag::Connect {
+            from,
+            at,
+            position,
+            pointer: self.viewport.to_flow(pane),
+            snap: None,
+            started: false,
+            reconnecting: Some(id.clone()),
+        });
+        true
+    }
+
+    /// Moves an edge's ends to a connection's, keeping the rest of it (its id, kind, label and
+    /// look), and says what it was and is. None, changing nothing, when the edge is missing,
+    /// already joins those handles, another edge does, or the flow's connection check refuses
+    /// it.
+    pub fn reconnect(
+        &mut self,
+        id: &EdgeId,
+        connection: Connection,
+        cx: &mut Context<Self>,
+    ) -> Option<(Edge, Edge)> {
+        self.edited = true;
+        let i = self.edges.iter().position(|e| &e.id == id)?;
+        let same = |e: &Edge| {
+            e.source == connection.source
+                && e.target == connection.target
+                && e.source_handle == connection.source_handle
+                && e.target_handle == connection.target_handle
+        };
+        if same(&self.edges[i])
+            || self.edges.iter().any(|e| &e.id != id && same(e))
+            || self.node(&connection.source).is_none()
+            || self.node(&connection.target).is_none()
+            || !self.connection_allowed(&connection)
+        {
+            return None;
+        }
+        let old = self.edges[i].clone();
+        let edge = &mut self.edges[i];
+        edge.source = connection.source;
+        edge.target = connection.target;
+        edge.source_handle = connection.source_handle;
+        edge.target_handle = connection.target_handle;
+        let new = edge.clone();
+        cx.notify();
+        Some((old, new))
     }
 
     /// Begins a selection rectangle at this point of the pane; ⌘ keeps what's selected.
@@ -4389,14 +4526,18 @@ impl Flow {
                 pointer: at,
                 snap,
                 started,
+                reconnecting,
                 ..
             } => {
                 if !*started {
                     *started = true;
-                    cx.emit(FlowEvent::ConnectStart {
-                        node: from.node.clone(),
-                        handle: from.handle.clone(),
-                        kind: from.kind,
+                    cx.emit(match reconnecting {
+                        Some(edge) => FlowEvent::ReconnectStart(edge.clone()),
+                        None => FlowEvent::ConnectStart {
+                            node: from.node.clone(),
+                            handle: from.handle.clone(),
+                            kind: from.kind,
+                        },
                     });
                 }
                 *at = pointer;
@@ -4536,6 +4677,23 @@ impl Flow {
                     } else {
                         FlowEvent::NodeClick(pressed)
                     });
+                }
+            }
+            Drag::Connect {
+                reconnecting: Some(edge),
+                snap,
+                started,
+                ..
+            } => {
+                if started {
+                    let moved = snap
+                        .filter(|s| s.valid)
+                        .and_then(|s| self.reconnect(&edge, s.connection, cx));
+                    let reconnected = moved.is_some();
+                    if let Some((old, new)) = moved {
+                        cx.emit(FlowEvent::Reconnect { old, new });
+                    }
+                    cx.emit(FlowEvent::ReconnectEnd { edge, reconnected });
                 }
             }
             Drag::Connect {
@@ -4792,6 +4950,18 @@ impl Flow {
                 self.selection_changed(cx);
             }
             Some(Drag::Connect {
+                reconnecting: Some(edge),
+                started,
+                ..
+            }) => {
+                if started {
+                    cx.emit(FlowEvent::ReconnectEnd {
+                        edge,
+                        reconnected: false,
+                    });
+                }
+            }
+            Some(Drag::Connect {
                 from,
                 started,
                 pointer,
@@ -4815,7 +4985,6 @@ impl Flow {
 
     // Drawing.
 
-    /// Moves a transition along, and asks for another frame until it's done.
     /// While nodes or a connection are dragged with the pointer near the pane's edge, moves the
     /// viewport that way a little each frame, the drag following the pointer as it does, as
     /// React Flow's auto-pan. Its speed is React Flow's per frame at 60 a second, scaled to the
@@ -4857,6 +5026,7 @@ impl Flow {
         window.request_animation_frame();
     }
 
+    /// Moves a transition along, and asks for another frame until it's done.
     fn step_transition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(t) = &self.transition else {
             return;
@@ -5141,9 +5311,18 @@ impl Flow {
                     .collect(),
             )
         });
+        // The edge whose end is being moved is drawn as the connection line instead.
+        let moving = match &self.drag {
+            Some(Drag::Connect {
+                reconnecting: Some(edge),
+                started: true,
+                ..
+            }) => Some(edge.clone()),
+            _ => None,
+        };
         self.edges
             .iter()
-            .filter(|e| !e.hidden)
+            .filter(|e| !e.hidden && moving.as_ref() != Some(&e.id))
             .filter_map(|e| {
                 let (si, ti) = (self.index_of(&e.source)?, self.index_of(&e.target)?);
                 let (source, target) = (&self.nodes[si], &self.nodes[ti]);

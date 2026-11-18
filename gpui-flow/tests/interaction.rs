@@ -614,3 +614,88 @@ fn connecting_by_clicks_can_be_turned_off(cx: &mut TestAppContext) {
             .any(|e| matches!(e, FlowEvent::ConnectStart { .. }))
     );
 }
+
+/// An edge's end dragged to another handle moves there, the other end staying put and the
+/// edge keeping its id, as React Flow's `edgesReconnectable`.
+#[gpui::test]
+fn an_edges_end_can_be_dragged_to_another_handle(cx: &mut TestAppContext) {
+    let (flow, events, cx) = open(cx, with_three);
+    // Just above b's target handle, on the line coming down into it.
+    let end = flow.read_with(cx, |f, _| {
+        f.flow_to_screen(f.handle_point("b", HandleKind::Target, None).unwrap() - xy(0., 7.))
+    });
+    let to = handle(&flow, cx, "c", HandleKind::Target);
+    drag(cx, end, to, Modifiers::none());
+    flow.read_with(cx, |f, _| {
+        assert_eq!(f.edges().len(), 1);
+        let edge = &f.edges()[0];
+        assert_eq!(
+            (edge.id.as_ref(), edge.source.as_ref(), edge.target.as_ref()),
+            ("a-b", "a", "c")
+        );
+    });
+    let seen = events.borrow();
+    assert!(
+        seen.iter()
+            .any(|e| matches!(e, FlowEvent::ReconnectStart(id) if id == "a-b"))
+    );
+    assert!(seen.iter().any(
+        |e| matches!(e, FlowEvent::Reconnect { old, new } if old.target == "b" && new.target == "c")
+    ));
+    assert!(seen.iter().any(|e| matches!(
+        e,
+        FlowEvent::ReconnectEnd {
+            reconnected: true,
+            ..
+        }
+    )));
+    // No new connection was made for it.
+    assert!(
+        !seen
+            .iter()
+            .any(|e| matches!(e, FlowEvent::Connect(_) | FlowEvent::ConnectStart { .. }))
+    );
+}
+
+#[gpui::test]
+fn an_edges_end_let_go_of_over_nothing_stays_where_it_was(cx: &mut TestAppContext) {
+    let (flow, events, cx) = open(cx, with_three);
+    let end = flow.read_with(cx, |f, _| {
+        f.flow_to_screen(f.handle_point("b", HandleKind::Target, None).unwrap() - xy(0., 7.))
+    });
+    drag(cx, end, offset(end, 300., 200.), Modifiers::none());
+    flow.read_with(cx, |f, _| {
+        let edge = &f.edges()[0];
+        assert_eq!((edge.source.as_ref(), edge.target.as_ref()), ("a", "b"));
+    });
+    assert!(events.borrow().iter().any(|e| matches!(
+        e,
+        FlowEvent::ReconnectEnd {
+            reconnected: false,
+            ..
+        }
+    )));
+}
+
+#[gpui::test]
+fn edges_ends_stay_put_when_reconnecting_is_off(cx: &mut TestAppContext) {
+    let (flow, events, cx) = open(cx, |f| {
+        with_three(f).with_options(|o| o.edges_reconnectable = false)
+    });
+    let end = flow.read_with(cx, |f, _| {
+        f.flow_to_screen(f.handle_point("b", HandleKind::Target, None).unwrap() - xy(0., 7.))
+    });
+    let to = handle(&flow, cx, "c", HandleKind::Target);
+    drag(cx, end, to, Modifiers::none());
+    assert_eq!(
+        flow.read_with(cx, |f, _| f.edges()[0].target.clone())
+            .as_ref(),
+        "b"
+    );
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, FlowEvent::ReconnectStart(_)))
+    );
+}

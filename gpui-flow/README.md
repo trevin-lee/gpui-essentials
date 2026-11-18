@@ -129,7 +129,9 @@ made.
   drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
   rectangle; drag from a handle to another (either direction) to connect, or click (tap) one and
   then the other (`connect_on_click`, as React Flow's; the first is drawn in the selection's
-  colour until then, and the same handle again, the pane or escape lets it go); a node or a
+  colour until then, and the same handle again, the pane or escape lets it go); drag an edge's
+  end to another handle to move it there, the other end staying put (`edges_reconnectable`,
+  `Reconnect` with the edge as it was and is); a node or a
   connection dragged to within 40 points of the pane's edge moves the view that way, faster the
   nearer the edge (`auto_pan_on_node_drag`, `auto_pan_on_connect`, `auto_pan_speed`, as React
   Flow's); click an edge to select it; delete, ⌘A, escape (which also puts back a drag, resize, pan or rectangle), the
@@ -336,7 +338,7 @@ made.
   animated edges redraw the flow twenty times a second while one is on screen.
 - **Names.** React Flow's `Position` is `Side` and `Background` is `FlowBackground`, because
   GPUI exports both names and hosts import both crates whole.
-- **Not yet.** Reconnecting an existing edge by dragging its end; a node toolbar; edge
+- **Not yet.** A node toolbar; edge
   renderers of the host's own (a custom type is drawn as a bezier); `dragHandle`; markers that
   scale with the line's width; a keyboard path through nodes and accessibility; undo.
 
