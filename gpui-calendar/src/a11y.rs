@@ -19,7 +19,7 @@ use std::rc::Rc;
 use chrono::{Datelike, Duration, NaiveDate};
 use gpui::{
     A11ySubtreeBuilder, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
-    IntoElement, LayoutId, Pixels, Role, WeakEntity, Window, accesskit, point, size,
+    IntoElement, LayoutId, Pixels, Role, SharedString, WeakEntity, Window, accesskit, point, size,
 };
 
 use crate::calendar::Calendar;
@@ -340,6 +340,22 @@ impl Calendar {
                 }
             }
         }
+        // Each node tells gpui-core's accessibility audit what it says, as gpui-core's own
+        // controls do.
+        for item in &out {
+            let what = match item.target {
+                A11yTarget::Event(_) => "CalendarEvent",
+                A11yTarget::Day(_) => "CalendarDay",
+                A11yTarget::More(_) => "CalendarMore",
+                A11yTarget::Crowd(_) => "CalendarCrowd",
+                A11yTarget::Slot { .. } => "CalendarSlot",
+            };
+            gpui_core::audit(
+                what,
+                item.role,
+                Some(&SharedString::from(item.label.clone())),
+            );
+        }
         out
     }
 
@@ -492,6 +508,11 @@ impl<E: Element> Element for Accessible<E> {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        gpui_core::audit(
+            "Calendar",
+            Role::Group,
+            Some(&SharedString::from(self.label.clone())),
+        );
         self.inner
             .prepaint(id, inspector, bounds, layout, window, cx)
     }
