@@ -10,6 +10,7 @@ use gpui::*;
 use gpui_core::ActiveTheme as _;
 use markdown::mdast::Node;
 use markdown_editor::BlockId;
+use markdown_editor::Control as _;
 use markdown_editor::{CustomNode, Extension};
 
 /// The block's Markdown.
@@ -84,6 +85,7 @@ impl Extension for TocPlugin {
             div()
                 .id(("blocks-toc", ix))
                 .debug_selector(move || format!("blocks-toc-{ix}"))
+                .control(module_path!(), Role::Link, heading.text.clone())
                 .pl(px(16. * (heading.level - top) as f32))
                 .py(px(2.))
                 // A row, so the underline is as wide as the title.

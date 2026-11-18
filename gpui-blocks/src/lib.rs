@@ -40,6 +40,7 @@
 //! });
 //! ```
 
+mod a11y;
 mod block_menu;
 pub mod bookmark;
 mod code_chrome;

@@ -11,6 +11,7 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::ActiveTheme as _;
+use markdown_editor::Control as _;
 use markdown_editor::{
     BlockEditor, BlockEditorEvent, BlockEditorState, BlockId, BlockKind, BlockPosition,
     BlockSelection, EditOrigin, EditorCommand, Extensions,
@@ -190,6 +191,7 @@ pub struct Options {
     comments: bool,
     block_link: Option<BlockLink>,
     unfurl: Option<UnfurlFn>,
+    accessibility_label: SharedString,
     typography: bool,
     gutter: Pixels,
     top: Pixels,
@@ -215,6 +217,7 @@ impl Default for Options {
             comments: false,
             block_link: None,
             unfurl: None,
+            accessibility_label: "Page".into(),
             gutter: px(GUTTER),
             top: px(TOP),
             compact_below: px(COMPACT_BELOW),
@@ -245,6 +248,7 @@ impl std::fmt::Debug for Options {
             .field("comments", &self.comments)
             .field("block_link", &self.block_link.is_some())
             .field("unfurl", &self.unfurl.is_some())
+            .field("accessibility_label", &self.accessibility_label)
             .field("gutter", &self.gutter)
             .field("top", &self.top)
             .field("compact_below", &self.compact_below)
@@ -366,6 +370,13 @@ impl Options {
     ) -> Self {
         self.unfurl = Some(Arc::new(unfurl));
         self.items.extend(slash::bookmark_items());
+        self
+    }
+
+    /// What assistive technology calls the page's text, "Page" unless set: the document's title,
+    /// say.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = label.into();
         self
     }
 
@@ -643,6 +654,7 @@ impl Editor {
         };
         let images = options.images.clone();
         let typography = options.typography;
+        let accessibility_label = options.accessibility_label.clone();
         let highlighter = options.highlighter.clone();
         let embed_heights: docs::Heights = Arc::default();
         let this = cx.entity().downgrade();
@@ -717,6 +729,7 @@ impl Editor {
                 state = state.with_code_highlighter(highlighter);
             }
             state.set_scroll_handle(scroll.clone());
+            state.set_accessibility_label(accessibility_label, cx);
             state
         });
         let subscription = cx.subscribe(&state, |this, _, event: &BlockEditorEvent, cx| {
@@ -1230,8 +1243,11 @@ impl Editor {
             div()
                 .id(label)
                 .debug_selector(move || format!("blocks-paste-{label}"))
-                .role(Role::Button)
-                .aria_label(format!("Paste as {}", label.to_lowercase()))
+                .control(
+                    module_path!(),
+                    Role::Button,
+                    format!("Paste as {}", label.to_lowercase()),
+                )
                 .px(px(10.))
                 .py(px(5.))
                 .rounded(px(5.))
@@ -1982,8 +1998,7 @@ impl Editor {
         let state = self.state.clone();
         let grip = button("blocks-side-grip", "⋮⋮")
             .debug_selector(|| "blocks-side-grip".into())
-            .role(Role::Button)
-            .aria_label("Move block")
+            .control(module_path!(), Role::Button, "Move block")
             .aria_description("Drag to move the block; click for its menu")
             .aria_expanded(self.block_menu == Some(block))
             .cursor_grab()
@@ -2023,8 +2038,7 @@ impl Editor {
                         .gap(px(2.))
                         .child(
                             button("blocks-side-add", "+")
-                                .role(Role::Button)
-                                .aria_label("Add a block below")
+                                .control(module_path!(), Role::Button, "Add a block below")
                                 .cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                                     cx.stop_propagation();
@@ -2069,8 +2083,7 @@ impl Editor {
             rows.push(
                 div()
                     .id(("blocks-slash", ix))
-                    .role(Role::ListBoxOption)
-                    .aria_label(item.title.clone())
+                    .control(module_path!(), Role::ListBoxOption, item.title.clone())
                     .aria_description(item.hint.clone())
                     .aria_selected(selected)
                     .mx_1()
@@ -2146,8 +2159,7 @@ impl Editor {
                     div()
                         .id("blocks-slash-menu")
                         .debug_selector(|| "blocks-slash-menu".into())
-                        .role(Role::ListBox)
-                        .aria_label("Blocks")
+                        .control(module_path!(), Role::ListBox, "Blocks")
                         .w(px(300.))
                         .max_h(px(MENU_HEIGHT))
                         .overflow_y_scroll()
@@ -2573,8 +2585,7 @@ impl Editor {
                 div()
                     .id("blocks-touch-color")
                     .debug_selector(|| "blocks-touch-color".into())
-                    .role(Role::Button)
-                    .aria_label("Color")
+                    .control(module_path!(), Role::Button, "Color")
                     .size(px(44.))
                     .flex()
                     .items_center()
@@ -2610,8 +2621,7 @@ impl Editor {
                 .whitespace_nowrap()
                 .child(label)
                 .debug_selector(move || format!("blocks-menu-{label}"))
-                .role(Role::MenuItem)
-                .aria_label(label)
+                .control(module_path!(), Role::MenuItem, label)
                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                     cx.stop_propagation();
                     let _ = this.update(cx, |this, cx| this.used_menu(cx));
@@ -2632,8 +2642,7 @@ impl Editor {
             items.push(
                 div()
                     .id("Block…")
-                    .role(Role::MenuItem)
-                    .aria_label("Block menu")
+                    .control(module_path!(), Role::MenuItem, "Block menu")
                     .h(px(44.))
                     .px(px(14.))
                     .flex()
@@ -2660,8 +2669,7 @@ impl Editor {
                     .child(
                         div()
                             .id("blocks-edit-menu")
-                            .role(Role::Menu)
-                            .aria_label("Edit")
+                            .control(module_path!(), Role::Menu, "Edit")
                             .flex()
                             .flex_col()
                             .rounded(px(10.))
