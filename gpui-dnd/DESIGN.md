@@ -574,6 +574,199 @@ pub struct SortableDrag<K> { pub list: ElementId, pub key: K, pub from: usize, p
   something. At 10,000 rows, a frame of a drag takes 0.14 ms (median, release, ci-runner) and an
   auto-scroll frame 0.08 ms.
 
+## Proposal: drags a host starts itself (for gpui-calendar)
+
+Not built yet; reviewed by the lead and the gpui-calendar agent. gpui-calendar draws a whole view on one canvas and decides
+itself what a press means (`paint::target_at`): empty time creates, an event moves, an event's
+bottom (or an all-day span's right edge) resizes, a "+N" list's row moves its event, and only
+the selected event follows a finger at once. So a drag there can't start from a `dnd` element
+that's the thing pressed. What calendar does today, and must keep (from a survey of
+`calendar.rs`, `paint.rs`, `time.rs` and their tests):
+
+- the press becomes a drag past `4 × scale` px (8 on touch), or at once on a long press;
+- the proposal is worked out in display-zone wall minutes from the last frame's `Geo`, snapped
+  to `snap_minutes`, across DST (`time::moved`, `resized`, `created`), and between the all-day
+  row and the hours (the event changes shape mid-drag);
+- calendar draws the ghost in place on its canvas, with the original faded;
+- it emits a proposal (`Create`, `Move`, `Resize`) and changes nothing itself;
+- a repeating event's drop waits for the "this / following / all" question with the ghost
+  left where it was dropped;
+- Escape drops the drag (and the selection on a second Escape); a cancelled touch clears it;
+- a release outside the window commits;
+- the pointer is followed across the whole window (`paint.rs:703-739`) and clamped to the grid:
+  a move or a release over the header, the mini month or the sidebar proposes and commits at the
+  clamped spot;
+- the cursor follows the drag's kind;
+- the grid auto-scrolls near its top and bottom, in minutes;
+- there's no keyboard move or resize yet.
+
+And these, which the new API must leave alone:
+- a press that never passes the threshold reaches calendar unchanged, so clicks and
+  double-clicks work as now (`press_at` doesn't stop the press's propagation);
+- only the left button starts a drag (calendar calls `press_at` only for it);
+- read-only events get no `press_at` or `begin_at`;
+- hover cursors before a drag stay calendar's; `DragSource::cursor` applies only while dragging;
+- only the selected event's touch is claimed, so panning and period swipes stay calendar's;
+- a drag from a "+N" row closes that list (calendar, in `on_begin`).
+
+### What already fits
+
+- **The target.** Calendar's body (one element) is a `dnd` target that accepts its own item
+  type. `on_hover` gets the pointer (`client_offset`) and works the proposal out with its `Geo`
+  as it does now, into its own state, and notifies itself. Its areas (the grid, the all-day row,
+  the month) stay calendar's: the item changes shape between them, so they aren't separate
+  targets.
+- **The ghost.** `Preview::None`: calendar keeps drawing it on its canvas, and a cancel ends at
+  once (no slide back, since nothing is drawn to slide).
+- **The drop.** `on_drop` calls calendar's `finish`. For a repeating event it stores its
+  question as now and returns `Handled`: gpui-dnd's drag is over, calendar's question and ghost
+  carry on (no "pending" drop in gpui-dnd).
+- **Cancel.** gpui-dnd takes Escape during a drag and the source's `on_end` hears
+  `cancelled`, where calendar clears its drag (its question keys come after the drop, when no
+  drag holds the keyboard). A touch cancelled is the same. A release outside the window already
+  drops where the pointer last was. With `catch_outside` (below) that drop is calendar's, as
+  it commits now.
+- **Touch begin.** `on_begin` is where calendar sets up a long press's create (an hour from the
+  snapped minute).
+
+### What's missing: five additions
+
+```rust
+/// Starts a drag the host chose to start: a press on something gpui-dnd doesn't know is a
+/// source (a canvas's event, a list row outside it). It becomes a drag once the pointer moves
+/// `threshold` away (the mouse, or a finger whose touch drag the host claimed), as a source's
+/// press does. `id` names the drag's source for the monitor (`is_dragging_source`); `grab` is
+/// where in the item it was taken (the preview's and `source_client_offset`'s anchor).
+pub fn press_at<T: 'static>(
+    window: &mut Window,
+    cx: &mut App,
+    id: impl Into<ElementId>,
+    at: Point<Pixels>,
+    source: DragSource<T>,
+    options: Press,
+);
+
+/// The same, begun at once: a long press, or a key.
+pub fn begin_at<T: 'static>(
+    window: &mut Window,
+    cx: &mut App,
+    id: impl Into<ElementId>,
+    at: Point<Pixels>,
+    source: DragSource<T>,
+    options: Press,
+) -> bool;
+
+pub struct Press {
+    pub backend: Backend,          // Mouse, Touch or Keyboard
+    pub threshold: Option<Pixels>, // a source's quarter rem unless given
+    pub grab: Point<Pixels>,       // from the item's top-left; zero for a create
+    pub size: Size<Pixels>,        // the item's, for a preview and the monitor
+}
+
+/// Ends the window's drag as Escape would (for a host whose own key, or its question, must
+/// win).
+pub fn cancel(window: &mut Window, cx: &mut App);
+
+impl<T> DragSource<T> {
+    /// The cursor while it's dragged, by what's dragged: calendar's ClosedHand to move,
+    /// ResizeUpDown (or LeftRight) to resize, Arrow to create. ClosedHand unless given.
+    pub fn cursor(self, f: impl Fn(&T, &DragMonitor) -> CursorStyle + 'static) -> Self;
+}
+
+/// A scroll zone the host registers from its own paint, for a band of a canvas (calendar's
+/// hours, between `grid_top` and `grid_bottom`) scrolled by something that isn't an element's
+/// handle (`Shared.scroll`, in minutes, through `Scrollable`). Only for drags whose item
+/// `for_items` takes (calendar's: creating, moving over the hours, resizing in them).
+pub fn auto_scroll_zone(
+    window: &mut Window,
+    cx: &mut App,
+    bounds: Bounds<Pixels>,
+    scroller: Rc<dyn Scrollable>,
+    options: AutoScroll,
+);
+
+impl AutoScroll {
+    pub fn for_items(self, f: impl Fn(&DragItem) -> bool + 'static) -> Self;
+}
+
+impl DropTarget {
+    /// This target takes the drag wherever the pointer is in the window, when no other target
+    /// under the pointer takes it: `on_hover` keeps hearing the pointer (past its bounds, for
+    /// the host to clamp) and a release there calls its `on_drop`, not a cancel. `is_over`
+    /// stays geometric, so the host can tell. If two such targets take a drag, the one drawn
+    /// last wins; calendar's `can_drop` takes only its own view's items, so two calendars in
+    /// a window each keep their own drags.
+    pub fn catch_outside(self, on: bool) -> Self;
+}
+```
+
+- **Why `catch_outside`, not a drop point in `on_end`.** Calendar clamps the ghost while the
+  pointer is over the header or sidebar, not only on release. A drop point in `on_end` would
+  give it the release but none of the moves before it, so it would need its window-level move
+  listeners back, which this proposal removes. With `catch_outside`, the moves and the drop
+  take the same path inside and outside the grid (`on_hover`, then `on_drop` → `finish`, with
+  the repeating question). A drop on another target that takes the item (a sidebar list, one
+  day) still goes there, and a drop on nothing still ends in calendar's `on_drop`, never as a
+  cancel.
+
+- `press_at` and `begin_at` reuse the source machinery: the pending press, the threshold, the
+  touch slop, `on_begin`, `on_end`, the provider's listeners, the keyboard. There's no element,
+  so no record in the registry. The item's spec is held by the drag itself, as it already is
+  once a drag starts.
+- **No cost a frame.** The source is built at the press, not each frame, so calendar needs no
+  shared source (see "A source costs little a frame"). A host already holding a
+  `SharedSource<K>` for its elements could pass it and a key instead (`press_shared_at`), if one
+  turns up.
+- **Touch.** Calendar claims the `TouchDragEvent` for the selected event itself (its predicate)
+  and calls `press_at` with `Backend::Touch` and its 8 × scale slop. For a long press it calls
+  `begin_at` from its `LongPressEvent`. gpui-dnd then follows the touch as for its own sources.
+- **Auto-scroll.** It moves to timed frames, fixing calendar's "only while the pointer moves"
+  (README:436). It scrolls by `Scrollable::set_offset`, which calendar maps to minutes.
+
+### What calendar gains, and the keyboard
+
+- **Keyboard move and resize, new.** On the selected event, Space (or a key the host picks)
+  calls `begin_at(.., Backend::Keyboard)`, with the item saying move or resize.
+  - Calendar's target gives `keyboard_step`. On the grid, ↑ and ↓ are one snap step (the end's,
+    for a resize) and ← and → a day; in the month, a day or a week. Each returns the point for
+    that time, scrolling the grid to show it, as `VirtualSortable` does.
+  - `describe` gives VoiceOver the event, where it was and where it's going, at each step. The
+    strings are calendar's: it already returns a `SharedString` from the host's closure, and
+    gpui-dnd formats no times. Calendar builds them with its own formatting (12- or 24-hour,
+    the display zone, full day names, the day named when it changes): "Standup, Tuesday 9 to
+    9:30 AM, moving to Wednesday 10 AM" for a move, "…, ending at 10 AM" for a resize.
+    Calendar's tests assert those strings. Space or Enter drops, with a repeating event's
+    question after, and Escape cancels.
+  - Creating by keyboard stays calendar's Enter and `n`.
+- **The rest:** timed auto-scroll, one cursor and listener path shared with the rest of the app's
+  drags, and the window-level listeners calendar registers in paint (`paint.rs:703-739`) gone.
+
+### What stays calendar's
+
+All of the geometry and time:
+- `Geo`, `geo.pos`, `target_at`, the 44-point touch targets;
+- snapping and DST;
+- the all-day and hours conversion;
+- proposals and edit scopes;
+- the recurring question;
+- the crowd list (its rows call `press_at` with the event held by its start);
+- the agenda (no drags);
+- read-only checks (calendar calls neither `press_at` nor `begin_at` for them);
+- the double-click and the tap-tap creates.
+
+gpui-dnd only owns the drag's life: when it begins, where the pointer is, the keys and the
+touch while it's on, how it ends, the cursor, and timed scrolling.
+
+### Order, once agreed
+
+1. gpui-dnd: `press_at`, `begin_at`, `cancel`, `DragSource::cursor`, `auto_scroll_zone` with
+   `for_items`, and `DropTarget::catch_outside`, with tests: a canvas starting drags, a press
+   under the threshold reaching the host, touch claimed by the host, a zone without an element,
+   and a release outside the target dropping on it.
+2. gpui-calendar, with its owner: the mouse and touch paths onto them, its tests unchanged (the
+   interaction and touch drag tests above are the contract), frame times before and after.
+3. Keyboard move and resize in gpui-calendar, with announcements.
+
 ## react-dnd → gpui-dnd
 
 | react-dnd | gpui-dnd |
