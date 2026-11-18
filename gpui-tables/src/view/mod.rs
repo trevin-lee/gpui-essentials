@@ -47,6 +47,7 @@ mod host;
 mod list;
 mod list_render;
 pub mod ops;
+mod peek;
 mod properties;
 mod render;
 mod rows;

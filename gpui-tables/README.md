@@ -620,6 +620,12 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
     sums up the shown view's (its sort's first property and how many more, its filter's
     property or how many rules), and pressing either opens the settings (the filter's, on its
     rules).
+- **Peek.** With `TableView::set_peek(true)`, opening a row (its Open button, a card, a list's
+  line, Enter) shows it in a panel at the view's right instead of an `openRow`: its title, then
+  every property with its value as its cell shows it. The panel steps to the row above or below
+  (in the view's order), has **Open as page** (the `openRow`, and the panel closes) and Close;
+  Escape closes it too. A host can peek a row itself (`peek`, `close_peek`, `peeked_row`), and
+  the panel goes when its row leaves the docs. It's read-only for now.
 - **Search.** The search button at the bar's right end, or ⌘F while the view has the keyboard,
   opens a field in its place ("Search", with a × to clear it). As it's typed, the table, board
   or list shows only the rows whose title or any shown property's text (a table's columns, a
