@@ -30,7 +30,8 @@
 //! menu) and `view-settings` (a board's settings beside its menu, its card properties open); and
 //! `search` (People searched from the bar for a company's name, typed without its capital); and
 //! `calculations` (People grouped by stage, a calculation under each column of each group, a
-//! number's footer menu open).
+//! number's footer menu open); and `peek` (Imani's row peeked in the panel at the right) and
+//! `gallery` (Pipeline drawn as a gallery, its rows as cards).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -886,6 +887,32 @@ mod shots {
                         let t = pick(2, cx);
                         let id = board_view(&t, cx);
                         t.update(cx, |t, cx| t.set_view(id, cx));
+                    }
+                    "peek" => {
+                        // The table with peeking on, Imani's row in the panel.
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            t.set_peek(true, cx);
+                            t.peek(IMANI, cx);
+                        });
+                    }
+                    "gallery" => {
+                        // Pipeline drawn as a gallery: the same rows as cards in a grid.
+                        let t = pick(0, cx);
+                        t.update(cx, |t, cx| {
+                            let mut db = t.database().clone();
+                            let rows = t.rows().to_vec();
+                            if let Some(v) = db
+                                .database
+                                .as_mut()
+                                .and_then(|d| d.views.iter_mut().find(|v| v.id == PIPELINE))
+                            {
+                                v.kind = gpui_tables::ViewType::Gallery;
+                                v.name = "Gallery".into();
+                            }
+                            t.set_docs(db, rows, cx);
+                            t.set_view(PIPELINE, cx);
+                        });
                     }
                     "list" => {
                         let t = pick(2, cx);

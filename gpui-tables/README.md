@@ -548,7 +548,7 @@ new docs, as a header's change is.
 
 | | |
 |---|---|
-| ![The bar's + menu: a new view's name typed over its three types, Board highlighted, under the +](docs/view-add.png) | ![The Pipeline board's menu under its tab, View settings open beside it (what it groups by, its card properties, its sort to remove), and beside that the card properties, shown (the highlighted one's grip to drag it) then hidden](docs/view-settings.png) |
+| ![The bar's + menu: a new view's name typed over its three types, Board highlighted, under the +](docs/view-add.png) | ![The Pipeline board's menu under its tab, View settings open beside it (what it groups by, its card properties, its filter, its sort to remove), and beside that the card properties, shown (the highlighted one's grip to drag it) then hidden](docs/view-settings.png) |
 
 ```rust,ignore
 let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(true));
@@ -629,6 +629,8 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   cell's own editor, hung from the panel: a field (Enter saves, Escape leaves it), the options,
   people or rows, the month, or a checkbox's toggle; each change is the cell's `rowValueChanged`.
   A property the view hides as a column is shown and not edited there.
+
+  ![The People table with Imani Castell peeked: a panel at the right with her title, each property and its value, and buttons to close, step up and down, and open as a page](docs/table-peek.png)
 - **Search.** The search button at the bar's right end, or ⌘F while the view has the keyboard,
   opens a field in its place ("Search", with a × to clear it). As it's typed, the table, board
   or list shows only the rows whose title or any shown property's text (a table's columns, a
@@ -836,6 +838,8 @@ How each type behaves:
   A card dragged to another place (with no sort) is a `rowsMoved`, the board's drag, with a line
   where it'll land. Grouping isn't drawn in a gallery yet (its settings have no Group by), and
   cards have no cover image.
+
+  ![The Pipeline view as a gallery: the people as cards in a grid, three to a line, each with its company, last contact and owner](docs/gallery.png)
 
 A new row made in a filtered or grouped view gets the values that keep it in that view (the
 group's option, a checked box the filter wants), as Notion does.
