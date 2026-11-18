@@ -329,3 +329,10 @@ fn nothing_runs_while_a_drag_over_a_list_holds_still(cx: &mut TestAppContext) {
         "the slide is over and nothing else moves"
     );
 }
+
+#[gpui::test]
+fn a_list_just_drawn_asks_for_no_frames(cx: &mut TestAppContext) {
+    let (mut o, _lists, _moves) = open_lists(cx, vec![vec![1, 2, 3]], Setup::default());
+    o.frame();
+    assert_eq!(o.frames_wanted(), 0, "nothing slides at rest");
+}

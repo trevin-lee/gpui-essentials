@@ -90,6 +90,10 @@ Sortable::new("todo", self.todo.clone())
     .scroll(&self.todo_scroll)   // scrolls, and auto-scrolls near its ends during a drag
 ```
 
+For long lists, `VirtualSortable::new(id, keys, &scroll_handle)` takes the same builder methods
+over a `uniform_list`: only the rows on screen are drawn, and drags, auto-scroll and the keyboard
+work through rows that aren't drawn yet (rows must be the same height).
+
 The items part to open a gap where the dragged one would land, then slide back if it doesn't.
 `Placeholder::Line` draws a line instead, and `Placeholder::Custom` fills the gap with your
 element. You own the order: apply each `SortableMove` to your keys. A kanban board is a row of

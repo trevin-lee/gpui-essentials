@@ -41,7 +41,7 @@ pub struct SortableDrag<K> {
     pub from: usize,
     /// The item's size, which the gap opens to.
     pub size: Size<Pixels>,
-    group: Option<SharedString>,
+    pub(crate) group: Option<SharedString>,
 }
 
 /// An item's state, for its renderer.
@@ -87,12 +87,12 @@ pub enum Placeholder {
 
 /// Draws a custom placeholder of the dragged item's size.
 pub type RenderPlaceholder = Rc<dyn Fn(Size<Pixels>, &mut Window, &mut App) -> AnyElement>;
-type Rects = Rc<RefCell<Vec<Bounds<Pixels>>>>;
-type RenderItem<K> = Rc<dyn Fn(&K, &SortableItem, &mut Window, &mut App) -> AnyElement>;
-type RenderEmpty = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
-type ItemLabel<K> = Rc<dyn Fn(&K) -> SharedString>;
-type CanMove<K> = Rc<dyn Fn(&SortableMove<K>, &App) -> bool>;
-type OnMove<K> = Rc<dyn Fn(&SortableMove<K>, &mut Window, &mut App)>;
+pub(crate) type Rects = Rc<RefCell<Vec<Bounds<Pixels>>>>;
+pub(crate) type RenderItem<K> = Rc<dyn Fn(&K, &SortableItem, &mut Window, &mut App) -> AnyElement>;
+pub(crate) type RenderEmpty = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
+pub(crate) type ItemLabel<K> = Rc<dyn Fn(&K) -> SharedString>;
+pub(crate) type CanMove<K> = Rc<dyn Fn(&SortableMove<K>, &App) -> bool>;
+pub(crate) type OnMove<K> = Rc<dyn Fn(&SortableMove<K>, &mut Window, &mut App)>;
 
 /// A list whose items reorder by dragging, by touch and by keyboard. With a
 /// [`group`](Self::group), lists of the same group take each other's items: a kanban board is
@@ -245,32 +245,32 @@ struct ListState {
 
 /// An item sliding from one offset to another.
 #[derive(Clone, Copy)]
-struct Slide {
-    from: Point<Pixels>,
-    to: Point<Pixels>,
-    start: Instant,
+pub(crate) struct Slide {
+    pub from: Point<Pixels>,
+    pub to: Point<Pixels>,
+    pub start: Instant,
 }
 
 impl Slide {
-    fn progress(&self, now: Instant) -> f32 {
+    pub fn progress(&self, now: Instant) -> f32 {
         (now.saturating_duration_since(self.start).as_secs_f32() / SLIDE_DURATION.as_secs_f32())
             .min(1.)
     }
 
-    fn at(&self, now: Instant) -> Point<Pixels> {
+    pub fn at(&self, now: Instant) -> Point<Pixels> {
         let t = self.progress(now);
         let eased = 1. - (1. - t).powi(3);
         self.from + (self.to - self.from) * eased
     }
 }
 
-fn hash<K: Hash>(key: &K) -> u64 {
+pub(crate) fn hash<K: Hash>(key: &K) -> u64 {
     let mut h = DefaultHasher::new();
     key.hash(&mut h);
     h.finish()
 }
 
-fn item_id(list: &ElementId, key: u64) -> ElementId {
+pub(crate) fn item_id(list: &ElementId, key: u64) -> ElementId {
     ElementId::NamedChild(Arc::new(list.clone()), format!("item-{key:x}").into())
 }
 
@@ -494,7 +494,7 @@ impl<K: Clone + Eq + Hash + 'static> RenderOnce for Sortable<K> {
                     };
                 }
                 let at = slide.at(now);
-                moving |= slide.progress(now) < 1.;
+                moving |= slide.from != slide.to && slide.progress(now) < 1.;
                 offsets.push(at);
             }
         });
@@ -911,10 +911,10 @@ impl<K: Clone + Eq + Hash + 'static> RenderOnce for Sortable<K> {
 
 /// Draws its child moved by `offset` without moving it in the layout, and notes where the
 /// layout put it.
-struct Placed {
-    child: AnyElement,
-    offset: Point<Pixels>,
-    record: Option<(Rects, usize)>,
+pub(crate) struct Placed {
+    pub child: AnyElement,
+    pub offset: Point<Pixels>,
+    pub record: Option<(Rects, usize)>,
 }
 
 impl Placed {

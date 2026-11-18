@@ -177,6 +177,26 @@ fn step(direction: Point<f32>, window: &mut Window, cx: &mut App) {
     let Some(snap) = state::snapshot(cx) else {
         return;
     };
+    // The target the pointer is over may move it within itself (a long list).
+    let over = shared
+        .borrow()
+        .drag
+        .as_ref()
+        .and_then(|d| d.targets.last().cloned());
+    if let Some(target) = over
+        && let Some(step) = target.spec.step.clone()
+    {
+        let monitor = DropMonitor {
+            monitor: DragMonitor::of(cx),
+            target: target.id.clone(),
+            bounds: target.bounds,
+        };
+        if let Some(at) = step(&snap.item, &monitor, direction, window, cx) {
+            state::move_to(at, Modifiers::none(), window, cx);
+            announce_over(window, cx);
+            return;
+        }
+    }
     let targets = shared.borrow_mut().registry(window_id).live_targets();
     let monitor = DragMonitor::of(cx);
     let from = snap.current;
