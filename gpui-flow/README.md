@@ -365,7 +365,12 @@ made.
   one moves only by the part its renderer wraps in `NodeContext::drag_handle`, with a grab
   cursor; a press elsewhere on it selects it and leaves the rest to the renderer (text to
   select, controls to press).
-- **Not yet.** Edge renderers of the host's own (a custom type is drawn as a bezier); undo.
+- **Edge kinds of the host's** (`Flow::with_edge_kind`, as React Flow's `edgeTypes`): the host
+  says how an edge of its kind (`EdgeKind::Custom`) runs between its ends (`EdgeEnds`: each
+  point and the side it leaves or arrives on), as an `EdgePath` of lines and curves, with its
+  label's place. The flow draws it in the edge's look, with arrowheads, label, dashes and
+  animation, takes clicks along it and exports it. A kind without one is drawn as a bezier.
+- **Not yet.** Undo.
 
 ## License
 

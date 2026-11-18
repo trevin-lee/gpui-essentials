@@ -553,6 +553,18 @@ pub enum PanelPosition {
 }
 
 type PanelRenderer = Rc<dyn Fn(&Flow, &mut Window, &mut App) -> AnyElement>;
+/// How a host's kind of edge runs between its ends ([`Flow::with_edge_kind`]).
+pub type EdgePathFn = Rc<dyn Fn(&EdgeEnds) -> EdgePath>;
+
+/// Where an edge's ends are, for a host's kind of edge to run between: each end's point in the
+/// flow, and the side of its node it leaves or arrives on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeEnds {
+    pub source: XY,
+    pub source_side: Side,
+    pub target: XY,
+    pub target_side: Side,
+}
 type ToolbarRenderer = Rc<dyn Fn(&Node, &Flow, &mut Window, &mut App) -> Option<AnyElement>>;
 
 /// Where a node's toolbar sits ([`Flow::with_node_toolbar`]): the side of the node, how it
@@ -713,6 +725,7 @@ pub struct Flow {
     /// How the flow behaves; change it at any time and notify.
     pub options: FlowOptions,
     node_kinds: HashMap<SharedString, NodeRenderer>,
+    edge_kinds: HashMap<SharedString, EdgePathFn>,
     colors: Option<FlowColors>,
     background: Option<FlowBackground>,
     controls: bool,
@@ -953,6 +966,7 @@ impl Flow {
             viewport: Viewport::default(),
             options: FlowOptions::default(),
             node_kinds: built_in(),
+            edge_kinds: HashMap::new(),
             colors: None,
             background: None,
             controls: false,
@@ -1169,6 +1183,32 @@ impl Flow {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// Draws edges of a kind of the host's (`EdgeKind::Custom(kind)`, saved as React Flow's
+    /// `type`) along the path `path` gives between their ends, as React Flow's `edgeTypes`.
+    /// The flow draws it in the edge's look, with its arrowheads, label, dashes and animation,
+    /// and takes clicks, selection and the SVG export along it, as for a built-in kind. A
+    /// kind without one is drawn as a bezier.
+    pub fn with_edge_kind(
+        mut self,
+        kind: impl Into<SharedString>,
+        path: impl Fn(&EdgeEnds) -> EdgePath + 'static,
+    ) -> Self {
+        self.edge_kinds.insert(kind.into(), Rc::new(path));
+        self
+    }
+
+    /// An edge's path between its ends: its host kind's, or a built-in one's.
+    pub(crate) fn path_between(&self, kind: &EdgeKind, ends: EdgeEnds) -> EdgePath {
+        custom_path(self.edge_path_fn(kind).as_ref(), kind, ends)
+    }
+
+    fn edge_path_fn(&self, kind: &EdgeKind) -> Option<EdgePathFn> {
+        match kind {
+            EdgeKind::Custom(name) => self.edge_kinds.get(name).cloned(),
+            _ => None,
+        }
     }
 
     /// Draws nodes of this `kind`, a new one or a built-in one's replacement.
@@ -5785,6 +5825,7 @@ impl Flow {
                     }
                 }
                 Some(EdgeDraw {
+                    path_fn: self.edge_path_fn(&e.kind),
                     id: e.id.clone(),
                     z: self.edge_z(e, [(source, geo.z[si]), (target, geo.z[ti])]),
                     kind: e.kind.clone(),
@@ -5892,7 +5933,16 @@ impl Flow {
                                     edge_path(&edge.kind, from, from_side, to, to_side)
                                 })
                         }
-                        None => edge_path(&edge.kind, from, from_side, to, to_side),
+                        None => custom_path(
+                            edge.path_fn.as_ref(),
+                            &edge.kind,
+                            EdgeEnds {
+                                source: from,
+                                source_side: from_side,
+                                target: to,
+                                target_side: to_side,
+                            },
+                        ),
                     };
                     // Off screen, an edge costs nothing more.
                     if !path.bounds().intersects(&seen) && !seen.contains(from) {
@@ -6102,6 +6152,8 @@ struct End {
 }
 
 struct EdgeDraw {
+    /// The host's path for its kind, when it's one of the host's.
+    path_fn: Option<EdgePathFn>,
     id: EdgeId,
     z: i64,
     kind: EdgeKind,
@@ -6868,6 +6920,21 @@ impl Flow {
         if !done {
             cx.propagate();
         }
+    }
+}
+
+/// An edge's path between its ends: the host's for its kind when there's one, else the
+/// built-in kind's (a bezier for a host kind with none).
+fn custom_path(path: Option<&EdgePathFn>, kind: &EdgeKind, ends: EdgeEnds) -> EdgePath {
+    match path {
+        Some(f) => f(&ends),
+        None => edge_path(
+            kind,
+            ends.source,
+            ends.source_side,
+            ends.target,
+            ends.target_side,
+        ),
     }
 }
 

@@ -12,7 +12,6 @@ use std::fmt::Write as _;
 use gpui::{App, Hsla, Rgba};
 
 use crate::flow::Flow;
-use crate::geometry::edge_path;
 use crate::shapes::{PathOp, geometry};
 use crate::theme::FlowColors;
 use crate::types::*;
@@ -534,7 +533,13 @@ fn computed_line(flow: &Flow, edge: &Edge) -> Option<Vec<XY>> {
             Side::Top
         }
     };
-    Some(edge_path(&edge.kind, from, side(from, to), to, side(to, from)).flatten(4.))
+    let ends = crate::EdgeEnds {
+        source: from,
+        source_side: side(from, to),
+        target: to,
+        target_side: side(to, from),
+    };
+    Some(flow.path_between(&edge.kind, ends).flatten(4.))
 }
 
 fn marker(out: &mut String, m: &Marker, tip: XY, from: XY, width: f32, color: Hsla) {
