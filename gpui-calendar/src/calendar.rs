@@ -32,6 +32,7 @@ pub(crate) mod drag;
 mod menu;
 mod mini;
 mod panel;
+mod scrollbar;
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
 use crate::theme::{CalendarColors, palette_color};
 use crate::time::{self, DstChange};
@@ -425,6 +426,12 @@ pub struct Calendar {
     selection: Option<Selection>,
     pub(crate) drag: Option<Drag>,
     hover_cursor: CursorStyle,
+    /// The grid's scroll bar: shown until this time after a scroll, wider while the pointer is
+    /// on it, and dragged from (the pointer's y, the scroll then) by its thumb.
+    bar_until: Option<Instant>,
+    bar_hover: bool,
+    bar_drag: Option<(Pixels, f32)>,
+    _bar_hide: Option<Task<()>>,
     now_override: Option<DateTime<Utc>>,
     laid: Option<Rc<Laid>>,
     last_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
@@ -529,6 +536,10 @@ impl Calendar {
             selection: None,
             drag: None,
             hover_cursor: CursorStyle::Arrow,
+            bar_until: None,
+            bar_hover: false,
+            bar_drag: None,
+            _bar_hide: None,
             now_override: None,
             laid: None,
             last_range: None,
@@ -1510,6 +1521,9 @@ impl Calendar {
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
+        if self.press_scrollbar(event.position, &geo, cx) {
+            return;
+        }
         let target = paint::target_at(&geo, &self.shared, event.position);
         // A press outside the list closes it; one on its "+N" toggles it.
         let reopen = match &target {
@@ -1595,6 +1609,9 @@ impl Calendar {
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
+        if self.move_scrollbar(event, &geo, cx) {
+            return;
+        }
         match &self.drag {
             None => {
                 let cursor = paint::cursor_at(&geo, &self.shared, event.position);
@@ -1767,6 +1784,10 @@ impl Calendar {
 
     /// A press let go before it was a drag: a click. A drag's release is gpui-dnd's.
     pub(crate) fn mouse_up(&mut self, _: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.bar_drag.take().is_some() {
+            self.flash_scrollbar(cx);
+            return;
+        }
         if matches!(self.drag, Some(Drag::Press { .. })) {
             self.finish(cx);
         }
@@ -1873,6 +1894,7 @@ impl Calendar {
         }
         let minutes = -f32::from(delta) / f32::from(geo.hour_h) * 60.;
         self.scroll_by(minutes, &geo);
+        self.flash_scrollbar(cx);
         cx.notify();
     }
 
@@ -3136,6 +3158,7 @@ impl Render for Calendar {
             neighbour: self.swipe_neighbour(),
             lanes: None,
             find: self.query.clone().map(|q| (q, colors.find.opacity(0.38))),
+            scrollbar: self.scrollbar_shown(cx),
         };
         let this = cx.entity().downgrade();
         let body = crate::a11y::Accessible::new(

@@ -2274,3 +2274,68 @@ fn shift_f10_opens_the_selected_event_s_menu(cx: &mut TestAppContext) {
     c.update(cx, |c, cx| c.pick_menu_item("delete", cx));
     assert!(c.read_with(cx, |c, _| c.is_asking()));
 }
+
+fn wheel(cx: &mut VisualTestContext, at: Point<Pixels>, dy: f32) {
+    cx.simulate_event(gpui::ScrollEvent {
+        position: at,
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(dy))),
+        ..Default::default()
+    });
+    draw(cx);
+}
+
+#[gpui::test]
+fn the_grid_s_scroll_bar_shows_while_it_scrolls_and_then_hides(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    // At rest there's no bar over the events.
+    assert_eq!(c.read_with(cx, |c, _| c.scroll_bar()), None);
+    let p = spot(&c, cx, day(2), 11, 30);
+    // From the top of the day, so there's room to scroll down.
+    wheel(cx, p, 5000.);
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1100));
+    draw(cx);
+    assert_eq!(c.read_with(cx, |c, _| c.scroll_bar()), None);
+    let before = c.read_with(cx, |c, _| c.scroll_minute());
+    wheel(cx, p, -120.);
+    let thumb = c.read_with(cx, |c, _| c.scroll_bar()).expect("shown");
+    assert!(c.read_with(cx, |c, _| c.scroll_minute()) > before);
+    // As tall as the share of the day on screen, at the right edge.
+    let edge = c.read_with(cx, |c, _| c.event_bounds("a").unwrap());
+    assert!(thumb.left() > edge.left());
+    // A second after it stops, it's gone.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(1100));
+    draw(cx);
+    assert_eq!(c.read_with(cx, |c, _| c.scroll_bar()), None);
+}
+
+#[gpui::test]
+fn the_scroll_bar_s_thumb_drags_the_hours_and_its_track_pages_them(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    let p = spot(&c, cx, day(2), 11, 30);
+    // At the top of the day, so the thumb has room to go down.
+    wheel(cx, p, 5000.);
+    let thumb = c.read_with(cx, |c, _| c.scroll_bar()).expect("shown");
+    let before = c.read_with(cx, |c, _| c.scroll_minute());
+    // The thumb, carried down, scrolls later in the day.
+    let grab = thumb.center();
+    cx.simulate_mouse_move(grab, None, Modifiers::none());
+    cx.simulate_mouse_down(grab, MouseButton::Left, Modifiers::none());
+    let to = point(grab.x, grab.y + px(40.));
+    cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    let dragged = c.read_with(cx, |c, _| c.scroll_minute());
+    assert!(dragged > before + 30., "{before} → {dragged}");
+    // Nothing was selected or made by the press.
+    assert_eq!(selected_id(&c, cx), None);
+    // A press on the track above the thumb pages back up.
+    let thumb = c.read_with(cx, |c, _| c.scroll_bar()).expect("shown");
+    let above = point(thumb.center().x, thumb.top() - px(10.));
+    cx.simulate_mouse_move(above, None, Modifiers::none());
+    cx.simulate_mouse_down(above, MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(above, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert!(c.read_with(cx, |c, _| c.scroll_minute()) < dragged);
+}

@@ -148,6 +148,8 @@ pub(crate) struct Shared {
     /// Whether the drag on now scrolls the hours near (or past) the grid's edges: creating,
     /// moving over the hours, or resizing in them.
     pub drag_scrolls: Cell<bool>,
+    /// The grid's scroll bar from the last frame.
+    pub bar: Cell<Option<ScrollBar>>,
     /// How far the agenda is scrolled, in pixels; none until a frame places it (at today).
     pub agenda_scroll: Cell<Option<f32>>,
     /// The farthest the agenda scrolls, from the last frame.
@@ -185,6 +187,14 @@ pub(crate) struct Geo {
     /// Taken by touch: small things take taps around them, and only the selected event
     /// shows a handle to change its end.
     pub touch: bool,
+}
+
+/// The time grid's scroll bar as last drawn: its track (where the pointer shows it), and its
+/// thumb where it was drawn (none while it's hidden).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ScrollBar {
+    pub track: Bounds<Pixels>,
+    pub thumb: Option<Bounds<Pixels>>,
 }
 
 /// The smallest a touch target is, in points (CSS pixels): Apple's 44.
@@ -330,6 +340,9 @@ pub(crate) struct Scene {
     pub lanes: Option<usize>,
     /// The find query and the colour its finds are marked in, while there is one.
     pub find: Option<(Rc<Query>, Hsla)>,
+    /// The time grid's scroll bar: hidden (None), shown after a scroll (Some(false)), or
+    /// shown wider while the pointer is on it or drags it (Some(true)).
+    pub scrollbar: Option<bool>,
 }
 
 impl Scene {
@@ -828,6 +841,7 @@ fn draw(
             });
         if scene.kind == Kind::Grid {
             paint_gutter(&mut ink, scene, geo);
+            paint_scrollbar(&mut ink, scene, geo, shared);
         }
     });
 }
@@ -2180,6 +2194,48 @@ fn paint_handle(ink: &mut Ink, at: Point<Pixels>, cc: ChipColors) {
 
 /// The time grid's gutter: the zone, "All day", the hours and the time now. A swipe leaves it
 /// where it is.
+/// The time grid's scroll bar, at its right edge: a thumb as tall as the share of the day on
+/// screen, where the scroll is. Drawn only while asked for (`Scene::scrollbar`), so it never
+/// sits over the events at rest.
+fn paint_scrollbar(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
+    let visible = geo.visible_minutes();
+    let room = time::DAY_MINUTES - visible;
+    let pad = ink.u(2.);
+    let track = Bounds::from_corners(
+        point(geo.bounds.right() - ink.u(12.), geo.grid_top + pad),
+        point(geo.bounds.right(), geo.grid_bottom - pad),
+    );
+    if room <= 0. || track.size.height <= ink.u(24.) {
+        shared.bar.set(None);
+        return;
+    }
+    let Some(wide) = scene.scrollbar else {
+        shared.bar.set(Some(ScrollBar { track, thumb: None }));
+        return;
+    };
+    let height = (track.size.height * (visible / time::DAY_MINUTES)).max(ink.u(24.));
+    let top = track.top() + (track.size.height - height) * (geo.scroll / room).clamp(0., 1.);
+    let width = ink.u(if wide { 8. } else { 6. });
+    let thumb = Bounds::new(point(track.right() - pad - width, top), size(width, height));
+    let c = &scene.colors;
+    if wide {
+        let groove = Bounds::from_corners(
+            point(thumb.left() - pad, track.top()),
+            point(track.right(), track.bottom()),
+        );
+        ink.rounded(groove, width / 2. + pad, c.line.opacity(0.35));
+    }
+    ink.rounded(
+        thumb,
+        width / 2.,
+        c.muted_text.opacity(if wide { 0.7 } else { 0.45 }),
+    );
+    shared.bar.set(Some(ScrollBar {
+        track,
+        thumb: Some(thumb),
+    }));
+}
+
 fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
     let c = &scene.colors;
     let b = geo.bounds;

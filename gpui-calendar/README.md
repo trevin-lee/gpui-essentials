@@ -69,6 +69,11 @@ their look.
   colour, until they answer; hollow, faded and struck through once declined; as any event
   once they say yes or maybe. The month's dot becomes a ring, and the agenda's bar an outline.
   VoiceOver adds ", not answered" or ", declined". `Event::my_answer()` gives the answer.
+- **Scroll bar:** the time grid shows a thin scroll bar at its right edge, as macOS draws
+  one: for a second after the hours scroll, and wider while the pointer is over it. Its thumb
+  drags the hours, and a press on its track pages them. At rest it's hidden, so it never
+  covers the events; on touch it shows as the hours scroll. `scroll_bar()` says where its
+  thumb was drawn.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
 - **Menu:** a right-click on an event selects it and opens its menu, as in Google Calendar:
   Open, Edit and Delete (Open alone for one that can't be changed); on empty time, New event.
@@ -445,7 +450,6 @@ Not done yet:
 - Editing a recurrence rule itself (expanding recurring events, and applying a scoped edit to
   the series, is the app's job, as above).
 - Year, resource and timeline views.
-- A scrollbar on the grid.
 - In narrow columns, titles are cut to one line with "…" rather than wrapped.
 
 ## License
