@@ -96,6 +96,13 @@ impl Editor {
         block.map(|b| b.id())
     }
 
+    /// Copy link to block, when the app makes links to blocks ([`crate::Options::block_link`]).
+    fn copy_link_item(&self) -> Option<PopupMenuItem> {
+        self.block_link
+            .as_ref()
+            .map(|_| PopupMenuItem::new("copy-link", "Copy link to block").icon(IconName::Link))
+    }
+
     /// Runs the block menu's entry `id` on `block`.
     pub(crate) fn block_menu_pick(
         &mut self,
@@ -106,6 +113,15 @@ impl Editor {
     ) {
         self.block_menu = None;
         self.block_sheet = None;
+        if id == "copy-link" {
+            if let Some(link) = self.block_link.clone() {
+                let id = self.lock_ids().id_of(block);
+                cx.write_to_clipboard(ClipboardItem::new_string(link(&id)));
+            }
+            self.state.update(cx, |state, cx| state.focus(window, cx));
+            cx.notify();
+            return;
+        }
         let (first, last) = self.menu_blocks(block, cx);
         // Color: the blocks' text, all of it, as Notion colours a block.
         if let Some((paint, on)) = Paint::of_menu_item(id) {
@@ -256,6 +272,7 @@ impl Editor {
                         None,
                     )),
             )
+            .items(self.copy_link_item())
             .item(
                 PopupMenuItem::new("duplicate", "Duplicate")
                     .icon(IconName::Copy)
@@ -311,6 +328,7 @@ impl Editor {
                 );
             let menu = menu
                 .separator()
+                .items(self.copy_link_item())
                 .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
                 .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash));
             // Its colours last, listed in it as Turn into's are (a sheet has no room for a

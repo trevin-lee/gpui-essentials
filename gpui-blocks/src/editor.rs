@@ -156,6 +156,9 @@ const MAX_PASTED_HTML: usize = 4 << 20;
 /// write, or `None` to insert nothing.
 type ImageLink = Arc<dyn Fn(&Path) -> Option<String>>;
 
+/// Makes the link to a block from its lasting id (see [`Options::block_link`]).
+type BlockLink = Arc<dyn Fn(&str) -> String>;
+
 /// What an editor is made with beyond its document: the app's widgets and slash menu items.
 #[derive(Clone)]
 pub struct Options {
@@ -169,6 +172,7 @@ pub struct Options {
     mentions: Option<Arc<dyn Mentions>>,
     html_clipboard: Option<HtmlClipboard>,
     comments: bool,
+    block_link: Option<BlockLink>,
     gutter: Pixels,
     top: Pixels,
     compact_below: Pixels,
@@ -187,6 +191,7 @@ impl Default for Options {
             mentions: None,
             html_clipboard: None,
             comments: false,
+            block_link: None,
             gutter: px(GUTTER),
             top: px(TOP),
             compact_below: px(COMPACT_BELOW),
@@ -214,6 +219,7 @@ impl std::fmt::Debug for Options {
             .field("mentions", &self.mentions.is_some())
             .field("html_clipboard", &self.html_clipboard.is_some())
             .field("comments", &self.comments)
+            .field("block_link", &self.block_link.is_some())
             .field("gutter", &self.gutter)
             .field("top", &self.top)
             .field("compact_below", &self.compact_below)
@@ -310,6 +316,16 @@ impl Options {
     /// sends [`EditorEvent::CommentRequested`] with the selection's anchor.
     pub fn comments(mut self) -> Self {
         self.comments = true;
+        self
+    }
+
+    /// The link to a block, for the block menu's Copy link to block, as Notion's: `link` gets
+    /// the block's lasting id (as [`Editor::document`] and [`docs::Embed::block`] give it) and
+    /// returns the link to copy, an address of this document with the block in it, say.
+    /// Opening one is the app's: it opens the document and calls [`Editor::reveal_block`] with
+    /// the id. Without it the menu has no Copy link to block.
+    pub fn block_link(mut self, link: impl Fn(&str) -> String + 'static) -> Self {
+        self.block_link = Some(Arc::new(link));
         self
     }
 
@@ -451,6 +467,8 @@ pub struct Editor {
     html_clipboard: Option<HtmlClipboard>,
     /// Whether the format bar has Comment ([`Options::comments`]).
     pub(crate) comments: bool,
+    /// Makes the block menu's Copy link to block's link.
+    pub(crate) block_link: Option<BlockLink>,
     /// The open @ menu.
     pub(crate) mention: Option<MentionMenu>,
     /// The `@` closed with Esc. It stays closed until the caret leaves it.
@@ -624,6 +642,7 @@ impl Editor {
             mentions: options.mentions.clone(),
             html_clipboard: options.html_clipboard.clone(),
             comments: options.comments,
+            block_link: options.block_link.clone(),
             mention: None,
             mention_dismissed: None,
             dismissed: None,
@@ -3682,6 +3701,86 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// With [`Options::block_link`], the block menu's Copy link to block copies the app's link
+    /// for the block's lasting id, and that id reveals the block; without it the menu has none.
+    #[gpui::test]
+    fn copy_link_to_block_copies_the_apps_link(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let options = super::Options::default().block_link(|id| format!("app://doc/page#{id}"));
+            Editor::with_options("first\n\nsecond", options, window, cx)
+        });
+        draw(cx);
+        let second = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .nth(1)
+                .unwrap()
+                .id()
+        });
+        editor.update(cx, |e, cx| {
+            e.grip_pressed(second);
+            e.grip_released(cx);
+        });
+        draw(cx);
+        assert!(
+            cx.debug_bounds("menu-item-copy-link").is_some(),
+            "the menu has it"
+        );
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(second, "copy-link", window, cx)
+        });
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .expect("a link is copied");
+        let id = copied
+            .strip_prefix("app://doc/page#")
+            .expect("the app's link")
+            .to_string();
+        let lasting = editor.update(cx, |e, cx| {
+            e.document(cx).blocks.get(1).map(|b| b.id.clone())
+        });
+        assert_eq!(
+            lasting.as_deref(),
+            Some(id.as_str()),
+            "the block's lasting id"
+        );
+        assert_eq!(
+            markdown(&editor, cx),
+            "first\n\nsecond",
+            "nothing else changes"
+        );
+        let revealed = editor.update_in(cx, |e, window, cx| e.reveal_block(&id, window, cx));
+        assert!(revealed);
+        // Without the option, no entry.
+        let (editor, cx) = open(cx, "first");
+        let block = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .next()
+                .unwrap()
+                .id()
+        });
+        editor.update(cx, |e, cx| {
+            e.grip_pressed(block);
+            e.grip_released(cx);
+        });
+        draw(cx);
+        assert!(cx.debug_bounds("menu-item-copy-link").is_none());
     }
 
     fn paste_key(cx: &mut VisualTestContext, plain: bool) {
