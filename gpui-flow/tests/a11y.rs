@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use gpui::{Role, TestAppContext};
+use gpui::{Focusable as _, Role, TestAppContext};
 use gpui_flow::*;
 
 fn names(what: &str, seen: &[gpui_core::Audited]) -> Vec<String> {
@@ -89,4 +89,117 @@ fn moves_connections_and_deletions_are_announced(cx: &mut TestAppContext) {
     // B, and the edge from A to it.
     cx.simulate_keystrokes("escape tab tab delete");
     assert_eq!(said(cx), "Deleted 1 node and 1 edge");
+}
+
+/// Every control the flow draws is named: each button (zoom, fit, lock, a tree's fold chip, a
+/// node's link button, a link card's open button, the edit toolbar's), and the minimap. A
+/// button drawn without a name fails here.
+#[gpui::test]
+fn every_control_the_flow_draws_has_a_name(cx: &mut TestAppContext) {
+    gpui_core::audit_start();
+    let (flow, _, cx) = open(cx, |f| {
+        let topic = |id: &str| {
+            Node::new(id, xy(0., 0.))
+                .kind("topic")
+                .label(id.to_uppercase())
+        };
+        f.with_nodes(vec![
+            topic("root").link("doc:42"),
+            topic("a"),
+            Node::new("card", xy(0., 0.)).link_card("https://example.com"),
+        ])
+        .with_edges(vec![
+            Edge::new("root-a", "root", "a"),
+            Edge::new("root-card", "root", "card"),
+        ])
+        .with_viewport(Viewport::new(150., 250., 1.))
+        .with_controls()
+        .with_minimap()
+        .with_options(|o| {
+            o.layout = Layout::Tree(TreeLayout {
+                motion: std::time::Duration::ZERO,
+                ..TreeLayout::default()
+            });
+            o.edit_toolbar = true;
+        })
+    });
+    flow.update(cx, |f, cx| f.update_node("a", |n| n.selected = true, cx));
+    draw(cx);
+    let seen = gpui_core::audit_take();
+    let unnamed: Vec<&gpui_core::Audited> = seen
+        .iter()
+        .filter(|a| a.role == Role::Button)
+        .filter(|a| a.label.as_ref().is_none_or(|l| l.trim().is_empty()))
+        .collect();
+    assert!(unnamed.is_empty(), "buttons with no name: {unnamed:?}");
+    let named = |what: &str| {
+        let mut n: Vec<String> = seen
+            .iter()
+            .filter(|a| a.what == what)
+            .filter_map(|a| a.label.as_ref().map(|l| l.to_string()))
+            .collect();
+        n.sort();
+        n.dedup();
+        n
+    };
+    assert_eq!(
+        named("FlowControl"),
+        ["Fit view", "Lock the canvas", "Zoom in", "Zoom out"]
+    );
+    assert_eq!(named("FlowMinimap"), ["Mini map"]);
+    assert_eq!(
+        named("FlowNodeButton"),
+        [
+            "Fold away what's under ROOT",
+            "Open the link",
+            "Open the page"
+        ]
+    );
+    // The edit toolbar's, gpui-core buttons.
+    for name in ["Copy", "Paste", "Duplicate", "Delete"] {
+        assert!(named("Press").iter().any(|n| n == name), "{name}");
+    }
+
+    // Locked, the lock says it unlocks; folded, the chip says it shows what's under.
+    flow.update(cx, |f, cx| {
+        f.set_interactive(false, cx);
+        f.set_collapsed("root", true, cx);
+    });
+    gpui_core::audit_start();
+    draw(cx);
+    let seen = gpui_core::audit_take();
+    let labels: Vec<String> = seen
+        .iter()
+        .filter_map(|a| a.label.as_ref().map(|l| l.to_string()))
+        .collect();
+    assert!(
+        labels.iter().any(|l| l == "Unlock the canvas"),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|l| l == "Show what's under ROOT"),
+        "{labels:?}"
+    );
+}
+
+/// The controls are pressed as buttons: by a click, which leaves the canvas its keys.
+#[gpui::test]
+fn the_controls_zoom_by_a_click_and_the_canvas_keeps_the_keys(cx: &mut TestAppContext) {
+    let (flow, _, cx) = open(cx, |f| with_three(f).with_controls());
+    let before = flow.read_with(cx, |f, _| f.viewport().zoom);
+    let at = cx
+        .debug_bounds("flow-control-Zoom in")
+        .expect("the zoom-in button")
+        .center();
+    cx.simulate_click(at, gpui::Modifiers::none());
+    // Past any zoom transition.
+    for _ in 0..5 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(200));
+        draw(cx);
+    }
+    let after = flow.read_with(cx, |f, _| f.viewport().zoom);
+    assert!(after > before, "{before} {after}");
+    let focused = cx.update(|window, cx| flow.read(cx).focus_handle(cx).is_focused(window));
+    assert!(focused, "the canvas keeps the focus");
 }
