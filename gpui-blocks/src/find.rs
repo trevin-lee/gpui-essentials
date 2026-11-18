@@ -102,7 +102,22 @@ impl Editor {
                 state.find_previous(cx);
             }
         });
+        self.show_match_in_middle(cx);
         cx.notify();
+    }
+
+    /// The current match, in the middle of the page when it's out of view.
+    fn show_match_in_middle(&mut self, cx: &mut Context<Self>) {
+        let at = {
+            let state = self.state.read(cx);
+            let (matches, current) = state.find_matches();
+            current
+                .and_then(|i| matches.get(i))
+                .map(|m| markdown_editor::BlockPosition::new(m.block, m.range.start))
+        };
+        if let Some(at) = at {
+            self.bring_to_middle_if_hidden(at, cx);
+        }
     }
 
     /// Finds the query again, after it or the case changed.
@@ -118,6 +133,7 @@ impl Editor {
         self.state.update(cx, |state, cx| {
             state.find_words(&query, case_sensitive, whole_word, cx)
         });
+        self.show_match_in_middle(cx);
         cx.notify();
     }
 
@@ -128,6 +144,7 @@ impl Editor {
         let with = bar.replace.read(cx).value();
         self.state
             .update(cx, |state, cx| state.replace_match(&with, cx));
+        self.show_match_in_middle(cx);
         cx.notify();
     }
 
