@@ -233,6 +233,43 @@ fn a_custom_layer_draws_the_preview_where_the_monitor_says(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn the_default_preview_shows_the_sources_label(cx: &mut TestAppContext) {
+    let mut o = open(cx, |_, _| {
+        div()
+            .p(px(20.))
+            .flex()
+            .gap(px(40.))
+            .child(
+                dnd("labelled")
+                    .debug_selector(|| "labelled".into())
+                    .label("report.pdf")
+                    .w(px(120.))
+                    .h(px(36.))
+                    .source(DragSource::item(Card)),
+            )
+            .child(
+                dnd("bare")
+                    .debug_selector(|| "bare".into())
+                    .w(px(120.))
+                    .h(px(36.))
+                    .source(DragSource::item(Card)),
+            )
+            .into_any_element()
+    });
+    let a = o.center("labelled");
+    o.hold(a, point(px(400.), px(300.)));
+    o.draw();
+    let label = o.bounds("dnd-preview-label");
+    assert!(o.bounds("dnd-preview").contains(&label.center()));
+    o.keys("escape");
+    o.wait(250);
+    let b = o.center("bare");
+    o.hold(b, point(px(400.), px(300.)));
+    o.draw();
+    assert!(o.shown("dnd-preview") && !o.shown("dnd-preview-label"));
+}
+
+#[gpui::test]
 fn without_a_layer_a_layer_preview_draws_nothing(cx: &mut TestAppContext) {
     let log = log();
     let b = board(log.clone(), || Preview::Layer);

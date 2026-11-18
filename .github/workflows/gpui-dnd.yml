@@ -72,6 +72,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt -p gpui-dnd --check
       - run: cargo clippy -p gpui-dnd --locked --all-targets -- -D warnings
+      - if: needs.changes.outputs.own == 'true'
+        run: cargo clippy -p gpui-dnd --locked --all-targets --features shots -- -D warnings
       # The headless tests: simulated mouse, keys and touch, and the idle render counts.
       - run: cargo test -p gpui-dnd --locked
       - run: cargo doc -p gpui-dnd --locked --no-deps
@@ -93,3 +95,26 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: rustup target add aarch64-apple-ios-sim
       - run: cargo build -p gpui-dnd --locked --target aarch64-apple-ios-sim
+
+  # Pictures of the examples for the README, rendered offscreen on macOS: run by hand
+  # (`gh workflow run gpui-dnd.yml --ref <branch>`), they come back as an artifact to quantise
+  # and commit in gpui-dnd/docs/.
+  shots:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: gpui-dnd-shots
+          save-if: false
+      - run: |
+          mkdir -p shots
+          for shot in "kanban drag" "sortable drag" "nested hover" "custom_preview drag"; do
+            set -- $shot
+            cargo run -p gpui-dnd --locked --features shots --example "$1" -- --shot "shots/$1-$2.png" --scene "$2"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpui-dnd-shots
+          path: shots
