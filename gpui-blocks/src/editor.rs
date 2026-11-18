@@ -56,6 +56,15 @@ const GO_TO_MARGIN: f32 = 48.;
 /// The frames a block gone to is waited for.
 const GO_TO_TRIES: u8 = 6;
 
+/// Where a place gone to lands on the page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Place {
+    /// Near the top: a heading, with its section below it.
+    Top,
+    /// In the middle: a found match, with the lines around it.
+    Middle,
+}
+
 /// How much of the page Page Down keeps in view from before: a few lines.
 const PAGE_OVERLAP: f32 = 64.;
 
@@ -679,7 +688,7 @@ pub struct Editor {
     page_to: Option<(Point<Pixels>, Option<BlockPosition>, u8)>,
     /// A block gone to (from a table of contents or a link to it), to bring near the top of the
     /// page once it's drawn, and the frames left to wait for that.
-    go_to_top: Option<(BlockPosition, u8)>,
+    go_to_top: Option<(BlockPosition, u8, Place)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1046,21 +1055,36 @@ impl Editor {
     /// Brings `at` near the top of the page once it's drawn, as Notion does for a heading picked
     /// from a table of contents or a link to a block: below it, the rest of its section.
     fn bring_to_top(&mut self, at: BlockPosition, cx: &mut Context<Self>) {
-        self.go_to_top = Some((at, GO_TO_TRIES));
+        self.go_to_top = Some((at, GO_TO_TRIES, Place::Top));
         cx.notify();
+    }
+
+    /// Brings `at` to the middle of the page once it's drawn, when it isn't in view now: a
+    /// match the find bar steps to, as a browser's find shows it, with the lines around it.
+    pub(crate) fn bring_to_middle_if_hidden(&mut self, at: BlockPosition, cx: &mut Context<Self>) {
+        let view = self.scroll.bounds();
+        let shown = self
+            .state
+            .read(cx)
+            .position_bounds(at)
+            .is_some_and(|line| line.top() >= view.top() && line.bottom() <= view.bottom());
+        if !shown {
+            self.go_to_top = Some((at, GO_TO_TRIES, Place::Middle));
+            cx.notify();
+        }
     }
 
     /// Scrolls the block gone to near the top, once it's been drawn (it may have been out of
     /// the drawn part of a long page, and the caret's reveal draws it first).
     fn finish_go_to(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((at, frames)) = self.go_to_top else {
+        let Some((at, frames, place)) = self.go_to_top else {
             return;
         };
         // The caret's reveal scrolls in the first frame and draws the block in the second: its
         // place is read once that frame has been drawn, and a few frames later at most.
         let drawn = self.state.read(cx).position_bounds(at);
         let Some(line) = drawn.filter(|_| frames <= GO_TO_TRIES - 2) else {
-            self.go_to_top = frames.checked_sub(1).map(|f| (at, f));
+            self.go_to_top = frames.checked_sub(1).map(|f| (at, f, place));
             window.request_animation_frame();
             return;
         };
@@ -1068,7 +1092,11 @@ impl Editor {
         let view = self.scroll.bounds();
         let max = self.scroll.max_offset().y;
         let offset = self.scroll.offset();
-        let y = (offset.y + (view.top() + px(GO_TO_MARGIN)) - line.top()).clamp(-max, px(0.));
+        let to = match place {
+            Place::Top => view.top() + px(GO_TO_MARGIN),
+            Place::Middle => view.center().y - line.size.height / 2.,
+        };
+        let y = (offset.y + to - line.top()).clamp(-max, px(0.));
         if (y - offset.y).abs() >= px(1.) {
             self.scroll.set_offset(point(offset.x, y));
             window.refresh();
@@ -4234,6 +4262,52 @@ mod tests {
         });
         assert!(!editor.update_in(cx, |e, window, _| e.compact(window)));
         assert_eq!(block.left() - view.left(), gpui::px(24.));
+    }
+
+    /// Stepping to a match out of view brings it to the middle of the page, as a browser's
+    /// find does, not to the page's bottom edge; a match in view stays where it is.
+    #[gpui::test]
+    fn a_match_out_of_view_is_shown_in_the_middle(cx: &mut TestAppContext) {
+        let source = (1..=200)
+            .map(|n| match n {
+                3 | 150 => format!("Line {n} has the needle"),
+                _ => format!("Line {n}"),
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (editor, cx) = open(cx, &source);
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-f"
+        } else {
+            "ctrl-f"
+        });
+        draw(cx);
+        cx.simulate_input("needle");
+        for _ in 0..8 {
+            draw(cx);
+        }
+        let top = editor.read_with(cx, |e, _| e.scroll.offset().y);
+        assert_eq!(top, gpui::px(0.), "the first match is in view: no scroll");
+        editor.update(cx, |e, cx| e.step_find(true, cx));
+        for _ in 0..8 {
+            draw(cx);
+        }
+        let (found, view) = editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            let (matches, current) = state.find_matches();
+            let m = &matches[current.unwrap()];
+            (
+                state
+                    .position_bounds(BlockPosition::new(m.block, m.range.start))
+                    .unwrap(),
+                e.scroll.bounds(),
+            )
+        });
+        let third = view.size.height / 3.;
+        assert!(
+            found.top() > view.top() + third && found.bottom() < view.bottom() - third,
+            "in the middle: {found:?} in {view:?}"
+        );
     }
 
     /// ⌘F opens the find bar with the selected word, Enter steps on, Esc closes it and stops
