@@ -41,6 +41,7 @@ pub struct DndProvider {
     child: Option<AnyElement>,
     mouse: bool,
     keyboard: bool,
+    touch: bool,
     announcements: Option<Announcements>,
     layer: Option<Layer>,
 }
@@ -51,9 +52,17 @@ impl DndProvider {
             child: Some(child.into_any_element()),
             mouse: true,
             keyboard: true,
+            touch: true,
             announcements: None,
             layer: None,
         }
+    }
+
+    /// Whether touches pick up sources (a long press, or a move on an at-once source). On
+    /// unless turned off.
+    pub fn touch(mut self, on: bool) -> Self {
+        self.touch = on;
+        self
     }
 
     /// Whether the keyboard picks up sources (Space or Enter on a focused source). On unless
@@ -141,6 +150,7 @@ impl Element for DndProvider {
                     .provider_views
                     .insert(window_id, window.current_view());
                 state.keyboard.insert(window_id, self.keyboard);
+                state.touch.insert(window_id, self.touch);
                 match &self.announcements {
                     Some(a) => state.announcements.insert(window_id, a.clone()),
                     None => state.announcements.remove(&window_id),
@@ -174,6 +184,9 @@ impl Element for DndProvider {
         let window_id = state::window_id(window);
         if state::drag_in(window, cx) == Some(false) {
             window.set_window_cursor_style(gpui::CursorStyle::ClosedHand);
+        }
+        if self.touch {
+            crate::touch::listen(window);
         }
         if self.mouse {
             listen_to_mouse(window);
