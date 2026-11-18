@@ -372,6 +372,14 @@ made.
   nothing is selected, delete removes it, and escape leaves it for the canvas. A click takes
   the keyboard off. In a tree, Tab and enter add nodes as before, once one is selected.
   `Flow::keyboard_on` and `set_keyboard_on` read and set it.
+- **Connecting by keyboard:** C on the node the keyboard is on (or the one selected) begins a
+  connection from its first handle that connections leave from, as clicking that handle does
+  (it's drawn in the selection's colour); Tab moves the keyboard to another node, and Enter
+  connects to that node's handle nearest the first (of the other kind, unless connections are
+  loose), through the same checks as a drag. Escape lets it go. Each step is said ("Connecting
+  from B…", "Connected B to C", "Can't connect A to B", "T can't be connected"), and a
+  connection is told and sent as one made with the mouse is (`Connect`, then `Edits`).
+  `Flow::start_keyboard_connect` and `keyboard_connecting` do it from a host's own button.
 - **Resizing by keyboard:** R on the node the keyboard is on (or the one selected) resizes it,
   if its renderer draws a resizer (`NodeContext::resizer`: a frame, a picture). Right and
   down grow it ten points (a grid square when snapping), left and up shrink it, shift four
