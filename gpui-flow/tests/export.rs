@@ -88,3 +88,56 @@ fn the_png_is_the_svg_in_pixels(cx: &mut TestAppContext) {
     assert_eq!(h, (size("height") * 2.).ceil() as u32);
     assert!(export::svg_to_png("not an svg", 1.).is_err());
 }
+
+/// The width (from one barb to the other) of each closed arrowhead in an SVG: the paths
+/// `M a L tip L b Z`.
+fn arrowhead_widths(svg: &str) -> Vec<f32> {
+    svg.split("<path d=\"M")
+        .skip(1)
+        .filter_map(|rest| {
+            let d = rest.split('"').next()?;
+            let d = d.strip_suffix('Z')?;
+            let points: Vec<(f32, f32)> = d
+                .split('L')
+                .map(|p| {
+                    let mut xy = p.split(' ').filter_map(|n| n.parse::<f32>().ok());
+                    Some((xy.next()?, xy.next()?))
+                })
+                .collect::<Option<_>>()?;
+            let [a, _, b] = points[..] else { return None };
+            Some(((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt())
+        })
+        .collect()
+}
+
+/// An arrowhead grows with a line wider than 1, so it isn't lost in it, and stays its size on
+/// a thinner one.
+#[gpui::test]
+fn arrowheads_grow_with_their_lines_width(cx: &mut TestAppContext) {
+    let (flow, _, cx) = open(cx, |f| {
+        f.with_nodes(vec![
+            Node::new("a", xy(0., 0.)).label("A"),
+            Node::new("b", xy(0., 200.)).label("B"),
+            Node::new("c", xy(300., 0.)).label("C"),
+            Node::new("d", xy(300., 200.)).label("D"),
+            Node::new("e", xy(600., 0.)).label("E"),
+            Node::new("f", xy(600., 200.)).label("F"),
+        ])
+        .with_edges(vec![
+            Edge::new("thin", "a", "b").arrows(Arrows::Forward),
+            Edge::new("thick", "c", "d")
+                .arrows(Arrows::Forward)
+                .stroke_width(3.),
+            Edge::new("hair", "e", "f")
+                .arrows(Arrows::Forward)
+                .stroke_width(0.5),
+        ])
+    });
+    let svg = cx.update(|_, cx| flow.read(cx).to_svg(cx));
+    let mut widths = arrowhead_widths(&svg);
+    widths.sort_by(f32::total_cmp);
+    assert_eq!(widths.len(), 3, "{svg}");
+    // The hairline's and the default's are the same; the 3-wide one's is three times as wide.
+    assert!((widths[0] - widths[1]).abs() < 0.01, "{widths:?}");
+    assert!((widths[2] / widths[0] - 3.).abs() < 0.01, "{widths:?}");
+}
