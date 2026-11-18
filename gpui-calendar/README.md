@@ -188,6 +188,15 @@ their look.
   - **Tab** goes through the header, the mini month, the days (the arrow keys move in them), and
     an open panel or question, in that order. Where Tab brought the keyboard to the days, a ring
     in the theme's focus colour shows it.
+  - **The keyboard reaches what the mouse does.** Arrows select slots, days and events; Enter
+    opens; Space and Shift+Space move and resize; Shift-F10 opens the menu; `g` the mini month.
+    Switching views with `d`, `w`, `m` or `y` opens on the selected day, as a click on a day's
+    or a month's name does.
+  - **Checked.** Every control and canvas node reports its role and label to gpui-core's
+    accessibility audit. `tests/a11y_audit.rs` draws every surface (the header on a desktop and
+    a phone, the mini month, the panel, the menu, the lists, the question, find, and each
+    view) and fails on any control without a role or a label. A second test fails on any
+    `Press` or `Button` in the source made without one.
   - **Reduce Motion:** a swipe lands at once instead of easing. This reads `App::reduce_motion()`,
     which GPUI 0.3.12 doesn't set from the system, so set it from your app (see "Putting it in an
     app"). Nothing else in the calendar moves on its own: popovers and sheets appear at once, and
