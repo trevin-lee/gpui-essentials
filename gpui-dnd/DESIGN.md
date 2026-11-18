@@ -787,6 +787,230 @@ touch while it's on, how it ends, the cursor, and timed scrolling.
 3. Keyboard move and resize in gpui-calendar, with announcements. Calendar's sentences are
    said as they are with `DropTarget::say`, added first in its own PR.
 
+## Proposal: gpui-blocks' block drags on gpui-dnd
+
+Not built. Reviewed by the gpui-blocks agent (#393), as #362 was by gpui-calendar's; building
+waits for a quiet period in blocks' drag code. From a read of `engine/src/reorder.rs`,
+`engine/src/side_drop.rs`, the block-drag half of `engine/src/state.rs` (`BlockDrag`,
+`begin_block_drag` to `finish_block_drag`, `touch_pressed`, `touch_moved`, `lift_block`,
+`lifted_touch`, `touch_ended`), the touch listeners in `engine/src/element.rs`, and the page
+editor's grips, `scroll_near_edge` and `MoveBlockUp`/`Down` in `src/editor.rs`.
+
+### What blocks does today, and must keep
+
+- **Starting a drag.**
+  - A press on a block's grip (drawn by the page editor, which calls `begin_block_drag`), or on
+    a top-level table's or code block's edge handle (`drag_handle_at`), arms a drag.
+  - The drag begins past 4 points.
+  - A grip let go without moving opens the block menu, and Shift-click extends the block
+    selection.
+  - A press on one of a selected run of sibling blocks drags the run (`drag_run`). A drag from
+    inside a column is `nested`.
+- **Motion** (`reorder.rs`).
+  - The dragged blocks follow the pointer exactly, in content y, which scrolling leaves alone.
+  - The other top-level blocks spring aside to open the run's whole height. The gap is the one
+    past every block whose middle, as drawn at the start, the pointer has passed. Blocks the
+    cull didn't draw get estimated middles.
+  - On release the blocks land from the pointer's speed, with a little give.
+  - A keyboard move or an undo springs both ways without overshoot.
+  - Reduced motion jumps, and nothing asks for frames once settled. The motion is springs, not
+    timed curves, so a block caught mid-flight carries on.
+- **Side drops** (`side_drop.rs`).
+  - Once the pointer has gone sideways (or for any drag out of a column), the pointer within
+    the side-drop reach `side_drop.rs` computes from a block's left or right edge makes a row of
+    two columns.
+  - Over a row's edge or the gap between its columns, it adds a column, up to `MAX_COLUMNS`.
+  - Inside a column, it drops among the column's blocks. Out of a column, it drops into the
+    top level.
+  - A vertical or horizontal line shows the drop. Each drop is one undo step, and
+    normalization takes away an emptied column and unwraps a one-column row.
+- **The drop** is one undoable move (`move_run_to` or `drop_run`). An edit landing mid-drag
+  (the revision changed) cancels it, and everything springs back.
+- **Touch** (#332).
+  - A long press *on text* selects the word, and moving extends the selection, as iOS does.
+    This must stay exactly as it is.
+  - A long press *off the text* (the gutter, a bullet, a picture, past a line's end; see
+    `on_text`) lifts the top-level block under it, or the block in its column, once the
+    finger moves 8 points (`TOUCH_LIFT`). It's drawn lifted, a little bigger and higher, and
+    drops where the finger lets go. A cancelled touch puts it back.
+  - The block sheet's Move lifts a block in place (`lift_block`). The next finger drag
+    *anywhere* moves it by as much as the finger moves (`lifted_follow`), and a tap sets it
+    down.
+- **Edge scrolling.** While blocks are dragged, the page editor requests a frame every frame
+  and scrolls a step toward an edge the pointer is near (`scroll_near_edge`), then continues
+  the drag at the same pointer (`continue_block_drag`). Blocks is making it stop asking for
+  frames when nothing scrolls, and moving `reorder.rs` to GPUI's clock (`web_time` on wasm),
+  itself, before any of this.
+- **Keys.** `MoveBlockUp` and `MoveBlockDown` move the caret's block, or the selected blocks,
+  one place, instantly.
+- **Readonly** documents don't drag.
+
+### Who owns what
+
+The engine keeps the document and the drawing; gpui-dnd takes the drag's life, as for calendar.
+
+- **The engine keeps:**
+  - what a press means: grips, edge handles, `on_text`, `TOUCH_LIFT`, runs, nested;
+  - the side-drop geometry and `drop_run`, `move_run_to` and normalization;
+  - the undo steps, the revision check, culling and estimated middles;
+  - drawing the lifted blocks and the drop line;
+  - the grip's click and Shift-click.
+- **gpui-dnd takes:**
+  - when the drag begins, the pointer and the finger while it's on, and the release (in the
+    window or out of it);
+  - Escape (new for blocks) and a lost touch;
+  - the cursor while dragging;
+  - the edge scrolling, on timed frames that stop when there's nothing left to scroll;
+  - the keyboard pick-up (new) and its announcements.
+
+### How it maps
+
+- **The item.** `DraggedBlocks { editor: EntityId, first: BlockId, count: usize, nested: bool }`.
+  It carries no document data: the engine's `BlockDrag` stays the state, as calendar's `Drag`
+  does.
+- **The sources are presses the engine recognises.**
+  - A grip's or edge handle's mouse down calls `press_at(.., Press { threshold: 4 points,
+    .. })` with a `DragSource::item(DraggedBlocks)`, `Preview::None`, `keyboard(false)`, a
+    cursor (closed hand), `on_begin`, which activates the drag (`activate_block_drag`), and
+    `on_end`, which clears a cancelled one.
+  - A press under the threshold stays the grip's click, and opens the block menu as now.
+  - `begin_block_drag(block, at)`, the host API, gains the window and context to do this:
+    a breaking change for hosts that draw their own handles.
+- **The target.** The editor's content is one `dnd` target with `catch_outside(true)` and a
+  `can_drop` that takes only its own editor's blocks.
+  - `on_hover` does what `block_drag_to` does now: velocity, `side_target_of`, `drop_gap`.
+  - `on_drop` does what `finish_block_drag` does, and returns `Handled`.
+  - The columns aren't separate targets: the engine's side-drop geometry (the reach
+    `side_drop.rs` computes, the sideways rule, `MAX_COLUMNS`) is finer than nested targets
+    would be, and it stays in `side_drop.rs`.
+- **`SortableState` the engine drives.**
+  - `reorder.rs` moves into gpui-dnd as `SortableState<K: Copy + Eq + Hash>`, generic over the
+    key with its tests, as it already nearly is (only `BlockId` ties it to blocks).
+  - Its API is the one blocks uses now: `begin_drag(middles)`, `drop_gap(&Dragged)`,
+    `frame(slots, dragged, now, reduce_motion) -> (offsets, moving)`, `release(dragged)` and
+    `cancel_drag()`. A `Dragged` holds the first key, a count, `dy`, the pointer and its
+    velocity.
+  - The engine goes on calling it from its prepaint with its own slots and painting the
+    offsets, so layout, culling and motion stay together where they are now.
+  - gpui-dnd gains a headless, spring-based reorder model. `Sortable` and `VirtualSortable`
+    could later take their motion from it (springs that carry a release's velocity instead
+    of their timed slide), but that's a separate change.
+  - It uses GPUI's clock, `web_time::Instant` on wasm (#383). Today `reorder.rs` uses
+    `std::time::Instant`, which doesn't build for the browser.
+- **Touch.**
+  - The engine's long-press listener stays, with the text-selection path untouched: on text, it
+    never involves gpui-dnd.
+  - Off the text, once the finger has moved `TOUCH_LIFT`, it calls `begin_at(.., Backend::Touch)`
+    at the press, deferred out of the editor's update (gpui-dnd calls back as a drag begins).
+    gpui-dnd then follows the long press's moves, and its end drops or its cancel puts back.
+  - The engine's own long-press moves give way once a gpui-dnd drag is on.
+- **Lifted in place** needs one addition: `Press::relative(true)`. The drag then follows the
+  next finger by how far it moves, not where it is: the offset is taken when that finger
+  lands, as `lifted_follow` does now. The block sheet's Move calls `begin_at(Touch)` with it,
+  and a tap calls `cancel`.
+- **Edge scrolling** becomes `.auto_scroll(&scroll, AutoScroll::vertical().for_items(..))` on
+  the page's scroll container.
+  - That replaces blocks' own edge-scroll canvas, with `block_drag_pointer` and
+    `continue_block_drag`.
+  - gpui-dnd's tick hovers again after each step, so the gap follows the content scrolled
+    under a still pointer, as `continue_block_drag` does now.
+- **An edit mid-drag** (the revision changed) calls `gpui_dnd::cancel`, deferred, and the
+  blocks spring back as now. Blocks defers edits it makes itself, such as applying an unfurl
+  answer, until no block drag is on, so this cancel is only for edits from outside.
+
+### Keyboard block moves
+
+`MoveBlockUp` and `MoveBlockDown` stay as they are: one place, instantly, like a menu's Alt-↑↓.
+New is a pick-up, for moving a block or a run further or into columns, with each step said in
+blocks' words. Blocks' tests assert these strings.
+
+- **Picking up.**
+  - Space while blocks are selected (no new chord: ⌘⇧M is Notion's comment key). The desktop
+    block menu also gets a Move item.
+  - Either calls `begin_at(.., Backend::Keyboard)` with the selected run, and the label as
+    `Press::label`. The label is the kind plus up to 6 words ("Heading Plans for Q3"), or
+    "3 blocks".
+  - gpui-dnd says "Picked up {label}. Arrow keys move it, Space drops it, Escape cancels.",
+    which is its own sentence with blocks' label.
+- **Stepping.** The content target's `keyboard_step`:
+  - ↑ and ↓ move to the previous or next gap between top-level blocks;
+  - → into the neighbouring block's row, as a new column;
+  - ← back out of the columns.
+  Each step is a `drop_gap` or side-drop target the engine works out. The page scrolls it into
+  view, and the step returns the point where the drop line is.
+- **Saying it.** `DropTarget::say` (#385) gives blocks' sentences, word for word:
+  - a step: "{label}, below {neighbour}, {n} of {m}";
+  - into columns: "{label}, in a new column beside {neighbour}";
+  - out of columns: "{label}, out of the columns, below {neighbour}";
+  - the drop: "{label}, moved below {neighbour}", or "{label}, moved to the top" at index 0;
+  - a cancel: "{label}, put back". This needs `Said::Cancelled`, below.
+- **Dropping.** Space or Enter drops through the same `on_drop` as the pointer, as one undo
+  step. Escape cancels, and the blocks spring back.
+
+### What blocks gains
+
+- Escape during a pointer, touch or keyboard drag, with the blocks springing back. The editor
+  binds Escape to `SelectBlock`. During a drag, gpui-dnd takes Escape first (its keystroke
+  interceptor stops it), so it cancels the drag and doesn't also select the block. A test
+  checks that Escape mid-drag leaves the selection as it was.
+- A release outside the window drops where the pointer last was.
+- Edge scrolling that asks for no frames while nothing scrolls.
+- The cursor while dragging.
+- Keyboard pick-up with announcements.
+- One drag at a time across the app: a block drag and a table's card drag can't run together.
+- Two editors in a window keep their own drags.
+
+### What gpui-dnd adds
+
+1. `SortableState<K>`, from `reorder.rs`, with its tests.
+2. `Press::relative`, for a lifted-in-place block, with a test of a finger landing elsewhere.
+3. `Said::Cancelled`: on a keyboard drag's cancel, the target it was last over (here the
+   editor, which catches the drag outside) is asked for its own sentence ("{label}, put back"),
+   said in place of the provider's "Cancelled. … is back where it was.".
+
+Nothing else: the rest is `press_at`, `begin_at`, `cancel`, `catch_outside`, `auto_scroll`,
+`keyboard_step` and `say`, as calendar uses them.
+
+### Order, once agreed and once blocks' drag code is quiet
+
+Agreed with the gpui-blocks agent (#393). Building starts after blocks' bookmarks and Page
+Up/Down PRs merge, when the lead says.
+
+
+1. gpui-dnd: `SortableState`, `Press::relative` and `Said::Cancelled`, with tests. Blocks keeps
+   its own `reorder.rs` until step 2.
+2. gpui-blocks, reviewed by the blocks agent:
+   - grips, edge handles, touch lift and lift-in-place onto gpui-dnd;
+   - the content as target, and edge scrolling as `auto_scroll`;
+   - `reorder.rs` swapped for `SortableState<BlockId>`.
+   Its drag, touch and columns tests stay unchanged, plus one that Escape mid-drag leaves the
+   selection as it was, with frame times before and after, interleaved on the quiet Mac.
+3. Keyboard pick-up with blocks' sentences.
+
+## Later: gpui-flow's canvas
+
+Not proposed for building yet. gpui-flow's node moves, connections, resizing, panning, lasso and
+ink are gestures on a zoomed canvas, not drag and drop, and stay its own. So do its tree
+reparenting (a node drag dropped on another node, `drop_target` and `reparent` in flow
+coordinates), frames adopting the nodes they enclose, and files dropped from the system (GPUI's
+`ExternalPaths`: the OS's drags, not gpui-dnd's). What gpui-dnd would add:
+
+- **Palette drops.** A host's palette lists node kinds as gpui-dnd sources: a shared source
+  keyed by the kind, carrying a public `FlowPaletteItem` (a node template).
+  - **The target:** the flow pane accepts that item. Its `on_hover` maps `client_offset`
+    through `screen_to_flow`, and the canvas draws the ghost at the canvas's zoom and snap
+    (`Preview::None`). Its `on_drop` emits a `FlowEvent::NodeDropped { item, position }` for
+    the host to add, as `FilesDropped` does.
+  - **Auto-pan:** `auto_scroll_zone` over the pane, with a `Scrollable` that pans the viewport.
+  - **The keyboard:** the pane's `keyboard_step` moves the drop point a grid step, with
+    flow's own sentences.
+  - Nothing new is needed in gpui-dnd.
+- **Reparenting by keyboard,** later: picking a node up with `begin_at(Keyboard)`, the arrows
+  stepping to the next node it could go under (tree) or the frame it could go into, said in
+  flow's words. The pointer path stays flow's.
+- **Dragging nodes out to other views** (onto a doc page) would hand the canvas's own drag to
+  gpui-dnd with `begin_at` when the pointer leaves the pane. It waits for a host that needs it.
+
 ## react-dnd → gpui-dnd
 
 | react-dnd | gpui-dnd |
@@ -856,17 +1080,7 @@ is swallowed, and nothing redraws while held still.
   gpui-dnd. Either the menu keeps its own reorder, or the theme moves to a crate both depend on.
   Keeping the menu's own is the cheap answer.
 
-**gpui-blocks** (block reorder). Hand-rolled: a block (or a selected run) follows the pointer as
-a shadowed copy while the others spring apart, the gap measured against midpoints in content
-coordinates snapshotted at the start (culled blocks get estimated ones), one undo step on
-release, ⌘⇧↑↓ by keyboard, no touch reorder, no Escape, no auto-scroll.
-- Needs: `Sortable` driven by its own layout (blocks are laid out by the engine's element, not
-  as children): a lower-level `SortableState` that takes item extents and hands back the gap
-  and the slide offsets, so the engine keeps painting; multi-item drags; spring motion with the
-  release velocity as an option of the slide animation; a "settled" signal.
-- Gains: Escape with the return animation, touch reorder by long press, auto-scroll, keyboard
-  pick-up with announcements.
-- Hard part: motion, layout and culling are intertwined in the engine's prepaint.
+**gpui-blocks** (block drags): see "Proposal: gpui-blocks' block drags on gpui-dnd".
 
 **gpui-calendar** (moving and resizing events). Hand-rolled on a painted grid: positions are
 (date, minute, area) snapped to 15 minutes; the ghost is drawn at the proposal; the host gets a
@@ -882,11 +1096,4 @@ auto-scroll.
   auto-scroll.
 - Moving events with gpui-dnd is reasonable; creation and resize may stay its own.
 
-**gpui-flow.** Node moves, connections, resize, pan, lasso and ink are gestures on a zoomed
-canvas, not drag-and-drop: they stay its own. What maps: dropping a node onto another to
-reparent it in a tree layout, dropping nodes into a frame, and dragging an item from outside
-the canvas (a palette) onto it.
-- Needs: target regions in flow coordinates (a transform from window to canvas space on the
-  target), a `Scrollable` that pans the viewport for auto-pan at the canvas edge, and modifiers
-  on the monitor.
-- Its touch claims (`TouchDragEvent` per node) and Escape put-back are its own and stay.
+**gpui-flow**: see "Later: gpui-flow's canvas".
