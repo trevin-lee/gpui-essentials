@@ -8,14 +8,18 @@
 //! add the node (`Flow::add_node`) as it likes. The window needs a [`gpui_dnd::DndProvider`].
 
 use gpui::prelude::FluentBuilder as _;
-use gpui::{
-    AnyElement, App, ElementId, EntityId, IntoElement, ParentElement as _, SharedString,
-    Styled as _, div, px,
-};
-use gpui_dnd::{DragMonitor, DragSource, Preview};
+use std::rc::Rc;
 
+use gpui::{
+    AnyElement, App, ElementId, EntityId, IntoElement, ParentElement as _, Pixels, Point,
+    SharedString, Styled as _, WeakEntity, Window, div, point, px,
+};
+use gpui_dnd::{AutoScroll, DragMonitor, DragSource, Preview, Scrollable};
+
+use crate::Flow;
+use crate::node::Shared;
 use crate::theme::FlowColors;
-use crate::types::{Node, NodeId, XY};
+use crate::types::{Node, NodeId, Viewport, XY};
 
 /// The width a built-in node takes without a size of its own.
 const DEFAULT_WIDTH: f32 = 150.;
@@ -109,4 +113,48 @@ pub(crate) fn is_drop_target(id: &ElementId) -> bool {
 pub(crate) fn landing(item: &FlowPaletteItem, at: XY, snap: impl Fn(XY) -> XY) -> XY {
     let (w, h) = item.size();
     snap(crate::types::xy(at.x - w / 2., at.y - h / 2.))
+}
+
+/// How far gpui-dnd may think the pane can scroll each way: a pan has no ends, so its offset is
+/// kept in the middle of a range this long.
+const REACH: f32 = 100_000.;
+
+/// The flow's viewport as something gpui-dnd scrolls (`auto_scroll_zone`), for palette items
+/// held near the pane's edges.
+struct Pan {
+    flow: WeakEntity<Flow>,
+    shared: Rc<Shared>,
+}
+
+impl Scrollable for Pan {
+    fn offset(&self) -> Point<Pixels> {
+        let v = self.shared.viewport.get();
+        point(px(v.x - REACH), px(v.y - REACH))
+    }
+
+    fn max_offset(&self) -> Point<Pixels> {
+        point(px(REACH * 2.), px(REACH * 2.))
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>, _: &mut Window, cx: &mut App) {
+        let v = self.shared.viewport.get();
+        let to = Viewport::new(
+            f32::from(offset.x) + REACH,
+            f32::from(offset.y) + REACH,
+            v.zoom,
+        );
+        // Read back at once by the next step, before the flow draws again.
+        self.shared.viewport.set(to);
+        self.flow
+            .update(cx, |flow, cx| flow.set_viewport(to, cx))
+            .ok();
+    }
+}
+
+/// The pane's pan and how it pans: only for palette items.
+pub(crate) fn pan(flow: WeakEntity<Flow>, shared: Rc<Shared>) -> (Rc<dyn Scrollable>, AutoScroll) {
+    (
+        Rc::new(Pan { flow, shared }),
+        AutoScroll::default().for_items(|item| item.is::<FlowPaletteItem>()),
+    )
 }

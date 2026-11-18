@@ -1,7 +1,7 @@
 //! Palette drops on gpui-dnd: a host's palette item dragged onto the pane lands where the
 //! pointer is in the flow, whatever the zoom, and on the grid when snapping is on; the flow
-//! draws where it would land as it's dragged; and one dropped off the pane springs back,
-//! adding nothing.
+//! draws where it would land as it's dragged; one held near the pane's edge pans it; and one
+//! dropped off the pane springs back, adding nothing.
 
 mod common;
 
@@ -217,4 +217,29 @@ fn a_flow_that_takes_no_pointer_takes_no_drops(cx: &mut TestAppContext) {
     hold(cx, at);
     release(cx, at);
     assert!(dropped.borrow().is_empty());
+}
+
+#[gpui::test]
+fn held_near_the_panes_edge_it_pans_the_canvas(cx: &mut TestAppContext) {
+    let (flow, dropped, cx) = open(cx, |f| f.with_viewport(Viewport::new(0., 0., 1.)));
+    // Near the pane's right edge, halfway down.
+    let at = point(px(795.), px(300.));
+    hold(cx, at);
+    for _ in 0..10 {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
+    }
+    let v = flow.read_with(cx, |f, _| f.viewport());
+    assert!(v.x < -20., "panned toward what's right of the pane: {v:?}");
+    assert_eq!(v.y, 0., "not up or down");
+    release(cx, at);
+    let v = flow.read_with(cx, |f, _| f.viewport());
+    let (_, position) = dropped.borrow()[0].clone();
+    let landing = xy(795. - PALETTE - v.x - 50., 300. - 20.);
+    assert!(
+        close(position.x, landing.x) && close(position.y, landing.y),
+        "under the pointer in the panned flow: {position:?}, {landing:?}"
+    );
 }
