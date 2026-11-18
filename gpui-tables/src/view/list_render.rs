@@ -6,13 +6,13 @@ use std::ops::Range;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, AppContext as _, ClickEvent, Context, DispatchPhase, DragMoveEvent, ElementId,
-    FontWeight, InteractiveElement, IntoElement, LongPressEvent, ParentElement, Pixels, Point,
-    Role, SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, px, uniform_list,
+    AnyElement, ClickEvent, Context, ElementId, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Pixels, Role, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
+    div, px, uniform_list,
 };
 use gpui_core::{IconName, Press, Selectable as _};
+use gpui_dnd::dnd;
 
-use super::board::{CardGhost, DraggedCard};
 use super::list::ListMetrics;
 use super::render::{icon, line};
 use super::table::{CellRef, Item, TableView};
@@ -49,10 +49,7 @@ impl Landing {
 
 impl TableView {
     pub(crate) fn render_list(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // A mouse drag GPUI ended somewhere else (let go outside the list) is over.
-        if self.board.drag.as_ref().is_some_and(|d| !d.touch) && !cx.has_active_drag() {
-            self.board.drag = None;
-        }
+        self.forget_ended_drag(cx);
         let t = self.theme.clone();
         let m = self.list_metrics();
         let n = self.shown.items.len();
@@ -66,39 +63,13 @@ impl TableView {
         .w_full();
 
         let bounds = self.bounds.clone();
-        let entity = cx.entity().downgrade();
-        let probe = canvas(
-            move |b, _, _| bounds.set(b),
-            move |_, _, window, _| {
-                // A finger's long press picks a row up; the finger then drags it.
-                let e = entity.clone();
-                window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
-                    if phase != DispatchPhase::Bubble {
-                        return;
-                    }
-                    let claimed = e
-                        .update(cx, |this, cx| this.long_press(ev, window, cx))
-                        .unwrap_or(false);
-                    if claimed {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                    }
-                });
-            },
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full();
+        let probe = canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full();
 
-        // A finger's row follows it (the mouse's is drawn by GPUI).
-        let origin = self.bounds.get().origin;
-        let ghost = self.board.drag.as_ref().filter(|d| d.touch).map(|d| {
-            let at = d.at - origin - d.offset;
-            div().absolute().left(at.x).top(at.y).child(d.ghost.clone())
-        });
-
-        div()
+        let root = div()
             .id("gpui-tables")
             .debug_selector(|| "list".into())
             .key_context(super::CONTEXT)
@@ -131,10 +102,6 @@ impl TableView {
             .on_action(
                 cx.listener(|this, _: &super::Cancel, window, cx| this.board_cancel(window, cx)),
             )
-            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<DraggedCard>, _, cx| {
-                this.drag_card_to(e.event.position, cx)
-            }))
-            .on_drop(cx.listener(|this, _: &DraggedCard, window, cx| this.drop_card(window, cx)))
             .relative()
             .size_full()
             .flex()
@@ -146,9 +113,8 @@ impl TableView {
             .font_family(t.fonts.body.clone())
             .text_size(t.px(t.sizes.text))
             .child(list)
-            .child(probe)
-            .children(ghost)
-            .into_any_element()
+            .child(probe);
+        self.card_drop_target(root, cx)
     }
 
     /// The lines on screen.
@@ -322,11 +288,10 @@ impl TableView {
                 )
             })
             .collect();
-        let weak = cx.entity().downgrade();
         let from = key.clone();
         let sel = format!("line:{rid}:{key}");
         let bar = Landing::bar(landing, lane, slot, count);
-        Press::new(ElementId::NamedInteger("line".into(), ix as u64))
+        let press = Press::new(ElementId::NamedInteger("line".into(), ix as u64))
             .tab_stop(false)
             .focus_on_press(false)
             .focus_ring(false)
@@ -403,28 +368,17 @@ impl TableView {
                 });
                 this.open_row(row, window, cx);
                 cx.notify();
-            }))
-            .on_drag(
-                DraggedCard { row_id: rid, from },
-                move |d: &DraggedCard, offset: Point<Pixels>, window, cx| {
-                    let at = window.mouse_position();
-                    match weak.upgrade() {
-                        Some(view) => view.update(cx, |this, cx| {
-                            this.begin_card_drag(
-                                &d.row_id,
-                                &d.from,
-                                Vec::new(),
-                                offset,
-                                at,
-                                false,
-                                cx,
-                            )
-                        }),
-                        None => cx.new(|_| CardGhost::empty()),
-                    }
-                },
-            )
-            .into_any_element()
+            }));
+        // The line is a gpui-dnd drag source: the mouse past a few pixels or a finger's long
+        // press picks it up.
+        dnd(ElementId::Name(
+            format!("gpui-tables-line:{rid}:{from}").into(),
+        ))
+        .size_full()
+        .drop_indicator(false)
+        .source(self.card_source(rid, from, cx))
+        .child(press)
+        .into_any_element()
     }
 
     fn render_list_group(

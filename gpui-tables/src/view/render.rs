@@ -26,7 +26,7 @@ use super::list_render::Landing;
 use super::table::{Action, Drag, Entry, Item, Popover, Reopen, TableView, naive_day, type_icon};
 use crate::engine::{GroupKey, time};
 use crate::model::{Color, Doc, Person, Property, PropertyType, Value};
-use gpui_dnd::{DndProvider, DragMonitor};
+use gpui_dnd::DndProvider;
 
 impl Render for TableView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -55,14 +55,7 @@ impl Render for TableView {
 impl TableView {
     fn render_table(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.clamp_scroll();
-        // A row's drag that gpui-dnd ended (dropped where it couldn't land, Escape, a lost
-        // touch: its preview going back) is over for the table.
-        if self.board.drag.is_some() {
-            let m = DragMonitor::of(cx);
-            if !m.is_dragging() || m.is_returning() {
-                self.board.drag = None;
-            }
-        }
+        self.forget_ended_drag(cx);
         let t = self.theme.clone();
         let n = self.shown.items.len();
         let mut list = uniform_list(
@@ -279,7 +272,7 @@ impl TableView {
             .child(probe)
             .children(note)
             .child(popover);
-        self.row_drop_target(root, cx)
+        self.card_drop_target(root, cx)
     }
 }
 

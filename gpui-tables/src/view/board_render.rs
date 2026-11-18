@@ -7,14 +7,14 @@ use std::ops::Range;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, AppContext as _, BoxShadow, ClickEvent, Context, DispatchPhase, DragMoveEvent,
-    ElementId, FontWeight, InteractiveElement, IntoElement, ListSizingBehavior, LongPressEvent,
-    ParentElement, Pixels, Point, Render, Role, SharedString, StatefulInteractiveElement, Styled,
-    TouchPhase, Window, canvas, div, point, px, uniform_list,
+    AnyElement, BoxShadow, ClickEvent, Context, ElementId, FontWeight, InteractiveElement,
+    IntoElement, ListSizingBehavior, ParentElement, Pixels, Render, Role, SharedString,
+    StatefulInteractiveElement, Styled, Window, canvas, div, point, px, uniform_list,
 };
 use gpui_core::{IconName, Press, Selectable as _};
+use gpui_dnd::dnd;
 
-use super::board::{BoardMetrics, BoardSpot, CardGhost, DraggedCard};
+use super::board::{BoardMetrics, BoardSpot, CardGhost};
 use super::render::{icon, line};
 use super::table::TableView;
 use crate::model::{PropertyType, Value};
@@ -29,10 +29,7 @@ struct ColumnInfo {
 
 impl TableView {
     pub(crate) fn render_board(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // A mouse drag GPUI ended somewhere else (let go outside the board) is over.
-        if self.board.drag.as_ref().is_some_and(|d| !d.touch) && !cx.has_active_drag() {
-            self.board.drag = None;
-        }
+        self.forget_ended_drag(cx);
         let t = self.theme.clone();
         let m = self.board_metrics();
         let infos: Vec<ColumnInfo> = self
@@ -77,37 +74,11 @@ impl TableView {
         }
 
         let bounds = self.bounds.clone();
-        let entity = cx.entity().downgrade();
-        let probe = canvas(
-            move |b, _, _| bounds.set(b),
-            move |_, _, window, _| {
-                // A finger's long press picks a card up; the finger then drags it.
-                let e = entity.clone();
-                window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
-                    if phase != DispatchPhase::Bubble {
-                        return;
-                    }
-                    let claimed = e
-                        .update(cx, |this, cx| this.long_press(ev, window, cx))
-                        .unwrap_or(false);
-                    if claimed {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                    }
-                });
-            },
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full();
-
-        // A finger's card follows it (the mouse's is drawn by GPUI).
-        let origin = self.bounds.get().origin;
-        let ghost = self.board.drag.as_ref().filter(|d| d.touch).map(|d| {
-            let at = d.at - origin - d.offset;
-            div().absolute().left(at.x).top(at.y).child(d.ghost.clone())
-        });
+        let probe = canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full();
 
         let mut scroller = div()
             .id("gpui-tables-board-scroll")
@@ -123,7 +94,7 @@ impl TableView {
         // Up and down belong to the columns; the board takes only sideways scrolls and pans.
         scroller.interactivity().base_style.restrict_scroll_to_axis = Some(true);
 
-        div()
+        let root = div()
             .id("gpui-tables")
             .debug_selector(|| "board".into())
             .key_context(super::CONTEXT)
@@ -156,10 +127,6 @@ impl TableView {
             .on_action(
                 cx.listener(|this, _: &super::Cancel, window, cx| this.board_cancel(window, cx)),
             )
-            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<DraggedCard>, _, cx| {
-                this.drag_card_to(e.event.position, cx)
-            }))
-            .on_drop(cx.listener(|this, _: &DraggedCard, window, cx| this.drop_card(window, cx)))
             .relative()
             .size_full()
             .overflow_hidden()
@@ -168,74 +135,8 @@ impl TableView {
             .font_family(t.fonts.body.clone())
             .text_size(t.px(t.sizes.text))
             .child(scroller)
-            .child(probe)
-            .children(ghost)
-            .into_any_element()
-    }
-
-    /// A finger's long press: on a card (or a list's line) it picks the card up, and the finger
-    /// then moves it. Returns whether it took the press (a plain pan, which never becomes a
-    /// long press, scrolls instead).
-    pub(crate) fn long_press(
-        &mut self,
-        ev: &LongPressEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        match ev.phase {
-            TouchPhase::Started => {
-                if self.board.drag.is_some() || self.move_lanes().is_none() {
-                    return false;
-                }
-                let Some((row_id, key, card)) = self.pickup_at(ev.start_position) else {
-                    return false;
-                };
-                window.focus(&self.focus, cx);
-                let offset = ev.start_position - card.origin;
-                let others = self.carried_with(&row_id);
-                self.begin_card_drag(&row_id, &key, others, offset, ev.start_position, true, cx);
-                true
-            }
-            TouchPhase::Moved => {
-                if !self.board.drag.as_ref().is_some_and(|d| d.touch) {
-                    return false;
-                }
-                self.drag_card_to(ev.position, cx);
-                true
-            }
-            TouchPhase::Ended => {
-                if !self.board.drag.as_ref().is_some_and(|d| d.touch) {
-                    return false;
-                }
-                self.drag_card_to(ev.position, cx);
-                self.drop_card(window, cx);
-                true
-            }
-            TouchPhase::Cancelled => {
-                if self.board.drag.take().is_some() {
-                    cx.notify();
-                }
-                false
-            }
-        }
-    }
-
-    /// What a finger pressing at `at` picks up: the row's id, the key of the column (or group)
-    /// it's in, and the card's (or line's) bounds. A table's rows are gpui-dnd's (`rows.rs`).
-    fn pickup_at(&self, at: Point<Pixels>) -> Option<(String, String, gpui::Bounds<Pixels>)> {
-        if self.shown.table.is_some() {
-            return None;
-        }
-        if self.shown.list.is_some() {
-            return self.line_at(at);
-        }
-        let (column, index, card) = self.card_at(at)?;
-        let col = self.shown.board.as_ref()?.get(column)?;
-        Some((
-            self.shown_row(*col.rows.get(index)?)?.id.clone(),
-            col.key_string(),
-            card,
-        ))
+            .child(probe);
+        self.card_drop_target(root, cx)
     }
 
     /// The bounds of a column's cards (its list's), as last drawn.
@@ -657,7 +558,6 @@ impl TableView {
                 );
             }
         }
-        let weak = cx.entity().downgrade();
         let from = key.to_owned();
         let sel = format!("card:{rid}:{key}");
         let shadow = BoxShadow {
@@ -667,15 +567,14 @@ impl TableView {
             spread_radius: px(0.),
             inset: false,
         };
-        Press::new(ElementId::NamedInteger("card".into(), row as u64))
+        let press = Press::new(ElementId::NamedInteger("card".into(), row as u64))
             .tab_stop(false)
             .focus_on_press(false)
             .focus_ring(false)
             .selected(focused)
             .accessibility_label(words)
             .debug_selector(move || sel.clone())
-            .w_full()
-            .h(m.card)
+            .size_full()
             .px(m.card_pad)
             .py(m.card_pad)
             .flex()
@@ -712,41 +611,18 @@ impl TableView {
                 window.focus(&this.focus, cx);
                 this.set_board_spot(BoardSpot::Card { column, index: ix }, cx);
                 this.open_row(row, window, cx);
-            }))
-            .on_drag(
-                DraggedCard { row_id: rid, from },
-                move |d: &DraggedCard, offset: Point<Pixels>, window, cx| {
-                    let at = window.mouse_position();
-                    match weak.upgrade() {
-                        Some(view) => view.update(cx, |this, cx| {
-                            this.begin_card_drag(
-                                &d.row_id,
-                                &d.from,
-                                Vec::new(),
-                                offset,
-                                at,
-                                false,
-                                cx,
-                            )
-                        }),
-                        None => cx.new(|_| CardGhost::empty()),
-                    }
-                },
-            )
-            .into_any_element()
-    }
-}
-
-impl CardGhost {
-    pub(crate) fn empty() -> Self {
-        Self {
-            title: String::new(),
-            lines: Vec::new(),
-            theme: super::TableTheme::default(),
-            width: px(0.),
-            height: px(0.),
-            inline: false,
-        }
+            }));
+        // The card is a gpui-dnd drag source: the mouse past a few pixels or a finger's long
+        // press picks it up.
+        dnd(ElementId::Name(
+            format!("gpui-tables-card:{rid}:{from}").into(),
+        ))
+        .w_full()
+        .h(m.card)
+        .drop_indicator(false)
+        .source(self.card_source(rid, from, cx))
+        .child(press)
+        .into_any_element()
     }
 }
 
