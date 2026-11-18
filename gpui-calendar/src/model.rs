@@ -287,6 +287,16 @@ impl Response {
 }
 
 impl Event {
+    /// The user's answer, where this is an invitation they didn't send: the response of the
+    /// attendee marked `me`, unless they're its organizer. The calendar draws one not answered
+    /// yet hollow, and a declined one struck through, as Google Calendar does.
+    pub fn my_answer(&self) -> Option<Response> {
+        self.attendees
+            .iter()
+            .find(|a| a.me && !a.organizer)
+            .map(|a| a.response)
+    }
+
     /// A timed event from `start` up to `end`.
     pub fn timed(
         id: impl Into<EventId>,

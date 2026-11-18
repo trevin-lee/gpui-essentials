@@ -113,7 +113,8 @@ fn reading_order(e: &Event, tz: chrono_tz::Tz) -> (NaiveDate, bool, i64) {
 
 impl Calendar {
     /// What a screen reader says for an event: "Team sync, Tuesday 3 to 4 PM, Work calendar",
-    /// with ", repeating", ", read-only" and ", 2 links" where they apply.
+    /// with ", repeating", ", read-only", ", not answered" (or ", declined") and ", 2 links"
+    /// where they apply.
     pub fn describe_event(&self, id: &str) -> Option<String> {
         let e = self.event(id)?;
         let title = if e.title.trim().is_empty() {
@@ -133,6 +134,12 @@ impl Calendar {
         }
         if self.is_read_only(e) {
             out.push_str(", read-only");
+        }
+        // An invitation the user didn't send: not answered yet, or declined, as its chip shows.
+        match e.my_answer() {
+            Some(Response::NeedsAction) => out.push_str(", not answered"),
+            Some(Response::Declined) => out.push_str(", declined"),
+            _ => {}
         }
         match e.links.len() {
             0 => {}
