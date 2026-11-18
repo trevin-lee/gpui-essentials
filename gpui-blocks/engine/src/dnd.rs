@@ -186,6 +186,13 @@ pub(crate) struct KeyDrop {
     label: String,
 }
 
+/// What a keyboard pick-up says: "Picked up {label}. Arrow keys move it, Space drops it, Escape
+/// cancels.", "them" for a run of blocks.
+fn picked_up(label: &str, count: usize) -> String {
+    let it = if count > 1 { "them" } else { "it" };
+    format!("Picked up {label}. Arrow keys move {it}, Space drops {it}, Escape cancels.")
+}
+
 /// How many of a block's first words a label says.
 const LABEL_WORDS: usize = 6;
 
@@ -262,6 +269,8 @@ impl BlockEditorState {
         let begin = Begin {
             press: gpui_dnd::Press {
                 label: Some(label.clone().into()),
+                // The whole sentence is the editor's: "them" for a run.
+                picked_up: Some(picked_up(&label, run.len()).into()),
                 ..begin.press
             },
             ..begin

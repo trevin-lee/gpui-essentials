@@ -30,6 +30,10 @@ pub struct Press {
     pub size: Size<Pixels>,
     /// The item's name, for the keyboard's announcements.
     pub label: Option<SharedString>,
+    /// What a keyboard pick-up says, word for word, in place of the provider's "Picked up
+    /// {label}. …": for a host that says everything in its own words ("Picked up 2 blocks.
+    /// Arrow keys move them, …").
+    pub picked_up: Option<SharedString>,
     /// A touch drag begun with [`begin_at`] that follows the next finger by how far it moves,
     /// not where it is: something lifted in place (a block sheet's Move), then carried by a
     /// finger landing anywhere. The offset from that finger to the drag's pointer is taken as
@@ -45,6 +49,7 @@ impl Default for Press {
             grab: Point::default(),
             size: Size::default(),
             label: None,
+            picked_up: None,
             relative: false,
         }
     }
@@ -128,7 +133,7 @@ pub fn begin_at<T: 'static>(
     }
     let record = record(id.into(), at, source, &press);
     if press.backend == Backend::Keyboard {
-        return crate::keyboard::start(record, at, window, cx);
+        return crate::keyboard::start(record, at, press.picked_up.clone(), window, cx);
     }
     let began = state::begin(&record, at, press.backend, window, cx);
     if began && press.relative && press.backend == Backend::Touch {

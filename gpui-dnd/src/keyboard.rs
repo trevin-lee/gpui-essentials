@@ -128,7 +128,7 @@ fn pick_up_focused(window: &mut Window, cx: &mut App) -> bool {
         return false;
     };
     let at = source.bounds.center();
-    start(source, at, window, cx)
+    start(source, at, None, window, cx)
 }
 
 /// Picks up the source with this id with the keyboard, as a list that's one Tab stop does
@@ -146,7 +146,7 @@ pub(crate) fn pick_up(id: &ElementId, window: &mut Window, cx: &mut App) -> bool
     match source {
         Some(source) => {
             let at = source.bounds.center();
-            start(source, at, window, cx)
+            start(source, at, None, window, cx)
         }
         None => false,
     }
@@ -156,6 +156,7 @@ pub(crate) fn pick_up(id: &ElementId, window: &mut Window, cx: &mut App) -> bool
 pub(crate) fn start(
     source: Rc<crate::state::SourceRecord>,
     at: Point<Pixels>,
+    picked_up: Option<SharedString>,
     window: &mut Window,
     cx: &mut App,
 ) -> bool {
@@ -164,8 +165,12 @@ pub(crate) fn start(
         return false;
     }
     if let Some(snap) = state::snapshot(cx) {
-        let said = announcements(window, cx).picked_up.clone();
-        announce(said(&snap.item), window, cx);
+        // The host's own sentence, word for word, or the provider's.
+        let text = match picked_up.filter(|s| !s.is_empty()) {
+            Some(text) => text,
+            None => (announcements(window, cx).picked_up.clone())(&snap.item),
+        };
+        announce(text, window, cx);
         if let Some(drag) = shared.borrow_mut().drag.as_mut() {
             drag.said_over = None;
         }

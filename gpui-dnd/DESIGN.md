@@ -1003,7 +1003,8 @@ Up/Down PRs merge, when the lead says.
    `blocks_selected` key context so Space types elsewhere, and Move in the desktop block menu.
    Its steps set the drop explicitly (`KeyDrop`, in `engine/src/dnd.rs`), not from pointer
    geometry; the pointer only slides the other blocks aside. Taking a block out of a column
-   uses the new `top_level_gap_target`.
+   uses the new `top_level_gap_target`. The pick-up sentence is blocks' too
+   (`Press::picked_up`, new): "move them" for a run, so gpui-dnd composes no English for it.
 
 ## Later: gpui-flow's canvas
 

@@ -5727,7 +5727,7 @@ fn escape_puts_keyboard_picked_blocks_back(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(
         said(cx),
-        "Picked up 2 blocks. Arrow keys move it, Space drops it, Escape cancels."
+        "Picked up 2 blocks. Arrow keys move them, Space drops them, Escape cancels."
     );
     keys(cx, "down");
     assert_eq!(said(cx), "2 blocks, below Paragraph third, 2 of 2");
@@ -5818,4 +5818,22 @@ fn space_in_text_still_types_a_space(cx: &mut TestAppContext) {
     keys(cx, "right space");
     assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
     assert_eq!(source(&editor, cx), "a b");
+}
+
+#[gpui::test]
+fn a_run_picked_up_by_the_keyboard_is_said_as_them(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "a\n\nb\n\nc\n\nd");
+    select_top(&editor, cx, 0, 2);
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(
+        said(cx),
+        "Picked up 3 blocks. Arrow keys move them, Space drops them, Escape cancels."
+    );
+    keys(cx, "down");
+    assert_eq!(said(cx), "3 blocks, below Paragraph d, 2 of 2");
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(said(cx), "3 blocks, moved below Paragraph d");
+    assert_eq!(source(&editor, cx), "d\n\na\n\nb\n\nc");
 }
