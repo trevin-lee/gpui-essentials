@@ -514,9 +514,12 @@ fn collected_state_notifies_its_view_only_when_it_changes(cx: &mut TestAppContex
             .into_any_element()
     });
     let (a, t) = (o.center("a"), o.center("t"));
-    let start = probe_renders.get();
+    // Counted once the drag is on: a press can redraw everything for GPUI's own reasons (an
+    // element's pressed state), which isn't the drag's doing.
     o.hold(a, point(px(30.), px(300.)));
+    let start = probe_renders.get();
     o.drag_to(point(px(40.), px(310.)));
+    o.drag_to(point(px(50.), px(320.)));
     assert_eq!(probe_renders.get(), start, "nothing it collects changed");
     o.drag_to(t);
     assert_eq!(probe_renders.get(), start + 1, "now it's over");

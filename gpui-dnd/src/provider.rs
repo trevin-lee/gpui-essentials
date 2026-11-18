@@ -11,6 +11,7 @@ use gpui_core::ActiveTheme as _;
 use std::rc::Rc;
 
 use crate::item::DragItem;
+use crate::keyboard::{self, Announcements};
 use crate::monitor::{DragLayerMonitor, DragMonitor};
 use crate::source::{Backend, PreviewSpec};
 use crate::state;
@@ -39,6 +40,8 @@ pub const PREVIEW_PRIORITY: usize = 100;
 pub struct DndProvider {
     child: Option<AnyElement>,
     mouse: bool,
+    keyboard: bool,
+    announcements: Option<Announcements>,
     layer: Option<Layer>,
 }
 
@@ -47,8 +50,23 @@ impl DndProvider {
         Self {
             child: Some(child.into_any_element()),
             mouse: true,
+            keyboard: true,
+            announcements: None,
             layer: None,
         }
+    }
+
+    /// Whether the keyboard picks up sources (Space or Enter on a focused source). On unless
+    /// turned off.
+    pub fn keyboard(mut self, on: bool) -> Self {
+        self.keyboard = on;
+        self
+    }
+
+    /// What the live region says during a keyboard drag, in place of the English defaults.
+    pub fn announcements(mut self, announcements: Announcements) -> Self {
+        self.announcements = Some(announcements);
+        self
     }
 
     /// A custom drag layer (react-dnd's `useDragLayer`), for sources whose preview is
@@ -118,9 +136,15 @@ impl Element for DndProvider {
             state.provider_depth += 1;
             let outermost = state.provider_depth == 1;
             if outermost {
+                let window_id = state::window_id(window);
                 state
                     .provider_views
-                    .insert(state::window_id(window), window.current_view());
+                    .insert(window_id, window.current_view());
+                state.keyboard.insert(window_id, self.keyboard);
+                match &self.announcements {
+                    Some(a) => state.announcements.insert(window_id, a.clone()),
+                    None => state.announcements.remove(&window_id),
+                };
             }
             outermost
         };
@@ -128,6 +152,7 @@ impl Element for DndProvider {
         shared.borrow_mut().provider_depth -= 1;
         if outermost {
             draw_preview(self.layer.as_ref(), window, cx);
+            draw_live_region(window, cx);
         }
         outermost
     }
@@ -172,8 +197,16 @@ fn listen_to_mouse(window: &mut Window) {
     // on its way back.
     window.on_mouse_event(|_: &MouseDownEvent, phase, window, cx| {
         if phase == DispatchPhase::Capture {
-            if state::drag_in(window, cx) == Some(true) {
-                state::land(None, window, cx);
+            // And ends a keyboard drag: the pointer has taken over.
+            match state::drag_in(window, cx) {
+                Some(true) => state::land(None, window, cx),
+                Some(false)
+                    if state::snapshot(cx).is_some_and(|s| s.backend == Backend::Keyboard) =>
+                {
+                    state::cancel(window, cx);
+                    state::land(None, window, cx);
+                }
+                _ => {}
             }
             let shared = state::shared(cx);
             let mut state = shared.borrow_mut();
@@ -321,6 +354,24 @@ fn draw_preview(layer: Option<&Layer>, window: &mut Window, cx: &mut App) {
     .into_any_element();
     floating.request_layout(window, cx);
     window.defer_draw(floating, at, PREVIEW_PRIORITY, None);
+}
+
+/// The live region with what the keyboard drag last said, if it said anything in this window.
+fn draw_live_region(window: &mut Window, cx: &mut App) {
+    let said = state::shared(cx)
+        .borrow()
+        .said
+        .get(&state::window_id(window))
+        .cloned();
+    let Some(said) = said else { return };
+    let mut floating = Floating {
+        child: keyboard::live_region(said).into_any_element(),
+        origin: Point::default(),
+        space: AvailableSpace::min_size(),
+    }
+    .into_any_element();
+    floating.request_layout(window, cx);
+    window.defer_draw(floating, Point::default(), PREVIEW_PRIORITY, None);
 }
 
 /// An element laid out on its own at a place in the window, as GPUI lays out its own drag's
