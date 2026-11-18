@@ -266,3 +266,32 @@ fn insert_columns_makes_the_line_the_first_column() {
     assert_eq!(shape(&m), ["columns[0.5:1 0.5:1]"]);
     assert_columns_in_shape(&m);
 }
+
+#[test]
+fn column_widths_are_set_as_one_step_and_checked() {
+    let mut m = model(TWO);
+    let columns = m.document().root().children().nth(1).unwrap().id();
+    m.run(EditorCommand::SetColumnWidths {
+        columns,
+        widths: vec![0.3, 0.7],
+    })
+    .unwrap();
+    assert_eq!(shape(&m)[1], "columns[0.3:1 0.7:2]");
+    assert!(m.source().contains("<!-- column 0.3 -->"));
+    assert!(m.undo());
+    assert_eq!(shape(&m)[1], "columns[0.5:1 0.5:2]");
+    for widths in [vec![0.5], vec![0.5, 0.], vec![0.5, f32::NAN]] {
+        assert!(
+            m.run(EditorCommand::SetColumnWidths { columns, widths })
+                .is_err()
+        );
+    }
+    let paragraph = m.document().root().children().next().unwrap().id();
+    assert!(
+        m.run(EditorCommand::SetColumnWidths {
+            columns: paragraph,
+            widths: vec![0.5, 0.5]
+        })
+        .is_err()
+    );
+}

@@ -42,6 +42,7 @@
 
 mod block_menu;
 mod code_chrome;
+mod columns_ui;
 mod comments;
 pub mod docs;
 mod editor;

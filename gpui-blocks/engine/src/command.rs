@@ -53,6 +53,12 @@ pub enum EditorCommand {
     InsertColumns {
         count: usize,
     },
+    /// Give a columns block's columns these widths, their shares of the row (one each, every
+    /// one above 0), as one undo step.
+    SetColumnWidths {
+        columns: BlockId,
+        widths: Vec<f32>,
+    },
     /// Insert an empty table (`rows` includes the header row) after the
     /// caret's block, replacing it when it is an empty paragraph.
     InsertTable {
@@ -1169,6 +1175,27 @@ impl BlockEditorModel {
         self.wrap_caret_block("toggle", BlockKindData::Toggle { open: true })
     }
 
+    fn set_column_widths(
+        &mut self,
+        columns: BlockId,
+        widths: &[f32],
+    ) -> Result<bool, CommandError> {
+        if self.doc.kind(columns) != Some(&BlockKindData::Columns) {
+            return Err(CommandError::Unsupported("not columns"));
+        }
+        let ids = self.doc.children(columns).to_vec();
+        if ids.len() != widths.len() || widths.iter().any(|w| !w.is_finite() || *w <= 0.) {
+            return Err(CommandError::Unsupported("column widths"));
+        }
+        let selection = self.selection.clone();
+        self.transact(EditOrigin::Command("set_column_widths"), |tx| {
+            for (id, width) in ids.iter().zip(widths) {
+                tx.set_kind(*id, BlockKindData::Column { width: *width })?;
+            }
+            Ok(Some(selection))
+        })
+    }
+
     fn insert_columns(&mut self, count: usize) -> Result<bool, CommandError> {
         let count = count.clamp(2, crate::kind::MAX_COLUMNS);
         let pos = self.caret_resolved()?.pos;
@@ -1695,6 +1722,9 @@ impl BlockEditorModel {
                 self.tab_cell(command == EditorCommand::Outdent)
             }
             EditorCommand::InsertColumns { count } => self.insert_columns(count),
+            EditorCommand::SetColumnWidths { columns, widths } => {
+                self.set_column_widths(columns, &widths)
+            }
             EditorCommand::InsertTable { rows, cols } => self.insert_table(rows, cols),
             EditorCommand::EditTable(edit) => self.edit_table(edit),
             EditorCommand::Indent => self.indent(),
