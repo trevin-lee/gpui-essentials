@@ -353,6 +353,29 @@ h2 a:hover {
   line-height: 1.45;
 }
 
+/* A crate's page: its pictures, one under another, each with what it shows. */
+
+.shot {
+  margin: 24px 0 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.shot figcaption {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-fg);
+  font-size: 14px;
+}
+
 @media (max-width: 760px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
@@ -363,6 +386,13 @@ h2 a:hover {
     max-height: none;
     padding-bottom: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  /* On a phone the full list would push the page below the fold: only the link to the
+     index stays, which lists everything. */
+  .sidebar h4,
+  .sidebar ul {
+    display: none;
   }
 
   main {

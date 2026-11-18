@@ -6,9 +6,10 @@
 //! cargo run --manifest-path docs-site/render/Cargo.toml -- --out $TMPDIR/site [--only button]
 //! ```
 //!
-//! It writes `<out>/img/<component>/<variant>-{light,dark}.png`, `<out>/index.html`,
-//! `<out>/components/<component>.html` and `<out>/style.css`. With `--only`, it draws that
-//! component's pictures alone, and still writes every page.
+//! It writes `<out>/img/<component>/<variant>-{light,dark}.png`, the crates' pictures in
+//! `<out>/img/crates/<crate>/`, `<out>/index.html`, `<out>/components/<component>.html`,
+//! `<out>/crates/<crate>.html` and `<out>/style.css`. With `--only`, it makes that component's
+//! or crate's pictures alone, and still writes every page.
 
 mod html;
 mod install;
@@ -25,7 +26,7 @@ use gpui::AsyncApp;
 use gpui_core::Icons;
 
 use crate::install::Installs;
-use crate::site::Component;
+use crate::site::{Component, Crate};
 
 /// The repository's root, where the crates' folders are.
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -63,10 +64,12 @@ fn main() -> ExitCode {
         }
     };
     let components = registry::components();
+    let crates = registry::crates();
     if let Some(only) = &args.only
         && !components.iter().any(|c| c.slug == only)
+        && !crates.iter().any(|c| c.slug == only)
     {
-        eprintln!("no component {only:?} in the registry");
+        eprintln!("no component or crate {only:?} in the registry");
         return ExitCode::from(2);
     }
     gpui_platform::application()
@@ -74,7 +77,7 @@ fn main() -> ExitCode {
         .run(move |cx| {
             gpui_core::init(cx);
             cx.spawn(async move |cx| {
-                if let Err(e) = render_site(&args, &components, cx).await {
+                if let Err(e) = render_site(&args, &components, &crates, cx).await {
                     eprintln!("{e:#}");
                     // The app's run loop may end the process itself on quitting.
                     std::process::exit(1);
@@ -86,7 +89,12 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn render_site(args: &Args, components: &[Component], cx: &mut AsyncApp) -> Result<()> {
+async fn render_site(
+    args: &Args,
+    components: &[Component],
+    crates: &[Crate],
+    cx: &mut AsyncApp,
+) -> Result<()> {
     let started = Instant::now();
     let mut pictures = 0;
     for c in components {
@@ -110,11 +118,24 @@ async fn render_site(args: &Args, components: &[Component], cx: &mut AsyncApp) -
             pictures += 2;
         }
     }
+    for c in crates {
+        if args.only.as_ref().is_some_and(|only| only != c.slug) {
+            continue;
+        }
+        let dir = args.out.join("img/crates").join(c.slug);
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        for (file, _) in &c.pictures {
+            let from = Path::new(ROOT).join(c.dir).join("docs").join(file);
+            shot::copy_picture(&from, &dir.join(file))?;
+            pictures += 1;
+        }
+        println!("{}: {} pictures", c.name, c.pictures.len());
+    }
     let installs = Installs::load(&Path::new(ROOT).join("gpui-core/components.toml"))?;
-    html::write_site(&args.out, components, &installs)?;
+    html::write_site(&args.out, components, crates, &installs)?;
     println!(
         "{pictures} pictures and {} pages in {} ({:.1} s)",
-        components.len() + 1,
+        components.len() + crates.len() + 1,
         args.out.display(),
         started.elapsed().as_secs_f32()
     );
