@@ -1839,7 +1839,7 @@ impl Input {
     }
 
     /// The keyboard focus ring's colour (with `appearance`), drawn as given (otherwise the
-    /// theme's ring at half strength).
+    /// theme's ring at 60%).
     pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
         self.colors.ring = Some(color.into());
         self
@@ -1988,7 +1988,7 @@ impl RenderOnce for Input {
                     .rounded(theme.radius_md())
                     .border_1()
                     .border_color(theme.input)
-                    .when(dark, |d| d.bg(theme.input.opacity(0.3)))
+                    .when(dark, |d| d.bg(theme.control.opacity(0.3)))
                     .text_size(theme.text.sm)
                     .focus_visible(move |s| s.border_color(theme.ring))
             })

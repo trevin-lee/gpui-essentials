@@ -56,9 +56,15 @@ pub struct Colors {
     /// Done, working.
     pub success: Hsla,
     pub border: Hsla,
-    /// A field's border, and a switch's track when off.
+    /// The boundary that shows a control: a field's border, a checkbox's or radio's outline, an
+    /// outline button's border, and a switch's track when off. At least 3:1 against the page
+    /// and a card (WCAG 1.4.11).
     pub input: Hsla,
-    /// The focus ring (drawn at half strength) and the text selection (at 30%).
+    /// What a control's fill is mixed from: a field's fill is it at 30% in the dark, a hovered
+    /// one at 50%, and a pressed toggle or a selected button is it at 100%. Kept apart from
+    /// `input` so the fill stays quiet and a placeholder on it stays 4.5:1.
+    pub control: Hsla,
+    /// The focus ring (drawn at 60%) and the text selection (at 30%).
     pub ring: Hsla,
     pub sidebar: Hsla,
     pub sidebar_foreground: Hsla,
@@ -126,18 +132,20 @@ pub struct Colors {
     pub success_text: Hsla,
     /// A solid success badge.
     pub success_fill: Hsla,
-    /// A field's fill on a card or sheet: `input` at 30% over `card`, opaque, so a focus ring
+    /// A field's fill on a card or sheet: `control` at 30% over `card`, opaque, so a focus ring
     /// stays a ring.
     pub field_on_card: Hsla,
     /// A search box's fill on the page: `secondary` at 60% over `background`, opaque.
     pub field_on_page: Hsla,
-    /// A field's fill on the page: `input` at 30%.
+    /// A field's fill on the page: `control` at 30%.
     pub input_fill: Hsla,
     /// A choice tile's fill: `secondary` at 50%.
     pub tile_fill: Hsla,
     /// A menu's, popover's or dialog's border: `foreground` at 10%.
     pub overlay_line: Hsla,
-    /// Quieter secondary text (a row's time): `muted_foreground` at 70%.
+    /// Quieter secondary text (a row's time): `muted_foreground` at 86% in the dark, the least
+    /// that is 4.5:1 on the sidebar, and `muted_foreground` itself in the light. (The name is
+    /// the apps' token's, from when it was 70%.)
     pub muted_70: Hsla,
     /// An error's box: `destructive` at 10%.
     pub destructive_fill: Hsla,
@@ -194,7 +202,8 @@ impl Colors {
             destructive: c(0xe5665b),
             success: c(0x4cc38a),
             border: c(0x28282d),
-            input: c(0x3a3a41),
+            input: c(0x656571),
+            control: c(0x3a3a41),
             ring: c(0x9f9fa9),
             sidebar: c(0x0b0b0d),
             sidebar_foreground: c(0xededef),
@@ -230,7 +239,7 @@ impl Colors {
             callout_warning_background: tint(0xd29922),
             callout_caution: c(0xf85149),
             callout_caution_background: tint(0xf85149),
-            chart_1: c(0x1447e6),
+            chart_1: c(0x2556ec),
             chart_2: c(0x00bc7d),
             chart_3: c(0xfe9a00),
             chart_4: c(0xad46ff),
@@ -246,7 +255,7 @@ impl Colors {
             input_fill: ca(0x3a3a414d),
             tile_fill: ca(0x1f1f2380),
             overlay_line: ca(0xededef1a),
-            muted_70: ca(0x8b8b93b3),
+            muted_70: ca(0x8b8b93db),
             destructive_fill: ca(0xe5665b1a),
             scrim: ca(0x0000001a),
             scrim_strong: ca(0x0000007a),
@@ -270,10 +279,11 @@ impl Colors {
             muted_foreground: c(0x6b6b73),
             accent: ca(0x0000000d),
             accent_foreground: c(0x0f0f11),
-            destructive: c(0xc7362b),
-            success: c(0x1f8f5c),
+            destructive: c(0xc1342a),
+            success: c(0x1c8254),
             border: c(0xe4e4e7),
-            input: c(0xd9d9de),
+            input: c(0x8f8f9e),
+            control: c(0xd9d9de),
             ring: c(0x0f0f11),
             sidebar: c(0xf1f1f3),
             sidebar_foreground: c(0x0f0f11),
@@ -283,10 +293,10 @@ impl Colors {
             sidebar_accent_foreground: c(0x0f0f11),
             sidebar_border: c(0xe4e4e7),
             sidebar_ring: c(0x0f0f11),
-            live: c(0x1f8f5c),
-            attention: c(0xd9a441),
-            attention_foreground: c(0xa8701a),
-            ready: c(0x1f8f5c),
+            live: c(0x1c8254),
+            attention: c(0xba8625),
+            attention_foreground: c(0x9c6818),
+            ready: c(0x1c8254),
             bubble: c(0xf1f1f3),
             empty_pattern: ca(0x00000012),
             syntax_keyword: c(0x7c3aed),
@@ -312,11 +322,13 @@ impl Colors {
             chart_1: c(0xf54900),
             chart_2: c(0x009689),
             chart_3: c(0x104e64),
-            chart_4: c(0xffb900),
-            chart_5: c(0xfe9a00),
+            // shadcn's amber and orange can't reach 3:1 on white without turning muddy and
+            // alike, so the light theme takes the dark one's purple and rose, darkened.
+            chart_4: c(0xad46ff),
+            chart_5: c(0xe60076),
             // The same tokens on the light colours above, by the same recipes.
             warning: c(0xf59e0b),
-            warning_text: c(0xb45309),
+            warning_text: c(0xb25209),
             warning_fill: ca(0xf59e0b1a),
             warning_line: ca(0xf59e0b40),
             success_text: c(0x047857),
@@ -326,16 +338,18 @@ impl Colors {
             input_fill: ca(0xd9d9de4d),
             tile_fill: ca(0xf1f1f380),
             overlay_line: ca(0x0f0f111a),
-            muted_70: ca(0x6b6b73b3),
-            destructive_fill: ca(0xc7362b1a),
+            // muted_foreground itself: below about 99% it isn't 4.5:1 on the light sidebar.
+            muted_70: c(0x6b6b73),
+            destructive_fill: ca(0xc1342a1a),
             scrim: ca(0x0000001a),
             scrim_strong: ca(0x0000007a),
         }
     }
 
-    /// The focus ring's colour: the ring at half strength, as the web draws `outline-ring/50`.
+    /// The focus ring's colour: the ring at 60%. The web draws `outline-ring/50`, but in the
+    /// dark that's under 3:1 against the page (WCAG 2.4.13), and 60% is over it in both themes.
     pub fn focus_ring(&self) -> Hsla {
-        self.ring.opacity(0.5)
+        self.ring.opacity(0.6)
     }
 
     /// Selected text's highlight: the ring at 30%.
@@ -596,6 +610,6 @@ mod tests {
         assert_eq!(t.border, Colors::light().border);
         assert_eq!(t.mode, ThemeMode::Light);
         assert!(Theme::dark().mode.is_dark());
-        assert_eq!(t.focus_ring().a, 0.5);
+        assert_eq!(t.focus_ring().a, 0.6);
     }
 }

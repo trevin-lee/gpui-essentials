@@ -122,13 +122,9 @@ impl RenderOnce for Switch {
             s.changes
         });
 
-        let track = if checked {
-            theme.primary
-        } else if dark {
-            theme.input.opacity(0.8)
-        } else {
-            theme.input
-        };
+        // Off, the track is the control's boundary colour, so it shows against the page at
+        // 3:1 (WCAG 1.4.11) in both themes.
+        let track = if checked { theme.primary } else { theme.input };
         let thumb_color = match (dark, checked) {
             (true, true) => theme.primary_foreground,
             (true, false) => theme.foreground,
