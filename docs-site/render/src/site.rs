@@ -1,4 +1,5 @@
-//! What the site shows: families of components, each with its variants and their demos.
+//! What the site shows: families of components, each with its variants and their demos, and
+//! the crates built on them, each with pictures from its README.
 
 use gpui::{AnyElement, AnyView, App, Window};
 
@@ -94,4 +95,20 @@ impl Demo {
     pub fn is_view(self) -> bool {
         matches!(self, Demo::View(_))
     }
+}
+
+/// One crate's page: pictures from its README, with links to its docs and its source.
+pub struct Crate {
+    /// Its package name, the page's title.
+    pub name: &'static str,
+    /// Its page's file name and its pictures' folder: `crates/<slug>.html`, `img/crates/<slug>/`.
+    pub slug: &'static str,
+    /// Its folder in the repository, holding README.md and the pictures in `docs/`.
+    pub dir: &'static str,
+    /// Its library's name, for its rustdoc: `api/<lib>/index.html`.
+    pub lib: &'static str,
+    /// One line under its name, and on its card in the index.
+    pub about: &'static str,
+    /// Pictures from `<dir>/docs/`, each with what it shows; the first is its card's.
+    pub pictures: Vec<(&'static str, &'static str)>,
 }

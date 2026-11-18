@@ -224,20 +224,32 @@ pub fn crop_pair(light: RgbaImage, dark: RgbaImage, what: &str) -> Result<[RgbaI
         bottom = (top + least).min(h);
         top = bottom - least;
     }
-    Ok([light, dark].map(|image| {
-        let cropped = image::imageops::crop_imm(&image, 0, top, w, bottom - top).to_image();
-        if w > MAX_WIDTH {
-            let height = (cropped.height() as u64 * MAX_WIDTH as u64 / w as u64) as u32;
-            image::imageops::resize(
-                &cropped,
-                MAX_WIDTH,
-                height.max(1),
-                image::imageops::FilterType::Lanczos3,
-            )
-        } else {
-            cropped
-        }
-    }))
+    Ok([light, dark]
+        .map(|image| fit(image::imageops::crop_imm(&image, 0, top, w, bottom - top).to_image())))
+}
+
+/// `image`, scaled down to [`MAX_WIDTH`] if it's wider.
+fn fit(image: RgbaImage) -> RgbaImage {
+    let (w, h) = image.dimensions();
+    if w <= MAX_WIDTH {
+        return image;
+    }
+    let height = (h as u64 * MAX_WIDTH as u64 / w as u64) as u32;
+    image::imageops::resize(
+        &image,
+        MAX_WIDTH,
+        height.max(1),
+        image::imageops::FilterType::Lanczos3,
+    )
+}
+
+/// Saves a crate's picture from its `docs/` folder as the site's are: at most [`MAX_WIDTH`]
+/// wide, in 256 colours.
+pub fn copy_picture(from: &Path, to: &Path) -> Result<()> {
+    let image = image::open(from)
+        .with_context(|| format!("reading {}", from.display()))?
+        .into_rgba8();
+    save_png(&fit(image), to)
 }
 
 /// Saves `image` as an indexed PNG of at most 256 colours: exactly its own colours when it has

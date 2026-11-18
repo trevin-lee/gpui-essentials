@@ -40,3 +40,7 @@ opt-level = 3
 
 [profile.dev.package.png]
 opt-level = 3
+
+# Scaling the crates' pictures down too.
+[profile.dev.package.image]
+opt-level = 3
