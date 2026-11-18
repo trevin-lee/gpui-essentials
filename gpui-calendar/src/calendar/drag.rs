@@ -334,13 +334,16 @@ impl Calendar {
     fn key_step(&mut self, dir: Point<f32>, cx: &mut Context<Self>) -> Option<Point<Pixels>> {
         let step = self.options.snap();
         let (dx, dy) = (dir.x.round() as i64, dir.y.round() as i64);
+        // Days step over a hidden weekend, as the selection's arrows do.
+        let weekends = self.weekends_shown();
+        let day = |d: NaiveDate| paint::step_days(weekends, d, dx);
         let moved = |p: (NaiveDate, f32), area: Area| match area {
             Area::Grid => (
-                p.0 + Duration::days(dx),
+                day(p.0),
                 (p.1 + dy as f32 * step).clamp(0., time::DAY_MINUTES),
             ),
-            Area::AllDay => (p.0 + Duration::days(dx), p.1),
-            Area::Month => (p.0 + Duration::days(dx + 7 * dy), p.1),
+            Area::AllDay => (day(p.0), p.1),
+            Area::Month => (day(p.0) + Duration::days(7 * dy), p.1),
         };
         let (area, now) = match self.drag.as_mut()? {
             Drag::Move { area, now, .. } | Drag::Resize { area, now, .. } => {

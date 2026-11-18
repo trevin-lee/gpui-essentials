@@ -1035,6 +1035,12 @@ impl Calendar {
         time::short_title(self.view, self.anchor, self.options.week_start)
     }
 
+    /// Whether the view on screen gives Saturday and Sunday columns: always, unless
+    /// [`CalendarOptions::show_weekends`] is off and it's the week or the month.
+    pub fn weekends_shown(&self) -> bool {
+        self.options.show_weekends || !matches!(self.view, CalendarView::Week | CalendarView::Month)
+    }
+
     pub fn set_view(&mut self, view: CalendarView, cx: &mut Context<Self>) {
         self.view = view;
         self.range_changed(cx);
@@ -2266,6 +2272,12 @@ impl Calendar {
         }
         let month = self.view == CalendarView::Month;
         let slot = self.options.slot_minutes.max(1) as f32;
+        // A day left or right (past a hidden weekend), and in the month a week up or down.
+        let weekends = self.weekends_shown();
+        let day_to = |date: NaiveDate| {
+            paint::step_days(weekends, date, dx as i64)
+                + Duration::days(if month { 7 * dy as i64 } else { 0 })
+        };
         let Some((date, minute)) = self.selection_place() else {
             if dx != 0 && dy == 0 {
                 // Nothing selected: left and right go to the previous and next period.
@@ -2274,8 +2286,15 @@ impl Calendar {
             }
             let (first, days) = self.visible_days();
             let today = self.today();
-            let in_view = today >= first && (today - first).num_days() < days as i64;
-            let date = if in_view { today } else { first };
+            let in_view = today >= first
+                && (today - first).num_days() < days as i64
+                && paint::day_shown(weekends, today);
+            // Else the first day with a column.
+            let date = if in_view {
+                today
+            } else {
+                paint::step_days(weekends, first - Duration::days(1), 1)
+            };
             let now = time::local(self.now(), self.options.time_zone).1;
             let minute = time::snap_floor(if in_view { now } else { 9. * 60. }, slot);
             self.select_slot(date, minute, cx);
@@ -2299,12 +2318,7 @@ impl Calendar {
                 }
                 return;
             }
-            let to = date
-                + Duration::days(if month {
-                    dx as i64 + 7 * dy as i64
-                } else {
-                    dx as i64
-                });
+            let to = day_to(date);
             let nearest = self
                 .events_on(to)
                 .into_iter()
@@ -2322,10 +2336,10 @@ impl Calendar {
             return;
         }
         let (to, minute) = if month {
-            (date + Duration::days(dx as i64 + 7 * dy as i64), minute)
+            (day_to(date), minute)
         } else {
             (
-                date + Duration::days(dx as i64),
+                day_to(date),
                 (minute + dy as f32 * slot).clamp(0., time::DAY_MINUTES - slot),
             )
         };
@@ -3224,6 +3238,7 @@ impl Render for Calendar {
             neighbour: self.swipe_neighbour(),
             lanes: None,
             find: self.query.clone().map(|q| (q, colors.find.opacity(0.38))),
+            weekends: self.weekends_shown(),
             scrollbar: self.scrollbar_shown(cx),
         };
         let this = cx.entity().downgrade();
