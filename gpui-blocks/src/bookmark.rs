@@ -318,15 +318,16 @@ fn card(bookmark: &Bookmark, hooks: &BookmarkHooks, cx: &mut App) -> AnyElement 
                 .line_clamp(2)
                 .child(description)
         }))
-        .child(
+        // The address under the title, unless the title is the address (nothing known yet).
+        .children(bookmark.title.is_some().then(|| {
             div()
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .text_color(fg)
                 .text_size(px(12.))
-                .child(bookmark.url.clone()),
-        );
+                .child(bookmark.url.clone())
+        }));
     let on_click = hooks.on_click.clone();
     let url = bookmark.url.clone();
     div()
