@@ -98,6 +98,13 @@ impl RenderOnce for BlockEditor {
                         .is_some_and(|caret| handle.bounds().contains(&caret.center()))
                 })
         };
+        // How far the scroll container has scrolled the editor, for the first frame's cull.
+        let scroll_top = self
+            .state
+            .read(cx)
+            .scroll_handle
+            .as_ref()
+            .map_or(px(0.), |h| -h.offset().y);
         let (focus, snapshot, backgrounds, keep, list_items) = self.state.update(cx, |state, _| {
             let snapshot = state.snapshot();
             let mut backgrounds: HashMap<u64, Vec<(Range<usize>, Hsla)>> = HashMap::new();
@@ -237,7 +244,18 @@ impl RenderOnce for BlockEditor {
             let mut cull_state = cull.borrow_mut();
             cull_state.measured.clear();
             cull_state.drawn.clear();
-            let window_span = cull_state.visible.map(|(top, bottom)| {
+            // Before the first frame has measured where the editor is shown: where its scroll
+            // container shows it, from the scroll offset and the window's height, rather than
+            // every block (on a long page, most of opening it). A wrong guess is put right by
+            // the next frame, which the cull asks for when the shown span leaves the drawn one.
+            // After a change of width every block is laid out again, as before, so the caret
+            // stays where it was.
+            let first = !cull_state.drawn_once;
+            let guess = || {
+                let top = scroll_top.max(px(0.));
+                first.then(|| (top, top + window.viewport_size().height))
+            };
+            let window_span = cull_state.visible.or_else(guess).map(|(top, bottom)| {
                 // Overscan two viewports each way, so a fast scroll stays
                 // within laid-out blocks until the next frame catches up.
                 let margin = ((bottom - top) * 2.).max(px(600.));
