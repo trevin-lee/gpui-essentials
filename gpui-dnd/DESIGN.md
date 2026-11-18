@@ -574,9 +574,10 @@ pub struct SortableDrag<K> { pub list: ElementId, pub key: K, pub from: usize, p
   something. At 10,000 rows, a frame of a drag takes 0.14 ms (median, release, ci-runner) and an
   auto-scroll frame 0.08 ms.
 
-## Proposal: drags a host starts itself (for gpui-calendar)
+## Drags a host starts itself (for gpui-calendar)
 
-Not built yet; reviewed by the lead and the gpui-calendar agent. gpui-calendar draws a whole view on one canvas and decides
+Agreed with the lead and the gpui-calendar agent (#362); step 1 is built (see the order at the
+end). gpui-calendar draws a whole view on one canvas and decides
 itself what a press means (`paint::target_at`): empty time creates, an event moves, an event's
 bottom (or an all-day span's right edge) resizes, a "+N" list's row moves its event, and only
 the selected event follows a finger at once. So a drag there can't start from a `dnd` element
@@ -757,15 +758,23 @@ All of the geometry and time:
 gpui-dnd only owns the drag's life: when it begins, where the pointer is, the keys and the
 touch while it's on, how it ends, the cursor, and timed scrolling.
 
-### Order, once agreed
+### Order
 
-1. gpui-dnd: `press_at`, `begin_at`, `cancel`, `DragSource::cursor`, `auto_scroll_zone` with
+1. **Built.** gpui-dnd: `press_at`, `begin_at`, `cancel`, `DragSource::cursor`, `auto_scroll_zone` with
    `for_items`, and `DropTarget::catch_outside`, with tests: a canvas starting drags, a press
    under the threshold reaching the host, touch claimed by the host, a zone without an element,
-   and a release outside the target dropping on it.
+   and a release outside the target dropping on it (`tests/host.rs`). Building it added:
+   - `Press::label`, the item's name for the keyboard's announcements;
+   - `AutoScroll::beyond_edges`, since calendar scrolls its hours while the pointer is above
+     the grid, over the header, not only near the edge;
+   - `drag_cursor(cx)`, the cursor the drag shows, for tests and hosts.
+
+   `AutoScroll` is `Clone` and no longer `Copy`: it holds the `for_items` filter.
 2. gpui-calendar, with its owner: the mouse and touch paths onto them, its tests unchanged (the
    interaction and touch drag tests above are the contract), frame times before and after.
-3. Keyboard move and resize in gpui-calendar, with announcements.
+3. Keyboard move and resize in gpui-calendar, with announcements. The live region now says
+   "Over {describe}." Calendar's sentence has to be said as it is, so this step adds a way
+   for a target to say its own sentence; it will be decided then.
 
 ## react-dnd → gpui-dnd
 

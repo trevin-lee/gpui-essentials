@@ -127,7 +127,8 @@ fn pick_up_focused(window: &mut Window, cx: &mut App) -> bool {
     let Some(source) = source else {
         return false;
     };
-    start(source, window, cx)
+    let at = source.bounds.center();
+    start(source, at, window, cx)
 }
 
 /// Picks up the source with this id with the keyboard, as a list that's one Tab stop does
@@ -143,20 +144,23 @@ pub(crate) fn pick_up(id: &ElementId, window: &mut Window, cx: &mut App) -> bool
         state.registry(window_id).source(id)
     };
     match source {
-        Some(source) => start(source, window, cx),
+        Some(source) => {
+            let at = source.bounds.center();
+            start(source, at, window, cx)
+        }
         None => false,
     }
 }
 
-fn start(source: Rc<crate::state::SourceRecord>, window: &mut Window, cx: &mut App) -> bool {
+/// Begins a keyboard drag of `source` at `at`, and says it's picked up.
+pub(crate) fn start(
+    source: Rc<crate::state::SourceRecord>,
+    at: Point<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
     let shared = state::shared(cx);
-    if !state::begin(
-        &source,
-        source.bounds.center(),
-        Backend::Keyboard,
-        window,
-        cx,
-    ) {
+    if !state::begin(&source, at, Backend::Keyboard, window, cx) {
         return false;
     }
     if let Some(snap) = state::snapshot(cx) {

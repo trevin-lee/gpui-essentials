@@ -40,6 +40,7 @@ pub struct DropTarget {
     slots: Option<Slots>,
     describe: Option<Describe>,
     pub(crate) step: Option<Step>,
+    pub(crate) catch_outside: bool,
 }
 
 impl DropTarget {
@@ -77,6 +78,21 @@ impl DropTarget {
         f: impl Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropOutcome + 'static,
     ) -> Self {
         self.on_drop = Some(Rc::new(f));
+        self
+    }
+
+    /// Takes the drag wherever the pointer is in the window, when no target under the pointer
+    /// can take it: for a canvas that follows its own drags past its edges (a calendar
+    /// clamping a moved event to its grid while the pointer is over its header). `on_hover`
+    /// goes on hearing the pointer outside its bounds, and a release there calls `on_drop`
+    /// rather than ending the drag without a drop. [`is_over`](DropMonitor::is_over) stays
+    /// geometric (false out there); [`can_drop`](DropMonitor::can_drop) is true.
+    ///
+    /// When several such targets can take the item, the one drawn last does. Give each a
+    /// [`can_drop`](Self::can_drop) that takes only its own drags, and two canvases in a window
+    /// keep theirs.
+    pub fn catch_outside(mut self, on: bool) -> Self {
+        self.catch_outside = on;
         self
     }
 

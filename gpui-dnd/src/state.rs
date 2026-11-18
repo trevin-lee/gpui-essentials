@@ -110,6 +110,24 @@ impl Registry {
         }
     }
 
+    /// The targets that [catch](DropTarget::catch_outside) a drag of this item outside their
+    /// bounds, but for those in `under`: the last drawn first.
+    pub fn catchers(&self, item: &DragItem, under: &[Rc<TargetRecord>]) -> Vec<Rc<TargetRecord>> {
+        let ty = item.item_type();
+        let mut found: Vec<_> = self
+            .targets
+            .iter()
+            .filter_map(Weak::upgrade)
+            .filter(|t| {
+                t.spec.catch_outside
+                    && t.spec.accepts(ty)
+                    && !under.iter().any(|u| Rc::ptr_eq(u, t))
+            })
+            .collect();
+        found.sort_by_key(|t| std::cmp::Reverse(t.seq));
+        found
+    }
+
     /// The targets under `at` that accept the item, outermost first: the topmost accepting
     /// target whose visible part holds the point, and the accepting targets it's drawn inside
     /// that hold it too.
@@ -278,6 +296,13 @@ pub(crate) fn snapshot(cx: &App) -> Option<Rc<Snapshot>> {
     state.drag.as_ref().map(|d| d.snap.clone())
 }
 
+/// The drag's source's cursor, if it gives one.
+pub(crate) fn drag_cursor(cx: &App) -> Option<crate::source::CursorErased> {
+    let global = cx.try_global::<DndGlobal>()?;
+    let state = global.0.borrow();
+    state.drag.as_ref().and_then(|d| d.spec.cursor.clone())
+}
+
 /// The drag in this window, if there is one: whether its preview is on its way back.
 pub(crate) fn drag_in(window: &Window, cx: &App) -> Option<bool> {
     let id = window.window_handle().window_id();
@@ -365,7 +390,7 @@ pub(crate) fn begin(
 /// take the item and tells them it's hovering, and tells the views that collect.
 pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Window, cx: &mut App) {
     let state = shared(cx);
-    let (records, mut snap) = {
+    let (mut records, mut snap, catchers) = {
         let mut state = state.borrow_mut();
         let Some(drag) = state.drag.as_ref().filter(|d| d.returning.is_none()) else {
             return;
@@ -382,9 +407,11 @@ pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Wind
             .map(|t| TargetSnap {
                 id: t.id.clone(),
                 can_drop: true,
+                outside: false,
             })
             .collect();
-        (records, snap)
+        let catchers = state.registry(window_id).catchers(&item, &records);
+        (records, snap, catchers)
     };
     // Each target is asked with the pointer already where it is.
     let asking = DragMonitor {
@@ -392,6 +419,23 @@ pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Wind
     };
     for (t, record) in snap.targets.iter_mut().zip(&records) {
         t.can_drop = record.spec.takes(&snap.item, &asking, cx);
+    }
+    // None under the pointer can take it: a target that catches it outside does, as the
+    // outermost.
+    if !snap.targets.iter().any(|t| t.can_drop)
+        && let Some(catcher) = catchers
+            .into_iter()
+            .find(|c| c.spec.takes(&snap.item, &asking, cx))
+    {
+        snap.targets.insert(
+            0,
+            TargetSnap {
+                id: catcher.id.clone(),
+                can_drop: true,
+                outside: !catcher.visible.contains(&at),
+            },
+        );
+        records.insert(0, catcher);
     }
     let snap = Rc::new(snap);
     {
