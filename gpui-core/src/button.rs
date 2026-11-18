@@ -168,11 +168,12 @@ fn paint(variant: ButtonVariant, selected: bool, theme: &Theme) -> Paint {
             border: none,
             hover: c.secondary.blend(c.foreground.opacity(0.05)),
         },
+        // The apps' hover token (`accent`: the foreground at 5% in the dark), as a sidebar row's.
         ButtonVariant::Ghost => Paint {
             fill: none,
             text: c.foreground,
             border: none,
-            hover: if dark { c.muted.opacity(0.5) } else { c.muted },
+            hover: c.accent,
         },
         ButtonVariant::Destructive => Paint {
             fill: c.destructive.opacity(if dark { 0.2 } else { 0.1 }),
