@@ -9,12 +9,12 @@
 
 use gpui::{
     AnyElement, Bounds, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, Modifiers,
-    ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    point, px, size,
+    ParentElement, Pixels, Point, SharedString, Styled, Window, div, point, px, size,
 };
 use gpui_core::{IconName, Press};
 use gpui_dnd::dnd;
 
+use super::a11y::Control;
 use super::board::DraggedCard;
 use super::render::icon;
 use super::table::{Action, CellRef, Entry, Item, Popover, TableView};
@@ -763,8 +763,11 @@ impl TableView {
                     div()
                         .id("gpui-tables-drag-note")
                         .debug_selector(|| "drag-note".into())
-                        .role(gpui::Role::Status)
-                        .aria_label(SharedString::from(note.clone()))
+                        .control(
+                            module_path!(),
+                            gpui::Role::Status,
+                            SharedString::from(note.clone()),
+                        )
                         .max_w(t.px(480.))
                         .min_w_0()
                         .px(t.px(10.))

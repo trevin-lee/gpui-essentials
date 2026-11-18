@@ -7,12 +7,12 @@ use std::ops::Range;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Pixels, Role, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
-    div, px, uniform_list,
+    ParentElement, Pixels, Role, SharedString, Styled, Window, canvas, div, px, uniform_list,
 };
 use gpui_core::{IconName, Press, Selectable as _};
 use gpui_dnd::dnd;
 
+use super::a11y::Control;
 use super::board::DraggedCard;
 use super::list::ListMetrics;
 use super::render::{icon, line};
@@ -75,13 +75,16 @@ impl TableView {
             .debug_selector(|| "list".into())
             .key_context(super::CONTEXT)
             .track_focus(&self.focus)
-            .role(Role::List)
-            .aria_label(SharedString::from(
-                self.shown
-                    .view
-                    .as_ref()
-                    .map_or(self.database.title.clone(), |v| v.name.clone()),
-            ))
+            .control(
+                module_path!(),
+                Role::List,
+                SharedString::from(
+                    self.shown
+                        .view
+                        .as_ref()
+                        .map_or(self.database.title.clone(), |v| v.name.clone()),
+                ),
+            )
             .on_action(cx.listener(|this, _: &super::Up, window, cx| {
                 if !this.up_to_bar(window, cx) {
                     this.move_cell(-1, 0, cx)

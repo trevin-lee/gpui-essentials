@@ -9,11 +9,12 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Pixels,
+    AnyElement, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Pixels, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use gpui_core::{IconName, Press};
 
+use super::a11y::Control;
 use super::render::{icon, line};
 use super::table::{Item, TableView, type_icon};
 use crate::model::{Doc, PropertyType, TableEvent};
@@ -201,15 +202,24 @@ impl TableView {
                             .relative()
                             .rounded(t.px(t.sizes.chip_radius))
                             .when(editable, |d| {
-                                d.cursor_pointer()
-                                    .hover(|s| s.bg(t.colors.hover))
-                                    .child(self.peek_place(&p.id, cx))
-                                    .on_click(cx.listener({
-                                        let (id, pid) = (id.clone(), p.id.clone());
-                                        move |this, _: &ClickEvent, window, cx| {
-                                            this.edit_peeked(&id, Some(&pid), window, cx)
-                                        }
-                                    }))
+                                d.control(
+                                    module_path!(),
+                                    Role::Button,
+                                    format!(
+                                        "{}: {}",
+                                        p.name,
+                                        if empty { "Empty" } else { text.as_str() }
+                                    ),
+                                )
+                                .cursor_pointer()
+                                .hover(|s| s.bg(t.colors.hover))
+                                .child(self.peek_place(&p.id, cx))
+                                .on_click(cx.listener({
+                                    let (id, pid) = (id.clone(), p.id.clone());
+                                    move |this, _: &ClickEvent, window, cx| {
+                                        this.edit_peeked(&id, Some(&pid), window, cx)
+                                    }
+                                }))
                             })
                             .when(empty, |d| d.text_color(t.colors.text_muted))
                             .child(SharedString::from(if empty {
@@ -255,6 +265,7 @@ impl TableView {
                         .child(
                             div()
                                 .id("peek-title-press")
+                                .control(module_path!(), Role::Button, format!("Title: {title}"))
                                 .cursor_pointer()
                                 .child(self.peek_place("title", cx))
                                 .on_click(cx.listener({

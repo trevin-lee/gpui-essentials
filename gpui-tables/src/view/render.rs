@@ -20,6 +20,7 @@ use gpui_core::{
     PopupMenuItem, Press, Selectable as _,
 };
 
+use super::a11y::Control;
 use super::format;
 use super::host::person_label;
 use super::list_render::Landing;
@@ -141,13 +142,16 @@ impl TableView {
             .debug_selector(|| "table".into())
             .key_context(super::CONTEXT)
             .track_focus(&self.focus)
-            .role(Role::Grid)
-            .aria_label(SharedString::from(
-                self.shown
-                    .view
-                    .as_ref()
-                    .map_or(self.database.title.clone(), |v| v.name.clone()),
-            ))
+            .control(
+                module_path!(),
+                Role::Grid,
+                SharedString::from(
+                    self.shown
+                        .view
+                        .as_ref()
+                        .map_or(self.database.title.clone(), |v| v.name.clone()),
+                ),
+            )
             .on_action(cx.listener(|this, _: &super::Up, window, cx| {
                 if !this.up_to_bar(window, cx) {
                     this.on_vertical(-1, cx)
@@ -523,6 +527,14 @@ impl TableView {
                 let active = resizing == Some(c);
                 div()
                     .id(("resize", c))
+                    .control(
+                        module_path!(),
+                        Role::Splitter,
+                        format!(
+                            "Width of {}",
+                            if name.is_empty() { "the column" } else { &name }
+                        ),
+                    )
                     .debug_selector(move || format!("resize:{name}"))
                     .absolute()
                     .top_0()
@@ -627,8 +639,7 @@ impl TableView {
         div()
             .id(("header", column))
             .debug_selector(move || format!("header:{sel_name}"))
-            .role(Role::ColumnHeader)
-            .aria_label(SharedString::from(name.clone()))
+            .control(module_path!(), Role::ColumnHeader, name.clone())
             .relative()
             .flex_none()
             .w(self.column_px(column))
@@ -743,6 +754,7 @@ impl TableView {
             .map(|c| self.render_cell(ix, row, c, cx))
             .collect();
         let rid = self.rows[row].id.clone();
+        let title = self.card_title(&self.rows[row]);
         let selected = self.selected.contains(&rid);
         let lifted = self
             .board
@@ -762,7 +774,7 @@ impl TableView {
             .id(("row", ix))
             .debug_selector(move || sel)
             .group("gpui-tables-row")
-            .role(Role::Row)
+            .control(module_path!(), Role::Row, title)
             .relative()
             .h(self.row_height())
             .w_full()
@@ -864,8 +876,11 @@ impl TableView {
         div()
             .id(("cell", column))
             .debug_selector(move || format!("cell:{rid}:{pid}"))
-            .role(if is_check { Role::CheckBox } else { Role::Cell })
-            .aria_label(SharedString::from(label))
+            .control(
+                module_path!(),
+                if is_check { Role::CheckBox } else { Role::Cell },
+                label,
+            )
             .relative()
             .flex_none()
             .w(self.column_px(column))
@@ -1875,6 +1890,7 @@ impl TableView {
         let button =
             |id: &'static str, label: &'static str, day: Option<i64>, cx: &mut Context<Self>| {
                 Press::new(id)
+                    .accessibility_label(label)
                     .tab_stop(false)
                     .focus_ring_color(t.colors.focus)
                     .debug_selector(move || id.into())
@@ -2035,8 +2051,11 @@ impl TableView {
             div()
                 .id("gpui-tables-menu-note")
                 .debug_selector(|| "menu-note".into())
-                .role(Role::Status)
-                .aria_label(SharedString::from(note.clone()))
+                .control(
+                    module_path!(),
+                    Role::Status,
+                    SharedString::from(note.clone()),
+                )
                 .px(t.px(8.))
                 .py(t.px(4.))
                 .overflow_hidden()

@@ -14,6 +14,7 @@ use gpui::{
 use gpui_core::{IconName, Press, Selectable as _};
 use gpui_dnd::dnd;
 
+use super::a11y::Control;
 use super::board::{BoardMetrics, BoardSpot, CardGhost, DraggedCard};
 use super::render::{icon, line};
 use super::table::TableView;
@@ -99,13 +100,16 @@ impl TableView {
             .debug_selector(|| "board".into())
             .key_context(super::CONTEXT)
             .track_focus(&self.focus)
-            .role(Role::Grid)
-            .aria_label(SharedString::from(
-                self.shown
-                    .view
-                    .as_ref()
-                    .map_or(self.database.title.clone(), |v| v.name.clone()),
-            ))
+            .control(
+                module_path!(),
+                Role::Grid,
+                SharedString::from(
+                    self.shown
+                        .view
+                        .as_ref()
+                        .map_or(self.database.title.clone(), |v| v.name.clone()),
+                ),
+            )
             .on_action(cx.listener(|this, _: &super::Up, window, cx| {
                 if !this.up_to_bar(window, cx) {
                     this.board_move(0, -1, cx)
@@ -297,8 +301,11 @@ impl TableView {
         div()
             .id(("board-column", ci))
             .debug_selector(move || format!("column:{sel}"))
-            .role(Role::List)
-            .aria_label(SharedString::from(format!("{name}, {} cards", info.count)))
+            .control(
+                module_path!(),
+                Role::List,
+                SharedString::from(format!("{name}, {} cards", info.count)),
+            )
             .relative()
             .flex_none()
             .w(m.column_width)
@@ -390,8 +397,7 @@ impl TableView {
         div()
             .id("board-collapsed")
             .debug_selector(|| "collapsed".into())
-            .role(Role::List)
-            .aria_label("Collapsed")
+            .control(module_path!(), Role::List, "Collapsed")
             .flex_none()
             .w(m.column_width)
             .max_h_full()
