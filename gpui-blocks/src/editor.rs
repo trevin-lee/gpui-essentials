@@ -1920,7 +1920,11 @@ impl Editor {
         )
     }
 
-    fn slash_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
+    fn slash_menu(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
         let slash = self.slash.as_ref()?;
         let caret = self.state.read(cx).caret_bounds()?;
         let theme = cx.theme();
@@ -2016,32 +2020,56 @@ impl Editor {
                     .into_any_element(),
             );
         }
+        let height = (px(MENU_ROW) * rows.len() as f32 + px(8.)).min(px(MENU_HEIGHT));
         Some(
             deferred(
-                anchored()
-                    .position(point(caret.left() - px(4.), caret.bottom() + px(6.)))
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        div()
-                            .id("blocks-slash-menu")
-                            .role(Role::ListBox)
-                            .aria_label("Blocks")
-                            .w(px(300.))
-                            .max_h(px(340.))
-                            .overflow_y_scroll()
-                            .track_scroll(&self.menu_scroll)
-                            .py_1()
-                            .rounded(px(10.))
-                            .border_1()
-                            .border_color(theme.border)
-                            .bg(theme.popover)
-                            .text_color(theme.popover_foreground)
-                            .shadow_lg()
-                            .children(rows),
-                    ),
+                caret_menu(caret, height, window).child(
+                    div()
+                        .id("blocks-slash-menu")
+                        .debug_selector(|| "blocks-slash-menu".into())
+                        .role(Role::ListBox)
+                        .aria_label("Blocks")
+                        .w(px(300.))
+                        .max_h(px(MENU_HEIGHT))
+                        .overflow_y_scroll()
+                        .track_scroll(&self.menu_scroll)
+                        .py_1()
+                        .rounded(px(10.))
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.popover)
+                        .text_color(theme.popover_foreground)
+                        .shadow_lg()
+                        .children(rows),
+                ),
             )
             .with_priority(2),
         )
+    }
+}
+
+/// The tallest the slash and @ menus get, scrolling past it.
+pub(crate) const MENU_HEIGHT: f32 = 340.;
+
+/// About how tall one of their rows is, a title and a hint.
+pub(crate) const MENU_ROW: f32 = 44.;
+
+/// Where a menu at the caret goes: under the caret's line, or over it when there's no room
+/// for the menu's `height` below and more above, as near the bottom of the window, so the menu
+/// never covers the line being typed.
+pub(crate) fn caret_menu(caret: Bounds<Pixels>, height: Pixels, window: &Window) -> Anchored {
+    let x = caret.left() - px(4.);
+    let below = window.viewport_size().height - caret.bottom();
+    let above = caret.top();
+    if below < height + px(14.) && above > below {
+        anchored()
+            .anchor(Anchor::BottomLeft)
+            .position(point(x, caret.top() - px(6.)))
+            .snap_to_window_with_margin(px(8.))
+    } else {
+        anchored()
+            .position(point(x, caret.bottom() + px(6.)))
+            .snap_to_window_with_margin(px(8.))
     }
 }
 
@@ -2607,8 +2635,8 @@ impl Render for Editor {
         } else {
             (self.gutter, self.top)
         };
-        let slash_menu = self.slash_menu(cx);
-        let mention_menu = self.mention_menu(cx);
+        let slash_menu = self.slash_menu(window, cx);
+        let mention_menu = self.mention_menu(window, cx);
         let handles = self.selection_handles(window, cx);
         let paste_menu = self.paste_menu(cx);
         let resize = self.resizing.is_some().then(|| {
@@ -2852,6 +2880,62 @@ mod tests {
             page(cx, "pagedown");
         }
         assert_eq!(line(&editor, cx), 299);
+    }
+
+    /// Near the bottom of the window the slash menu opens over the line, not on it.
+    #[gpui::test]
+    fn the_slash_menu_opens_above_a_line_near_the_bottom(cx: &mut TestAppContext) {
+        let source = (1..=200)
+            .map(|n| format!("Line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (editor, cx) = open(cx, &source);
+        let bottom = cx.update(|window, _| window.viewport_size().height);
+        // The last line drawn wholly in the window.
+        let (leaf, len) = editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            state
+                .model()
+                .document()
+                .leaves()
+                .filter_map(|l| {
+                    let len = l.text()?.len();
+                    let at = state.position_bounds(BlockPosition::new(l.id(), len))?;
+                    (at.bottom() < bottom - gpui::px(8.)).then_some((l.id(), len))
+                })
+                .last()
+                .unwrap()
+        });
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let _ = s.set_selection(BlockSelection::caret(BlockPosition::new(leaf, len)), cx);
+            })
+        });
+        cx.simulate_input(" /");
+        draw(cx);
+        let caret = editor.update(cx, |e, cx| e.state().read(cx).caret_bounds().unwrap());
+        let menu = cx.debug_bounds("blocks-slash-menu").expect("the menu");
+        assert!(
+            menu.bottom() <= caret.top(),
+            "menu {menu:?} over the caret {caret:?}"
+        );
+        // At the top it opens under the line, as before.
+        cx.simulate_keystrokes("escape");
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let first = s.model().document().leaves().next().unwrap().id();
+                let _ = s.set_selection(BlockSelection::caret(BlockPosition::new(first, 6)), cx);
+            })
+        });
+        draw(cx);
+        cx.simulate_input(" /");
+        draw(cx);
+        let caret = editor.update(cx, |e, cx| e.state().read(cx).caret_bounds().unwrap());
+        let menu = cx.debug_bounds("blocks-slash-menu").expect("the menu");
+        assert!(
+            menu.top() >= caret.bottom(),
+            "menu {menu:?} under the caret {caret:?}"
+        );
     }
 
     /// Typing shortcuts: arrows and an em dash, one undo putting back what was typed, never in
