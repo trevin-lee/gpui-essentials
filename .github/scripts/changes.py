@@ -5,20 +5,25 @@ $GITHUB_OUTPUT.
 - own: the crate's own files (or its workflow) changed. The slow jobs (iOS, the shots lint)
   run only then.
 - run: anything the crate builds from changed, so its macOS job runs. That's `own`, the
-  toolchain, the root Cargo.toml past its `members` line, or a package in Cargo.lock that the
-  crate depends on (directly or not, on any target, dev-dependencies included). A pull request
-  that only adds a crate to the workspace, or bumps a dependency another crate uses, then runs
-  nothing here.
+  toolchain, the folder of a workspace crate it depends on by path (directly or not, any kind of
+  dependency: gpui-tables on gpui-dnd on gpui-core), the root Cargo.toml past its `members`
+  line, or a package in Cargo.lock that the crate depends on (directly or not, on any target,
+  dev-dependencies included). A pull request that only adds a crate to the workspace, or bumps a
+  dependency another crate uses, then runs nothing here.
 
-Usage: changes.py <own-regex> <package>... (with GH_TOKEN, GITHUB_REPOSITORY, PR_NUMBER set).
+Usage: changes.py <own-regex> <package>... [--not <package>]... (with GH_TOKEN,
+GITHUB_REPOSITORY, PR_NUMBER set). `--not` leaves a workspace crate out of the path walk, for one
+whose own workflow already covers its dependents (gpui-core's lints and builds every crate).
 Anything it can't work out counts as changed.
 """
 
 import json
 import os
 import re
+import posixpath
 import subprocess
 import sys
+import tomllib
 
 
 def gh(*args: str) -> str:
@@ -69,17 +74,68 @@ def without_members(toml: str) -> str:
     return re.sub(r"^members\s*=\s*\[.*?\]", "", toml, count=1, flags=re.M | re.S)
 
 
+def workspace(repo: str, sha: str) -> dict[str, tuple[str, set[str]]]:
+    """The workspace's crates at a commit: by package name, its folder and the folders it
+    depends on by path (each kind of dependency, on any target)."""
+    root = tomllib.loads(raw(repo, "Cargo.toml", sha))
+    out = {}
+    for folder in root.get("workspace", {}).get("members", []):
+        manifest = tomllib.loads(raw(repo, f"{folder}/Cargo.toml", sha))
+        tables = [manifest] + list(manifest.get("target", {}).values())
+        deps = set()
+        for t in tables:
+            for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+                for d in (t.get(kind) or {}).values():
+                    if isinstance(d, dict) and "path" in d:
+                        deps.add(posixpath.normpath(posixpath.join(folder, d["path"])))
+        out[manifest["package"]["name"]] = (folder, deps)
+    return out
+
+
+def dependency_folders(crates: dict[str, tuple[str, set[str]]], roots: list[str], skip: list[str]) -> set[str]:
+    """The folders of the workspace crates `roots` depend on by path, walked through, without
+    the roots' own or `skip`'s (nor what only they lead to)."""
+    by_folder = {folder: name for name, (folder, _) in crates.items()}
+    own = {crates[r][0] for r in roots if r in crates}
+    skipped = {crates[s][0] for s in skip if s in crates}
+    seen: set[str] = set()
+    todo = [d for r in roots if r in crates for d in crates[r][1]]
+    while todo:
+        f = todo.pop()
+        if f in seen or f in skipped or f in own:
+            continue
+        seen.add(f)
+        todo.extend(crates[by_folder[f]][1] if f in by_folder else [])
+    return seen
+
+
 def main() -> None:
-    own_re, roots = re.compile(sys.argv[1]), sys.argv[2:]
+    args, skip = sys.argv[1:], []
+    while "--not" in args:
+        i = args.index("--not")
+        skip.append(args[i + 1])
+        del args[i : i + 2]
+    own_re, roots = re.compile(args[0]), args[1:]
     repo, number = os.environ["GITHUB_REPOSITORY"], os.environ["PR_NUMBER"]
     files = gh("--paginate", f"repos/{repo}/pulls/{number}/files", "--jq", ".[].filename").split()
     own = any(own_re.search(f) for f in files)
     run, why = own, "its own files" if own else ""
     if not run and "rust-toolchain.toml" in files:
         run, why = True, "the toolchain"
+    pr = json.loads(gh(f"repos/{repo}/pulls/{number}"))
+    head = pr["head"]["sha"]
+    if not run:
+        try:
+            deps = dependency_folders(workspace(repo, head), roots, skip)
+        except (KeyError, tomllib.TOMLDecodeError):
+            deps = None
+        if deps is None:
+            run, why = True, "the workspace: unreadable"
+        else:
+            hit = sorted({d for d in deps for f in files if f.startswith(d + "/")})
+            if hit:
+                run, why = True, "a crate it depends on: " + ", ".join(hit)
     if not run and ("Cargo.toml" in files or "Cargo.lock" in files):
-        pr = json.loads(gh(f"repos/{repo}/pulls/{number}"))
-        head = pr["head"]["sha"]
         base = json.loads(gh(f"repos/{repo}/compare/{pr['base']['sha']}...{head}"))[
             "merge_base_commit"
         ]["sha"]
