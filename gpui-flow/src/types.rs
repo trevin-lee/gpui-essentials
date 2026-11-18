@@ -412,6 +412,31 @@ impl Node {
         self
     }
 
+    /// What assistive technology calls the node (React Flow's `ariaLabel`, saved under that
+    /// name); its label when unset.
+    pub fn aria_label(mut self, label: impl Into<String>) -> Self {
+        self.extra
+            .insert("ariaLabel".into(), Value::String(label.into()));
+        self
+    }
+
+    /// What assistive technology calls the node: its `ariaLabel`, else its label, else its
+    /// kind ("image node").
+    pub fn accessible_name(&self) -> SharedString {
+        let given = self.extra.get("ariaLabel").and_then(Value::as_str);
+        match given.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(name) => name.to_string().into(),
+            None => {
+                let label = self.label_text();
+                if label.trim().is_empty() {
+                    format!("{} node", self.kind).into()
+                } else {
+                    label
+                }
+            }
+        }
+    }
+
     /// Sets `data.label`, which the built-in kinds show.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         if !self.data.is_object() {
@@ -1179,6 +1204,14 @@ impl Edge {
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// What assistive technology calls the edge (React Flow's `ariaLabel`, saved under that
+    /// name); "Edge from … to …" when unset (see [`crate::Flow::edge_name`]).
+    pub fn aria_label(mut self, label: impl Into<String>) -> Self {
+        self.extra
+            .insert("ariaLabel".into(), Value::String(label.into()));
         self
     }
 

@@ -98,7 +98,7 @@ mod toggle;
 mod tooltip;
 
 #[doc(hidden)]
-pub use a11y::{Audited, audit_start, audit_take};
+pub use a11y::{Audited, audit, audit_start, audit_take};
 pub use accordion::{Accordion, AccordionItem};
 pub use alert::{Alert, AlertVariant};
 pub use aspect_ratio::AspectRatio;
