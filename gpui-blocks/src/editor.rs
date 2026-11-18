@@ -5332,6 +5332,29 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "# intro words");
     }
 
+    /// On the smallest phone (375×667) the block sheet's Duplicate and Delete are in reach
+    /// without scrolling: before Turn into's long list.
+    #[gpui::test]
+    fn the_block_sheets_actions_are_in_reach_on_a_small_phone(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "intro words\n\nsecond line");
+        cx.simulate_resize(gpui::size(gpui::px(375.), gpui::px(667.)));
+        draw(cx);
+        let at = point_at(&editor, cx, 2);
+        long_press(cx, at);
+        tap(cx, "blocks-menu-Block");
+        draw(cx);
+        let window = cx.update(|window, _| window.viewport_size());
+        for item in ["menu-item-move", "menu-item-duplicate", "menu-item-delete"] {
+            let b = cx
+                .debug_bounds(item)
+                .unwrap_or_else(|| panic!("{item} isn't drawn"));
+            assert!(
+                b.bottom() <= window.height,
+                "{item} is below the window: {b:?}"
+            );
+        }
+    }
+
     /// Drags out a selection with the pointer from `from` to `to` (byte offsets in the first
     /// line), checking the bar waits for the button to come up.
     fn drag_select(editor: &Entity<Editor>, cx: &mut VisualTestContext, from: usize, to: usize) {

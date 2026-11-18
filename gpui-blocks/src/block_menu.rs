@@ -464,9 +464,10 @@ impl Editor {
 }
 
 impl Editor {
-    /// The block menu as a sheet across the bottom, for touch: Turn into's kinds listed in it
-    /// (a submenu has no room beside a phone's menu), Move (the block lifts, for the next finger
-    /// drag to move), Duplicate and Delete, then the colours.
+    /// The block menu as a sheet across the bottom, for touch: Move (the block lifts, for the
+    /// next finger drag to move), Duplicate and Delete first, in reach on the smallest phone,
+    /// then Turn into's kinds listed in it (a submenu has no room beside a phone's menu), then
+    /// the colours.
     /// Drawn closed too, so the focus goes back to the page when it closes.
     pub(crate) fn block_sheet(&self, cx: &mut Context<Self>) -> AnyElement {
         let block = self.block_sheet;
@@ -478,8 +479,18 @@ impl Editor {
         let dismiss = this.clone();
         let theme = cx.theme().clone();
         let menu = block.map(|block| {
+            // What's done to the block first, in reach on the smallest phone; then Turn into's
+            // long list, listed in it (a sheet has no room for a submenu).
             let menu = PopupMenu::new("block-sheet-menu")
                 .touch(true)
+                .item(PopupMenuItem::new("move", "Move").icon(IconName::Move))
+                .items(self.open_item(block, cx))
+                .items(self.resize_item(block, cx))
+                .items(self.copy_code_item(block, cx))
+                .items(self.copy_link_item())
+                .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
+                .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash))
+                .separator()
                 .heading("Turn into")
                 .items(
                     turn_into_titles()
@@ -489,17 +500,7 @@ impl Editor {
                             PopupMenuItem::new(format!("turn-{ix}"), title).disabled(!has_text)
                         }),
                 );
-            let menu = menu
-                .separator()
-                .item(PopupMenuItem::new("move", "Move").icon(IconName::Move))
-                .items(self.open_item(block, cx))
-                .items(self.resize_item(block, cx))
-                .items(self.copy_code_item(block, cx))
-                .items(self.copy_link_item())
-                .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
-                .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash));
-            // Its colours last, listed in it as Turn into's are (a sheet has no room for a
-            // submenu), so the long list doesn't push Duplicate and Delete out of reach.
+            // Its colours last, listed in it too.
             let menu = match self.callout_look(block, cx) {
                 Some((icon, color)) => callout_color_entries(
                     icon_entries(menu.separator().heading("Icon"), icon.as_deref())
