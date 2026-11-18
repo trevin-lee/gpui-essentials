@@ -3770,6 +3770,8 @@ mod tests {
         cx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
         draw(cx);
         assert_eq!(markdown(&editor, cx), "right\n\ntop\n\nleft");
+        // The grip's release ended a drag, not a click: no block menu.
+        assert_eq!(editor.read_with(cx, |e, _| e.block_menu), None);
     }
 
     /// `compact_below(px(0.))` keeps the wide layout on a narrow editor, with the host's own
@@ -5036,6 +5038,37 @@ mod tests {
         touch(cx, Ended, gpui::point(from.x, from.y + by));
         assert!(!editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
         assert_eq!(markdown(&editor, cx), "second\n\nthird\n\nfirst");
+    }
+
+    /// A tap on a block lifted by the sheet's Move sets it down where it was.
+    #[gpui::test]
+    fn a_tap_sets_a_lifted_block_down_where_it_was(cx: &mut TestAppContext) {
+        use gpui::TouchPhase::*;
+        let (editor, cx) = open(cx, "first\n\nsecond\n\nthird");
+        let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks());
+        long_press(cx, blocks[0].1.center());
+        tap(cx, "blocks-menu-Block");
+        draw(cx);
+        let move_item = cx
+            .debug_bounds("menu-item-move")
+            .expect("the sheet has Move")
+            .center();
+        cx.simulate_click(move_item, gpui::Modifiers::none());
+        draw(cx);
+        assert!(editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
+        let at = blocks[2].1.center();
+        touch(cx, Started, at);
+        touch(cx, Ended, at);
+        draw(cx);
+        assert!(
+            !editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()),
+            "set down"
+        );
+        assert_eq!(
+            markdown(&editor, cx),
+            "first\n\nsecond\n\nthird",
+            "where it was"
+        );
     }
 
     /// While blocks are dragged near the page's bottom edge, the page scrolls.

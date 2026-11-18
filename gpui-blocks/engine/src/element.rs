@@ -301,14 +301,14 @@ impl RenderOnce for BlockEditor {
             let index = &cull_state.index;
             let n = units.len();
             // Where each top-level block lays out (a long list's chunks are one block), and how
-            // the blocks changing places move from there (`reorder`).
-            let mut slots: Vec<(BlockId, super::reorder::Slot)> = Vec::with_capacity(n);
+            // the blocks changing places move from there (gpui-dnd's `SortableState`).
+            let mut slots: Vec<(BlockId, gpui_dnd::sortable_state::Slot)> = Vec::with_capacity(n);
             for (ix, unit) in units.iter().enumerate() {
                 let id = snapshot.blocks[unit.block];
                 let (top, height) = (f32::from(index.prefix(ix)), f32::from(index.height(ix)));
                 match slots.last_mut() {
                     Some((last, slot)) if *last == id => slot.pitch += height,
-                    _ => slots.push((id, super::reorder::Slot { top, pitch: height })),
+                    _ => slots.push((id, gpui_dnd::sortable_state::Slot { top, pitch: height })),
                 }
             }
             let reduce_motion = cx.reduce_motion();
@@ -516,7 +516,7 @@ impl RenderOnce for BlockEditor {
         let mut root_style = Style::default();
         root_style.refine(&self.style);
         let s = &self.state;
-        div()
+        let editor = div()
             .id("block-editor")
             // D8: one multi-line text input over the document; the value is
             // built only while accessibility is active (cached per revision).
@@ -631,7 +631,10 @@ impl RenderOnce for BlockEditor {
                 own_leaves,
                 snapshot,
                 style,
-            })
+            });
+        // Block drags run on gpui-dnd: the editor's own provider (layout-transparent; the
+        // window's first drawn one does the work).
+        gpui_dnd::DndProvider::new(editor)
     }
 }
 
@@ -739,6 +742,15 @@ impl Element for EditorRoot {
         window: &mut Window,
         cx: &mut App,
     ) -> Prepaint {
+        // The content as its block drags' target, held until the next frame registers it again.
+        let target = gpui_dnd::register_target(
+            window,
+            cx,
+            ElementId::NamedInteger("gpui-blocks-editor".into(), self.state.entity_id().as_u64()),
+            bounds,
+            super::dnd::target(&self.state),
+        );
+        *self.state.read(cx).dnd_target.borrow_mut() = Some(target);
         if std::mem::take(&mut self.fresh) {
             child.prepaint(window, cx);
             // Swap in the complete frame; handlers read it until the next one.
@@ -1057,7 +1069,7 @@ impl Element for EditorRoot {
             });
         });
         let entity = self.state.clone();
-        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
             if phase != DispatchPhase::Bubble {
                 return;
             }
@@ -1074,17 +1086,25 @@ impl Element for EditorRoot {
             if event.pressed_button != Some(MouseButton::Left) {
                 return;
             }
-            entity.update(cx, |state, cx| {
-                if state.block_drag_to(event.position, cx) {
-                    return;
+            let begin = entity.update(cx, |state, cx| {
+                // A press on a grip or edge handle past its threshold begins the block drag;
+                // once on, gpui-dnd follows it (see `dnd`).
+                match state.pressed_move(event.position, cx) {
+                    super::dnd::Moved::Begin(begin) => return Some(*begin),
+                    super::dnd::Moved::Taken => return None,
+                    super::dnd::Moved::Selection => {}
                 }
                 if state.dragging && state.sweep_to(event.position, cx) {
-                    return;
+                    return None;
                 }
                 if state.dragging {
                     state.mouse_at(event.position, true, cx);
                 }
+                None
             });
+            if let Some(begin) = begin {
+                super::dnd::start(&entity, begin, window, cx);
+            }
         });
         // Touch: a long press selects the word under the finger, and moving before letting go
         // extends the selection; begun off the text (the gutter, a picture, past a line's end),
@@ -1116,11 +1136,20 @@ impl Element for EditorRoot {
                 }
                 gpui::TouchPhase::Moved if window.has_long_press_capture(&entity) => {
                     cx.stop_propagation();
-                    entity.update(cx, |state, cx| {
-                        if !state.touch_moved(event.start_position, event.position, cx) {
-                            state.mouse_at(event.position, true, cx)
+                    let begin = entity.update(cx, |state, cx| {
+                        match state.touch_moved(event.start_position, event.position, cx) {
+                            super::dnd::Moved::Begin(begin) => Some(*begin),
+                            super::dnd::Moved::Taken => None,
+                            super::dnd::Moved::Selection => {
+                                state.mouse_at(event.position, true, cx);
+                                None
+                            }
                         }
                     });
+                    // Lifted off the text: gpui-dnd follows the finger from here.
+                    if let Some(begin) = begin {
+                        super::dnd::start(&entity, begin, window, cx);
+                    }
                 }
                 gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => {
                     let cancelled = event.phase == gpui::TouchPhase::Cancelled;
@@ -1129,24 +1158,10 @@ impl Element for EditorRoot {
                 _ => {}
             }
         });
-        // A block lifted in place (the block sheet's Move) takes the next finger drag.
-        let entity = self.state.clone();
-        window.on_mouse_event(move |event: &gpui::TouchDragEvent, phase, window, cx| {
-            if phase != DispatchPhase::Bubble {
-                return;
-            }
-            let taken = entity.update(cx, |state, cx| {
-                state.lifted_touch(event.phase, event.start_position, event.position, cx)
-            });
-            if taken {
-                if event.phase == gpui::TouchPhase::Started {
-                    window.prevent_default();
-                }
-                cx.stop_propagation();
-            }
-        });
         let entity = self.state.clone();
         window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+            // A drag's release is gpui-dnd's (it doesn't reach here): this is a press that
+            // never became one.
             if phase == DispatchPhase::Bubble {
                 entity.update(cx, |state, cx| {
                     state.dragging = false;
