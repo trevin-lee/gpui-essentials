@@ -1574,7 +1574,7 @@ impl Calendar {
             target,
             held: None,
         });
-        self.hand_over(event.position, gpui_dnd::Backend::Mouse, window, cx);
+        self.hand_over(event.position, gpui_dnd::Backend::Mouse, 4., window, cx);
         cx.notify();
     }
 
@@ -1949,7 +1949,7 @@ impl Calendar {
                     target,
                     held: None,
                 });
-                self.hand_over(at, gpui_dnd::Backend::Touch, window, cx);
+                self.hand_over(at, gpui_dnd::Backend::Touch, 8., window, cx);
                 true
             }
             _ => self.touch_follow(event.phase, event.position, &geo, cx),

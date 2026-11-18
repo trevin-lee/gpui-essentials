@@ -162,7 +162,10 @@ impl Calendar {
             },
             held: Some(held),
         });
-        self.hand_over(at, gpui_dnd::Backend::Mouse, window, cx);
+        // A tap reaches a row as a mouse press (GPUI makes one when the finger lifts), so it's
+        // the mouse's either way; on touch it takes a finger's 8 points to start a drag.
+        let slop = if self.options.touch { 8. } else { 4. };
+        self.hand_over(at, gpui_dnd::Backend::Mouse, slop, window, cx);
         cx.notify();
     }
 

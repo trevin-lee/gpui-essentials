@@ -30,11 +30,12 @@ pub(crate) struct DraggedEvent {
 
 impl Calendar {
     /// The press just made `Drag::Press`: if it can become a drag, gpui-dnd takes it from here
-    /// and begins it once it moves `4 × scale` (`8 × scale` for a finger).
+    /// and begins it once it moves `slop × scale` (4 for the mouse, 8 for a finger).
     pub(super) fn hand_over(
         &mut self,
         at: Point<Pixels>,
         backend: Backend,
+        slop: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -46,10 +47,6 @@ impl Calendar {
         };
         let Some(cursor) = self.drag_cursor(target, &geo) else {
             return;
-        };
-        let slop = match backend {
-            Backend::Touch => 8.,
-            _ => 4.,
         };
         let source = self.drag_source(cursor, cx);
         let id = self.drag_id(cx);
