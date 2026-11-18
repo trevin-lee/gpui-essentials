@@ -1014,37 +1014,51 @@ impl Ink<'_> {
             return None;
         }
         let font_size = self.u(size);
-        let mut line: SharedString = text.to_string().into();
-        let mut runs = self.runs(text, weight, color);
-        if let Some(w) = max_w {
-            if w <= px(1.) {
-                return None;
-            }
+        let full: SharedString = text.to_string().into();
+        let runs = self.runs(text, weight, color);
+        let Some(w) = max_w else {
+            return Some(
+                self.window
+                    .text_system()
+                    .shape_line(full, font_size, &runs, None),
+            );
+        };
+        if w <= px(1.) {
+            return None;
+        }
+        // The line wrapper measures glyph by glyph; shaping adds kerning, so a line it says
+        // fits can come out a hair wider. Then it's cut again, shorter by what it overflowed,
+        // rather than left out.
+        let mut room = w;
+        for _ in 0..3 {
             let mut wrapper = self
                 .window
                 .text_system()
                 .line_wrapper(runs[0].font.clone(), font_size);
-            let (cut, cut_runs) = wrapper.truncate_line(line, w, "…", &runs, TruncateFrom::End);
-            let next = cut_runs.into_owned();
-            if next.is_empty() {
+            let (cut, cut_runs) =
+                wrapper.truncate_line(full.clone(), room, "…", &runs, TruncateFrom::End);
+            let cut_runs = cut_runs.into_owned();
+            if cut_runs.is_empty() {
                 return None;
             }
             // A lone "…", or one letter and "…", says nothing: leave the text out.
             if cut.as_ref() != text && kept_chars(&cut) < MIN_KEPT {
                 return None;
             }
-            line = cut;
-            runs = next;
+            let shaped = self
+                .window
+                .text_system()
+                .shape_line(cut, font_size, &cut_runs, None);
+            if shaped.width <= w {
+                return Some(shaped);
+            }
+            room -= shaped.width - w + px(0.5);
+            if room <= px(1.) {
+                break;
+            }
         }
-        let shaped = self
-            .window
-            .text_system()
-            .shape_line(line, font_size, &runs, None);
         // Too narrow for even the ellipsis: draw nothing rather than spill over.
-        if max_w.is_some_and(|w| shaped.width > w) {
-            return None;
-        }
-        Some(shaped)
+        None
     }
 
     /// One line of text from its top left, cut with an ellipsis at `max_w`. Returns its width.
