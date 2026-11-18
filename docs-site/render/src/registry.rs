@@ -723,6 +723,10 @@ pub fn crates() -> Vec<Crate> {
                     "A month with spans, dotted rows and \"+N more\"",
                 ),
                 (
+                    "year.png",
+                    "The year as twelve small months, busy days shaded",
+                ),
+                (
                     "drag-move.png",
                     "An event carried to another day, the original faded",
                 ),
