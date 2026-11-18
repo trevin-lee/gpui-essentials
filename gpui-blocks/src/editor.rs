@@ -2817,6 +2817,139 @@ mod tests {
         assert_eq!((anchor.offset, head.offset), (0, 4));
     }
 
+    /// Timings on a 5,000-block page, for finding what's slow: run with
+    /// `cargo test -p gpui-blocks --release --features gpui/bench-support -- --ignored
+    /// long_page_timings --nocapture`. Headless (GPUI's test platform lays out and paints into
+    /// nothing), so it measures the editor's own work, not the GPU's.
+    #[gpui::test]
+    #[ignore]
+    fn long_page_timings(cx: &mut TestAppContext) {
+        use std::time::{Duration, Instant};
+        let mut page = String::new();
+        for i in 0..5000 {
+            match i % 10 {
+                0 => page.push_str(&format!("## Section {i}\n\n")),
+                1 | 2 => page.push_str(&format!("- item {i} with **bold**, `code` and a [link](https://example.com/{i})\n")),
+                3 => page.push_str(&format!("\n> A quote, number {i}, with *emphasis*.\n\n")),
+                4 => page.push_str(&format!("```rust\nfn f{i}() -> u32 {{ {i} }}\n```\n\n")),
+                5 => page.push_str(&format!("- [ ] task {i}\n\n")),
+                _ => page.push_str(&format!(
+                    "Paragraph {i}: the plan is to write, review and ship it, with notes on what changed and why.\n\n"
+                )),
+            }
+        }
+        let median = |mut runs: Vec<Duration>| {
+            runs.sort();
+            runs[runs.len() / 2]
+        };
+        let t = Instant::now();
+        let parsed =
+            markdown_editor::BlockEditorModel::from_markdown(&page, crate::extensions(&[]));
+        let parse = t.elapsed();
+        drop(parsed);
+        let t = Instant::now();
+        let (editor, cx) = open(cx, &page);
+        let made = t.elapsed();
+        cx.simulate_resize(gpui::size(gpui::px(1280.), gpui::px(820.)));
+        draw(cx);
+        let open_time = t.elapsed();
+        let leaves = editor.update(cx, |e, cx| {
+            e.state().read(cx).model().document().leaves().count()
+        });
+        // A frame and the work it leaves for after it, as the app's loop runs both.
+        let frame = |cx: &mut VisualTestContext| {
+            let t = Instant::now();
+            cx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            cx.run_until_parked();
+            t.elapsed()
+        };
+        let steady = median((0..9).map(|_| frame(cx)).collect());
+        // Typing in the middle, a keystroke and its frame.
+        caret_at_end(&editor, cx, leaves / 2);
+        let typing = median(
+            (0..15)
+                .map(|_| {
+                    let t = Instant::now();
+                    cx.simulate_input("x");
+                    draw(cx);
+                    t.elapsed()
+                })
+                .collect(),
+        );
+        let enter = median(
+            (0..9)
+                .map(|_| {
+                    let t = Instant::now();
+                    cx.simulate_keystrokes("enter");
+                    draw(cx);
+                    t.elapsed()
+                })
+                .collect(),
+        );
+        // Scrolling end to end in 40-point steps, a frame each.
+        let max = editor.read_with(cx, |e, _| e.scroll.max_offset().y);
+        let mut scroll_frames = Vec::new();
+        let mut y = gpui::px(0.);
+        while y < max {
+            y = (y + gpui::px(40.)).min(max);
+            editor.read_with(cx, |e, _| {
+                e.scroll.set_offset(gpui::point(gpui::px(0.), -y))
+            });
+            scroll_frames.push(frame(cx));
+        }
+        let scrolled = scroll_frames.len();
+        let scroll_worst = scroll_frames.iter().max().copied().unwrap_or_default();
+        let scroll = median(scroll_frames);
+        // Select all, copy it, and the save's JSON and Markdown.
+        // The test context's first update after thousands of frames settles them (about half a
+        // second, which the app's own frame loop never piles up): out of the timings below.
+        editor.update(cx, |_, cx| cx.notify());
+        let t = Instant::now();
+        cx.simulate_keystrokes("secondary-a");
+        let select_all_key = t.elapsed();
+        let t = Instant::now();
+        draw(cx);
+        let select_all_frame = t.elapsed();
+        let next_frame = frame(cx);
+        let t = Instant::now();
+        cx.simulate_keystrokes("secondary-c");
+        let copy = t.elapsed();
+        let t = Instant::now();
+        let json = editor.update(cx, |e, cx| e.document(cx)).to_json();
+        let to_json = t.elapsed();
+        let t = Instant::now();
+        let markdown = editor.update(cx, |e, cx| e.markdown(cx));
+        let to_markdown = t.elapsed();
+        // Find a word on every line, then step.
+        let t = Instant::now();
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| s.find("the", false, cx))
+        });
+        draw(cx);
+        let find = t.elapsed();
+        let matches = editor.update(cx, |e, cx| e.state().read(cx).find_matches().0.len());
+        // Undo a delete of everything.
+        cx.simulate_keystrokes("backspace");
+        draw(cx);
+        let t = Instant::now();
+        cx.simulate_keystrokes("secondary-z");
+        draw(cx);
+        let undo_all = t.elapsed();
+        eprintln!(
+            "long page ({leaves} lines, {} KB Markdown, {} KB JSON, {} build):\n  open + first frame {open_time:?} (parse {parse:?}, editor made {made:?})\n  steady frame {steady:?}\n  keystroke + frame {typing:?}\n  enter + frame {enter:?}\n  scroll frame {scroll:?} median, {scroll_worst:?} worst, {scrolled} frames\n  select all {select_all_key:?} + frame {select_all_frame:?}, next frame {next_frame:?}\n  copy {copy:?}\n  document() to JSON {to_json:?}\n  markdown() {to_markdown:?}\n  find \"the\" ({matches} matches) + frame {find:?}\n  undo deleting everything + frame {undo_all:?}",
+            markdown.len() / 1024,
+            json.len() / 1024,
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            },
+        );
+    }
+
     /// A comment's quote, tinted from its anchor, follows its words as the text around them is
     /// edited, and goes when they do; a quote over two lines tints both.
     #[gpui::test]
