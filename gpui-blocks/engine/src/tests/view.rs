@@ -5339,3 +5339,29 @@ fn a_selected_run_drops_beside_as_one_column_and_columns_never_nest(cx: &mut Tes
         Ok(())
     );
 }
+
+#[gpui::test]
+fn a_long_press_beside_a_line_in_a_column_lifts_that_block(cx: &mut TestAppContext) {
+    let src = format!("top\n\n{ROW}");
+    let (editor, cx) = open(cx, &src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let columns = blocks[1].0;
+    let cols = editor.read_with(cx, |e, _| e.children_bounds(columns));
+    let right = editor.read_with(cx, |e, _| e.children_bounds(cols[1].0))[0].1;
+    // Past the end of "right": off the text, in the right column.
+    let start = gpui::point(right.left() + px(120.), right.center().y);
+    let to = gpui::point(blocks[0].1.center().x, blocks[0].1.top() - px(2.));
+    for (phase, at) in [
+        (gpui::TouchPhase::Started, start),
+        (gpui::TouchPhase::Moved, to),
+        (gpui::TouchPhase::Ended, to),
+    ] {
+        cx.simulate_event(gpui::LongPressEvent {
+            phase,
+            start_position: start,
+            position: at,
+        });
+        draw(cx);
+    }
+    assert_eq!(source(&editor, cx), "right\n\ntop\n\nleft");
+}

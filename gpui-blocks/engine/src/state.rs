@@ -2516,7 +2516,7 @@ impl BlockEditorState {
         if f32::from(d.x).hypot(f32::from(d.y)) <= TOUCH_LIFT {
             return true;
         }
-        let Some(block) = self
+        let Some(top) = self
             .top_level_bounds()
             .into_iter()
             .find(|(_, _, b)| start.y >= b.top() && start.y < b.bottom())
@@ -2524,6 +2524,8 @@ impl BlockEditorState {
         else {
             return false;
         };
+        // In columns: the block under the press in the column it's in.
+        let block = self.block_in_columns_at(top, start).unwrap_or(top);
         self.begin_block_drag(block, start);
         let Some(drag) = self.block_drag.as_mut() else {
             return false;
@@ -2531,6 +2533,20 @@ impl BlockEditorState {
         drag.by_touch = true;
         self.block_drag_to(at, cx);
         true
+    }
+
+    /// The block at `at` in a column of the columns block `columns`, if `at` is in one.
+    fn block_in_columns_at(&self, columns: BlockId, at: Point<Pixels>) -> Option<BlockId> {
+        let (column, _) = self.children_bounds(columns).into_iter().find(|(_, b)| {
+            at.x >= b.left() - gpui::px(30.)
+                && at.x < b.right()
+                && at.y >= b.top() - gpui::px(6.)
+                && at.y < b.bottom() + gpui::px(6.)
+        })?;
+        self.children_bounds(column)
+            .into_iter()
+            .find(|(_, b)| at.y >= b.top() - gpui::px(4.) && at.y < b.bottom() + gpui::px(4.))
+            .map(|(id, _)| id)
     }
 
     /// Lifts the top-level `block` where it is, as the block sheet's Move does: it's drawn
