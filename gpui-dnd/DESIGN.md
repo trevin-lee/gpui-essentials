@@ -977,8 +977,11 @@ Agreed with the gpui-blocks agent (#393). Building starts after blocks' bookmark
 Up/Down PRs merge, when the lead says.
 
 
-1. gpui-dnd: `SortableState`, `Press::relative` and `Said::Cancelled`, with tests. Blocks keeps
-   its own `reorder.rs` until step 2.
+1. **Built.** gpui-dnd: `SortableState` (`src/sortable_state.rs`, from `reorder.rs` at #397,
+   generic over the key, with its tests), `Press::relative` and `Said::Cancelled`, with tests in
+   `tests/host.rs`. An empty `say` sentence leaves that moment to the provider's words, which
+   is how gpui-calendar keeps gpui-dnd's own cancel sentence. Blocks keeps its own `reorder.rs`
+   until step 2.
 2. gpui-blocks, reviewed by the blocks agent:
    - grips, edge handles, touch lift and lift-in-place onto gpui-dnd;
    - the content as target, and edge scrolling as `auto_scroll`;

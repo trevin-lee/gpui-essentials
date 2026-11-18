@@ -298,7 +298,11 @@ pub(crate) fn target_sentence(
         target: target.id.clone(),
         bounds: target.bounds,
     };
-    target.spec.sentence(item, &monitor, when, cx)
+    // An empty sentence leaves it to the provider's.
+    target
+        .spec
+        .sentence(item, &monitor, when, cx)
+        .filter(|s| !s.is_empty())
 }
 
 pub(crate) fn announcements(window: &Window, cx: &mut App) -> Announcements {

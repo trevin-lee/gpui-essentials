@@ -176,6 +176,10 @@ pub(crate) struct ActiveDrag {
     pub returning: Option<Returning>,
     /// What a keyboard drag last said about where it is.
     pub said_over: Option<SharedString>,
+    /// A drag that follows the next finger by how far it moves ([`Press::relative`]
+    /// (crate::Press::relative)): the offset from that finger to the drag's pointer, once it
+    /// has landed.
+    pub relative: Option<Option<Point<Pixels>>>,
 }
 
 /// How long a preview takes to go back to its source after a cancel.
@@ -382,6 +386,7 @@ pub(crate) fn begin(
             targets: Vec::new(),
             returning: None,
             said_over: None,
+            relative: None,
         });
     }
     if let Some(on_begin) = &spec.on_begin {
@@ -555,6 +560,28 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
 
 /// Ends the drag without a drop: the preview goes back to the source. A drag already going
 /// back lands at once.
+/// A relative drag's offset from its finger to its pointer ([`ActiveDrag::relative`]).
+pub(crate) fn relative(cx: &App) -> Option<Option<Point<Pixels>>> {
+    let global = cx.try_global::<DndGlobal>()?;
+    let state = global.0.borrow();
+    state.drag.as_ref()?.relative
+}
+
+pub(crate) fn set_relative(offset: Option<Point<Pixels>>, cx: &mut App) {
+    if let Some(drag) = shared(cx).borrow_mut().drag.as_mut()
+        && drag.relative.is_some()
+    {
+        drag.relative = Some(offset);
+    }
+}
+
+/// The target the drag is over now (the innermost), if any.
+fn state_targets_last(cx: &App) -> Option<Rc<TargetRecord>> {
+    let global = cx.try_global::<DndGlobal>()?;
+    let state = global.0.borrow();
+    state.drag.as_ref()?.targets.last().cloned()
+}
+
 pub(crate) fn cancel(window: &mut Window, cx: &mut App) {
     let Some(returning) = drag_in(window, cx) else {
         return;
@@ -564,12 +591,24 @@ pub(crate) fn cancel(window: &mut Window, cx: &mut App) {
         return;
     }
     let Some(snap) = snapshot(cx) else { return };
+    // A keyboard drag's target may say the cancel in its own words, asked while it's still
+    // over it.
+    let over = state_targets_last(cx);
+    let said = match over {
+        Some(target) if snap.backend == Backend::Keyboard => crate::keyboard::target_sentence(
+            &target,
+            &snap.item,
+            crate::target::Said::Cancelled,
+            cx,
+        ),
+        _ => None,
+    };
     go_back(
         EndInfo {
             dropped: false,
             target: None,
             target_label: None,
-            said: None,
+            said,
             result: None,
             cancelled: true,
             backend: snap.backend,
@@ -664,7 +703,7 @@ fn finish(end: EndInfo, window: &mut Window, cx: &mut App) {
     }
     if end.backend == Backend::Keyboard {
         let said = crate::keyboard::announcements(window, cx);
-        let text = if let Some(own) = end.said.clone().filter(|_| end.dropped) {
+        let text = if let Some(own) = end.said.clone() {
             own
         } else if end.dropped {
             (said.dropped)(&drag.snap.item, end.target_label.as_ref())

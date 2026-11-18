@@ -668,7 +668,7 @@ fn a_target_that_says_its_own_sentences_is_said_word_for_word(cx: &mut TestAppCo
                 match (when, live.get()) {
                     (Said::Over, true) => format!("Standup, moving to {y:.0}").into(),
                     (Said::Dropped, true) => format!("Standup, moved to {y:.0}").into(),
-                    (_, false) => "nothing is moving".into(),
+                    _ => "nothing is moving".into(),
                 }
             })
             .on_drop(move |_, _, _, _| {
@@ -697,5 +697,147 @@ fn a_target_that_says_its_own_sentences_is_said_word_for_word(cx: &mut TestAppCo
         o.said().unwrap(),
         format!("Standup, moved to {y:.0}"),
         "the drop's sentence is asked before on_drop"
+    );
+}
+
+fn relative_press() -> Press {
+    Press {
+        relative: true,
+        ..press(Backend::Touch)
+    }
+}
+
+/// A finger on a touch drag: down, moved by steps, up.
+fn finger_drag(o: &mut Opened, from: Point<Pixels>, to: Point<Pixels>) {
+    touch(o, TouchPhase::Started, from);
+    slide(o, from, to);
+    touch(o, TouchPhase::Ended, to);
+}
+
+#[gpui::test]
+fn a_relative_drag_follows_a_finger_landing_anywhere_by_how_far_it_moves(cx: &mut TestAppContext) {
+    let log = log();
+    let event = Rc::new(Cell::new(1));
+    let mut o = open(cx, calendar(log.clone(), Start::Press, event, |t| t));
+    let from = o.center("canvas");
+    let t = o.center("t");
+    // Lifted in place, with no finger on it.
+    o.vcx.update(|window, cx| {
+        assert!(begin_at(
+            window,
+            cx,
+            "event",
+            from,
+            source(&log, 1),
+            relative_press()
+        ))
+    });
+    // A finger far away, moving as far as from the canvas to the target.
+    let away = point(px(600.), px(500.));
+    touch(&mut o, TouchPhase::Started, away);
+    slide(&mut o, away, away + (t - from));
+    let pointer = o
+        .vcx
+        .update(|_, cx| DragMonitor::of(cx).client_offset().unwrap());
+    assert_eq!(
+        pointer, t,
+        "moved by the finger's travel, not to where it is"
+    );
+    touch(&mut o, TouchPhase::Ended, away + (t - from));
+    assert_eq!(with(&log, "drop"), ["drop 1"]);
+    assert_eq!(with(&log, "end"), ["end 1 dropped=true cancelled=false"]);
+}
+
+#[gpui::test]
+fn a_tap_drops_a_relative_drag_where_it_is(cx: &mut TestAppContext) {
+    let log = log();
+    let event = Rc::new(Cell::new(1));
+    let mut o = open(
+        cx,
+        calendar(log.clone(), Start::Press, event, |t| t.catch_outside(true)),
+    );
+    let from = o.center("canvas");
+    o.vcx.update(|window, cx| {
+        assert!(begin_at(
+            window,
+            cx,
+            "event",
+            from,
+            source(&log, 1),
+            relative_press()
+        ))
+    });
+    let away = point(px(600.), px(500.));
+    finger_drag(&mut o, away, away);
+    assert_eq!(with(&log, "drop"), ["drop 1"]);
+    let last = with(&log, "hover").pop().unwrap();
+    assert_eq!(
+        last,
+        format!(
+            "hover {:.0},{:.0} over=false can_drop=true",
+            f32::from(from.x),
+            f32::from(from.y)
+        ),
+        "dropped where it was"
+    );
+}
+
+#[gpui::test]
+fn a_cancelled_keyboard_drag_says_the_targets_own_sentence(cx: &mut TestAppContext) {
+    let log = log();
+    let event = Rc::new(Cell::new(1));
+    let mut o = open(
+        cx,
+        calendar(log.clone(), Start::Press, event.clone(), |t| {
+            t.say(|_, _, said, _| match said {
+                Said::Cancelled => "Standup, put back".into(),
+                _ => "Standup, over".into(),
+            })
+        }),
+    );
+    let t = o.center("t");
+    o.vcx.update(|window, cx| {
+        assert!(begin_at(
+            window,
+            cx,
+            "event",
+            t,
+            source(&log, 1),
+            press(Backend::Keyboard)
+        ))
+    });
+    o.keys("escape");
+    assert_eq!(o.said().unwrap(), "Standup, put back");
+    assert_eq!(with(&log, "end"), ["end 1 dropped=false cancelled=true"]);
+}
+
+#[gpui::test]
+fn an_empty_sentence_leaves_the_moment_to_the_providers_words(cx: &mut TestAppContext) {
+    let log = log();
+    let event = Rc::new(Cell::new(1));
+    let mut o = open(
+        cx,
+        calendar(log.clone(), Start::Press, event, |t| {
+            t.say(|_, _, said, _| match said {
+                Said::Cancelled => "".into(),
+                _ => "Standup, over".into(),
+            })
+        }),
+    );
+    let t = o.center("t");
+    o.vcx.update(|window, cx| {
+        assert!(begin_at(
+            window,
+            cx,
+            "event",
+            t,
+            source(&log, 1),
+            press(Backend::Keyboard)
+        ))
+    });
+    o.keys("escape");
+    assert_eq!(
+        o.said().unwrap(),
+        "Cancelled. Standup is back where it was."
     );
 }
