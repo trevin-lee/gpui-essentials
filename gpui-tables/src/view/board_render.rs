@@ -487,7 +487,7 @@ impl TableView {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn render_card(
+    pub(crate) fn render_card(
         &mut self,
         column: usize,
         ix: usize,

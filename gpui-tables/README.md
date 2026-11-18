@@ -566,8 +566,8 @@ let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(t
   and the settings stay put. Pressing a tab shows its view (`set_view`); the table keeps which
   view is shown, so the host needn't store it, and `TableHost::view_shown` tells a host that wants
   to remember it. Pressing the shown view's tab, or right-clicking any tab, opens its menu.
-- **Adding.** + opens a field for the name over the types: Table, Board and List (galleries
-  aren't drawn in v1), in gpui-core's naming `Picker` as for properties. Typing names it, Up and Down move through the types while the field keeps
+- **Adding.** + opens a field for the name over the types: Table, Board, List and Gallery,
+  in gpui-core's naming `Picker` as for properties. Typing names it, Up and Down move through the types while the field keeps
   the keyboard, Enter or a press makes it; nothing typed names it for its type ("Board", then
   "Board 2"). It's a `viewCreated` with a new id, an `order` after every view's
   (`order::between`) and the type's defaults (no sort, filter or columns; a table shows every
@@ -812,7 +812,7 @@ every person (and agent) sees the same ones.
   `unchecked`, `owner`, `agent:<id>`, `relative:today`, `day:2026-11-15`, `week:2026-11-09`
   (the week's first day), `month:2026-11`, `year:2026`.
 
-How each type behaves (the table, board and list are drawn; galleries come later):
+How each type behaves:
 
 - **Table.** A row per row and a column per property. Columns resize by dragging their edge and
   reorder by dragging their header; both are a `viewChanged`. The header's menu sorts, filters,
@@ -827,7 +827,12 @@ How each type behaves (the table, board and list are drawn; galleries come later
   column has a New to add a row with that column's value. See [Board view](#board-view).
 - **List.** One line per row: the title, then `cardProperties` to the right. Grouping folds as in
   a table, and rows drag to reorder and between groups as cards do. See [List view](#list-view).
-- **Gallery.** Cards in a grid. In the JSON from the start, drawn in a later version.
+- **Gallery.** The rows as cards in a grid, as many to a line as the view's width takes: each
+  the board's card, its title and the view's `cardProperties`. Pressing a card opens its row (or
+  peeks it); the arrows move between cards and Enter opens one; New after the cards makes a row.
+  A card dragged to another place (with no sort) is a `rowsMoved`, the board's drag, with a line
+  where it'll land. Grouping isn't drawn in a gallery yet (its settings have no Group by), and
+  cards have no cover image.
 
 A new row made in a filtered or grouped view gets the values that keep it in that view (the
 group's option, a checked box the filter wants), as Notion does.
@@ -1208,7 +1213,7 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
 - **Templates.** A template is a page with content, which belongs to the docs app and its editor;
   the crate would only pass a template id through `rowCreated`. Prefilled values for a new row in a
   view are in v1.
-- **Also later:** the gallery view, files, a status type, unique ids, and linked views of a
+- **Also later:** a gallery's groups and cover images, files, a status type, unique ids, and linked views of a
   database on another page.
 
 ## Tests

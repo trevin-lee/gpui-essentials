@@ -330,6 +330,9 @@ pub(crate) struct Shown {
     /// A table's groups (or its one group of every row, when it doesn't group), when the view
     /// is a table: what a dragged row moves between, as a list's groups.
     pub table: Option<Vec<super::board::BoardColumn>>,
+    /// A gallery's one group of every row (it doesn't draw groups yet), when the view is a
+    /// gallery: what a dragged card moves within.
+    pub gallery: Option<Vec<super::board::BoardColumn>>,
     /// The properties a board's cards and a list's lines show beside the title (places in
     /// `properties`).
     pub card_properties: Vec<usize>,
@@ -418,6 +421,9 @@ pub struct TableView {
     /// The row in the peek panel ([`TableView::peek`]), and whether opening a row peeks it.
     pub(crate) peek: Option<String>,
     pub(crate) peek_mode: bool,
+    /// The gallery's card with the keyboard, by place, and its grid as last drawn.
+    pub(crate) gallery_focus: Option<usize>,
+    pub(crate) gallery_grid: StdCell<super::gallery::GalleryGrid>,
     /// The one drag source every row's handle, card and line shares, built on first use:
     /// each gives only its row and group.
     pub(crate) card_drag: std::cell::OnceCell<gpui_dnd::SharedSource<super::board::DraggedCard>>,
@@ -483,6 +489,8 @@ impl TableView {
             hovered_row: None,
             peek: None,
             peek_mode: false,
+            gallery_focus: None,
+            gallery_grid: StdCell::new(Default::default()),
             card_drag: std::cell::OnceCell::new(),
             search: Default::default(),
             row_text: engine::RowText::new(),
@@ -800,7 +808,9 @@ impl TableView {
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let list = (view.kind == ViewType::List)
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
-        let table = (board.is_none() && list.is_none())
+        let gallery = (view.kind == ViewType::Gallery)
+            .then(|| super::board::lanes_of(&view, &[], &result.rows));
+        let table = (board.is_none() && list.is_none() && gallery.is_none())
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let mut card_properties: Vec<usize> = Vec::new();
         for id in &view.card_properties {
@@ -813,7 +823,8 @@ impl TableView {
         }
         // A table's footers, under each New row.
         let footed = table.is_some();
-        let grouped = view.group_by.is_some() && !groups.is_empty();
+        let grouped =
+            view.group_by.is_some() && !groups.is_empty() && view.kind != ViewType::Gallery;
         if grouped {
             for (gi, g) in groups.iter().enumerate() {
                 let folded = view.collapsed_groups.contains(&g.key.to_string());
@@ -866,6 +877,7 @@ impl TableView {
             board,
             list,
             table,
+            gallery,
             card_properties,
             calcs,
         };
