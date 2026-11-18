@@ -24,8 +24,10 @@
 //! Give the editor the app's documents with [`Options::docs`](crate::Options::docs), which also
 //! adds Page and Link to page to the slash menu.
 
+use std::ops::Not as _;
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::ActiveTheme as _;
 use markdown::mdast::{Link, Node};
@@ -505,6 +507,28 @@ pub(crate) type Heights = Arc<std::sync::Mutex<std::collections::HashMap<u64, u3
 /// Called when an embed's bottom edge is pressed, to follow the drag.
 pub(crate) type OnResize = Arc<dyn Fn(ResizeStart, &mut Window, &mut App) + Send + Sync>;
 
+/// A key on an embed's focused height handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HandleKey {
+    /// Taller (more) or shorter (less), by this many points.
+    Step(i32),
+    /// As short or as tall as an embed gets.
+    Least,
+    Most,
+    /// The key was let go: the run of steps it made is one undo step.
+    Released,
+    /// Esc or Enter: back to the page.
+    Leave,
+}
+
+/// Called for a key on an embed's focused height handle.
+pub(crate) type OnHandleKey =
+    Arc<dyn Fn(ResizeStart, HandleKey, &mut Window, &mut App) + Send + Sync>;
+
+/// The focus of each embed's height handle, by the embed block's lasting id, so it keeps the
+/// keyboard while its height is written into the document.
+pub(crate) type HandleFocus = Arc<std::sync::Mutex<std::collections::HashMap<String, FocusHandle>>>;
+
 /// What embeds draw and do.
 #[derive(Clone, Default)]
 pub(crate) struct EmbedHooks {
@@ -514,6 +538,10 @@ pub(crate) struct EmbedHooks {
     /// Heights while a resize is under way, by parse key.
     pub(crate) heights: Heights,
     pub(crate) on_resize: Option<OnResize>,
+    /// A key on a focused height handle.
+    pub(crate) on_key: Option<OnHandleKey>,
+    /// The height handles' focus.
+    pub(crate) focus: HandleFocus,
     /// A block's lasting id, as [`Editor::document`](crate::Editor::document) gives it.
     pub(crate) lasting_id: Option<LastingId>,
 }
@@ -698,6 +726,18 @@ impl EmbedPlugin {
                 }),
         };
         let on_resize = hooks.on_resize.clone();
+        // Focusable, for the keyboard: by the block's lasting id, so it keeps the keyboard while
+        // its new height is written.
+        let focus = shown.block.is_empty().not().then(|| {
+            let mut handles = hooks
+                .focus
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            handles
+                .entry(shown.block.to_string())
+                .or_insert_with(|| cx.focus_handle())
+                .clone()
+        });
         let start = ResizeStart {
             key: data.key,
             markdown: data.markdown.clone(),
@@ -712,6 +752,23 @@ impl EmbedPlugin {
             )))
             .debug_selector(|| "blocks-embed-grip".into())
             .control(module_path!(), Role::Splitter, format!("Height of {title}"))
+            .aria_value(format!("{title}, {height} points tall"))
+            .when_some(focus, |grip, focus| {
+                let on_key = hooks.on_key.clone();
+                let start = start.clone();
+                let focused = focus.is_focused(window);
+                crate::handles::handle_keys(
+                    grip.track_focus(&focus).when(focused, |g| g.bg(accent)),
+                    crate::handles::EMBED_HANDLE,
+                    24,
+                    8,
+                    std::rc::Rc::new(move |key: HandleKey, window: &mut Window, cx: &mut App| {
+                        if let Some(on_key) = &on_key {
+                            on_key(start.clone(), key, window, cx);
+                        }
+                    }),
+                )
+            })
             .absolute()
             .left_0()
             .right_0()

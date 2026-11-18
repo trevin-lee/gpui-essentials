@@ -50,6 +50,7 @@ pub mod docs;
 mod editor;
 mod find;
 mod format_bar;
+mod handles;
 pub mod html;
 pub mod import;
 pub mod json;
@@ -119,7 +120,21 @@ pub mod actions {
             OpenAtCaret,
             /// Asks the app for a comment on the selection (⌘⇧M), as the format bar's Comment
             /// does, when the editor takes comments.
-            Comment
+            Comment,
+            /// On a focused handle: a step left or up (← on a column handle, ↑ on an embed's).
+            HandleLess,
+            /// On a focused handle: a step right or down.
+            HandleMore,
+            /// A small step left or up (with Shift).
+            HandleLessFine,
+            /// A small step right or down (with Shift).
+            HandleMoreFine,
+            /// To the least (Home).
+            HandleLeast,
+            /// To the most (End).
+            HandleMost,
+            /// Back to the page (Esc or Enter).
+            HandleLeave
         ]
     );
 }

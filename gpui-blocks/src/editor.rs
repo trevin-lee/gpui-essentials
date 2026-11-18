@@ -50,14 +50,38 @@ const COMPACT_INSET: f32 = 16.;
 /// left of the text to lift its block.
 const COMPACT_SIDE: f32 = 24.;
 
-/// Binds the slash menu's keys and the keys that move blocks. They match only inside this view
-/// (key context `BlocksEditor`, or `BlocksSlashMenu` while the menu is open), and are bound
-/// after the editor's own, so ↑, ↓, Enter, Tab and Esc go to the menu while it's open. An app
-/// can bind the actions in [`crate::actions`] to other keys after [`crate::init`].
 /// How much of the page Page Down keeps in view from before: a few lines.
 const PAGE_OVERLAP: f32 = 64.;
 
+/// Binds the slash menu's keys and the keys that move blocks. They match only inside this view
+/// (key context `BlocksEditor`, or `BlocksSlashMenu` while the menu is open), and are bound
+/// after the editor's own, so ↑, ↓, Enter, Tab and Esc go to the menu while it's open. A
+/// focused handle's keys match in its own context. An app can bind the actions in
+/// [`crate::actions`] to other keys after [`crate::init`].
 pub(crate) fn bind_keys(cx: &mut App) {
+    // A focused handle's keys, as ARIA's separators take them.
+    for (context, [less, more, less_fine, more_fine]) in [
+        (
+            crate::handles::COLUMN_HANDLE,
+            ["left", "right", "shift-left", "shift-right"],
+        ),
+        (
+            crate::handles::EMBED_HANDLE,
+            ["up", "down", "shift-up", "shift-down"],
+        ),
+    ] {
+        let at = Some(context);
+        cx.bind_keys([
+            KeyBinding::new(less, HandleLess, at),
+            KeyBinding::new(more, HandleMore, at),
+            KeyBinding::new(less_fine, HandleLessFine, at),
+            KeyBinding::new(more_fine, HandleMoreFine, at),
+            KeyBinding::new("home", HandleLeast, at),
+            KeyBinding::new("end", HandleMost, at),
+            KeyBinding::new("escape", HandleLeave, at),
+            KeyBinding::new("enter", HandleLeave, at),
+        ]);
+    }
     let menu = Some("BlocksSlashMenu > BlockEditor");
     let editor = Some("BlocksEditor > BlockEditor");
     let mac = cfg!(target_os = "macos");
@@ -572,6 +596,15 @@ pub struct Editor {
     pub(crate) format_color: bool,
     /// A columns block's width handle being dragged (see `columns_ui.rs`).
     pub(crate) column_drag: Option<crate::columns_ui::ColumnDrag>,
+    /// The columns block whose width handles have the keyboard (see `handles.rs`).
+    pub(crate) column_keys: Option<BlockId>,
+    /// The width handles' focus, by columns block and place.
+    pub(crate) column_focus:
+        std::cell::RefCell<std::collections::HashMap<(BlockId, usize), FocusHandle>>,
+    /// The embeds' height handles' focus, by the embed's lasting id.
+    pub(crate) embed_focus: docs::HandleFocus,
+    /// Steps a handle's keys made since one went down: one undo step.
+    pub(crate) key_run: Option<crate::handles::KeyRun>,
     /// Whether the touch edit menu's Color sheet is open.
     pub(crate) color_sheet: bool,
     /// The colour last picked in the Color menu, which ⌘⇧H gives again.
@@ -626,7 +659,7 @@ pub struct Editor {
     headings: Arc<std::sync::Mutex<Vec<Heading>>>,
     /// The blocks' ids in [`Editor::document`].
     /// The blocks' lasting ids, shared with the embeds, which tell the app theirs.
-    ids: Arc<std::sync::Mutex<crate::json::Ids>>,
+    pub(crate) ids: Arc<std::sync::Mutex<crate::json::Ids>>,
     /// The comment anchors whose words are tinted (see [`Editor::highlight_quotes`]).
     pub(crate) quotes: Vec<(String, String)>,
     /// A selection handle being dragged by touch: the selection's other end, which stays, and
@@ -672,8 +705,10 @@ impl Editor {
         let accessibility_label = options.accessibility_label.clone();
         let highlighter = options.highlighter.clone();
         let embed_heights: docs::Heights = Arc::default();
+        let embed_focus: docs::HandleFocus = Arc::default();
         let this = cx.entity().downgrade();
         let that = this.clone();
+        let keyed = this.clone();
         let ids: Arc<std::sync::Mutex<crate::json::Ids>> = Arc::default();
         let embed_ids = ids.clone();
         let embeds = EmbedHooks {
@@ -696,6 +731,12 @@ impl Editor {
                     cx.notify();
                 });
             })),
+            on_key: Some(Arc::new(
+                move |start, key, window: &mut Window, cx: &mut App| {
+                    let _ = keyed.update(cx, |this, cx| this.embed_key(start, key, window, cx));
+                },
+            )),
+            focus: embed_focus.clone(),
         };
         let headings: Arc<std::sync::Mutex<Vec<Heading>>> = Arc::default();
         let this = cx.entity().downgrade();
@@ -809,6 +850,10 @@ impl Editor {
             quotes: Vec::new(),
             headings,
             embed_heights,
+            embed_focus,
+            column_keys: None,
+            column_focus: Default::default(),
+            key_run: None,
             resizing: None,
             paste_offer: None,
             docs: options.docs.clone(),
@@ -2352,7 +2397,7 @@ pub(crate) fn caret_menu(caret: Bounds<Pixels>, height: Pixels, window: &Window)
 }
 
 /// Replaces `block` with `markdown`, and gives the block in its place its lasting id.
-fn replace_keeping_id(
+pub(crate) fn replace_keeping_id(
     state: &mut BlockEditorState,
     ids: &std::sync::Mutex<crate::json::Ids>,
     block: BlockId,

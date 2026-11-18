@@ -36,7 +36,14 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   through or code. ⌘⌥0 to ⌘⌥8 turn the block, or each selected block, into text, heading 1 to 3,
   a to-do, bulleted or numbered item, a toggle or code. Esc selects the caret's block whole: ↑
   and ↓ then step from block to block, ⇧↑ and ⇧↓ extend the selection, and Enter goes back into
-  the text. Off the Mac, Ctrl takes ⌘'s place.
+  the text. What a click does is on a key too: ⌘/ opens the block's menu (which has Open for a
+  sub-page, an embed or a bookmark, and Copy code for code), ⌘↵ checks a to-do or folds a toggle
+  from its title, ⌥↵ opens the link, mention or page at the caret, ⌘⇧M asks for a comment on the
+  selection (the editor answers it, so an app's own ⌘⇧M doesn't run too), and Page Up and Down
+  move a page. The block menu's Resize puts the keyboard on an embed's height handle (↑ and ↓,
+  24 points, 8 with Shift) or a columns block's width handles (← and →, 5% of the row, 1% with
+  Shift); Home and End go to the least and most, a run of steps is one undo step, and Esc goes
+  back to the page. Off the Mac, Ctrl takes ⌘'s place.
 - **Columns:** "2 columns" or "3 columns" in the slash menu lays the line out beside empty
   columns (up to five). Or drag a block by its grip onto another block's left or right edge to
   make a row of the two, onto a row's edge or the gap between two columns for a new column, or
