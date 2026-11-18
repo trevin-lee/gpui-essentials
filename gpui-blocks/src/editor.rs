@@ -20,6 +20,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::actions::*;
+use crate::bookmark::{Bookmark, BookmarkHooks, BookmarkPlugin, Unfurl, UnfurlFn};
 use crate::docs::{
     self, DocHooks, Docs, Embed, EmbedFn, EmbedHooks, EmbedPlugin, MentionPlugin, PagePlugin,
     ResizeStart,
@@ -137,6 +138,7 @@ pub fn extensions(widgets: &[Arc<dyn Widget>]) -> Extensions {
         TocHooks::default(),
         EmbedHooks::default(),
         MentionHooks::default(),
+        BookmarkHooks::default(),
     )
 }
 
@@ -146,10 +148,12 @@ fn extensions_with(
     toc: TocHooks,
     embeds: EmbedHooks,
     chips: MentionHooks,
+    bookmarks: BookmarkHooks,
 ) -> Extensions {
     let ext = Extensions::default()
         .with(TocPlugin(toc))
         .with(EmbedPlugin(embeds))
+        .with(BookmarkPlugin(bookmarks))
         .with(PagePlugin(hooks.clone()))
         .with(MentionPlugin(hooks))
         .with(ChipPlugin(chips));
@@ -185,6 +189,7 @@ pub struct Options {
     html_clipboard: Option<HtmlClipboard>,
     comments: bool,
     block_link: Option<BlockLink>,
+    unfurl: Option<UnfurlFn>,
     typography: bool,
     gutter: Pixels,
     top: Pixels,
@@ -209,6 +214,7 @@ impl Default for Options {
             typography: true,
             comments: false,
             block_link: None,
+            unfurl: None,
             gutter: px(GUTTER),
             top: px(TOP),
             compact_below: px(COMPACT_BELOW),
@@ -238,6 +244,7 @@ impl std::fmt::Debug for Options {
             .field("typography", &self.typography)
             .field("comments", &self.comments)
             .field("block_link", &self.block_link.is_some())
+            .field("unfurl", &self.unfurl.is_some())
             .field("gutter", &self.gutter)
             .field("top", &self.top)
             .field("compact_below", &self.compact_below)
@@ -347,6 +354,21 @@ impl Options {
         self
     }
 
+    /// How a new bookmark learns about its page (see [`crate::bookmark`]): `unfurl` gets the
+    /// page's address and asks the app's server for its title, description and picture (the
+    /// server's stored copy, an `asset:<sha256>`, which [`Options::images`] loads). The card
+    /// shows the address until the answer comes, and stays so for `None`. The editor never
+    /// fetches a page itself. Adds Bookmark to the slash menu, and Bookmark to the offer under
+    /// a web address pasted on a line of its own.
+    pub fn unfurl(
+        mut self,
+        unfurl: impl Fn(&str, &mut App) -> Task<Option<Unfurl>> + 'static,
+    ) -> Self {
+        self.unfurl = Some(Arc::new(unfurl));
+        self.items.extend(slash::bookmark_items());
+        self
+    }
+
     /// Typing shortcuts, as Notion's, on unless turned off here: `->` becomes →, `<-` becomes ←,
     /// and `--` then a space becomes an em dash. Never in code, inline code or a web address,
     /// and one undo right after puts back what was typed.
@@ -411,6 +433,9 @@ pub enum EditorEvent {
     /// The slash menu's Embed: the app asks which document and view, then calls
     /// [`Editor::insert_embed`].
     EmbedRequested,
+    /// The slash menu's Bookmark: the app asks for the page's address, then calls
+    /// [`Editor::insert_bookmark`].
+    BookmarkRequested,
     /// A click on a person, agent or date mention (see [`crate::mentions`]): the app shows it.
     /// A page's mention sends [`EditorEvent::DocClicked`].
     MentionClicked { kind: MentionKind, id: SharedString },
@@ -564,8 +589,11 @@ pub struct Editor {
     embed_heights: docs::Heights,
     /// The embed being resized.
     resizing: Option<ResizeStart>,
-    /// A document link pasted on a line of its own, which can become a sub-page or an embed.
+    /// A document link pasted on a line of its own, which can become a sub-page or an embed,
+    /// or a web address, which can become a bookmark.
     paste_offer: Option<PasteOffer>,
+    /// Asks the app about a new bookmark's page.
+    unfurl: Option<UnfurlFn>,
     /// The app's documents, for the title of a pasted `doc:` address.
     docs: Option<Arc<dyn Docs>>,
     /// The headings a table of contents lists, kept up to date after each change.
@@ -644,6 +672,14 @@ impl Editor {
         };
         let headings: Arc<std::sync::Mutex<Vec<Heading>>> = Arc::default();
         let this = cx.entity().downgrade();
+        let bookmarks = BookmarkHooks {
+            images: options.images.clone(),
+            on_click: Some(Arc::new(move |url: &str, _: &mut Window, cx: &mut App| {
+                let url = SharedString::from(url.to_string());
+                let _ = this.update(cx, |_, cx| cx.emit(EditorEvent::LinkClicked { url }));
+            })),
+        };
+        let this = cx.entity().downgrade();
         let chips = MentionHooks {
             on_click: Some(Arc::new(
                 move |kind: MentionKind, id: &str, _: &mut Window, cx: &mut App| {
@@ -663,7 +699,9 @@ impl Editor {
         };
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
-                .with_markdown_extensions(extensions_with(&widgets, hooks, toc, embeds, chips))
+                .with_markdown_extensions(extensions_with(
+                    &widgets, hooks, toc, embeds, chips, bookmarks,
+                ))
                 .with_input_rules(
                     markdown_editor::InputRule::markdown_defaults()
                         .into_iter()
@@ -732,6 +770,7 @@ impl Editor {
             html_clipboard: options.html_clipboard.clone(),
             comments: options.comments,
             block_link: options.block_link.clone(),
+            unfurl: options.unfurl.clone(),
             mention: None,
             mention_dismissed: None,
             dismissed: None,
@@ -1098,7 +1137,7 @@ impl Editor {
     /// `doc:id`) into a sub-page or an embed. Any other change closes the offer.
     fn refresh_paste_offer(&mut self, pasted: bool, cx: &mut Context<Self>) {
         let offer = pasted
-            .then(|| paste_offer(&self.state, self.docs.as_deref(), cx))
+            .then(|| paste_offer(&self.state, self.docs.as_deref(), self.unfurl.is_some(), cx))
             .flatten();
         if offer.is_some() || self.paste_offer.is_some() {
             self.paste_offer = offer;
@@ -1148,6 +1187,11 @@ impl Editor {
             );
         });
         match kind {
+            PasteAs::Bookmark => {
+                if let Some(url) = &offer.web {
+                    self.insert_bookmark(url, cx);
+                }
+            }
             PasteAs::Mention => self.insert_mention(&offer.doc, &offer.title, cx),
             PasteAs::Page => self.insert_page(&offer.doc, &offer.title, cx),
             PasteAs::Embed => self.insert_embed(&offer.doc, &offer.title, docs::DEFAULT_VIEW, cx),
@@ -1172,11 +1216,15 @@ impl Editor {
         );
         let this = cx.entity().downgrade();
         let mut kinds = Vec::new();
-        if offer.plain {
-            kinds.push((PasteAs::Mention, "Mention"));
+        if offer.web.is_some() {
+            kinds.push((PasteAs::Bookmark, "Bookmark"));
+        } else {
+            if offer.plain {
+                kinds.push((PasteAs::Mention, "Mention"));
+            }
+            kinds.push((PasteAs::Page, "Page"));
+            kinds.push((PasteAs::Embed, "Embed"));
         }
-        kinds.push((PasteAs::Page, "Page"));
-        kinds.push((PasteAs::Embed, "Embed"));
         let items = kinds.into_iter().map(move |(kind, label)| {
             let this = this.clone();
             div()
@@ -1225,9 +1273,16 @@ impl Editor {
         if docs::doc_id(&format!("{}{id}", docs::SCHEME)).is_none() {
             return;
         }
+        self.insert_at_caret(markdown, block, cx);
+    }
+
+    /// Inserts `markdown` at the caret, in place of the selection; as a `block` on a line of
+    /// its own: this one when it's empty, else a new one after the caret's top-level block.
+    /// Whether it went in.
+    fn insert_at_caret(&mut self, markdown: String, block: bool, cx: &mut Context<Self>) -> bool {
         self.state.update(cx, |state, cx| {
             if state.is_readonly() {
-                return;
+                return false;
             }
             state.group_edits(cx, |state, cx| {
                 if !state.model().selection().is_collapsed() {
@@ -1241,13 +1296,62 @@ impl Editor {
                         .caret()
                         .and_then(|c| top_level(state, c.block))
                     else {
-                        return;
+                        return false;
                     };
                     let _ = state.run(EditorCommand::InsertParagraphAfter(top), cx);
                 }
-                let _ = state.run(EditorCommand::InsertMarkdown(markdown), cx);
+                state
+                    .run(EditorCommand::InsertMarkdown(markdown), cx)
+                    .is_ok()
+            })
+        })
+    }
+
+    /// Inserts a bookmark of the web page at `url` at the caret, on a line of its own as
+    /// [`Editor::insert_page`] does, and asks [`Options::unfurl`] about the page: the card
+    /// shows the address until the answer comes. Nothing for an address that isn't `http` or
+    /// `https`, or in a read-only editor. Whether it went in.
+    pub fn insert_bookmark(&mut self, url: &str, cx: &mut Context<Self>) -> bool {
+        let url = url.trim();
+        if !crate::bookmark::web_url(url) {
+            return false;
+        }
+        let bare = Bookmark::new(url).markdown();
+        if !self.insert_at_caret(bare.clone(), true, cx) {
+            return false;
+        }
+        self.unfurl_bookmark(url.to_string(), bare, cx);
+        true
+    }
+
+    /// Asks the app about the page of the bookmark written `bare`, then writes what it says
+    /// into that bookmark, if it's still there and still bare.
+    fn unfurl_bookmark(&mut self, url: String, bare: String, cx: &mut Context<Self>) {
+        let Some(unfurl) = self.unfurl.clone() else {
+            return;
+        };
+        let answer = unfurl(&url, cx);
+        cx.spawn(async move |this, cx| {
+            let Some(answer) = answer.await else {
+                return;
+            };
+            let markdown = Bookmark::new(url).unfurled(answer).markdown();
+            if markdown == bare {
+                return;
+            }
+            let _ = this.update(cx, |this, cx| {
+                let ids = this.ids.clone();
+                this.state.update(cx, |state, cx| {
+                    if state.is_readonly() {
+                        return;
+                    }
+                    if let Some(block) = custom_block(state, &bare) {
+                        replace_keeping_id(state, &ids, block, markdown, cx);
+                    }
+                });
             });
-        });
+        })
+        .detach();
     }
 
     /// Inserts an embed of the document `id` at the caret (see [`crate::docs`]), shown as `view`
@@ -1602,6 +1706,7 @@ impl Editor {
             SlashAction::NewPage => Some(EditorEvent::NewPageRequested),
             SlashAction::LinkToPage => Some(EditorEvent::DocLinkRequested),
             SlashAction::Embed => Some(EditorEvent::EmbedRequested),
+            SlashAction::Bookmark => Some(EditorEvent::BookmarkRequested),
             _ => None,
         };
         let image_at = self.state.update(cx, |state, cx| {
@@ -1632,7 +1737,10 @@ impl Editor {
                     }
                     SlashAction::Color { text, index } => paint_line(state, *text, *index, cx),
                     // The app answers with insert_page or insert_mention.
-                    SlashAction::NewPage | SlashAction::LinkToPage | SlashAction::Embed => {}
+                    SlashAction::NewPage
+                    | SlashAction::LinkToPage
+                    | SlashAction::Embed
+                    | SlashAction::Bookmark => {}
                 }
                 None
             })
@@ -2104,12 +2212,24 @@ fn embed_block(state: &BlockEditorState, start: &ResizeStart) -> Option<BlockId>
         .find(|id| top_level(state, *id) == Some(top))
 }
 
-/// What a pasted document link can become.
+/// The first custom block written as `markdown`, in document order.
+fn custom_block(state: &BlockEditorState, markdown: &str) -> Option<BlockId> {
+    fn walk(block: markdown_editor::BlockRef<'_>, markdown: &str) -> Option<BlockId> {
+        if block.kind() == BlockKind::Custom && block.markdown() == markdown {
+            return Some(block.id());
+        }
+        block.children().find_map(|child| walk(child, markdown))
+    }
+    walk(state.model().document().root(), markdown)
+}
+
+/// What a pasted document link or web address can become.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PasteAs {
     Mention,
     Page,
     Embed,
+    Bookmark,
 }
 
 /// A line holding only a pasted document link.
@@ -2120,12 +2240,15 @@ struct PasteOffer {
     title: String,
     /// Pasted as the text `doc:id`, not yet a mention.
     plain: bool,
+    /// A web address pasted in place of a document link: it can become a bookmark.
+    web: Option<String>,
 }
 
 /// The offer for the caret's line, when it's a paragraph holding only a document link.
 fn paste_offer(
     state: &Entity<BlockEditorState>,
     docs: Option<&dyn Docs>,
+    bookmarks: bool,
     cx: &App,
 ) -> Option<PasteOffer> {
     let state = state.read(cx);
@@ -2136,6 +2259,16 @@ fn paste_offer(
         return None;
     }
     let text = block.text()?.trim();
+    // A web address alone on its line, as text or a link.
+    if bookmarks && crate::bookmark::web_url(text) {
+        return Some(PasteOffer {
+            block: caret.block,
+            doc: String::new(),
+            title: String::new(),
+            plain: true,
+            web: Some(text.to_string()),
+        });
+    }
     // Text from another app: `[title](doc:id)` pasted as it was written.
     if let Some((doc, title)) = docs::mention_of(text) {
         return Some(PasteOffer {
@@ -2143,6 +2276,7 @@ fn paste_offer(
             doc,
             title,
             plain: true,
+            web: None,
         });
     }
     if let Some(id) = docs::doc_id(text) {
@@ -2155,6 +2289,7 @@ fn paste_offer(
             doc: id.to_string(),
             title,
             plain: true,
+            web: None,
         });
     }
     if text != "\u{FFFC}" {
@@ -2166,6 +2301,7 @@ fn paste_offer(
         doc,
         title,
         plain: false,
+        web: None,
     })
 }
 

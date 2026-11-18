@@ -64,6 +64,7 @@ stored text is read as a space.
 | `toc` | | |
 | `embed` | `doc`: the document's id; `title`: its title when the embed was made; `view`: how the app shows it (`table`, `board`, `mindmap`, `calendar`, `page`, or another 1 to 64 of `A-Z a-z 0-9 - _`, such as a database view's id); `height`: in points, 80 to 1600 | |
 | `page` | `doc`: the document's id; `title`: its title when the link was written | |
+| `bookmark` | `url`: the page's `http` or `https` address; optional `title`, `description` (at most 300 characters written) and `image` (an `asset:<sha256>`) | |
 | `widget` | `name`, `meta` (the rest of the info string), `body` | |
 | `columns` | | 2 to 5 `column`s. Only at the top level |
 | `column` | `width`: its share of the row, in (0, 1]; the shares add up to 1 | any blocks but `columns` |
@@ -103,6 +104,15 @@ Markdown they're a comment on the marker's line, either key optional:
 `> [!TIP] <!-- icon:💡 color:yellow -->`. A comment that isn't exactly that (another key, an
 invalid value, more after it) stays as the callout's first paragraph. An invalid icon or
 colour in JSON is read as none.
+
+A bookmark is a web page as a card. Its Markdown is a link titled `bookmark` alone on its line,
+its text the page's title (or the address when there's none), then, when it has a description
+or picture, a comment holding them as a JSON object, either key optional:
+`[Title](https://example.com/a "bookmark") <!-- {"description":"…","image":"asset:<sha256>"} -->`.
+In the JSON, `<`, `>` and `&` are written as `\u003c`, `\u003e` and `\u0026`, so it can't end the
+comment. A comment that isn't exactly that (another key, a value that isn't a string, not
+JSON) makes the line an ordinary paragraph. Only an `asset:` picture is written or drawn:
+another is dropped. A description is cut to 300 characters when written, and read whole.
 
 A `markdown` block is what the editor keeps as is: a link definition, an HTML block, and in
 later versions any type a reader doesn't know.
