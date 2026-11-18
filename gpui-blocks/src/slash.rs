@@ -36,6 +36,10 @@ pub enum SlashAction {
     /// ([`EditorEvent::EmbedRequested`](crate::EditorEvent::EmbedRequested)). The app calls
     /// [`Editor::insert_embed`](crate::Editor::insert_embed).
     Embed,
+    /// Colour the whole line: its text (`text`) or its background, in the `index`th of Notion's
+    /// colours ([`markdown_editor::TEXT_COLORS`], [`markdown_editor::BACKGROUNDS`]), or take
+    /// that colour off (`None`).
+    Color { text: bool, index: Option<usize> },
 }
 
 /// One entry of the menu. Make one with [`SlashItem::new`] and its builder methods.
@@ -53,6 +57,8 @@ pub struct SlashItem {
     pub action: SlashAction,
     /// The keys that do the same, shown at the end of its row (`⌘⌥1`).
     pub shortcut: Option<SharedString>,
+    /// Listed only once something is typed that finds it, as Notion's colours are.
+    pub searched_only: bool,
 }
 
 impl SlashItem {
@@ -65,12 +71,19 @@ impl SlashItem {
             group: MEDIA.into(),
             action,
             shortcut: None,
+            searched_only: false,
         }
     }
 
     /// The keys that do the same, shown at the end of its row.
     pub fn shortcut(mut self, keys: impl Into<SharedString>) -> Self {
         self.shortcut = Some(keys.into());
+        self
+    }
+
+    /// Listed only once something typed finds it.
+    pub fn searched_only(mut self) -> Self {
+        self.searched_only = true;
         self
     }
 
@@ -259,6 +272,35 @@ fn built_in_items() -> Vec<SlashItem> {
     ]
 }
 
+/// The group Notion's colours are listed under, once typed.
+pub const COLORS: &str = "Color";
+
+/// Notion's colours for the whole line, found by typing (`/red`, `/blue background`): Default
+/// text, each text colour, Default background and each background colour.
+pub fn color_items() -> Vec<SlashItem> {
+    let item = |title: String, text: bool, index: Option<usize>, swatch: &str| {
+        SlashItem::new(title, SlashAction::Color { text, index })
+            .aliases(["color", "colour"])
+            .icon(swatch.to_string())
+            .group(COLORS)
+            .searched_only()
+    };
+    let mut out = vec![item("Default text".into(), true, None, "A")];
+    for (ix, color) in markdown_editor::TEXT_COLORS.iter().enumerate() {
+        out.push(item(color.name.to_string(), true, Some(ix), "A"));
+    }
+    out.push(item("Default background".into(), false, None, "▢"));
+    for (ix, color) in markdown_editor::BACKGROUNDS.iter().enumerate() {
+        out.push(item(
+            format!("{} background", color.name),
+            false,
+            Some(ix),
+            "▢",
+        ));
+    }
+    out
+}
+
 /// The group the items for other documents are listed under.
 pub const DOCS: &str = "Pages";
 
@@ -291,6 +333,7 @@ pub fn filter(items: &[SlashItem], query: &str) -> Vec<usize> {
     let mut found: Vec<(bool, usize)> = items
         .iter()
         .enumerate()
+        .filter(|(_, item)| !(q.is_empty() && item.searched_only))
         .filter_map(|(ix, item)| {
             let title = item.title.to_lowercase();
             let hit =
@@ -313,7 +356,13 @@ pub fn query_at(prefix: &str) -> Option<(usize, &str)> {
         return None;
     }
     let query = &prefix[slash + 1..];
-    if query.contains(char::is_whitespace) || query.chars().count() > 24 {
+    // Words after the slash, one space apart, as Notion's (`/heading 1`, `/blue background`):
+    // a space right after it, or two in a row, isn't a query.
+    if query.starts_with(char::is_whitespace)
+        || query.contains("  ")
+        || query.contains(['\n', '\t'])
+        || query.chars().count() > 24
+    {
         return None;
     }
     Some((slash, query))
@@ -330,7 +379,10 @@ mod tests {
         assert_eq!(query_at("some text /to"), Some((10, "to")));
         assert_eq!(query_at("a/b"), None);
         assert_eq!(query_at("https://x.com/"), None);
-        assert_eq!(query_at("/head ing"), None);
+        assert_eq!(query_at("/heading 1"), Some((0, "heading 1")));
+        assert_eq!(query_at("/blue background"), Some((0, "blue background")));
+        assert_eq!(query_at("a / b"), None);
+        assert_eq!(query_at("/two  spaces"), None);
         assert_eq!(query_at("no slash"), None);
         assert_eq!(query_at("日本語 /見出し"), Some((10, "見出し")));
         assert_eq!(
