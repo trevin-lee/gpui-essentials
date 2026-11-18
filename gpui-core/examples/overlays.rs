@@ -1,4 +1,5 @@
-//! gpui-core's overlays in a window: Dialog, AlertDialog, HoverCard, Drawer and CommandDialog (⌘K).
+//! gpui-core's overlays in a window: Dialog, AlertDialog, HoverCard, Drawer, Toast, Sheet and
+//! CommandDialog (⌘K).
 //!
 //! ```sh
 //! cargo run --example overlays [-- --light]
@@ -16,6 +17,7 @@ struct Overlays {
     dialog: bool,
     alert: bool,
     drawer: Option<DrawerSide>,
+    sheet: bool,
     commands: bool,
     /// The page's own focus, so ⌘K reaches it before anything else has the keyboard.
     focus: FocusHandle,
@@ -155,6 +157,63 @@ impl Render for Overlays {
                                 this.drawer = None;
                                 this.set("drawer cancelled", cx);
                             })),
+                    ),
+            )
+            .child(section("Toast"))
+            .child(
+                div()
+                    .flex()
+                    .gap(rems(0.5))
+                    .child(
+                        Button::new("toast-plain")
+                            .outline()
+                            .label("Save")
+                            .on_click(|_, window, cx| Toast::new("Saved.").show(window, cx)),
+                    )
+                    .child(
+                        Button::new("toast-success")
+                            .outline()
+                            .label("Copy the password")
+                            .on_click(|_, window, cx| {
+                                Toast::success("Copied the password.")
+                                    .description("It leaves the clipboard in a minute.")
+                                    .show(window, cx)
+                            }),
+                    )
+                    .child(
+                        Button::new("toast-error")
+                            .outline()
+                            .label("Fail, with Retry")
+                            .on_click(|_, window, cx| {
+                                Toast::error("Couldn't reach the agent.")
+                                    .action("Retry", |_, _| {})
+                                    .show(window, cx)
+                            }),
+                    ),
+            )
+            .child(section("Sheet (touch)"))
+            .child(
+                div().flex().child(
+                    Button::new("open-sheet")
+                        .outline()
+                        .label("Open a sheet")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.sheet = true;
+                            cx.notify();
+                        })),
+                ),
+            )
+            .child(
+                Sheet::new("sheet")
+                    .open(self.sheet)
+                    .on_dismiss(cx.listener(|this, reason: &DismissReason, _, cx| {
+                        this.sheet = false;
+                        this.set(&format!("sheet dismissed ({reason:?})"), cx);
+                    }))
+                    .child(
+                        div()
+                            .p(rems(1.5))
+                            .child("A panel across the bottom of the window, for touch."),
                     ),
             )
             .child(section("Command"))
@@ -300,6 +359,7 @@ fn main() {
                     dialog: false,
                     alert: false,
                     drawer: None,
+                    sheet: false,
                     commands: false,
                     name,
                     said: "nothing yet".into(),
