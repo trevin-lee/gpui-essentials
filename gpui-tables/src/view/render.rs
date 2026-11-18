@@ -1123,7 +1123,7 @@ impl TableView {
                             .size(t.px(22.))
                             .rounded(t.px(t.sizes.chip_radius))
                             .border_1()
-                            .border_color(t.colors.line_strong)
+                            .border_color(t.colors.control)
                             .bg(t.colors.background)
                             .hover(|s| s.bg(t.colors.hover))
                             .child(icon(
@@ -1190,7 +1190,7 @@ impl TableView {
                     .items_center()
                     .justify_center()
                     .when(on, |d| d.bg(t.colors.accent))
-                    .when(!on, |d| d.border_1().border_color(t.colors.line_strong))
+                    .when(!on, |d| d.border_1().border_color(t.colors.control))
                     .when(on, |d| {
                         d.child(icon(
                             IconName::Check,

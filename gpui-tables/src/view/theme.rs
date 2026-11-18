@@ -64,8 +64,11 @@ pub struct TableColors {
     pub text_faint: Hsla,
     /// Lines between rows and columns.
     pub line: Hsla,
-    /// The header's lower edge, a column being resized, a checkbox's edge.
+    /// The header's lower edge, a column being resized, a card that's lifted or hovered.
     pub line_strong: Hsla,
+    /// A control's boundary, which shows it's there: an unticked checkbox's outline and the
+    /// open button's edge, at least 3:1 against the background (WCAG 1.4.11).
+    pub control: Hsla,
     /// Behind the header row.
     pub header: Hsla,
     /// Behind a group's header.
@@ -197,6 +200,7 @@ impl TableTheme {
                 text_faint: hex(0x5c5c64),
                 line: hex(0x222226),
                 line_strong: hex(0x34343a),
+                control: hex(0x656571),
                 header: hex(0x0f0f11),
                 group: hex(0x141417),
                 hover: hexa(0xffffff0a),
@@ -236,6 +240,7 @@ impl TableTheme {
                 text_faint: hex(0xa3a3aa),
                 line: hex(0xececef),
                 line_strong: hex(0xdcdce0),
+                control: hex(0x8f8f9e),
                 header: hex(0xffffff),
                 group: hex(0xf7f7f8),
                 hover: hexa(0x0000000a),
@@ -281,7 +286,10 @@ impl TableTheme {
                 text_muted: core.muted_foreground,
                 text_faint: core.muted_foreground.opacity(0.65),
                 line: core.border,
-                line_strong: core.input,
+                // gpui-core's quiet control colour for lines, its boundary colour (3:1) for
+                // controls' edges.
+                line_strong: core.control,
+                control: core.input,
                 header: core.background,
                 group: core.muted.opacity(0.5),
                 hover: core.accent,
@@ -349,6 +357,7 @@ impl TableTheme {
             text_faint: c,
             line: c,
             line_strong: c,
+            control: c,
             header: c,
             group: c,
             hover: c,
