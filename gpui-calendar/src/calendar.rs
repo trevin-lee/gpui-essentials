@@ -41,6 +41,11 @@ actions!(
     [
         /// Moves the selection a day back; with nothing selected, goes to the previous period.
         SelectLeft,
+        /// Picks the selected event up to move it with the arrow keys: Space or Enter puts it
+        /// down, Escape puts it back.
+        MoveSelected,
+        /// Picks the selected event's end up to change it with the arrow keys.
+        ResizeSelected,
         /// Moves the selection a day on; with nothing selected, goes to the next period.
         SelectRight,
         /// Moves the selection earlier (a slot on the time grid, a week in the month).
@@ -78,6 +83,8 @@ actions!(
 );
 
 const CONTEXT: &str = "Calendar";
+/// The calendar's context while its days themselves have the keyboard's focus.
+const DAYS_CONTEXT: &str = "CalendarDays";
 
 /// The calendar's keys. Call once at startup ([`crate::init`] does). A host remaps any of them
 /// by binding the same actions to other keys in the `Calendar` context.
@@ -98,6 +105,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("j", NextPeriod, c),
         KeyBinding::new("n", NewEvent, c),
         KeyBinding::new("enter", OpenSelected, c),
+        // Only with the keyboard on the days: in the header, the panel or the mini month, Space
+        // presses what has the focus.
+        KeyBinding::new("space", MoveSelected, Some(DAYS_CONTEXT)),
+        KeyBinding::new("shift-space", ResizeSelected, Some(DAYS_CONTEXT)),
         KeyBinding::new("backspace", DeleteSelected, c),
         KeyBinding::new("delete", DeleteSelected, c),
         KeyBinding::new("escape", Cancel, c),
@@ -3162,6 +3173,8 @@ impl Render for Calendar {
             .track_focus(&self.focus)
             .key_context(if self.typing {
                 "CalendarQuery"
+            } else if self.focus.is_focused(window) {
+                "Calendar CalendarDays"
             } else {
                 CONTEXT
             })
@@ -3200,6 +3213,12 @@ impl Render for Calendar {
                 }
             }))
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
+            .on_action(
+                cx.listener(|c, _: &MoveSelected, window, cx| c.keyboard_drag(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|c, _: &ResizeSelected, window, cx| c.keyboard_drag(true, window, cx)),
+            )
             .on_action(cx.listener(|c, _: &Cancel, window, cx| c.cancel(window, cx)))
             .on_action(cx.listener(|_, _: &Find, _, cx| cx.emit(CalendarEvent::Find)))
             .on_action(cx.listener(|c, _: &GoToDate, window, cx| c.toggle_mini_month(window, cx)))
