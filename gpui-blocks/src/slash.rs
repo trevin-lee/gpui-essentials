@@ -36,6 +36,9 @@ pub enum SlashAction {
     /// ([`EditorEvent::EmbedRequested`](crate::EditorEvent::EmbedRequested)). The app calls
     /// [`Editor::insert_embed`](crate::Editor::insert_embed).
     Embed,
+    /// Make the line a toggle heading of this level (1 to 3): a heading whose blocks after
+    /// it fold away.
+    ToggleHeading(u8),
     /// Colour the whole line: its text (`text`) or its background, in the `index`th of Notion's
     /// colours ([`markdown_editor::TEXT_COLORS`], [`markdown_editor::BACKGROUNDS`]), or take
     /// that colour off (`None`).
@@ -213,6 +216,27 @@ fn built_in_items() -> Vec<SlashItem> {
             &["details", "collapse", "fold"],
             "▸",
             Command(C::WrapInToggle),
+        ),
+        basic(
+            "Toggle heading 1",
+            "A large heading that folds",
+            &["toggle h1", "collapsible heading"],
+            "▸H1",
+            ToggleHeading(1),
+        ),
+        basic(
+            "Toggle heading 2",
+            "A section heading that folds",
+            &["toggle h2", "collapsible heading"],
+            "▸H2",
+            ToggleHeading(2),
+        ),
+        basic(
+            "Toggle heading 3",
+            "A smaller heading that folds",
+            &["toggle h3", "collapsible heading"],
+            "▸H3",
+            ToggleHeading(3),
         ),
         basic(
             "Quote",
@@ -400,7 +424,7 @@ mod tests {
                 .map(|ix| items[ix].title.to_string())
                 .collect()
         };
-        assert_eq!(titles("h1"), ["Heading 1"]);
+        assert_eq!(titles("h1"), ["Heading 1", "Toggle heading 1"]);
         assert_eq!(titles("todo"), ["To-do list"]);
         assert_eq!(titles("head")[..3], ["Heading 1", "Heading 2", "Heading 3"]);
         // "list" is in three titles; none starts with it, so they keep their order.
