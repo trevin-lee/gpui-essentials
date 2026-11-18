@@ -39,6 +39,7 @@ README is the design for all of it.
 - [The host's part](#the-hosts-part)
 - [Performance](#performance)
 - [iOS and touch](#ios-and-touch)
+- [Accessibility](#accessibility)
 - [Not in v1](#not-in-v1)
 - [Tests](#tests)
 
@@ -1209,6 +1210,17 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
   ways with momentum, and
   the title column stays put.
 
+## Accessibility
+
+Every control the views draw tells assistive technology what it is and what it's called. A
+table is a grid named after its view, with each column header named after its property. Each row
+is named after its title and each cell after its property and value ("Stage: Lead"). A
+column's resize handle is a splitter ("Width of Company"). Board columns and lists are named
+lists, and cards and lines are named after their title and the properties they show. The bar of
+views is a tab list, and the peek's title and values are buttons ("Title: Imani Castell"). Each
+control reports its role and label to gpui-core's accessibility audit as it's drawn, so the
+tests fail on any control without them.
+
 ## Not in v1
 
 - **Formulas.** They need an expression language, an evaluator, dependency tracking between
@@ -1338,6 +1350,10 @@ cargo run --release -p gpui-tables --features shots --example crm -- --shot out.
   cell shows it.
 - `tests/view_performance.rs`: the table, the board and the list with 10,000 rows, timed, as
   above.
+- `tests/a11y.rs`: a table (a row peeked, a column's menu open), a board, a list and a gallery,
+  each under its bar of views, drawn while gpui-core's audit records each control: none goes
+  without a role and a label. The unit test `view::a11y` reads the views' source and fails on
+  any click handler whose element isn't a labelled control.
 - Unit tests for fractional indexes and calendar arithmetic.
 
 ## License

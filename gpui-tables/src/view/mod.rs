@@ -38,6 +38,7 @@
 //! }
 //! ```
 
+mod a11y;
 mod board;
 mod board_render;
 mod calc;
