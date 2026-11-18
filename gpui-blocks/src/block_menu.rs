@@ -1,12 +1,13 @@
 //! The block menu: a click on a block's ⋮⋮ grip (a press that doesn't drag) opens it beside the
-//! grip, to turn the block into another kind, duplicate it or delete it. On touch, where there's
+//! grip, to turn the block into another kind, colour all its text, duplicate it or delete it. On touch, where there's
 //! no grip, the long press's edit menu has Block…, which opens the same entries in a sheet.
 
 use gpui::*;
-use gpui_core::{IconName, Popover, PopupMenu, PopupMenuItem, Sheet};
+use gpui_core::{ActiveTheme as _, IconName, Popover, PopupMenu, PopupMenuItem, Sheet};
 use markdown_editor::{BlockId, BlockPosition, BlockSelection, EditorCommand};
 
 use crate::Editor;
+use crate::format_bar::{Paint, color_entries};
 use crate::slash::{self, SlashAction};
 
 impl Editor {
@@ -106,6 +107,20 @@ impl Editor {
         self.block_menu = None;
         self.block_sheet = None;
         let (first, last) = self.menu_blocks(block, cx);
+        // Color: the blocks' text, all of it, as Notion colours a block.
+        if let Some((paint, on)) = Paint::of_menu_item(id) {
+            if let Some(selection) = self.text_of(first, last, cx) {
+                let selected = self
+                    .state
+                    .update(cx, |state, cx| state.set_selection(selection, cx).is_ok());
+                if selected {
+                    self.set_paint(paint, on, cx);
+                }
+            }
+            self.state.update(cx, |state, cx| state.focus(window, cx));
+            cx.notify();
+            return;
+        }
         let whole = BlockSelection::Blocks {
             anchor: first,
             head: last,
@@ -232,6 +247,16 @@ impl Editor {
                     .submenu(turn),
             )
             .item(
+                PopupMenuItem::new("color", "Color")
+                    .icon(IconName::Palette)
+                    .disabled(!has_text)
+                    .submenu(color_entries(
+                        PopupMenu::new("block-menu-color"),
+                        cx.theme(),
+                        None,
+                    )),
+            )
+            .item(
                 PopupMenuItem::new("duplicate", "Duplicate")
                     .icon(IconName::Copy)
                     .shortcut(if cfg!(target_os = "macos") {
@@ -261,8 +286,8 @@ impl Editor {
 
 impl Editor {
     /// The block menu as a sheet across the bottom, for touch: Turn into's kinds listed in it
-    /// (a submenu has no room beside a phone's menu), then Duplicate and Delete. Drawn closed
-    /// too, so the focus goes back to the page when it closes.
+    /// (a submenu has no room beside a phone's menu), Duplicate and Delete, then the colours.
+    /// Drawn closed too, so the focus goes back to the page when it closes.
     pub(crate) fn block_sheet(&self, cx: &mut Context<Self>) -> AnyElement {
         let block = self.block_sheet;
         let has_text = block.is_some_and(|block| {
@@ -271,8 +296,9 @@ impl Editor {
         });
         let this = cx.entity().downgrade();
         let dismiss = this.clone();
+        let theme = cx.theme().clone();
         let menu = block.map(|block| {
-            PopupMenu::new("block-sheet-menu")
+            let menu = PopupMenu::new("block-sheet-menu")
                 .touch(true)
                 .heading("Turn into")
                 .items(
@@ -282,15 +308,23 @@ impl Editor {
                         .map(|(ix, title)| {
                             PopupMenuItem::new(format!("turn-{ix}"), title).disabled(!has_text)
                         }),
-                )
+                );
+            let menu = menu
                 .separator()
                 .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
-                .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash))
-                .on_select(move |picked, window, cx| {
-                    let _ = this.update(cx, |this, cx| {
-                        this.block_menu_pick(block, &picked.id, window, cx)
-                    });
-                })
+                .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash));
+            // Its colours last, listed in it as Turn into's are (a sheet has no room for a
+            // submenu), so the long list doesn't push Duplicate and Delete out of reach.
+            let menu = if has_text {
+                color_entries(menu.separator(), &theme, None)
+            } else {
+                menu
+            };
+            menu.on_select(move |picked, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.block_menu_pick(block, &picked.id, window, cx)
+                });
+            })
         });
         Sheet::new("block-sheet")
             .open(block.is_some())
