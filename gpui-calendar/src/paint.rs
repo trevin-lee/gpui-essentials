@@ -828,8 +828,9 @@ fn draw(
     });
 }
 
-/// Every line of text a frame draws, kept by the overflow tests.
-#[cfg(test)]
+/// Every line of text a frame draws, kept by the overflow tests (macOS only: they lay text out
+/// with Core Text).
+#[cfg(all(test, target_os = "macos"))]
 pub(crate) mod drawn {
     use std::cell::RefCell;
 
@@ -885,13 +886,13 @@ impl Ink<'_> {
     }
 
     /// Notes a line of text for the overflow tests; nothing outside them.
-    #[cfg_attr(not(test), allow(unused_variables))]
+    #[cfg_attr(not(all(test, target_os = "macos")), allow(unused_variables))]
     fn note(&self, text: &str, at: Point<Pixels>, width: Pixels, height: Pixels) {
-        #[cfg(test)]
+        #[cfg(all(test, target_os = "macos"))]
         if self.dry {
             return;
         }
-        #[cfg(test)]
+        #[cfg(all(test, target_os = "macos"))]
         drawn::TEXTS.with(|t| {
             if let Some(log) = t.borrow_mut().as_mut() {
                 log.push(drawn::Text {
