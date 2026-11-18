@@ -366,7 +366,7 @@ impl RenderOnce for DatePicker {
         let muted = c.placeholder.unwrap_or(theme.muted_foreground);
         let fill = c
             .field
-            .or_else(|| theme.mode.is_dark().then(|| theme.input.opacity(0.3)));
+            .or_else(|| theme.mode.is_dark().then(|| theme.control.opacity(0.3)));
 
         let trigger = Press::new(ElementId::NamedInteger("date-picker".into(), id))
             .track_focus(&focus)
@@ -546,7 +546,7 @@ pub struct DatePickerColors {
     pub text: Option<Hsla>,
     /// The placeholder and the calendar icon (the theme's muted foreground).
     pub placeholder: Option<Hsla>,
-    /// The keyboard focus ring, drawn as given (the theme's ring at half strength).
+    /// The keyboard focus ring, drawn as given (the theme's ring at 60%).
     pub focus_ring: Option<Hsla>,
     /// The focused field's border (the focus ring's colour if given, else the theme's ring).
     pub focus_border: Option<Hsla>,
@@ -566,7 +566,7 @@ pub struct DatePickerColors {
     pub today_ring: Option<Hsla>,
     /// Days outside the month, the weekdays' names and the dots (the theme's muted foreground).
     pub muted: Option<Hsla>,
-    /// The border of the day the keyboard is on (the theme's ring at half strength).
+    /// The border of the day the keyboard is on (the theme's ring at 60%).
     pub cursor: Option<Hsla>,
 }
 
@@ -734,7 +734,7 @@ fn month_view(
     let selected_text = c.selected_text.unwrap_or(theme.primary_foreground);
     let range = c.range.unwrap_or(theme.accent);
     let hover = c.hover.unwrap_or(theme.accent);
-    let cursor_border = c.cursor.unwrap_or(theme.ring.opacity(0.5));
+    let cursor_border = c.cursor.unwrap_or(theme.focus_ring());
     let day_button = |d: NaiveDate| {
         let in_month = d.month() == month.month();
         // What's picked, for assistive tech; drawn as picked too are a shown range's ends.

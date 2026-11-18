@@ -17,8 +17,8 @@ use crate::theme::ActiveTheme as _;
 type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// The focus ring the theme draws around something focused from the keyboard: the ring colour
-/// at half strength, three pixels wide outside the element (the web's `ring-3 ring-ring/50`),
-/// so nothing moves when it shows.
+/// at 60% (3:1 against the page in both themes; the web's `ring-ring/50` isn't in the dark),
+/// three pixels wide outside the element, as the web's `ring-3`, so nothing moves when it shows.
 pub fn focus_ring(cx: &App) -> BoxShadow {
     BoxShadow {
         color: cx.theme().focus_ring(),

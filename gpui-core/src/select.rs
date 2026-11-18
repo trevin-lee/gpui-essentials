@@ -390,9 +390,9 @@ impl RenderOnce for Select {
                 .into_iter()
                 .map(move |s| crate::base::ring_outside(s, radius, gpui::px(1.)))
         })
-        .when(dark, |p| p.bg(theme.input.opacity(0.3)))
+        .when(dark, |p| p.bg(theme.control.opacity(0.3)))
         .when(dark && !self.disabled, |p| {
-            let hover = theme.input.opacity(0.5);
+            let hover = theme.control.opacity(0.5);
             p.hover(move |s| s.bg(hover))
         })
         .text_size(theme.text.sm)

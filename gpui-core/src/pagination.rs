@@ -177,13 +177,13 @@ fn paint(current: bool, theme: &Theme) -> Paint {
     let none = gpui::transparent_black();
     match (current, dark) {
         (true, true) => Paint {
-            fill: theme.input.opacity(0.3),
+            fill: theme.control.opacity(0.3),
             border: theme.input,
-            hover: theme.input.opacity(0.5),
+            hover: theme.control.opacity(0.5),
         },
         (true, false) => Paint {
             fill: theme.background,
-            border: theme.border,
+            border: theme.input,
             hover: theme.muted,
         },
         (false, _) => Paint {

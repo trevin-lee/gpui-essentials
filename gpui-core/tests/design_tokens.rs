@@ -41,6 +41,7 @@ fn colours() -> Vec<(&'static str, Vec<Field>)> {
         ("muted-foreground", f!(muted_foreground)),
         ("border", f!(border, sidebar_border)),
         ("input", f!(input)),
+        ("control", f!(control)),
         ("ring", f!(ring, sidebar_ring)),
         ("live", f!(live, success, ready)),
         ("attention", f!(attention, attention_foreground)),

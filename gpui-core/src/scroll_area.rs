@@ -210,7 +210,7 @@ impl ScrollArea {
         self
     }
 
-    /// The keyboard focus ring's colour, drawn as given (the theme's ring at half strength
+    /// The keyboard focus ring's colour, drawn as given (the theme's ring at 60%
     /// unless given).
     pub fn focus_ring_color(mut self, color: impl Into<Hsla>) -> Self {
         self.ring = Some(color.into());

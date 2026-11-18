@@ -101,23 +101,23 @@ fn metrics(size: ControlSize) -> (Rems, Rems) {
 }
 
 /// Fill, text and the fill under the pointer. Pressed in, it's shadcn's `data-[state=on]`
-/// accent look; in the dark, where accent is all but the page, the input colour, as a selected
+/// accent look; in the dark, where accent is all but the page, the control colour, as a selected
 /// `Button` is.
 fn paint(variant: ToggleVariant, pressed: bool, theme: &Theme) -> (Hsla, Hsla, Hsla) {
     let dark = theme.mode.is_dark();
     let none = gpui::transparent_black();
     if pressed {
-        let fill = if dark { theme.input } else { theme.accent };
+        let fill = if dark { theme.control } else { theme.accent };
         return (fill, theme.accent_foreground, fill);
     }
     let hover = match (variant, dark) {
-        (ToggleVariant::Outline, true) => theme.input.opacity(0.5),
+        (ToggleVariant::Outline, true) => theme.control.opacity(0.5),
         (ToggleVariant::Outline, false) => theme.accent,
         (ToggleVariant::Default, true) => theme.muted.opacity(0.5),
         (ToggleVariant::Default, false) => theme.muted,
     };
     let fill = if variant == ToggleVariant::Outline && dark {
-        theme.input.opacity(0.3)
+        theme.control.opacity(0.3)
     } else {
         none
     };
