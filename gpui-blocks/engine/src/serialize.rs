@@ -96,6 +96,14 @@ pub(crate) fn block(doc: &EditorDocument, id: BlockId) -> String {
                 .and_then(|id| doc.inline(*id))
                 .map(|inline| inline_markdown(inline).replace('\n', " "))
                 .unwrap_or_default();
+            // A toggle heading: its level around the text (1 to 3; a deeper one is written as
+            // its text, which reads back as a plain toggle).
+            let summary = match children.first().and_then(|id| doc.kind(*id)) {
+                Some(BlockKindData::Heading { level }) if (1..=3).contains(level) => {
+                    format!("<h{level}>{summary}</h{level}>")
+                }
+                _ => summary,
+            };
             let tag = if *open { "<details open>" } else { "<details>" };
             let body = join_blocks(doc, children.get(1..).unwrap_or_default());
             if body.is_empty() {
