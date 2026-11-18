@@ -190,6 +190,8 @@ impl RenderOnce for Collapsible {
             Trigger::With(f) => Some(f(open)),
             Trigger::Label(label) => Some(
                 Press::new(trigger_id)
+                    // Its words are its name: the label text alone isn't announced as one.
+                    .accessibility_label(label.clone())
                     .debug_selector(|| "collapsible-trigger".into())
                     .flex()
                     .items_center()

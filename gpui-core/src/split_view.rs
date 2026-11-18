@@ -502,6 +502,7 @@ impl RenderOnce for SplitView {
                     });
                 }
             };
+            crate::base::a11y_audit("SplitView handle", Role::Splitter, pane.label.as_ref());
             let handle = div()
                 .id(("split-handle", i))
                 .key_context(CONTEXT)
