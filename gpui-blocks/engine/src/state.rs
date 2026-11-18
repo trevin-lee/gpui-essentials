@@ -509,6 +509,9 @@ pub struct BlockEditorState {
     /// Remembered x for repeated up/down.
     goal_x: Option<Pixels>,
     pub(crate) dragging: bool,
+    /// A press in the page's margin, beside the blocks: dragging from it selects the blocks it
+    /// sweeps over, whole, as Notion's does.
+    sweep: Option<Point<Pixels>>,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
     /// Whether the long press in progress began off the text, so moving lifts its block.
@@ -592,6 +595,7 @@ impl BlockEditorState {
             goal_x: None,
             dragging: false,
             block_drag: None,
+            sweep: None,
             touch_lifts: false,
             lifted_follow: None,
             reorder: Default::default(),
@@ -2320,6 +2324,57 @@ impl BlockEditorState {
     }
 
     /// Mouse: place or extend the caret at a window point.
+    /// A press at `at`: in the margin beside the blocks (left or right of all of them), a drag
+    /// from it sweeps blocks into a selection ([`Self::sweep_to`]).
+    pub(crate) fn arm_sweep(&mut self, at: Point<Pixels>) {
+        let tops = self.top_level_bounds();
+        let left = tops.iter().map(|(_, _, b)| b.left()).reduce(Pixels::min);
+        let right = tops.iter().map(|(_, _, b)| b.right()).reduce(Pixels::max);
+        self.sweep = match (left, right) {
+            (Some(left), Some(right)) if at.x < left || at.x > right => Some(at),
+            _ => None,
+        };
+    }
+
+    /// The pointer, pressed in the margin, is at `at`: once it has moved, the top-level blocks
+    /// between where it pressed and here are selected whole. Returns whether the move was the
+    /// sweep's.
+    pub(crate) fn sweep_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(start) = self.sweep else {
+            return false;
+        };
+        if (at.y - start.y).abs() < gpui::px(4.) {
+            return true;
+        }
+        let (top, bottom) = (start.y.min(at.y), start.y.max(at.y));
+        let swept: Vec<BlockId> = self
+            .top_level_bounds()
+            .into_iter()
+            .filter(|(_, _, b)| b.bottom() >= top && b.top() <= bottom)
+            .map(|(_, id, _)| id)
+            .collect();
+        let (Some(first), Some(last)) = (swept.first(), swept.last()) else {
+            return true;
+        };
+        // From where it pressed toward the pointer.
+        let (anchor, head) = if at.y >= start.y {
+            (*first, *last)
+        } else {
+            (*last, *first)
+        };
+        let selection = BlockSelection::Blocks { anchor, head };
+        if self.model.selection() != &selection {
+            self.end_composition();
+            let _ = self.model.set_selection(selection);
+            self.selection_changed(cx);
+        }
+        true
+    }
+
+    pub(crate) fn end_sweep(&mut self) {
+        self.sweep = None;
+    }
+
     pub(crate) fn mouse_at(&mut self, at: Point<Pixels>, extend: bool, cx: &mut Context<Self>) {
         // Block handle: a click in the left edge beside a table or code
         // block (left of its text) selects the block as a node.

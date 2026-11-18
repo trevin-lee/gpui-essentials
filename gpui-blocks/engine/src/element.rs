@@ -1048,6 +1048,7 @@ impl Element for EditorRoot {
                 state.dragging = true;
                 if !event.modifiers.shift {
                     state.arm_block_drag(event.position);
+                    state.arm_sweep(event.position);
                 }
                 state.mouse_at(event.position, event.modifiers.shift, cx);
                 if !event.modifiers.shift && event.click_count >= 2 {
@@ -1075,6 +1076,9 @@ impl Element for EditorRoot {
             }
             entity.update(cx, |state, cx| {
                 if state.block_drag_to(event.position, cx) {
+                    return;
+                }
+                if state.dragging && state.sweep_to(event.position, cx) {
                     return;
                 }
                 if state.dragging {
@@ -1146,6 +1150,7 @@ impl Element for EditorRoot {
             if phase == DispatchPhase::Bubble {
                 entity.update(cx, |state, cx| {
                     state.dragging = false;
+                    state.end_sweep();
                     state.finish_block_drag(cx);
                 });
             }
