@@ -439,7 +439,31 @@ impl RenderOnce for Button {
             press = press.tooltip(move |window, cx| build(window, cx));
         }
         press.style().refine(&self.style);
-        press
+        // What it holds is laid out and clipped in a box of its own, filling it: the button
+        // itself doesn't clip, so its focus ring shows just outside it, but a button squeezed
+        // narrower than its contents still keeps them inside its edge. The padding, gap and
+        // arrangement (the host's `flex_row_reverse` too) move to that box.
+        let mut inner = div()
+            .flex()
+            .flex_grow(1.)
+            .flex_shrink(1.)
+            .min_w_0()
+            .h_full()
+            .overflow_hidden();
+        {
+            let from = press.style();
+            let padding = std::mem::take(&mut from.padding);
+            let gap = std::mem::take(&mut from.gap);
+            let (direction, justify, align) =
+                (from.flex_direction, from.justify_content, from.align_items);
+            let to = inner.style();
+            to.padding = padding;
+            to.gap = gap;
+            to.flex_direction = direction;
+            to.justify_content = justify;
+            to.align_items = align;
+        }
+        let inner = inner
             .when_some(self.icon, |b, icon| b.child(icon.size(m.icon)))
             .when_some(self.label, |b, label| {
                 b.child(
@@ -456,8 +480,8 @@ impl RenderOnce for Button {
                         .child(label),
                 )
             })
-            .children(self.children)
-            .line_height(relative(1.))
+            .children(self.children);
+        press.child(inner).line_height(relative(1.))
     }
 }
 
@@ -537,16 +561,17 @@ impl RenderOnce for ButtonGroup {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let n = self.buttons.len();
         let on_click = self.on_click;
-        // It never runs out of its space: its buttons give way first (their labels end in an
-        // ellipsis). It doesn't clip, so a button's focus ring shows outside it.
-        let row = div()
+        // It never runs out of its space: its buttons give way first, and what can't fit even
+        // then (their padding) is clipped at its sides. Only its sides: a button's focus ring
+        // still shows above and below it.
+        let mut row = div()
             .id(self.id)
             .flex()
             .flex_shrink_1()
             .items_center()
             .min_w_0()
-            .max_w_full();
-        let mut row = row;
+            .max_w_full()
+            .overflow_x_hidden();
         row.style().refine(&self.style);
         row.children(self.buttons.into_iter().enumerate().map(|(i, mut b)| {
             if let Some(v) = self.variant {
