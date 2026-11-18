@@ -213,7 +213,7 @@ fn a_light_card_s_date_picker_takes_the_card_s_colours_in_a_dark_app() {
         "no field edged in the dark theme's input colour"
     );
     assert!(
-        !field(&|fill, _| near(fill, global.input.opacity(0.3))),
+        !field(&|fill, _| near(fill, global.control.opacity(0.3))),
         "no field filled as the dark theme's"
     );
 

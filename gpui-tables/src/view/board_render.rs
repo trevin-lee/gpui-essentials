@@ -538,7 +538,7 @@ impl TableView {
                                     .items_center()
                                     .justify_center()
                                     .when(on, |d| d.bg(t.colors.accent))
-                                    .when(!on, |d| d.border_1().border_color(t.colors.line_strong))
+                                    .when(!on, |d| d.border_1().border_color(t.colors.control))
                                     .when(on, |d| {
                                         d.child(icon(
                                             IconName::Check,
