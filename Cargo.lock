@@ -1888,6 +1888,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-cli"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "gpui-core"
 version = "0.1.0"
 dependencies = [
@@ -1918,14 +1926,6 @@ dependencies = [
  "tree-sitter-yaml",
  "unicode-segmentation",
  "web-time",
-]
-
-[[package]]
-name = "gpui-core-cli"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "syn 2.0.119",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 //! Each component page's Installation section, from gpui-core's components.toml: what
-//! `gpui-core add` copies into a host's crate. A component listed there is copied by its name,
+//! `gpui add` copies into a host's crate. A component listed there is copied by its name,
 //! with the components it needs and the crates it uses; one that stays in gpui-core (its
 //! `base`: the theme, popovers, inputs, charts…) is used from the dependency alone.
 
@@ -11,7 +11,7 @@ use anyhow::{Context as _, Result};
 
 const REPO: &str = "https://github.com/trevin-lee/gpui-essentials";
 
-/// What `gpui-core add` does for one component.
+/// What `gpui add` does for one component.
 pub struct Copy {
     /// Its name to the CLI, hyphenated: `date-picker`.
     name: String,
@@ -82,9 +82,9 @@ impl Installs {
             Some(copy) => {
                 let _ = write!(
                     html,
-                    "<p>Copy it into your crate, as code you own, with the gpui-core CLI:</p>\
-                     <pre><code>cargo install --locked --git {REPO} gpui-core-cli\n\
-                     gpui-core add {}</code></pre>",
+                    "<p>Copy it into your crate, as code you own, with the gpui CLI:</p>\
+                     <pre><code>cargo install --locked --git {REPO} gpui-cli\n\
+                     gpui add {}</code></pre>",
                     copy.name
                 );
                 if !copy.needs.is_empty() {

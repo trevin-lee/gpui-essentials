@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Copies every gpui-core component into a new crate with this checkout's `gpui-core add`, as a
+# Copies every gpui-core component into a new crate with this checkout's `gpui add`, as a
 # host would, and builds it; then runs side_by_side.rs, which puts a copy next to gpui-core's
 # original in one app. CI runs it on Linux; it runs on a Mac too.
 #
-# Usage: gpui-core-cli/ci/check-copies.sh [scratch-dir]   (from anywhere in the checkout)
+# Usage: gpui-cli/ci/check-copies.sh [scratch-dir]   (from anywhere in the checkout)
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -39,7 +39,7 @@ printf 'pub mod ui;\n' > "$host/src/lib.rs"
 cp "$repo/Cargo.lock" "$host/Cargo.lock"
 cp "$repo/rust-toolchain.toml" "$host/"
 
-cli=(cargo run --quiet --locked --manifest-path "$repo/Cargo.toml" -p gpui-core-cli --)
+cli=(cargo run --quiet --locked --manifest-path "$repo/Cargo.toml" -p gpui-cli --)
 cd "$host"
 "${cli[@]}" add --all --path "$repo"
 # A second run changes nothing.
@@ -54,6 +54,6 @@ grep -q '^Copied' "$scratch/again.txt" && { echo "a second add copied again"; ex
 # warnings; RUSTFLAGS would rebuild GPUI.)
 cargo build 2>&1 | tee "$scratch/build.txt"
 if grep -E '^(warning|error)' "$scratch/build.txt"; then echo "the copies have warnings"; exit 1; fi
-cp "$repo/gpui-core-cli/ci/side_by_side.rs" tests/
+cp "$repo/gpui-cli/ci/side_by_side.rs" tests/
 cargo test --test side_by_side
 echo "check-copies: every component copied, built, and a copy ran beside gpui-core's own"

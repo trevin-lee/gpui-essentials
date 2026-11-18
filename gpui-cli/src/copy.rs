@@ -1,4 +1,4 @@
-//! `gpui-core add`: writes the copies, their mod.rs, and says what's left for the host to do.
+//! `gpui add`: writes the copies, their mod.rs, and says what's left for the host to do.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -10,8 +10,12 @@ use crate::sha256;
 use crate::source::Source;
 
 /// Each copy's first line starts so; mod.rs's says it's generated.
-const MARK: &str = "// gpui-core add: ";
-const MOD_MARK: &str = "//! Components copied from gpui-core by `gpui-core add`.";
+const MARK: &str = "// gpui add: ";
+const MOD_MARK: &str = "//! Components copied from gpui-core by `gpui add`.";
+/// What the CLI wrote before it was renamed `gpui` (from `gpui-core`): copies and a mod.rs made
+/// then are still recognised, and get the new marks when next written.
+const OLD_MARK: &str = "// gpui-core add: ";
+const OLD_MOD_MARK: &str = "//! Components copied from gpui-core by `gpui-core add`.";
 
 pub struct Request {
     pub names: Vec<String>,
@@ -29,7 +33,7 @@ pub struct Request {
 fn header(name: &str, from: &str, file: &str, body: &str) -> String {
     format!(
         "{MARK}{name} from {from} ({file}), sha256 {}\n\
-         // Yours to change. `gpui-core add {} --diff` shows what a newer gpui-core changed, and\n\
+         // Yours to change. `gpui add {} --diff` shows what a newer gpui-core changed, and\n\
          // --force takes it, replacing your edits.\n",
         sha256::hex(body.as_bytes()),
         name.replace('_', "-"),
@@ -45,10 +49,13 @@ struct Existing {
     hash: String,
 }
 
-/// The component a file is a copy of, if `gpui-core add` wrote it, and the file.
+/// The component a file is a copy of, if `gpui add` wrote it, and the file.
 fn existing(path: &Path) -> Option<(String, Existing)> {
     let text = std::fs::read_to_string(path).ok()?;
-    let first = text.lines().next()?.strip_prefix(MARK)?;
+    let line = text.lines().next()?;
+    let first = line
+        .strip_prefix(MARK)
+        .or_else(|| line.strip_prefix(OLD_MARK))?;
     let name = first.split(' ').next()?.to_string();
     let hash = first.rsplit("sha256 ").next()?.trim().to_string();
     let body = text.splitn(4, '\n').nth(3).unwrap_or("").to_string();
@@ -86,11 +93,12 @@ pub fn add(req: &Request, root: &Path, source: &Source) -> Result<(), String> {
     let mod_path = req.dir.join("mod.rs");
     if let Ok(text) = std::fs::read_to_string(&mod_path)
         && !text.starts_with(MOD_MARK)
+        && !text.starts_with(OLD_MOD_MARK)
         && !req.force
         && !req.diff
     {
         return Err(format!(
-            "{} isn't the one gpui-core add writes, and add rewrites it: move it (or pass \
+            "{} isn't the one gpui add writes, and add rewrites it: move it (or pass \
              --dir for another directory, or --force to replace it)",
             req.dir_shown.join("mod.rs").display()
         ));
@@ -144,7 +152,7 @@ pub fn add(req: &Request, root: &Path, source: &Source) -> Result<(), String> {
                     wrote.push(name.clone());
                 } else {
                     let why = match copy {
-                        None => "isn't a copy gpui-core add made".to_string(),
+                        None => "isn't a copy gpui add made".to_string(),
                         Some(_) if edited => "has your edits".to_string(),
                         Some(_) => "is unedited, from another gpui-core".to_string(),
                     };
@@ -204,7 +212,7 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
 
 /// `diff -u` of a copy against what add would write.
 fn diff(shown: &Path, old: &str, new: &str) -> Result<(), String> {
-    let tmp = std::env::temp_dir().join(format!("gpui-core-add-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("gpui-add-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let (a, b) = (tmp.join("a"), tmp.join("b"));
     std::fs::write(&a, old).map_err(|e| e.to_string())?;
@@ -338,7 +346,7 @@ mod tests {
 
     #[test]
     fn a_header_reads_back() {
-        let dir = std::env::temp_dir().join(format!("gpui-core-cli-copy-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gpui-cli-copy-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let body = "use gpui::App;\n";
         let text = header("date_picker", "a/b@abc", "src/date_picker.rs", body) + body;
@@ -348,5 +356,18 @@ mod tests {
         assert_eq!(name, "date_picker");
         assert_eq!(e.body, body);
         assert_eq!(e.hash, sha256::hex(body.as_bytes()));
+    }
+
+    #[test]
+    fn a_copy_made_before_the_rename_is_still_one() {
+        let dir = std::env::temp_dir().join(format!("gpui-cli-old-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = "use gpui::App;\n";
+        let new = header("select", "a/b@abc", "src/select.rs", body);
+        let old = new.replacen(MARK, OLD_MARK, 1);
+        std::fs::write(dir.join("select.rs"), old + body).unwrap();
+        let (name, e) = existing(&dir.join("select.rs")).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!((name.as_str(), e.body.as_str()), ("select", body));
     }
 }

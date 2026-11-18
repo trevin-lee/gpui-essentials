@@ -1,17 +1,17 @@
 [package]
-name = "gpui-core-cli"
+name = "gpui-cli"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "`gpui-core add`: copies gpui-core's components into your crate, shadcn's way."
+description = "`gpui add`: copies gpui-core's components into your crate, shadcn's way."
 keywords = ["gpui", "ui", "components", "cli"]
 categories = ["command-line-utilities", "gui"]
 readme = "README.md"
 
 [[bin]]
-name = "gpui-core"
+name = "gpui"
 path = "src/main.rs"
 
 [dependencies]

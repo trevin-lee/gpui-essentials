@@ -1,12 +1,12 @@
-//! `gpui-core add`: copies gpui-core's components into your crate, as shadcn/ui's CLI does for
+//! `gpui add`: copies gpui-core's components into your crate, as shadcn/ui's CLI does for
 //! React. You own the copies and change them as you like; they build on `gpui_core::base`,
 //! which gpui-core keeps semver-stable, so gpui-core stays a dependency.
 //!
 //! ```text
-//! gpui-core add select dialog      # into src/ui/, with what they need
-//! gpui-core add --all
-//! gpui-core add select --diff      # what a newer gpui-core changed in your copy
-//! gpui-core list
+//! gpui add select dialog      # into src/ui/, with what they need
+//! gpui add --all
+//! gpui add select --diff      # what a newer gpui-core changed in your copy
+//! gpui list
 //! ```
 
 mod copy;
@@ -21,12 +21,12 @@ use std::process::ExitCode;
 use source::Source;
 
 const HELP: &str = "\
-gpui-core: copies gpui-core's components into your crate, to own and change.
+gpui: copies gpui-core's components into your crate, to own and change.
 
 USAGE
-    gpui-core add <component>... [options]   copy components (and what they need)
-    gpui-core add --all [options]            copy every component
-    gpui-core list [options]                 list the components
+    gpui add <component>... [options]   copy components (and what they need)
+    gpui add --all [options]            copy every component
+    gpui list [options]                 list the components
 
 OPTIONS
     --dir <dir>          where the copies go, from your crate's root [default: src/ui]
@@ -79,7 +79,7 @@ fn parse(args: Vec<String>) -> Result<Option<Options>, String> {
         match arg.as_str() {
             "-h" | "--help" => return Ok(None),
             "-V" | "--version" => {
-                println!("gpui-core {}", env!("CARGO_PKG_VERSION"));
+                println!("gpui {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "--all" => o.all = true,
@@ -158,11 +158,9 @@ fn run(o: Options) -> Result<(), String> {
         }
         "add" => {
             if o.names.is_empty() && !o.all {
-                return Err(
-                    "add which? Name components (`gpui-core add select`), or --all; \
-                            `gpui-core list` shows them"
-                        .into(),
-                );
+                return Err("add which? Name components (`gpui add select`), or --all; \
+                            `gpui list` shows them"
+                    .into());
             }
             let root = source::crate_root(&cwd)?;
             let source = source(&o, &root)?;
@@ -200,7 +198,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("gpui-core: {e}");
+            eprintln!("gpui: {e}");
             ExitCode::FAILURE
         }
     }
