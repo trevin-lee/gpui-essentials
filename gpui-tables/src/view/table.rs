@@ -1593,11 +1593,9 @@ impl TableView {
             self.finish_editor(false, true, window, cx);
             return;
         }
-        // A dragged row goes back where it was.
-        if let Some(d) = self.board.drag.take() {
-            if !d.touch {
-                cx.stop_active_drag(window);
-            }
+        // A dragged row goes back where it was (gpui-dnd takes Escape first during a drag; this
+        // is for a drag it has already let go of).
+        if self.board.drag.take().is_some() {
             cx.notify();
             return;
         }

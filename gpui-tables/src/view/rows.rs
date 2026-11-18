@@ -8,14 +8,13 @@
 //! groups as their lanes. A table carries its selected rows along with the one dragged.
 
 use gpui::{
-    AnyElement, AnyView, Bounds, ClickEvent, Context, ElementId, InteractiveElement, IntoElement,
-    Modifiers, ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement, Styled,
-    Window, div, point, px, size,
+    AnyElement, Bounds, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, Modifiers,
+    ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    point, px, size,
 };
 use gpui_core::{IconName, Press};
-use gpui_dnd::{Backend, DragSource, DropOutcome, DropTarget, Preview, dnd};
+use gpui_dnd::dnd;
 
-use super::board::DraggedCard;
 use super::render::icon;
 use super::table::{Action, CellRef, Entry, Item, Popover, TableView};
 use crate::engine::{self, relation};
@@ -690,7 +689,6 @@ impl TableView {
         let rid = r.id.clone();
         let sel = format!("handle:{rid}");
         let label = format!("{}: select, move or open its menu", self.card_title(r));
-        let weak = cx.entity().downgrade();
         let pressed = rid.clone();
         let shown = self.shown_serial;
         let press = Press::new(ElementId::NamedInteger("handle".into(), ix as u64))
@@ -728,107 +726,15 @@ impl TableView {
             }));
         // The handle is the row's drag source (gpui-dnd): by the mouse past a few pixels, or a
         // finger's long press. The table takes it up as its own drag when it begins.
-        let (began, ended, preview) = (weak.clone(), weak.clone(), weak);
-        dnd(ElementId::Name(format!("gpui-tables-row:{rid}").into()))
-            .flex_none()
-            .w(self.handle_width())
-            .h_full()
-            .drop_indicator(false)
-            .source(
-                DragSource::item(DraggedCard {
-                    row_id: rid,
-                    from: lane_key,
-                })
-                .keyboard(false)
-                .on_begin(move |m, window, cx| {
-                    let (Some(d), Some(at), Some(origin)) = (
-                        m.item().and_then(|i| i.get::<DraggedCard>()).cloned(),
-                        m.initial_client_offset(),
-                        m.initial_source_client_offset(),
-                    ) else {
-                        return;
-                    };
-                    let touch = m.backend() == Some(Backend::Touch);
-                    began
-                        .update(cx, |this, cx| {
-                            if touch {
-                                window.focus(&this.focus, cx);
-                            }
-                            let others = this.carried_with(&d.row_id);
-                            this.begin_card_drag(
-                                &d.row_id,
-                                &d.from,
-                                others,
-                                at - origin,
-                                at,
-                                touch,
-                                cx,
-                            );
-                        })
-                        .ok();
-                })
-                .on_end(move |_, _, cx| {
-                    ended
-                        .update(cx, |this, cx| {
-                            if this.board.drag.take().is_some() {
-                                cx.notify();
-                            }
-                        })
-                        .ok();
-                })
-                .preview(Preview::build(move |_, _, cx| {
-                    match preview
-                        .upgrade()
-                        .and_then(|t| t.read(cx).board.drag.as_ref().map(|d| d.ghost.clone()))
-                    {
-                        Some(ghost) => AnyView::from(ghost).into_any_element(),
-                        None => div().into_any_element(),
-                    }
-                })),
-            )
-            .child(press)
-            .into_any_element()
-    }
-
-    /// The table as the target of its rows' drags (gpui-dnd): where a row would land follows the
-    /// pointer (and scrolls the rows a step near their top or bottom), and a drop where it can
-    /// land moves it; elsewhere the preview goes back.
-    pub(crate) fn row_drop_target(
-        &self,
-        root: impl IntoElement,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let (hover, drop) = (cx.entity().downgrade(), cx.entity().downgrade());
-        dnd(ElementId::NamedInteger(
-            "gpui-tables-rows-target".into(),
-            cx.entity_id().as_u64(),
+        dnd(ElementId::Name(
+            format!("gpui-tables-row:{rid}:{lane_key}").into(),
         ))
-        .size_full()
+        .flex_none()
+        .w(self.handle_width())
+        .h_full()
         .drop_indicator(false)
-        .target(
-            DropTarget::new()
-                .accept::<DraggedCard>()
-                .on_hover(move |_, m, _, cx| {
-                    if let Some(at) = m.client_offset() {
-                        hover.update(cx, |this, cx| this.drag_card_to(at, cx)).ok();
-                    }
-                })
-                .on_drop(move |_, m, window, cx| {
-                    drop.update(cx, |this, cx| {
-                        if let Some(at) = m.client_offset() {
-                            this.drag_card_to(at, cx);
-                        }
-                        // Nowhere it can land (a sorted view, another table's rows): it goes back.
-                        if this.board.drag.as_ref().and_then(|d| d.target).is_none() {
-                            return DropOutcome::Pass;
-                        }
-                        this.drop_card(window, cx);
-                        DropOutcome::Handled(None)
-                    })
-                    .unwrap_or(DropOutcome::Pass)
-                }),
-        )
-        .child(root)
+        .source(self.card_source(rid, lane_key, cx))
+        .child(press)
         .into_any_element()
     }
 
