@@ -5382,6 +5382,7 @@ impl Flow {
                         .then(|| obstacles.clone())
                         .flatten(),
                     width: e.stroke_width.unwrap_or(1.) + if e.selected { 0.5 } else { 0. },
+                    stroke: e.stroke_width.unwrap_or(1.),
                     reach: e.interaction_width.unwrap_or(INTERACTION_WIDTH) / 2.,
                     anchors: self.tree_anchors(e),
                 })
@@ -5486,10 +5487,24 @@ impl Flow {
                     let n = line.len();
                     if n >= 2 {
                         if let Some(marker) = &edge.marker_end {
-                            ink.marker(marker, line[n - 1], line[n - 2], zoom, width, edge.color);
+                            ink.marker(
+                                marker,
+                                line[n - 1],
+                                line[n - 2],
+                                zoom * edge.stroke.max(1.),
+                                width,
+                                edge.color,
+                            );
                         }
                         if let Some(marker) = &edge.marker_start {
-                            ink.marker(marker, line[0], line[1], zoom, width, edge.color);
+                            ink.marker(
+                                marker,
+                                line[0],
+                                line[1],
+                                zoom * edge.stroke.max(1.),
+                                width,
+                                edge.color,
+                            );
                         }
                     }
                     if let Some(label) = &edge.label {
@@ -5659,6 +5674,8 @@ struct EdgeDraw {
     marker_end: Option<Marker>,
     color: Hsla,
     width: f32,
+    /// The edge's own stroke width, in flow units, unselected: what its arrowheads grow with.
+    stroke: f32,
     /// Half the interaction width, in flow units.
     reach: f32,
     /// Where a tree edge meets its nodes, set by the layout rather than by handles.
