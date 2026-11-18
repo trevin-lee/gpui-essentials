@@ -89,6 +89,14 @@ each giving only its key; the item is made from the key when a drag begins. At 5
 elements a frame (release, ci-runner, `tests/source_cost.rs`), a plain div takes 1.30 µs each,
 a `dnd` with a shared source 2.07 µs, one with its own source 2.45 µs.
 
+A drag's own cost is spread thin. Moved onto gpui-dnd (#372), a calendar drag frame took 11 µs
+more than calendar's own window listener (1.045 against 1.056 ms on a busy week, about 1%):
+the target lookup, the monitor's snapshot, the hover call and the zone check of each move, and
+the provider's and target's elements of each frame. Skipping the catch-outside scan when
+nothing catches, sharing the target list instead of copying it, and asking `can_drop` only of
+targets that have one (#380) measured the same as before, so they weren't made: no single
+part is worth more machinery.
+
 ### Idle costs nothing
 
 No timer or frame request exists unless a drag is moving, an auto-scroll is scrolling, or a
@@ -409,7 +417,11 @@ Keys reach the drag through `cx.intercept_keystrokes`, before any binding or ele
 takes no focus from a mouse press (a focus change redraws every view), and a press anywhere ends
 a keyboard drag. A source that the keyboard shouldn't pick up says `DragSource::keyboard(false)`.
 The live region's text is also readable with `gpui_dnd::announcement(window, cx)`, for a host
-that routes announcements itself; mouse and touch drags aren't announced.
+that routes announcements itself; mouse and touch drags aren't announced. A target whose own
+sentence says everything gives it with `DropTarget::say(|item, monitor, said, cx| …)` (`Said::Over` or `Said::Dropped`),
+said word for word in place of "Over …" and "Dropped … on …" (a calendar's "Standup, Tuesday 9
+to 9:30 AM, moving to Wednesday 10 AM", in its own formats). The drop's sentence is asked
+before `on_drop`, while the target still has the drag.
 
 The keyboard's pointer sits at each target's `keyboard_anchor`, so hover and drop run exactly as
 for the mouse, offsets included. Each step is announced in a live region (a `Role::Status`
@@ -772,9 +784,8 @@ touch while it's on, how it ends, the cursor, and timed scrolling.
    `AutoScroll` is `Clone` and no longer `Copy`: it holds the `for_items` filter.
 2. gpui-calendar, with its owner: the mouse and touch paths onto them, its tests unchanged (the
    interaction and touch drag tests above are the contract), frame times before and after.
-3. Keyboard move and resize in gpui-calendar, with announcements. The live region now says
-   "Over {describe}." Calendar's sentence has to be said as it is, so this step adds a way
-   for a target to say its own sentence; it will be decided then.
+3. Keyboard move and resize in gpui-calendar, with announcements. Calendar's sentences are
+   said as they are with `DropTarget::say`, added first in its own PR.
 
 ## react-dnd → gpui-dnd
 

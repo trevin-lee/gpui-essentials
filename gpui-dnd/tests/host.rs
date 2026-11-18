@@ -648,3 +648,54 @@ fn a_keyboard_drag_the_host_begins_steps_through_its_target(cx: &mut TestAppCont
     assert_eq!(with(&log, "drop"), ["drop 1"]);
     assert_eq!(with(&log, "end"), ["end 1 dropped=true cancelled=false"]);
 }
+
+#[gpui::test]
+fn a_target_that_says_its_own_sentences_is_said_word_for_word(cx: &mut TestAppContext) {
+    let log = log();
+    let event = Rc::new(Cell::new(1));
+    // What the target's drag is, as a calendar keeps it: cleared by its drop.
+    let moving = Rc::new(Cell::new(true));
+    let (live, d) = (moving.clone(), moving.clone());
+    let mut o = open(
+        cx,
+        calendar(log.clone(), Start::Press, event, move |t| {
+            let (live, d) = (live.clone(), d.clone());
+            t.keyboard_step(|_, m, dir, _, _| {
+                Some(m.client_offset().unwrap() + point(px(0.), px(10.) * dir.y))
+            })
+            .say(move |_, m, when, _| {
+                let y = f32::from(m.client_offset().unwrap().y);
+                match (when, live.get()) {
+                    (Said::Over, true) => format!("Standup, moving to {y:.0}").into(),
+                    (Said::Dropped, true) => format!("Standup, moved to {y:.0}").into(),
+                    (_, false) => "nothing is moving".into(),
+                }
+            })
+            .on_drop(move |_, _, _, _| {
+                d.set(false);
+                DropOutcome::Handled(None)
+            })
+        }),
+    );
+    let t = o.center("t");
+    o.vcx.update(|window, cx| {
+        assert!(begin_at(
+            window,
+            cx,
+            "event",
+            t,
+            source(&log, 1),
+            press(Backend::Keyboard)
+        ))
+    });
+    o.keys("down");
+    let y = f32::from(t.y) + 10.;
+    assert_eq!(o.said().unwrap(), format!("Standup, moving to {y:.0}"));
+    o.keys("space");
+    assert!(!moving.get(), "dropped");
+    assert_eq!(
+        o.said().unwrap(),
+        format!("Standup, moved to {y:.0}"),
+        "the drop's sentence is asked before on_drop"
+    );
+}
