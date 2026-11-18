@@ -1843,6 +1843,7 @@ dependencies = [
  "image",
  "pulldown-cmark",
  "unicode-segmentation",
+ "web-time",
 ]
 
 [[package]]
