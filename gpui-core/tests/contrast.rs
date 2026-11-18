@@ -201,6 +201,12 @@ fn pairs(dark: bool) -> Vec<Pair> {
             TEXT,
         ),
         pair(
+            "destructive menu entry on its highlight (destructive_fill over popover)",
+            |c| c.destructive,
+            vec![|c| c.popover, |c| c.destructive_fill],
+            TEXT,
+        ),
+        pair(
             "alert description: destructive at 90% on card",
             |c| c.destructive.opacity(0.9),
             vec![|c| c.card],
