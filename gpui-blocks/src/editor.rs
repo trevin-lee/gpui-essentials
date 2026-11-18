@@ -127,6 +127,21 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new("pageup", PageUp, editor),
         KeyBinding::new("shift-pagedown", SelectPageDown, editor),
         KeyBinding::new("shift-pageup", SelectPageUp, editor),
+        // What a click does, by keyboard (Notion's keys).
+        KeyBinding::new(if mac { "cmd-/" } else { "ctrl-/" }, OpenBlockMenu, editor),
+        KeyBinding::new(
+            if mac { "cmd-enter" } else { "ctrl-enter" },
+            CheckOrFold,
+            editor,
+        ),
+        KeyBinding::new("alt-enter", OpenAtCaret, editor),
+        // A host app binds ⌘⇧M to its comment field too: the editor's handler answers it and
+        // the key goes no further, so the field opens once.
+        KeyBinding::new(
+            if mac { "cmd-shift-m" } else { "ctrl-shift-m" },
+            Comment,
+            editor,
+        ),
     ]);
 }
 
@@ -1679,6 +1694,138 @@ impl Editor {
         });
     }
 
+    /// ⌘/: the block menu for the caret's block, or the selected blocks; on a phone, or after
+    /// a touch, the block sheet.
+    fn block_menu_by_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.read(cx).is_readonly() {
+            return;
+        }
+        let Some(block) = self.key_block(cx) else {
+            return;
+        };
+        if self.shows_side_menu(window) {
+            self.block_menu = Some(block);
+        } else {
+            self.block_sheet = Some(block);
+        }
+        cx.notify();
+    }
+
+    /// The block a key acts on: the first of the selected blocks, else the top-level block the
+    /// text selection starts in.
+    fn key_block(&self, cx: &App) -> Option<BlockId> {
+        match *self.state.read(cx).model().selection() {
+            BlockSelection::Blocks { anchor, .. } => Some(anchor),
+            _ => self.selection_top_block(cx),
+        }
+    }
+
+    /// ⌘↵: checks or unchecks the caret's to-do, or opens or closes the toggle whose title the
+    /// caret is in. Elsewhere it's the engine's ⌘↵ (leaving a table, or submitting).
+    fn check_or_fold(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let done = self.state.update(cx, |s, cx| {
+            let Some(caret) = s.model().caret() else {
+                return false;
+            };
+            let doc = s.model().document();
+            let mut at = doc.block(caret.block);
+            let mut child = None;
+            while let Some(b) = at {
+                match b.kind() {
+                    BlockKind::ListItem {
+                        checked: Some(checked),
+                    } => {
+                        if s.is_readonly() {
+                            return false;
+                        }
+                        return s.run(EditorCommand::SetTaskChecked(!checked), cx).is_ok();
+                    }
+                    // In its title, its first block: open or closed, as a click on the chevron.
+                    BlockKind::Toggle { open } if b.children().next().map(|c| c.id()) == child => {
+                        let toggle = b.id();
+                        return s
+                            .run(
+                                EditorCommand::SetToggleOpen {
+                                    block: toggle,
+                                    open: !open,
+                                },
+                                cx,
+                            )
+                            .is_ok();
+                    }
+                    _ => {}
+                }
+                child = Some(b.id());
+                at = b.parent();
+            }
+            false
+        });
+        if !done {
+            cx.propagate();
+        }
+        let _ = window;
+    }
+
+    /// ⌥↵: opens what's at the caret as a click would: a link, a mention, or the caret's
+    /// sub-page, embed or bookmark.
+    fn open_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let _ = window;
+        let event = {
+            let state = self.state.read(cx);
+            if let Some(url) = state.link_at_caret() {
+                Some(EditorEvent::LinkClicked { url })
+            } else if let Some(node) = state.custom_at_caret() {
+                if let Some(doc) = node.data::<docs::DocRef>() {
+                    Some(EditorEvent::DocClicked { id: doc.id.clone() })
+                } else {
+                    node.data::<crate::mentions::MentionRef>().map(|m| {
+                        EditorEvent::MentionClicked {
+                            kind: m.kind,
+                            id: m.id.clone(),
+                        }
+                    })
+                }
+            } else {
+                self.key_block(cx)
+                    .and_then(|block| self.block_target(block, cx))
+            }
+        };
+        match event {
+            Some(event) => cx.emit(event),
+            None => cx.propagate(),
+        }
+    }
+
+    /// What opening the custom block `block` asks the app for: its document or its page.
+    pub(crate) fn block_target(&self, block: BlockId, cx: &App) -> Option<EditorEvent> {
+        let state = self.state.read(cx);
+        let b = state.model().document().block(block)?;
+        if b.kind() != BlockKind::Custom {
+            return None;
+        }
+        match crate::json::kind_of_custom(&b.markdown()) {
+            crate::json::Kind::Page { doc, .. } | crate::json::Kind::Embed { doc, .. } => {
+                Some(EditorEvent::DocClicked { id: doc.into() })
+            }
+            crate::json::Kind::Bookmark { url, .. } => {
+                Some(EditorEvent::LinkClicked { url: url.into() })
+            }
+            _ => None,
+        }
+    }
+
+    /// ⌘⇧M: a comment on the selection, as the format bar's Comment asks for one. The key is
+    /// the editor's when it takes comments (the app's own ⌘⇧M doesn't run too).
+    fn comment_by_key(&mut self, cx: &mut Context<Self>) {
+        if !self.comments {
+            cx.propagate();
+            return;
+        }
+        if let Some((block, quote)) = self.selection_anchor(cx) {
+            cx.emit(EditorEvent::CommentRequested { block, quote });
+        }
+    }
+
     fn move_block(&mut self, down: bool, cx: &mut Context<Self>) {
         self.state.update(cx, |state, cx| {
             let _ = state.run(EditorCommand::MoveBlocks { down }, cx);
@@ -2879,6 +3026,10 @@ impl Render for Editor {
             .on_action(cx.listener(|this, _: &PageUp, w, cx| this.page(false, false, w, cx)))
             .on_action(cx.listener(|this, _: &SelectPageDown, w, cx| this.page(true, true, w, cx)))
             .on_action(cx.listener(|this, _: &SelectPageUp, w, cx| this.page(false, true, w, cx)))
+            .on_action(cx.listener(|this, _: &OpenBlockMenu, w, cx| this.block_menu_by_key(w, cx)))
+            .on_action(cx.listener(|this, _: &CheckOrFold, w, cx| this.check_or_fold(w, cx)))
+            .on_action(cx.listener(|this, _: &OpenAtCaret, w, cx| this.open_at_caret(w, cx)))
+            .on_action(cx.listener(|this, _: &Comment, _, cx| this.comment_by_key(cx)))
             .on_mouse_move(cx.listener(Self::hover))
             // The side menu was placed for the block under the pointer before the scroll; it
             // comes back on the next pointer move.
@@ -2978,6 +3129,145 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// What a click does, by keyboard: ⌘/ opens the block menu, ⌘↵ checks a to-do and folds a
+    /// toggle, ⌥↵ opens a link, a sub-page or a bookmark, ⌘⇧M asks for a comment, and the
+    /// block menu's Open and Copy code do what clicks on the block do.
+    #[gpui::test]
+    fn the_keyboard_reaches_what_clicks_do(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let source = "- [ ] Buy milk\n\n<details open>\n<summary>More</summary>\n\nInside\n\n</details>\n\nSee [the site](https://example.com) now.\n\n[Roadmap](doc:r1 \"page\")\n\n```rust\nfn main() {}\n```";
+        let (editor, cx) = cx.add_window_view(move |window, cx| {
+            Editor::with_options(source, super::Options::default().comments(), window, cx)
+        });
+        let events: std::rc::Rc<std::cell::RefCell<Vec<super::EditorEvent>>> = Default::default();
+        let seen = events.clone();
+        cx.update(|window, cx| {
+            cx.subscribe(&editor, move |_, e: &super::EditorEvent, _| {
+                if !matches!(e, super::EditorEvent::Changed) {
+                    seen.borrow_mut().push(e.clone());
+                }
+            })
+            .detach();
+            editor.update(cx, |e, cx| e.focus(window, cx));
+        });
+        draw(cx);
+        let caret_in =
+            |editor: &Entity<Editor>, cx: &mut VisualTestContext, leaf: usize, at: usize| {
+                editor.update(cx, |e, cx| {
+                    e.state().update(cx, |s, cx| {
+                        let id = s.model().document().leaves().nth(leaf).unwrap().id();
+                        let _ =
+                            s.set_selection(BlockSelection::caret(BlockPosition::new(id, at)), cx);
+                    })
+                });
+                draw(cx);
+            };
+        // ⌘↵ checks the to-do, and again unchecks it.
+        caret_in(&editor, cx, 0, 3);
+        cx.simulate_keystrokes("secondary-enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).starts_with("- [x] Buy milk"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        cx.simulate_keystrokes("secondary-enter");
+        draw(cx);
+        assert!(markdown(&editor, cx).starts_with("- [ ] Buy milk"));
+        // In a toggle's title, ⌘↵ closes it.
+        caret_in(&editor, cx, 1, 2);
+        cx.simulate_keystrokes("secondary-enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).contains("<details>\n<summary>More"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        // ⌥↵ in a link opens it.
+        let link = editor.update(cx, |e, cx| {
+            let doc = e.state().read(cx).model().document();
+            doc.leaves()
+                .position(|l| l.text().is_some_and(|t| t.starts_with("See")))
+                .unwrap()
+        });
+        caret_in(&editor, cx, link, 6);
+        cx.simulate_keystrokes("alt-enter");
+        draw(cx);
+        assert!(
+            events.borrow().iter().any(|e| matches!(
+                e,
+                super::EditorEvent::LinkClicked { url } if url.as_ref() == "https://example.com"
+            )),
+            "{:?}",
+            events.borrow()
+        );
+        // ⌘⇧M asks for a comment on the selection.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let id = s.model().document().leaves().nth(link).unwrap().id();
+                let _ = s.set_selection(
+                    BlockSelection::Text {
+                        anchor: BlockPosition::new(id, 0),
+                        head: BlockPosition::new(id, 3),
+                    },
+                    cx,
+                );
+            })
+        });
+        cx.simulate_keystrokes("secondary-shift-m");
+        draw(cx);
+        assert!(
+            events.borrow().iter().any(|e| matches!(
+                e,
+                super::EditorEvent::CommentRequested { quote, .. } if quote == "See"
+            )),
+            "{:?}",
+            events.borrow()
+        );
+        // ⌘/ opens the block menu; its Open opens the sub-page.
+        caret_in(&editor, cx, link, 0);
+        cx.simulate_keystrokes("secondary-/");
+        draw(cx);
+        let top = editor.update(cx, |e, cx| e.selection_top_block(cx));
+        assert_eq!(editor.read_with(cx, |e, _| e.block_menu), top);
+        let (page, code) = editor.update(cx, |e, cx| {
+            let doc = e.state().read(cx).model().document();
+            let blocks: Vec<_> = doc.root().children().map(|b| (b.id(), b.kind())).collect();
+            let page = blocks
+                .iter()
+                .find(|(_, k)| *k == BlockKind::Custom)
+                .unwrap()
+                .0;
+            let code = blocks
+                .iter()
+                .find(|(_, k)| *k == BlockKind::CodeBlock)
+                .unwrap()
+                .0;
+            (page, code)
+        });
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(page, "open", window, cx)
+        });
+        assert!(
+            events.borrow().iter().any(|e| matches!(
+                e,
+                super::EditorEvent::DocClicked { id } if id.as_ref() == "r1"
+            )),
+            "{:?}",
+            events.borrow()
+        );
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(code, "copy-code", window, cx)
+        });
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+            Some("fn main() {}")
+        );
     }
 
     /// Page Down and Up move the caret a page with the view, ⇧ extending the selection; past

@@ -87,7 +87,6 @@ impl InlineText {
         &self.runs
     }
 
-    #[cfg(test)]
     pub(crate) fn atoms(&self) -> &[(usize, InlineAtom)] {
         &self.atoms
     }

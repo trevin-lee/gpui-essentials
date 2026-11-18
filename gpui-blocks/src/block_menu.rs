@@ -100,6 +100,19 @@ impl Editor {
     }
 
     /// Copy link to block, when the app makes links to blocks ([`crate::Options::block_link`]).
+    /// Open, for a sub-page, an embed or a bookmark: what a click on it does, by keyboard too.
+    fn open_item(&self, block: BlockId, cx: &App) -> Option<PopupMenuItem> {
+        self.block_target(block, cx)
+            .map(|_| PopupMenuItem::new("open", "Open").icon(IconName::ExternalLink))
+    }
+
+    /// Copy code, for a code block: its chrome's Copy, by keyboard too.
+    fn copy_code_item(&self, block: BlockId, cx: &App) -> Option<PopupMenuItem> {
+        let doc = self.state.read(cx).model().document();
+        (doc.block(block)?.kind() == markdown_editor::BlockKind::CodeBlock)
+            .then(|| PopupMenuItem::new("copy-code", "Copy code").icon(IconName::Copy))
+    }
+
     fn copy_link_item(&self) -> Option<PopupMenuItem> {
         self.block_link
             .as_ref()
@@ -122,6 +135,30 @@ impl Editor {
                 state.focus(window, cx);
                 state.lift_block(block, cx);
             });
+            cx.notify();
+            return;
+        }
+        if id == "open" {
+            if let Some(event) = self.block_target(block, cx) {
+                cx.emit(event);
+            }
+            self.state.update(cx, |state, cx| state.focus(window, cx));
+            cx.notify();
+            return;
+        }
+        if id == "copy-code" {
+            let code = self
+                .state
+                .read(cx)
+                .model()
+                .document()
+                .block(block)
+                .filter(|b| b.kind() == markdown_editor::BlockKind::CodeBlock)
+                .and_then(|b| b.text().map(str::to_string));
+            if let Some(code) = code {
+                cx.write_to_clipboard(ClipboardItem::new_string(code));
+            }
+            self.state.update(cx, |state, cx| state.focus(window, cx));
             cx.notify();
             return;
         }
@@ -355,6 +392,8 @@ impl Editor {
                         color.as_deref(),
                     ))
             }))
+            .items(self.open_item(block, cx))
+            .items(self.copy_code_item(block, cx))
             .items(self.copy_link_item())
             .item(
                 PopupMenuItem::new("duplicate", "Duplicate")
@@ -374,8 +413,12 @@ impl Editor {
             });
         Popover::new("block-menu-popover")
             .open(true)
-            .on_dismiss(move |_, _, cx| {
-                let _ = this.update(cx, |this, cx| this.close_block_menu(cx));
+            .on_dismiss(move |_, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.close_block_menu(cx);
+                    // Back to the page, for a menu opened and closed by keyboard.
+                    this.state.update(cx, |state, cx| state.focus(window, cx));
+                });
             })
             .trigger(grip)
             .p(px(4.))
@@ -413,6 +456,8 @@ impl Editor {
             let menu = menu
                 .separator()
                 .item(PopupMenuItem::new("move", "Move").icon(IconName::Move))
+                .items(self.open_item(block, cx))
+                .items(self.copy_code_item(block, cx))
                 .items(self.copy_link_item())
                 .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
                 .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash));

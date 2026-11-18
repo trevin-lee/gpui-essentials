@@ -731,6 +731,11 @@ fn block(b: BlockRef<'_>, ids: &mut Ids) -> Block {
     Block { id, kind, children }
 }
 
+/// What a custom block is, from its Markdown: for the editor's keys that open one.
+pub(crate) fn kind_of_custom(markdown: &str) -> Kind {
+    custom(markdown)
+}
+
 /// A custom block from its Markdown: a sub-page, a widget, or kept as Markdown.
 fn custom(markdown: &str) -> Kind {
     if markdown == crate::toc::MARKDOWN {
