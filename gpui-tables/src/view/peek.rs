@@ -4,8 +4,9 @@
 //! value, buttons to go to the row above or below (in the view's order), Open as page (the
 //! host's `OpenRow`, as opening did before), and Close (Escape too). Pressing the title or a
 //! value edits it with its cell's own editor (a field, the options, people or rows, the month,
-//! or a checkbox's toggle), hung from the panel; a property the view hides as a column is shown
-//! and not edited.
+//! or a checkbox's toggle), in the panel: a typed value's field where the value was, and a
+//! picker or the month hung from it. A property the view hides as a column is edited the same
+//! way.
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -158,6 +159,9 @@ impl TableView {
         } else {
             r.title.clone()
         };
+        let title_field = fields
+            .title_property()
+            .and_then(|p| self.peek_field(&r.id, &p.id, "title"));
         let name_width = t.px(132.);
         let shown: Vec<crate::model::Property> = fields
             .properties_in_order()
@@ -171,6 +175,7 @@ impl TableView {
                 let text = self.peek_value(&r, p);
                 let empty = text.is_empty();
                 let editable = self.peek_cell(&id, Some(&p.id)).is_some();
+                let field = self.peek_field(&r.id, &p.id, &p.id);
                 let sel = format!("peek-value:{}", p.id);
                 div()
                     .flex()
@@ -221,23 +226,34 @@ impl TableView {
                                     }
                                 }))
                             })
-                            .when(empty, |d| d.text_color(t.colors.text_muted))
-                            .child(SharedString::from(if empty {
-                                "Empty".to_owned()
-                            } else {
-                                text
-                            })),
+                            .map(|d| match field {
+                                Some(field) => d.child(field),
+                                None => d.when(empty, |d| d.text_color(t.colors.text_muted)).child(
+                                    SharedString::from(if empty {
+                                        "Empty".to_owned()
+                                    } else {
+                                        text
+                                    }),
+                                ),
+                            }),
                     )
             })
             .collect();
-        // An edit from the panel is over once its editor is: its anchor goes.
-        if self.popover.is_none() && self.editor.is_none() {
+        // An edit from the panel is over once its editor is (none open, none on its way): its
+        // anchor goes, and the property it was on.
+        if self.popover.is_none() && self.editor.is_none() && self.pending_text.is_none() {
             self.peek_anchor = None;
+            self.peek_property = None;
         }
         Some(
             div()
                 .id("gpui-tables-peek")
                 .debug_selector(|| "peek".into())
+                // A field typed in here is the view's as a cell's is: Escape leaves it.
+                .key_context(super::CONTEXT)
+                .on_action(
+                    cx.listener(|this, _: &super::Cancel, window, cx| this.cancel(window, cx)),
+                )
                 .absolute()
                 .top_0()
                 .right_0()
@@ -279,7 +295,10 @@ impl TableView {
                                 .text_size(t.px(t.sizes.text * 1.6))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(t.colors.text)
-                                .child(SharedString::from(title)),
+                                .map(|d| match title_field {
+                                    Some(field) => d.child(field),
+                                    None => d.child(SharedString::from(title)),
+                                }),
                         )
                         .children(properties),
                 )
@@ -303,9 +322,27 @@ impl TableView {
         .size_full()
     }
 
-    /// The cell of row `row_id`'s property `pid` (its title when None) in the view as shown, if
-    /// it has one: a property the view hides as a column has none.
-    fn peek_cell(&self, row_id: &str, pid: Option<&str>) -> Option<super::table::CellRef> {
+    /// The field typing into row `row_id`'s property `pid` from the panel, if one is open.
+    /// `place` is where the panel draws it (the property's id, or "title").
+    fn peek_field(&self, row_id: &str, pid: &str, place: &str) -> Option<AnyElement> {
+        self.peek_anchor?;
+        let e = self.editor.as_ref().filter(|e| e.edits(row_id, pid))?;
+        let width = self
+            .peek_places
+            .borrow()
+            .get(place)
+            .map_or(px(0.), |b| b.size.width);
+        Some(self.render_editor(e, width))
+    }
+
+    /// The cell that edits row `row_id`'s property `pid` (its title when None) in the view as
+    /// shown, if the row is shown: the property's own, or for a property the view hides as a
+    /// column, the row's title cell and the property's index to edit in its place.
+    fn peek_cell(
+        &self,
+        row_id: &str,
+        pid: Option<&str>,
+    ) -> Option<(super::table::CellRef, Option<usize>)> {
         let fields = self.database.database.as_ref()?;
         let p = match pid {
             Some(pid) => fields.properties.iter().position(|p| p.id == pid)?,
@@ -317,8 +354,19 @@ impl TableView {
         let item = self.shown.items.iter().position(|i| {
             matches!(*i, Item::Row { row, .. } if self.rows.get(row).is_some_and(|r| r.id == row_id))
         })?;
-        let column = self.shown.columns.iter().position(|c| c.property == p)?;
-        Some(super::table::CellRef { item, column })
+        if let Some(column) = self.shown.columns.iter().position(|c| c.property == p) {
+            return Some((super::table::CellRef { item, column }, None));
+        }
+        let title = fields
+            .properties
+            .iter()
+            .position(|p| p.kind == PropertyType::Title)?;
+        let column = self
+            .shown
+            .columns
+            .iter()
+            .position(|c| c.property == title)?;
+        Some((super::table::CellRef { item, column }, Some(p)))
     }
 
     /// Edits the peeked row's property `pid` (its title when None) with its cell's editor, hung
@@ -331,12 +379,26 @@ impl TableView {
         cx: &mut Context<Self>,
     ) {
         self.ensure();
-        let Some(cell) = self.peek_cell(row_id, pid) else {
+        // A press in the field being typed in is the field's (placing the caret).
+        let typing = self.peek_anchor.is_some()
+            && self.editor.as_ref().is_some_and(|e| {
+                let title = self
+                    .database
+                    .database
+                    .as_ref()
+                    .and_then(|f| f.title_property())
+                    .map(|p| p.id.as_str());
+                pid.or(title).is_some_and(|pid| e.edits(row_id, pid))
+            });
+        if typing {
+            return;
+        }
+        let Some((cell, property)) = self.peek_cell(row_id, pid) else {
             return;
         };
         let key = pid.unwrap_or("title");
         self.peek_anchor = self.peek_places.borrow().get(key).copied();
-        self.edit_cell(cell, window, cx);
+        self.edit_cell_as(cell, property, window, cx);
     }
 
     /// The panel's width: two fifths of the view, between 320 and 480 points (all of it when

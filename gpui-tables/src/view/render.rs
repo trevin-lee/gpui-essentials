@@ -838,10 +838,14 @@ impl TableView {
         let shown = self.shown_serial;
         let is_check = p.kind == PropertyType::Checkbox;
         let numeric = p.kind == PropertyType::Number;
-        let editor = self.editor.as_ref().filter(|e| e.edits(&r.id, &p.id));
+        // A value edited from the peek has its field in the panel, not here.
+        let editor = self
+            .editor
+            .as_ref()
+            .filter(|e| e.edits(&r.id, &p.id) && self.peek_anchor.is_none());
         let editing = editor.is_some();
         let content = match editor {
-            Some(e) => self.render_editor(e, column),
+            Some(e) => self.render_editor(e, self.column_px(column)),
             None => self.cell_content(ix, row, r, p, row_focused, cx),
         };
         let label = format!("{}: {}", p.name, self.cell_text(r, p));
@@ -929,7 +933,9 @@ impl TableView {
     /// The field a cell's value is typed in: on one line inside the cell, or for a text value,
     /// a textarea over the cell that grows down over the rows below (up to eight lines, then it
     /// scrolls), at least a menu's width.
-    fn render_editor(&self, e: &super::table::Editor, column: usize) -> AnyElement {
+    /// A typed value's field: on one line where its value was, or a text value's box growing
+    /// down from there, at least `width` wide.
+    pub(crate) fn render_editor(&self, e: &super::table::Editor, width: Pixels) -> AnyElement {
         let t = &self.theme;
         let field = FieldColors::of(t);
         // A number is typed at the right, where the cell shows it.
@@ -960,9 +966,7 @@ impl TableView {
                 .child(input)
                 .into_any_element();
         }
-        let width = self
-            .column_px(column)
-            .max(t.pixels(t.sizes.menu_width, self.rem));
+        let width = width.max(t.pixels(t.sizes.menu_width, self.rem));
         // One line is the row's height (the 2-pixel edge included); more grow down.
         let row = self.row_height();
         let line_height = t.pixels(t.sizes.text + 6., self.rem);

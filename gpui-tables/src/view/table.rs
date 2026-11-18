@@ -376,7 +376,7 @@ pub struct TableView {
     pub(crate) drag: Option<Drag>,
     text_token: u64,
     /// A typed value asked of the host (or not yet handed back to be edited in place).
-    pending_text: Option<PendingText>,
+    pub(crate) pending_text: Option<PendingText>,
     /// The typed value being edited in place.
     pub(crate) editor: Option<Editor>,
     /// A row asked for with `rowCreated`, focused when the host hands it back.
@@ -426,6 +426,9 @@ pub struct TableView {
     pub(crate) peek_anchor: Option<Bounds<Pixels>>,
     pub(crate) peek_places:
         Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
+    /// While a property the view hides as a column is edited from the peek: its index, the
+    /// property the open picker or month sets in place of its cell's (the row's title cell).
+    pub(crate) peek_property: Option<usize>,
     /// The gallery's card with the keyboard, by place, and its grid as last drawn.
     pub(crate) gallery_focus: Option<usize>,
     pub(crate) gallery_grid: StdCell<super::gallery::GalleryGrid>,
@@ -496,6 +499,7 @@ impl TableView {
             peek_mode: false,
             peek_anchor: None,
             peek_places: Default::default(),
+            peek_property: None,
             gallery_focus: None,
             gallery_grid: StdCell::new(Default::default()),
             card_drag: std::cell::OnceCell::new(),
@@ -1179,19 +1183,28 @@ impl TableView {
         }
     }
 
-    /// The row and property of a cell, when it's a row's.
+    /// The row and property of a cell, when it's a row's: for the picker or month open from
+    /// the peek on a property the view hides, that property ([`Self::peek_property`]).
     pub(crate) fn cell_target(&self, cell: CellRef) -> Option<(usize, &Property)> {
+        let col = self.shown.columns.get(cell.column)?;
+        let property = match (&self.popover, self.peek_property) {
+            (Some(Popover::Picker { cell: c } | Popover::Date { cell: c }), Some(p))
+                if *c == cell =>
+            {
+                p
+            }
+            _ => col.property,
+        };
+        self.cell_property(cell, property)
+    }
+
+    /// The row of a cell, when it's a row's, and the property at index `property`.
+    fn cell_property(&self, cell: CellRef, property: usize) -> Option<(usize, &Property)> {
         let Item::Row { row, .. } = *self.shown.items.get(cell.item)? else {
             return None;
         };
         self.shown_row(row)?;
-        let col = self.shown.columns.get(cell.column)?;
-        let p = self
-            .database
-            .database
-            .as_ref()?
-            .properties
-            .get(col.property)?;
+        let p = self.database.database.as_ref()?.properties.get(property)?;
         Some((row, p))
     }
 
@@ -1224,8 +1237,27 @@ impl TableView {
     /// opens a picker (gpui-core's Picker), a date its month (gpui-core's MonthGrid), and a typed
     /// value opens a field in place (or the host's own).
     pub(crate) fn edit_cell(&mut self, cell: CellRef, window: &mut Window, cx: &mut Context<Self>) {
+        // Not from the peek: its editor is the cell's own.
+        self.peek_anchor = None;
+        self.edit_cell_as(cell, None, window, cx);
+    }
+
+    /// [`Self::edit_cell`], editing the property at index `property` of the cell's row in
+    /// place of the cell's own when given: the peek's way to a property the view hides.
+    pub(crate) fn edit_cell_as(
+        &mut self,
+        cell: CellRef,
+        property: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.ensure();
-        let Some((row, p)) = self.cell_target(cell) else {
+        self.peek_property = property;
+        let target = match property {
+            Some(property) => self.cell_property(cell, property),
+            None => self.cell_target(cell),
+        };
+        let Some((row, p)) = target else {
             return;
         };
         let p = p.clone();
