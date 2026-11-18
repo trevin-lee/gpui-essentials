@@ -478,64 +478,78 @@ from cache isn't seen.
 
 ```rust
 /// A list whose items reorder by dragging, by touch and by keyboard, and, with a `group`,
-/// move to other lists of the group. The host owns the order: on a move it hears
-/// `on_move` and changes its data.
+/// move to other lists of the group. The host owns the order: it hears `on_move` and changes
+/// its keys.
+#[derive(IntoElement)]
 pub struct Sortable<K: Clone + Eq + Hash + 'static> { /* … */ }
 
 impl<K: Clone + Eq + Hash + 'static> Sortable<K> {
     pub fn new(id: impl Into<ElementId>, keys: impl IntoIterator<Item = K>) -> Self;
-    pub fn axis(self, axis: Axis) -> Self;                    // Vertical
-    /// Lists with the same group take each other's items.
-    pub fn group(self, group: impl Into<SharedString>) -> Self;
+    pub fn axis(self, axis: Axis) -> Self;                      // Vertical
+    pub fn group(self, group: impl Into<SharedString>) -> Self; // lists of a group share items
     pub fn placeholder(self, placeholder: Placeholder) -> Self; // Gap
+    /// Draws an item; also its preview (`SortableItem::preview`).
     pub fn item(
         self,
         render: impl Fn(&K, &SortableItem, &mut Window, &mut App) -> AnyElement + 'static,
     ) -> Self;
-    /// Shown when the list has no items (still a target).
     pub fn empty(self, render: impl Fn(&mut Window, &mut App) -> AnyElement + 'static) -> Self;
+    pub fn label(self, label: impl Into<SharedString>) -> Self;   // "To do", for VoiceOver
+    pub fn item_label(self, label: impl Fn(&K) -> SharedString + 'static) -> Self;
     pub fn can_move(self, f: impl Fn(&SortableMove<K>, &App) -> bool + 'static) -> Self;
     pub fn on_move(self, f: impl Fn(&SortableMove<K>, &mut Window, &mut App) + 'static) -> Self;
-    pub fn auto_scroll(self, handle: &ScrollHandle) -> Self;
-    pub fn gap(self, gap: Rems) -> Self;
+    pub fn gap(self, gap: Rems) -> Self;                        // half a rem
+    /// The list scrolls along its axis with this handle, and auto-scrolls during a drag.
+    pub fn scroll(self, handle: &ScrollHandle) -> Self;
 }
 impl Styled for Sortable<K> {}
-impl RenderOnce for Sortable<K> {}
 
 pub enum Placeholder {
-    /// The items part to leave a gap of the dragged item's size where it'd land (animated).
+    /// The items part, a gap the dragged item's size opening where it'd land (animated).
     Gap,
-    /// A 2 px line in the theme's primary colour where it'd land; nothing moves.
+    /// A 2 px line in the theme's ring colour where it'd land; nothing moves.
     Line,
-    /// Your element in the gap.
+    /// The items part, and your element fills the gap.
     Custom(Rc<dyn Fn(Size<Pixels>, &mut Window, &mut App) -> AnyElement>),
 }
 
-pub struct SortableItem {
-    pub index: usize,
-    pub dragging: bool,  // this item is the one held
-    pub focused: bool,
-    pub lifted: bool,    // picked up by the keyboard
-}
+pub struct SortableItem { pub index: usize, pub dragging: bool, pub focused: bool, pub preview: bool }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SortableMove<K> {
     pub key: K,
     pub from: (ElementId, usize),
-    /// The index in the destination as it'd be with the item already removed.
+    /// The index in the destination counted without the item: remove, then insert.
     pub to: (ElementId, usize),
 }
+
+/// What a sortable item drags; other targets can accept it (a bin).
+pub struct SortableDrag<K> { pub list: ElementId, pub key: K, pub from: usize, pub size: Size<Pixels>, /* group */ }
 ```
 
-- The insertion index is measured against item midpoints in the list's content coordinates,
-  so it stays right while the list scrolls under a held drag.
-- `Gap` slides the items apart in 150 ms (FLIP: each item keeps its old place and moves to the
-  new one) and the dropped item settles into the gap; nothing animates under reduced motion.
-- The list is one Tab stop; before a pick-up the arrows move the focus between items.
-- The keyboard moves one slot per arrow along the axis, and across the axis to the
-  neighbouring list of the group (the nearest one in that direction), at the nearest index.
-- A kanban board is a row of `Sortable`s with one `group`, inside an `auto_scroll` row, each
-  column itself `auto_scroll`ing.
+- **Measuring.** The items keep their places in the layout while a drag is on, and are drawn
+  moved (`window.with_element_offset`, in prepaint). The midpoints the landing place is measured
+  against never move under the pointer, and a list that scrolls mid-drag measures afresh each
+  frame.
+- **Sliding.** `Gap` slides the items apart in 150 ms (`SLIDE_DURATION`), ease-out. The list it
+  leaves closes up; the list it would join grows by the item's size. After the drop, the item
+  settles from where its preview was let go into its new place. Under reduced motion nothing
+  slides.
+- **Rules.** Lists without a shared `group` take only their own items. `can_move` is asked
+  while hovering, so no gap opens where the move isn't allowed, and again at the drop.
+- **Keyboard.** The list is one Tab stop however long (ARIA's listbox pattern: `Role::List`,
+  the focused item its active descendant). Before a pick-up, the arrows along the axis (and
+  Home and End) move the focus between items, and Space or Enter picks up the focused one. Then
+  the arrows move it one place at a time: each gap between items is a keyboard slot of the
+  list's target (`DropTarget::keyboard_slots`). Across the axis they move to the nearest place
+  in the neighbouring list of the group. The live region says "Over To do, position 2 of 4"
+  (`DropTarget::describe`). After a keyboard drop, the focus follows the item to its new list
+  and place.
+- **Kanban.** A board is a row of `Sortable`s with one `group`, inside an `auto_scroll` row,
+  each column `scroll`ing on its own.
+- **Not yet.** Virtualized lists (`uniform_list`) aren't supported: every item is drawn, and its
+  place measured, each frame of a drag. gpui-tables will need them (see the migration list
+  below).
 
 ## react-dnd → gpui-dnd
 
