@@ -28,8 +28,7 @@ use gpui::{
     percentage, rems, svg,
 };
 
-use crate::icon::IconName;
-use crate::size::{ControlSize, Sizable};
+use crate::base::{ControlSize, IconName, Sizable};
 
 /// One turn.
 const TURN: Duration = Duration::from_secs(1);

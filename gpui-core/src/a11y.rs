@@ -98,13 +98,13 @@ impl<E: Element> Element for Disabled<E> {
 /// An element marked as the current one of a set (`aria-current`): the page a breadcrumb or a
 /// sidebar is on. GPUI has no `aria_current`; this sets it on the element's own node and draws
 /// it unchanged.
-pub(crate) struct Current<E> {
+pub struct Current<E> {
     inner: E,
     current: Option<accesskit::AriaCurrent>,
 }
 
 impl<E: Element> Current<E> {
-    pub(crate) fn new(inner: E, current: Option<accesskit::AriaCurrent>) -> Self {
+    pub fn new(inner: E, current: Option<accesskit::AriaCurrent>) -> Self {
         Self { inner, current }
     }
 }

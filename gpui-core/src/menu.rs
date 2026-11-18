@@ -363,7 +363,7 @@ pub(crate) type OnHighlight = Rc<dyn Fn(Option<&SharedString>, &mut App)>;
 pub struct PopupMenu {
     id: ElementId,
     entries: Vec<Entry>,
-    pub(crate) on_select: Option<OnSelect>,
+    on_select: Option<OnSelect>,
     on_reorder: Option<OnReorder>,
     on_highlight: Option<OnHighlight>,
     highlight: Option<SharedString>,
@@ -377,7 +377,7 @@ pub struct PopupMenu {
     /// Set when it's drawn as another menu's submenu: how it closes.
     nested: Option<CloseFn>,
     /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
-    pub(crate) start_blank: bool,
+    start_blank: bool,
 }
 
 type CloseFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -486,6 +486,30 @@ impl PopupMenu {
     /// its own sends its moves here.
     pub fn on_reorder(mut self, f: impl Fn(&MenuReorder, &mut Window, &mut App) + 'static) -> Self {
         self.on_reorder = Some(Rc::new(f));
+        self
+    }
+
+    /// Runs `f` with each pick too, after the handler given to [`on_select`](Self::on_select):
+    /// for a component that opens a host's menu and closes itself on a pick.
+    pub fn after_select(
+        mut self,
+        f: impl Fn(&MenuSelect, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        let first = self.on_select.take();
+        self.on_select = Some(Rc::new(move |pick, window, cx| {
+            if let Some(first) = &first {
+                first(pick, window, cx);
+            }
+            f(pick, window, cx);
+        }));
+        self
+    }
+
+    /// Opens with nothing highlighted until the keys or the pointer move (a menu opened by the
+    /// pointer), unless [`highlight`](Self::highlight) names an entry; by default the first entry
+    /// that can be picked is.
+    pub fn start_blank(mut self, blank: bool) -> Self {
+        self.start_blank = blank;
         self
     }
 

@@ -33,7 +33,7 @@ use gpui::{
     StyleRefinement, Styled, Window, div,
 };
 
-use crate::theme::ActiveTheme as _;
+use crate::base::ActiveTheme as _;
 
 /// How long one pulse takes: down to half and back.
 const PULSE: Duration = Duration::from_secs(2);

@@ -10,9 +10,7 @@ use gpui::{
     prelude::FluentBuilder as _, relative, rems,
 };
 
-use crate::press::focus_ring;
-use crate::size::Disableable;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Disableable, focus_ring};
 
 /// What a slider tells its host.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -1,0 +1,381 @@
+# Generated from the source by tests/components_registry.rs, which CI runs: don't edit it by
+# hand (but for `base`). Regenerate it with
+# `GPUI_CORE_WRITE_REGISTRY=1 cargo test -p gpui-core --test components_registry`.
+#
+# The components `gpui-core add` copies into a host's crate. A component reaches the rest of
+# gpui-core only through `crate::base::…` (in a copy, `gpui_core::base::…`) and through the
+# components in its `needs` (in a copy, `super::…`). For each:
+#   about     the first line of its module's docs
+#   file      its source, from this crate's directory
+#   exports   what gpui-core's root re-exports from it, which the copies' mod.rs re-exports
+#   needs     the components it uses directly, which are copied with it
+#   crates    gpui-core's dependencies besides gpui it uses, which the host adds; absent if none
+#   init      its function binding keys, which the copies' `init` calls; absent if none
+#   contexts  its own key contexts, which the CLI renames (with a `Ui` prefix)
+#   actions   its action namespace, which the CLI renames (to `ui`); absent if none
+
+# The modules that stay in gpui-core, behind gpui_core::base. Edit this by hand.
+base = ["a11y", "base", "chart", "highlight", "icon", "input", "menu", "modal", "picker", "popover", "press", "root", "size", "text", "theme"]
+
+[accordion]
+about = "An accordion, as shadcn/ui draws one: items stacked with a rule between them, each a header that shows or hides its content"
+file = "src/accordion.rs"
+exports = ["Accordion", "AccordionItem"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreAccordion"]
+actions = "gpui_core_accordion"
+
+[alert]
+about = "An alert, as shadcn/ui draws one: a bordered box calling attention to something, with an optional icon, a title and a description, in a default and a destructive variant"
+file = "src/alert.rs"
+exports = ["Alert", "AlertVariant"]
+needs = []
+contexts = []
+
+[aspect_ratio]
+about = "A box that keeps a ratio, as shadcn's `AspectRatio` (Radix's): as wide as it's given, and as tall as the ratio makes that, whatever is in it"
+file = "src/aspect_ratio.rs"
+exports = ["AspectRatio"]
+needs = []
+contexts = []
+
+[avatar]
+about = "Avatars, as shadcn draws them: a person's picture in a circle, or their initials on a muted circle when there's no picture (or until it's decoded), in three sizes; and a group of them overlapping, each ringed in the page's colour, with a \"+N\" for the rest"
+file = "src/avatar.rs"
+exports = ["Avatar", "AvatarGroup", "AvatarImage"]
+needs = []
+crates = ["unicode-segmentation"]
+contexts = []
+
+[badge]
+about = "A badge, as shadcn draws it (the web app's `badge.tsx`): a small pill of text, perhaps with an icon before it, in the default, secondary, destructive or outline look"
+file = "src/badge.rs"
+exports = ["Badge", "BadgeVariant"]
+needs = []
+contexts = []
+
+[breadcrumb]
+about = "A breadcrumb: the path to the page you're on, each step a link back to it, separated by chevrons; the last step is the current page, shown but not a link"
+file = "src/breadcrumb.rs"
+exports = ["Breadcrumb", "BreadcrumbItem"]
+needs = []
+contexts = []
+
+[button]
+about = "Buttons as the web app draws them (its `button.tsx`): primary, outline, secondary, ghost, destructive and link variants in five sizes, with a label, an icon or both, and groups of them joined edge to edge"
+file = "src/button.rs"
+exports = ["Button", "ButtonGroup", "ButtonVariant", "ButtonVariants"]
+needs = []
+contexts = []
+
+[card]
+about = "A card, as the web app draws it (its `card.tsx`): a raised panel with a header (a title, a description, and an action at the top right), content, and a footer along the bottom"
+file = "src/card.rs"
+exports = ["Card"]
+needs = []
+contexts = []
+
+[carousel]
+about = "A carousel: slides in a row, one or several in view, moved by previous and next buttons, the Left and Right keys, optional dots, and a swipe on a touch screen or a trackpad that snaps to a slide (shadcn's Carousel, which is Embla's)"
+file = "src/carousel.rs"
+exports = ["Carousel"]
+needs = ["button"]
+contexts = []
+
+[checkbox]
+about = "A check box, as shadcn draws it (its `checkbox.tsx`): a small rounded square, filled with the primary colour and a check when it's on, or a dash when it's partly on (indeterminate), with an optional label beside it that a press on toggles it too"
+file = "src/checkbox.rs"
+exports = ["Checkbox"]
+needs = []
+contexts = []
+
+[collapsible]
+about = "A collapsible: a trigger that shows or hides the content under it, as shadcn/ui's (Radix's) does"
+file = "src/collapsible.rs"
+exports = ["Collapsible"]
+needs = []
+contexts = []
+
+[combobox]
+about = "A combobox, as shadcn/ui's: a button showing the option chosen (or a placeholder) that opens a `Popover` with a search field over the options, filtered as you type"
+file = "src/combobox.rs"
+exports = ["Combobox"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreCombobox"]
+actions = "gpui_core_combobox"
+
+[command]
+about = "A command palette (the web's `CommandDialog`): a `Dialog` holding a search field over grouped commands, each with an icon and a shortcut's text, filtered as you type"
+file = "src/command.rs"
+exports = ["CommandDialog"]
+needs = ["dialog"]
+contexts = []
+
+[context_menu]
+about = "A context menu: a `PopupMenu` that opens where an element is pressed with the secondary button (a right-click, a two-finger click), where a finger rests on it, or from the keyboard (Shift-F10, or the Menu key where there is one) under the element that has the focus"
+file = "src/context_menu.rs"
+exports = ["ContextMenu"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreContextMenu"]
+actions = "gpui_core_context_menu"
+
+[date_picker]
+about = "A date picker: a field that shows the date, and a month to pick it from"
+file = "src/date_picker.rs"
+exports = ["DatePicker", "DatePickerColors", "DatePickerEvent", "DatePickerState", "DateValue", "MonthGrid"]
+needs = []
+crates = ["chrono"]
+init = "init"
+contexts = ["GpuiCoreDatePicker", "GpuiCoreMonthGrid"]
+actions = "gpui_core_date_picker"
+
+[dialog]
+about = "A dialog: a modal panel in the middle of the window over a scrim, with a title, a description, content, a footer of buttons and a close button; and an alert dialog, the same asking for a decision, which a press on the scrim doesn't close"
+file = "src/dialog.rs"
+exports = ["AlertDialog", "Dialog"]
+needs = ["button"]
+contexts = []
+
+[drawer]
+about = "A drawer: a modal panel that comes from an edge of the window (the bottom by default; the top, left or right too) over a scrim, with a title, a description, content and a footer"
+file = "src/drawer.rs"
+exports = ["DRAWER_DISMISS_FRACTION", "Drawer", "DrawerSide"]
+needs = []
+contexts = []
+
+[dropdown_menu]
+about = "A dropdown menu, as shadcn/ui's: a trigger (a `Button`, or any `Press`) that opens a `PopupMenu` hung from it"
+file = "src/dropdown_menu.rs"
+exports = ["DropdownMenu", "DropdownMenuTrigger"]
+needs = ["button"]
+init = "init"
+contexts = ["GpuiCoreDropdownMenu"]
+actions = "gpui_core_dropdown_menu"
+
+[empty_state]
+about = "An empty state, as shadcn draws it (its `Empty`, a name GPUI already has): an icon in a muted circle, a title, a description and room for actions, centred one above another"
+file = "src/empty_state.rs"
+exports = ["EmptyState"]
+needs = []
+contexts = []
+
+[field]
+about = "Labels and fields, as shadcn lays them out (its `label.tsx` and `field.tsx`): a `Label` for a control, a press on which focuses or toggles it; a `Field` that puts a label, the control, a description and an error message together, one above the other or side by side; and `FieldSet`, `FieldLegend` and `FieldGroup` to group fields"
+file = "src/field.rs"
+exports = ["Field", "FieldGroup", "FieldLegend", "FieldSet", "Label"]
+needs = []
+contexts = []
+
+[hover_card]
+about = "A hover card: a card of more about something (a person, a link), shown when the pointer rests on it and when it has the keyboard's focus"
+file = "src/hover_card.rs"
+exports = ["HOVER_CARD_CLOSE_DELAY", "HOVER_CARD_OPEN_DELAY", "HoverCard"]
+needs = []
+contexts = []
+
+[input_group]
+about = "An input group, as shadcn draws it (its `input-group.tsx`): an `Input` with addons inside its border, before or after the text: an icon (a search glass), text (`https://`, `.com`) or the host's own element (a button)"
+file = "src/input_group.rs"
+exports = ["InputGroup"]
+needs = []
+contexts = []
+
+[input_otp]
+about = "A one-time code field, as shadcn draws it (its `input-otp.tsx`): a row of single-character slots, six by default, optionally in groups with a dash between"
+file = "src/input_otp.rs"
+exports = ["InputOtp", "InputOtpEvent", "InputOtpState"]
+needs = []
+contexts = []
+
+[item]
+about = "Items, as shadcn/ui draws them (its `item.tsx`): a row with media (an icon or an image), a title, a description and actions, in default, outline and muted variants and two sizes; `ItemGroup` stacks them as a list, with `ItemSeparator` between them"
+file = "src/item.rs"
+exports = ["Item", "ItemGroup", "ItemSeparator", "ItemVariant"]
+needs = []
+contexts = []
+
+[kbd]
+about = "A keyboard key, as shadcn draws it (its `kbd`): a small muted cap holding a key's name or symbol (\"⌘\", \"K\", \"Shift\"), and a group of them for a shortcut (\"⌘ K\")"
+file = "src/kbd.rs"
+exports = ["Kbd", "KbdGroup"]
+needs = []
+contexts = []
+
+[menubar]
+about = "A menubar: a row of menus (File, Edit, View) in the window, as shadcn's Menubar"
+file = "src/menubar.rs"
+exports = ["Menubar", "MenubarMenu", "MenubarSelect"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreMenubar"]
+actions = "gpui_core_menubar"
+
+[navigation_menu]
+about = "A navigation menu: a site's top navigation, as shadcn's NavigationMenu"
+file = "src/navigation_menu.rs"
+exports = ["NavigationMenu", "NavigationMenuItem", "NavigationMenuLink"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreNavigationMenu", "GpuiCoreNavigationMenuPanel"]
+actions = "gpui_core_navigation_menu"
+
+[pagination]
+about = "Pagination: Previous, the page numbers around the current page with ellipses for the rest, and Next"
+file = "src/pagination.rs"
+exports = ["Pagination"]
+needs = []
+contexts = []
+
+[progress]
+about = "A progress bar, as shadcn draws it: an eight-pixel rounded track in the primary colour at 20%, filled with the primary colour as far as its value (0 to 100)"
+file = "src/progress.rs"
+exports = ["Progress"]
+needs = []
+contexts = []
+
+[radio_group]
+about = "A radio group, as shadcn draws it (its `radio-group.tsx`): options one above the other (or side by side), each a small circle with a label, one of them on"
+file = "src/radio_group.rs"
+exports = ["RadioGroup"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreRadioGroup"]
+actions = "gpui_core_radio_group"
+
+[scroll_area]
+about = "A scroll area: content that scrolls inside a box, with thin scrollbars laid over its edges (shadcn's ScrollArea)"
+file = "src/scroll_area.rs"
+exports = ["ScrollArea", "ScrollAreaHandle", "ScrollAxes"]
+needs = []
+contexts = []
+
+[search_list]
+about = "A searchable list: a search field above a list of rows the host draws, for a page with a list beside a detail pane (a vault's logins, codes and cards)"
+file = "src/search_list.rs"
+exports = ["SearchList"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreSearchList", "GpuiCoreSearchList > GpuiCoreInput"]
+actions = "gpui_core_search_list"
+
+[segmented]
+about = "A segmented control: a few options side by side, one of them on (a theme's System, Light and Dark; a page's views)"
+file = "src/segmented.rs"
+exports = ["SegmentedControl"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreSegmented"]
+actions = "gpui_core_segmented"
+
+[select]
+about = "A select, as shadcn draws it (its `select.tsx`): a field-like button showing the option chosen (or a placeholder) and a chevron, which opens a `PopupMenu` of the options in a `Popover`, the chosen one checked"
+file = "src/select.rs"
+exports = ["Select"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreSelect"]
+actions = "gpui_core_select"
+
+[separator]
+about = "A separator, as shadcn draws it (the web app's `separator.tsx`): a one-pixel line in the border colour, across its parent's width or down its height"
+file = "src/separator.rs"
+exports = ["Separator"]
+needs = []
+contexts = []
+
+[sheet]
+about = "A bottom sheet: a panel across the bottom of the window over a scrim, for touch"
+file = "src/sheet.rs"
+exports = ["Sheet"]
+needs = []
+contexts = []
+
+[sidebar]
+about = "A sidebar, as shadcn's Sidebar: an app's side navigation beside its content, with a header, groups of items (an icon, a label, a badge, an action) that can fold away, and a footer"
+file = "src/sidebar.rs"
+exports = ["Sidebar", "SidebarGroup", "SidebarItem", "SidebarState", "SidebarTrigger", "ToggleSidebar"]
+needs = ["tooltip"]
+init = "init"
+contexts = ["GpuiCoreSidebar", "GpuiCoreSidebarMenu"]
+actions = "gpui_core_sidebar"
+
+[skeleton]
+about = "A skeleton, as shadcn draws it: a muted rounded block standing in for content that's on its way, the size the host gives it, pulsing"
+file = "src/skeleton.rs"
+exports = ["Skeleton"]
+needs = []
+contexts = []
+
+[slider]
+about = "A slider: a value between a minimum and a maximum, in steps"
+file = "src/slider.rs"
+exports = ["Slider", "SliderEvent", "SliderState"]
+needs = []
+contexts = []
+
+[spinner]
+about = "A spinner, as shadcn draws it: Lucide's loader-circle turning once a second, in the text's colour, 16 pixels unless sized otherwise"
+file = "src/spinner.rs"
+exports = ["Spinner"]
+needs = []
+contexts = []
+
+[split_view]
+about = "A split view: two or three panes side by side (a sidebar, a list, a detail), with a handle between each two"
+file = "src/split_view.rs"
+exports = ["Pane", "SplitView"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreSplitView"]
+actions = "gpui_core_split_view"
+
+[switch]
+about = "An on/off switch, as the web app draws it (its `switch.tsx`): a pill in the primary colour when on and the input colour when off, with a thumb that slides between the two"
+file = "src/switch.rs"
+exports = ["Switch"]
+needs = []
+contexts = []
+
+[table]
+about = "A table, as shadcn/ui draws one (its `table.tsx`): a header row, body rows, an optional footer and an optional caption under it"
+file = "src/table.rs"
+exports = ["ColumnAlign", "ColumnWidth", "Table", "TableColumn", "TableRow"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreTable"]
+actions = "gpui_core_table"
+
+[tabs]
+about = "Tabs: a row of tabs over the panel of the one that's selected (a settings page's Account and Password)"
+file = "src/tabs.rs"
+exports = ["Tab", "Tabs", "TabsOverflow", "TabsVariant"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreTabs"]
+actions = "gpui_core_tabs"
+
+[toast]
+about = "Toasts: a short note at the bottom of the window (\"Saved.\", \"Copied the password.\", an error), as the web's are"
+file = "src/toast.rs"
+exports = ["TOAST_DURATION", "TOAST_DURATION_LONG", "Toast", "ToastKind"]
+needs = ["button"]
+contexts = []
+
+[toggle]
+about = "Toggles, as shadcn draws them (its `toggle.tsx` and `toggle-group.tsx`): a button that stays pressed in or comes back out (Bold in a toolbar), in a plain or an outlined look, with an icon, a label or both; and a row of them joined edge to edge, of which one or several can be pressed in, sharing one Tab stop"
+file = "src/toggle.rs"
+exports = ["Toggle", "ToggleGroup", "ToggleVariant"]
+needs = []
+init = "init"
+contexts = ["GpuiCoreToggleGroup"]
+actions = "gpui_core_toggle_group"
+
+[tooltip]
+about = "A tooltip, as the web app draws it (its `tooltip.tsx`): small text on the foreground colour, fading in"
+file = "src/tooltip.rs"
+exports = ["Tooltip"]
+needs = []
+contexts = []

@@ -27,10 +27,9 @@ use gpui::{
     StyleRefinement, Styled, Toggled, Window, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::press::{Press, focus_ring};
-use crate::size::{ControlSize, Disableable, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{
+    ActiveTheme as _, ControlSize, Disableable, Icon, IconName, Press, Sizable, focus_ring,
+};
 
 type OnClick = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 

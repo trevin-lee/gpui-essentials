@@ -43,12 +43,10 @@ use gpui::{
     actions, anchored, deferred, div, hsla, point, prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::a11y::Current;
-use crate::icon::{Icon, IconName};
-use crate::popover::{CONTEXT as OVERLAY_CONTEXT, Dismiss, PRIORITY, overlay_focus};
-use crate::press::Press;
-use crate::size::Disableable as _;
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, Current, Disableable as _, Dismiss, Icon, IconName, OVERLAY_PRIORITY,
+    POPOVER_CONTEXT as OVERLAY_CONTEXT, Press, Theme, overlay_focus,
+};
 use crate::tooltip::Tooltip;
 
 actions!(
@@ -561,7 +559,7 @@ struct FocusState {
 
 impl RenderOnce for Sidebar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let narrow = window.viewport_size().width < self.breakpoint;
         let (collapsed, open, folded) = self.state.update(cx, |s, _| {
@@ -869,7 +867,7 @@ impl RenderOnce for Sidebar {
                             ),
                     ),
                 )
-                .with_priority(PRIORITY),
+                .with_priority(OVERLAY_PRIORITY),
             );
         }
         row
@@ -942,7 +940,7 @@ mod tests {
 
     #[gpui::test]
     fn items_say_what_they_are_and_which_is_current(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
         vcx.update(|window, cx| {
             let theme = cx.theme().clone();

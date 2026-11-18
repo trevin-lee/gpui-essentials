@@ -13,11 +13,10 @@ use gpui::{
     canvas, div, ease_out_quint, prelude::FluentBuilder as _, px, relative, rems,
 };
 
+use crate::base::{
+    ActiveTheme as _, Disableable as _, IconName, Press, Selectable as _, Sizable as _, focus_ring,
+};
 use crate::button::{Button, ButtonVariants as _};
-use crate::icon::IconName;
-use crate::press::{Press, focus_ring};
-use crate::size::{Disableable as _, Selectable as _, Sizable as _};
-use crate::theme::ActiveTheme as _;
 
 /// How long a move to another slide takes.
 pub(crate) const MOVE: Duration = Duration::from_millis(250);

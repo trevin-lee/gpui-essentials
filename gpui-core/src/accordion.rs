@@ -32,10 +32,7 @@ use gpui::{
     prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::press::Press;
-use crate::size::Disableable;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Disableable, Icon, IconName, Press};
 
 actions!(
     gpui_core_accordion,
@@ -225,7 +222,7 @@ fn step(enabled: &[bool], from: usize, step: isize) -> Option<usize> {
 
 impl RenderOnce for Accordion {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let n = self.items.len();
         let handles = window.use_keyed_state(

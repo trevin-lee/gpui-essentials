@@ -41,8 +41,7 @@ use gpui::{
     deferred, div, prelude::FluentBuilder as _, px,
 };
 
-use crate::press::focus_ring;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, focus_ring};
 
 actions!(
     gpui_core_split_view,
@@ -357,7 +356,7 @@ fn tell(
 
 impl RenderOnce for SplitView {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let n = self.panes.len();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State::default());

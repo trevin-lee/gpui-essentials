@@ -1,5 +1,5 @@
 //! A bottom sheet: a panel across the bottom of the window over a scrim, for touch. It has the
-//! same API as [`Popover`](crate::Popover) without the anchor: the host owns whether it's open,
+//! same API as [`Popover`](crate::base::Popover) without the anchor: the host owns whether it's open,
 //! and closes it from [`Sheet::on_dismiss`], which runs on a press on the scrim and on Escape.
 //!
 //! ```no_run
@@ -28,10 +28,13 @@ use gpui::{
     Style, StyleRefinement, Styled, Window, div, hsla, relative, rems,
 };
 
-use crate::popover::{
-    CONTEXT, Dismiss, DismissFn, DismissReason, InLayer, PopoverColors, overlay_focus,
+use crate::base::{
+    ActiveTheme as _, Dismiss, DismissReason, InLayer, POPOVER_CONTEXT, PopoverColors,
+    overlay_focus, overlay_layer,
 };
-use crate::theme::ActiveTheme as _;
+
+/// Runs on a dismiss, with why.
+type DismissFn = std::rc::Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
 
 /// A panel across the bottom of the window, over a scrim that dims the rest; at most as wide as
 /// [`max_width`](Sheet::max_width) (centred on a wide window) and as tall as nine tenths of the
@@ -41,7 +44,7 @@ use crate::theme::ActiveTheme as _;
 /// focus goes back to what had it, or to [`Sheet::return_focus`]. For that, keep drawing the
 /// sheet while it's closed: closed, it draws nothing.
 ///
-/// Its rows are the host's, at 44 points for touch ([`ControlSize::Touch`](crate::ControlSize)).
+/// Its rows are the host's, at 44 points for touch ([`ControlSize::Touch`](crate::base::ControlSize)).
 #[derive(IntoElement)]
 pub struct Sheet {
     id: ElementId,
@@ -131,7 +134,7 @@ impl Styled for Sheet {
 
 impl RenderOnce for Sheet {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let focus = overlay_focus(
             &self.id,
             self.open,
@@ -168,7 +171,7 @@ impl Sheet {
         let mut panel = div()
             .id("sheet")
             .role(Role::Dialog)
-            .key_context(CONTEXT)
+            .key_context(POPOVER_CONTEXT)
             .track_focus(focus)
             // Over the scrim, so a press inside isn't one on it.
             .occlude()
@@ -275,7 +278,7 @@ impl Element for SheetElement {
             return;
         };
         let view = window.viewport_size();
-        let layer = crate::popover::layer(cx);
+        let layer = overlay_layer(cx);
         let scrim = scrim.w(view.width).h(view.height).into_any_element();
         let mut scrim = InLayer::new(layer, scrim).into_any_element();
         scrim.layout_as_root(view.map(gpui::AvailableSpace::Definite), window, cx);

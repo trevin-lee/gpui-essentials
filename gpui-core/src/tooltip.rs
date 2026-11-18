@@ -16,7 +16,7 @@ use gpui::{
     prelude::FluentBuilder as _, rems,
 };
 
-use crate::theme::ActiveTheme as _;
+use crate::base::ActiveTheme as _;
 
 pub struct Tooltip {
     text: SharedString,

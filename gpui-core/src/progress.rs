@@ -29,7 +29,7 @@ use gpui::{
     prelude::FluentBuilder as _, relative, rems,
 };
 
-use crate::theme::ActiveTheme as _;
+use crate::base::ActiveTheme as _;
 
 /// One sweep of an indeterminate bar.
 const SWEEP: Duration = Duration::from_millis(1500);

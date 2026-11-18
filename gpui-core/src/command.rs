@@ -42,10 +42,13 @@ use gpui::{
     App, ElementId, IntoElement, ParentElement as _, Rems, RenderOnce, SharedString, Window, rems,
 };
 
+use crate::base::{DismissReason, MenuSelect, Picker, PopupMenuItem};
 use crate::dialog::Dialog;
-use crate::menu::{MenuSelect, OnSelect, PopupMenuItem};
-use crate::picker::Picker;
-use crate::popover::{DismissFn, DismissReason};
+
+/// Runs on a dismiss, with why.
+type DismissFn = Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
+/// Runs with a pick.
+type OnSelect = Rc<dyn Fn(&MenuSelect, &mut Window, &mut App)>;
 
 /// A size in the web's CSS pixels, as rems of its 15 pixel text.
 fn css(v: f32) -> Rems {
