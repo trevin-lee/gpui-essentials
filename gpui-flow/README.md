@@ -372,6 +372,15 @@ made.
   nothing is selected, delete removes it, and escape leaves it for the canvas. A click takes
   the keyboard off. In a tree, Tab and enter add nodes as before, once one is selected.
   `Flow::keyboard_on` and `set_keyboard_on` read and set it.
+- **Resizing by keyboard:** R on the node the keyboard is on (or the one selected) resizes it,
+  if its renderer draws a resizer (`NodeContext::resizer`: a frame, a picture). Right and
+  down grow it ten points (a grid square when snapping), left and up shrink it, shift four
+  steps, never below the resizer's least size, a picture keeping its proportions, its top left
+  corner staying put. Enter keeps the size as one edit (one undo step), Escape puts it back,
+  and a click anywhere keeps it. Each step is said ("Payments, 250 by 160"), as are the start,
+  the end, and a node with no resizer. It sends `NodeResizeStart`, `NodeResize` and
+  `NodeResizeEnd` as a drag does. `Flow::start_keyboard_resize`, `keyboard_resizing` and
+  `end_keyboard_resize` do it from a host's own button.
 - **What changes is said** in a live region, which assistive technology reads out without the
   focus moving: a node moved by keyboard and where to ("Moved Start. New position, x: 105,
   y: 100", as React Flow's), a connection made ("Connected Start to Ship it") or moved, and
