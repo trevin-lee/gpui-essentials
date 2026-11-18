@@ -10,8 +10,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Refineable as _, Rems, RenderOnce, SharedString,
+    AnyElement, AnyView, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, Refineable as _, Rems, RenderOnce, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _, px, relative, rems,
 };
@@ -200,6 +200,7 @@ fn paint(variant: ButtonVariant, selected: bool, theme: &Theme) -> Paint {
 }
 
 type OnClick = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type BuildTooltip = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
 
 /// A button: a label, an icon, or an icon and a label. Give an icon-only button an
 /// [`accessibility_label`](Button::accessibility_label), since nothing else names it.
@@ -219,6 +220,9 @@ pub struct Button {
     style: StyleRefinement,
     /// Drawn after the icon and the label, in order.
     children: Vec<AnyElement>,
+    tooltip: Option<BuildTooltip>,
+    /// A test selector instead of its id.
+    selector: Option<SharedString>,
     /// Where it sits in a group, which squares its inner corners.
     joined: Joined,
 }
@@ -247,6 +251,8 @@ impl Button {
             expanded: None,
             style: StyleRefinement::default(),
             children: Vec::new(),
+            tooltip: None,
+            selector: None,
             joined: Joined::Alone,
         }
     }
@@ -274,6 +280,24 @@ impl Button {
     /// Called on a click, a tap, or Enter or Space while it has the focus.
     pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Rc::new(f));
+        self
+    }
+
+    /// A tooltip shown after the pointer rests on it, as GPUI's `.tooltip()`:
+    /// `.tooltip(|window, cx| Tooltip::new("Copy").build(window, cx))`. A tooltip only shows
+    /// under a pointer, so it never names the button: an icon-only button still needs an
+    /// [`accessibility_label`](Self::accessibility_label) with the same words.
+    pub fn tooltip(mut self, build: impl Fn(&mut Window, &mut App) -> AnyView + 'static) -> Self {
+        self.tooltip = Some(Rc::new(build));
+        self
+    }
+
+    /// The selector a host's tests find it by (`debug_bounds`), instead of its id, which is
+    /// the selector otherwise. Recorded only in debug builds with GPUI's test support.
+    pub fn debug_selector(mut self, selector: impl FnOnce() -> String) -> Self {
+        if cfg!(debug_assertions) {
+            self.selector = Some(selector().into());
+        }
         self
     }
 
@@ -348,7 +372,10 @@ impl RenderOnce for Button {
         let joined = self.joined;
 
         // Its id is also its test selector, so a host's tests find it as they name it.
-        let selector = self.id.to_string();
+        let selector = self
+            .selector
+            .clone()
+            .map_or_else(|| self.id.to_string(), |s| s.to_string());
         let mut press = Press::new(self.id)
             .debug_selector(move || selector)
             .flex()
@@ -407,6 +434,9 @@ impl RenderOnce for Button {
         }
         if let Some(expanded) = self.expanded {
             press = press.aria_expanded(expanded);
+        }
+        if let Some(build) = self.tooltip {
+            press = press.tooltip(move |window, cx| build(window, cx));
         }
         press.style().refine(&self.style);
         press
