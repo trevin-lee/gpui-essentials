@@ -113,6 +113,26 @@ actions!(
         SelectParagraphEnd,
         /// Copies the caret's block, or the selected blocks, right after them (⌘D).
         DuplicateBlocks,
+        /// Underlines the selection, or takes the underline off (⌘U).
+        ToggleUnderline,
+        /// Strikes the selection through, or takes the line off (⌘⇧S).
+        ToggleStrikethrough,
+        /// Turns the caret's block, or each selected block, into a heading 1 (⌘⌥1).
+        Heading1,
+        /// … a heading 2 (⌘⌥2).
+        Heading2,
+        /// … a heading 3 (⌘⌥3).
+        Heading3,
+        /// … a to-do list item, or back (⌘⌥4).
+        TodoList,
+        /// … a bulleted list item, or back (⌘⌥5).
+        BulletedList,
+        /// … a numbered list item, or back (⌘⌥6).
+        NumberedList,
+        /// Wraps the caret's block, or the selected blocks, in a toggle (⌘⌥7).
+        ToggleBlock,
+        /// Turns the caret's block into a code block (⌘⌥8).
+        CodeBlock,
     ]
 );
 
@@ -218,9 +238,20 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new(platform_key!("cmd", "b"), ToggleBold, ctx),
         KeyBinding::new(platform_key!("cmd", "i"), ToggleItalic, ctx),
         KeyBinding::new(platform_key!("cmd", "e"), ToggleCode, ctx),
+        KeyBinding::new(platform_key!("cmd", "u"), ToggleUnderline, ctx),
+        KeyBinding::new(platform_key!("cmd", "shift-s"), ToggleStrikethrough, ctx),
         KeyBinding::new(platform_key!("cmd", "k"), EditLink, ctx),
         // "Normal text": the block (or each selected block) becomes a paragraph.
         KeyBinding::new(platform_key!("cmd", "alt-0"), NormalText, ctx),
+        // Notion's turn-into keys, ⌘⌥1 to ⌘⌥8.
+        KeyBinding::new(platform_key!("cmd", "alt-1"), Heading1, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-2"), Heading2, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-3"), Heading3, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-4"), TodoList, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-5"), BulletedList, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-6"), NumberedList, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-7"), ToggleBlock, ctx),
+        KeyBinding::new(platform_key!("cmd", "alt-8"), CodeBlock, ctx),
         // Tables (D20): only act with the caret or a cell selection in a
         // table; elsewhere the keystroke propagates.
         KeyBinding::new(platform_key!("cmd", "alt-left"), TableInsertColumnLeft, ctx),
@@ -2746,13 +2777,66 @@ impl BlockEditorState {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.turn_into(EditorCommand::SetBlockKind(BlockKind::Paragraph), cx);
+    }
+    /// Runs a turn-into key's command on the caret's block or the selected blocks, as its own
+    /// undo step.
+    fn turn_into(&mut self, command: EditorCommand, cx: &mut Context<Self>) {
         if self.readonly {
             return;
         }
         self.end_composition();
         self.model.break_coalescing();
-        let _ = self.run(EditorCommand::SetBlockKind(BlockKind::Paragraph), cx);
+        let _ = self.run(command, cx);
         self.model.break_coalescing();
+    }
+    pub(crate) fn on_heading_1(&mut self, _: &Heading1, _: &mut Window, cx: &mut Context<Self>) {
+        self.turn_into(
+            EditorCommand::SetBlockKind(BlockKind::Heading { level: 1 }),
+            cx,
+        );
+    }
+    pub(crate) fn on_heading_2(&mut self, _: &Heading2, _: &mut Window, cx: &mut Context<Self>) {
+        self.turn_into(
+            EditorCommand::SetBlockKind(BlockKind::Heading { level: 2 }),
+            cx,
+        );
+    }
+    pub(crate) fn on_heading_3(&mut self, _: &Heading3, _: &mut Window, cx: &mut Context<Self>) {
+        self.turn_into(
+            EditorCommand::SetBlockKind(BlockKind::Heading { level: 3 }),
+            cx,
+        );
+    }
+    pub(crate) fn on_todo_list(&mut self, _: &TodoList, _: &mut Window, cx: &mut Context<Self>) {
+        self.turn_into(EditorCommand::ToggleTask, cx);
+    }
+    pub(crate) fn on_bulleted_list(
+        &mut self,
+        _: &BulletedList,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.turn_into(EditorCommand::ToggleList { ordered: false }, cx);
+    }
+    pub(crate) fn on_numbered_list(
+        &mut self,
+        _: &NumberedList,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.turn_into(EditorCommand::ToggleList { ordered: true }, cx);
+    }
+    pub(crate) fn on_toggle_block(
+        &mut self,
+        _: &ToggleBlock,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.turn_into(EditorCommand::WrapInToggle, cx);
+    }
+    pub(crate) fn on_code_block(&mut self, _: &CodeBlock, _: &mut Window, cx: &mut Context<Self>) {
+        self.turn_into(EditorCommand::SetCodeBlock { lang: None }, cx);
     }
     pub(crate) fn on_close_table_menu(
         &mut self,
@@ -2850,6 +2934,22 @@ impl BlockEditorState {
         cx: &mut Context<Self>,
     ) {
         self.toggle_mark(MarkKind::Code, cx);
+    }
+    pub(crate) fn on_toggle_underline(
+        &mut self,
+        _: &ToggleUnderline,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_mark(MarkKind::Underline, cx);
+    }
+    pub(crate) fn on_toggle_strikethrough(
+        &mut self,
+        _: &ToggleStrikethrough,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_mark(MarkKind::Strikethrough, cx);
     }
     pub(crate) fn on_indent(&mut self, _: &Indent, _: &mut Window, cx: &mut Context<Self>) {
         let _ = self.run(EditorCommand::Indent, cx);
