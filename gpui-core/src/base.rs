@@ -18,6 +18,8 @@
 use gpui::App;
 
 pub use crate::a11y::Current;
+#[doc(hidden)]
+pub use crate::a11y::audit as a11y_audit;
 pub use crate::icon::{Icon, IconName};
 pub use crate::init;
 pub use crate::input::{Input, InputEvent, InputState, Paste};

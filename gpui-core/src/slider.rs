@@ -5,7 +5,7 @@
 use gpui::{
     App, Bounds, Context, DispatchPhase, ElementId, Entity, EventEmitter, FocusHandle, Hsla,
     InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Rems, RenderOnce, Role,
+    MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Rems, RenderOnce, Role, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, canvas, div,
     prelude::FluentBuilder as _, relative, rems,
 };
@@ -189,6 +189,7 @@ pub struct Slider {
     ring: Option<Hsla>,
     fill: Option<Hsla>,
     thumb: Option<Hsla>,
+    label: Option<SharedString>,
     style: StyleRefinement,
 }
 
@@ -202,8 +203,16 @@ impl Slider {
             ring: None,
             fill: None,
             thumb: None,
+            label: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// What assistive technology calls it ("Volume"). A slider has no words of its own, so
+    /// give it this, with the words of the label shown beside it.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     /// The empty track's colour (otherwise the theme's input colour in the dark, its muted
@@ -282,9 +291,11 @@ impl RenderOnce for Slider {
         };
         let thumb = css(16.);
 
+        crate::base::a11y_audit("Slider", Role::Slider, self.label.as_ref());
         let mut el = div()
             .id(ElementId::Integer(state.entity_id().as_u64()))
             .role(Role::Slider)
+            .when_some(self.label.clone(), |d, label| d.aria_label(label))
             .aria_numeric_value(value as f64)
             .aria_min_numeric_value(lo as f64)
             .aria_max_numeric_value(hi as f64)

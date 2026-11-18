@@ -301,6 +301,7 @@ fn css(v: f32) -> Rems {
 pub struct DatePicker {
     state: Entity<DatePickerState>,
     placeholder: SharedString,
+    label: Option<SharedString>,
     disabled: bool,
     colors: DatePickerColors,
     style: StyleRefinement,
@@ -311,6 +312,7 @@ impl DatePicker {
         Self {
             state: state.clone(),
             placeholder: "Pick a date".into(),
+            label: None,
             disabled: false,
             colors: DatePickerColors::default(),
             style: StyleRefinement::default(),
@@ -325,6 +327,13 @@ impl DatePicker {
 
     pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.placeholder = placeholder.into();
+        self
+    }
+
+    /// What assistive technology calls the field ("Due date"); the date chosen (or the
+    /// placeholder) is then its value. Without it, the field is called by its date.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
         self
     }
 }
@@ -363,11 +372,19 @@ impl RenderOnce for DatePicker {
             .track_focus(&focus)
             .focus_ring(false)
             .disabled(self.disabled)
-            .accessibility_label(
+            .accessibility_label(self.label.clone().unwrap_or_else(|| {
                 label
                     .clone()
-                    .unwrap_or_else(|| self.placeholder.to_string()),
-            )
+                    .unwrap_or_else(|| self.placeholder.to_string())
+                    .into()
+            }))
+            .when(self.label.is_some(), |p| {
+                p.aria_value(
+                    label
+                        .clone()
+                        .unwrap_or_else(|| self.placeholder.to_string()),
+                )
+            })
             .flex()
             .items_center()
             .gap(css(8.))
@@ -404,6 +421,10 @@ impl RenderOnce for DatePicker {
 
         let mut root = div()
             .id(ElementId::NamedInteger("date-picker-root".into(), id))
+            // The field and its month, as one group under the host's name for it.
+            .when_some(self.label.clone(), |d, label| {
+                d.role(Role::Group).aria_label(label)
+            })
             .key_context(CONTEXT)
             .flex()
             .flex_col()
@@ -614,6 +635,9 @@ impl RenderOnce for MonthGrid {
         let s = self.state.clone();
         let focus = s.read(cx).focus.clone();
         let ring = ring_for(self.options.colors.focus_ring, cx);
+        // The grid is called by the month it shows, as its heading says.
+        let title: SharedString = s.read(cx).cursor.format("%B %Y").to_string().into();
+        crate::base::a11y_audit("MonthGrid", Role::Grid, Some(&title));
         let mut el = div()
             .id(ElementId::NamedInteger(
                 "month-grid".into(),
@@ -622,6 +646,7 @@ impl RenderOnce for MonthGrid {
             .key_context(GRID)
             .track_focus(&focus)
             .role(Role::Grid)
+            .aria_label(title)
             .p(css(4.))
             .rounded(theme.radius_md())
             .focus_visible(move |st| st.shadow(vec![ring]))

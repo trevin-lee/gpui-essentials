@@ -185,3 +185,44 @@ impl<E: Element> Element for Current<E> {
         self.inner.a11y_synthetic_children(prepaint, builder);
     }
 }
+
+/// A drawn control as assistive technology gets it: what drew it, its role and its label. For
+/// gpui-core's accessibility audit (`tests/a11y_labels.rs`), which records what every
+/// interactive node says while a component draws; not part of the stable API.
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct Audited {
+    pub what: &'static str,
+    pub role: gpui::Role,
+    pub label: Option<gpui::SharedString>,
+}
+
+thread_local! {
+    static AUDIT: std::cell::RefCell<Option<Vec<Audited>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Starts recording what interactive nodes say on this thread (until [`audit_take`]).
+#[doc(hidden)]
+pub fn audit_start() {
+    AUDIT.with(|a| *a.borrow_mut() = Some(Vec::new()));
+}
+
+/// What was recorded since [`audit_start`], and stops recording.
+#[doc(hidden)]
+pub fn audit_take() -> Vec<Audited> {
+    AUDIT.with(|a| a.borrow_mut().take().unwrap_or_default())
+}
+
+/// Records an interactive node's role and label while an audit runs; nothing otherwise.
+#[doc(hidden)]
+pub fn audit(what: &'static str, role: gpui::Role, label: Option<&gpui::SharedString>) {
+    AUDIT.with(|a| {
+        if let Some(list) = a.borrow_mut().as_mut() {
+            list.push(Audited {
+                what,
+                role,
+                label: label.cloned(),
+            });
+        }
+    });
+}
