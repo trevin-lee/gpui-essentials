@@ -20,6 +20,7 @@ pub(crate) enum RuleKind {
     InlineMarks,
     Link,
     Table,
+    Typography,
 }
 
 impl InputRule {
@@ -65,6 +66,13 @@ impl InputRule {
     /// header row holds those cells, plus one empty body row.
     pub const fn table() -> Self {
         Self(RuleKind::Table)
+    }
+
+    /// Typing shortcuts, as Notion's: `->` becomes →, `<-` becomes ←, and `--` then a space
+    /// becomes an em dash. Never in code, inline code or a web address; one undo puts back what
+    /// was typed. Not among [`Self::markdown_defaults`]: a page editor turns it on.
+    pub const fn typography() -> Self {
+        Self(RuleKind::Typography)
     }
 
     /// Every built-in rule.

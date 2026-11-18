@@ -46,6 +46,9 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   springs into it when you let go. Moving a top-level block with ⌘⇧↑ or ↓ (Ctrl on Linux and
   Windows), or undoing a move, slides the blocks to their new places. List items move within
   their list, without motion.
+- **Typing shortcuts:** `->` becomes →, `<-` becomes ←, and `--` then a space becomes an em
+  dash, as in Notion; never in code or a web address, and one undo puts back what was typed
+  (`Options::typing_shortcuts(false)` turns them off).
 - **Markdown shortcuts as you type:** `# `, `- `, `1. `, `[ ] `, `> `, `**bold**`, `*italic*`,
   `~~strike~~`, `` `code` `` and `[text](url)`, and three backticks, `---` or `| a | b |`
   followed by Enter.
