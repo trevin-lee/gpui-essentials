@@ -358,7 +358,13 @@ made.
   named by its `ariaLabel` (`Node::aria_label`, `Edge::aria_label`, saved under React Flow's
   name). Without one, a node is named by its label (or its kind) and an edge "Edge from … to …"
   with its nodes' names, after its own label. Edges, which are painted, are the canvas's own
-  nodes, where their lines are.
+  nodes, where their lines are. Every control the flow draws is named too: the controls
+  ("Canvas controls": Zoom in, Zoom out, Fit view, and "Lock the canvas" or "Unlock the
+  canvas"), which are buttons that Tab reaches and Enter or space presses, and a click leaves
+  the canvas its keys; the minimap ("Mini map", as React Flow's); a tree's fold chip ("Fold
+  away what's under …", "Show what's under …", with whether it's expanded); a node's link
+  button ("Open the link"); a link card's ("Open the page"); and the edit toolbar's buttons.
+  `tests/a11y.rs` fails on any button drawn without a name.
 - **By keyboard,** as React Flow's: Tab and shift-Tab move between the nodes (top to bottom,
   then left to right) and then the edges, with a focus ring round the one the keyboard is on,
   which is also what assistive technology is told is focused; past the last, Tab goes on out of
