@@ -15,6 +15,7 @@ use gpui::{
 use gpui_core::{IconName, Press};
 use gpui_dnd::dnd;
 
+use super::board::DraggedCard;
 use super::render::icon;
 use super::table::{Action, CellRef, Entry, Item, Popover, TableView};
 use crate::engine::{self, relation};
@@ -733,7 +734,13 @@ impl TableView {
         .w(self.handle_width())
         .h_full()
         .drop_indicator(false)
-        .source(self.card_source(rid, lane_key, cx))
+        .shared_source(
+            &self.card_source(cx),
+            DraggedCard {
+                row_id: rid,
+                from: lane_key,
+            },
+        )
         .child(press)
         .into_any_element()
     }
