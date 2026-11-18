@@ -4,7 +4,12 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// GPUI's clock is web-time's in a browser, where wasm32 has no std::time::Instant.
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
