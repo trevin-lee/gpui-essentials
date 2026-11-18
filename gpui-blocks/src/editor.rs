@@ -186,7 +186,10 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             widgets: Vec::new(),
-            items: slash::default_items(),
+            items: slash::default_items()
+                .into_iter()
+                .chain(slash::color_items())
+                .collect(),
             image_link: None,
             images: None,
             highlighter: None,
@@ -406,6 +409,50 @@ pub enum EditorEvent {
     /// selection, anchored as [`Editor::selection_anchor`] gives it: `block` is the lasting id
     /// of the block the selection starts in, and `quote` the selected words.
     CommentRequested { block: String, quote: String },
+}
+
+/// Gives the caret's line one of Notion's colours (its text's or its background), or takes
+/// that colour off, keeping the caret where it is.
+fn paint_line(
+    state: &mut markdown_editor::BlockEditorState,
+    text: bool,
+    index: Option<usize>,
+    cx: &mut Context<markdown_editor::BlockEditorState>,
+) {
+    use markdown_editor::{MarkChange, MarkKind};
+    let Some(caret) = state.model().caret() else {
+        return;
+    };
+    let Some(len) = state
+        .model()
+        .document()
+        .block(caret.block)
+        .and_then(|b| b.text())
+        .map(str::len)
+    else {
+        return;
+    };
+    let change = match (text, index) {
+        (true, Some(ix)) => markdown_editor::TEXT_COLORS
+            .get(ix)
+            .map(|c| MarkChange::new().with_color(c.color())),
+        (false, Some(ix)) => markdown_editor::BACKGROUNDS
+            .get(ix)
+            .map(|c| MarkChange::new().with_highlight(c.color())),
+        (true, None) => Some(MarkChange::new().clear(MarkKind::Color)),
+        (false, None) => Some(MarkChange::new().clear(MarkKind::Highlight)),
+    };
+    let Some(change) = change.filter(|_| len > 0) else {
+        return;
+    };
+    let line = BlockSelection::Text {
+        anchor: BlockPosition::new(caret.block, 0),
+        head: BlockPosition::new(caret.block, len),
+    };
+    if state.set_selection(line, cx).is_ok() {
+        let _ = state.run(EditorCommand::ApplyMark(change), cx);
+        let _ = state.set_selection(BlockSelection::caret(caret), cx);
+    }
 }
 
 /// Splits YAML front matter (between `---` lines at the very top) from the document, so the
@@ -1300,6 +1347,7 @@ impl Editor {
     /// Opens, narrows or closes the slash menu from the caret's line. Only typing (or the side
     /// menu's "+") opens it: moving the caret next to a `/` already in the text doesn't.
     fn refresh_slash(&mut self, may_open: bool, cx: &mut Context<Self>) {
+        let mut gone_for_good = None;
         let next = {
             let state = self.state.read(cx);
             let model = state.model();
@@ -1319,6 +1367,11 @@ impl Editor {
                         .slash
                         .as_ref()
                         .is_some_and(|s| s.block == caret.block && s.at == at);
+                    // An open menu whose query stopped matching closes for good, so the words
+                    // typed after a slash ("/so we could…") never reopen it, and Enter is Enter.
+                    if open && matches.is_empty() {
+                        gone_for_good = Some((caret.block, at));
+                    }
                     if !(may_open || open)
                         || self.dismissed == Some((caret.block, at))
                         || matches.is_empty()
@@ -1345,9 +1398,10 @@ impl Editor {
             }
         };
         if next.is_none() {
-            self.dismissed = self
-                .dismissed
-                .filter(|_| self.state_has_slash_at_dismissed(cx));
+            self.dismissed = gone_for_good.or_else(|| {
+                self.dismissed
+                    .filter(|_| self.state_has_slash_at_dismissed(cx))
+            });
         }
         if next != self.slash {
             self.slash = next;
@@ -1485,6 +1539,7 @@ impl Editor {
                         let _ = state.run(EditorCommand::InsertMarkdown(markdown.to_string()), cx);
                     }
                     SlashAction::Image => return state.model().caret(),
+                    SlashAction::Color { text, index } => paint_line(state, *text, *index, cx),
                     // The app answers with insert_page or insert_mention.
                     SlashAction::NewPage | SlashAction::LinkToPage | SlashAction::Embed => {}
                 }
@@ -3612,6 +3667,61 @@ mod tests {
         })
     }
 
+    /// Typing a colour's name in the slash menu colours the whole line, as Notion's does; the
+    /// colours aren't listed until typed.
+    #[gpui::test]
+    fn the_slash_menu_colours_the_line(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "Plan the launch");
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_input(" /");
+        draw(cx);
+        assert!(
+            !menu(&editor, cx)
+                .unwrap()
+                .iter()
+                .any(|t| t.contains("background")),
+            "colours aren't listed until typed"
+        );
+        cx.simulate_input("red");
+        draw(cx);
+        assert_eq!(menu(&editor, cx).unwrap()[0], "Red");
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx)
+                .starts_with("<span style=\"color:#d44c47\">Plan the launch</span>"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        cx.simulate_input(" /blue backg");
+        draw(cx);
+        assert_eq!(
+            menu(&editor, cx).map(|m| m.first().cloned()),
+            Some(Some("Blue background".to_string())),
+            "{}",
+            editor.update(cx, |e, cx| format!(
+                "{:?}",
+                e.state().read(cx).caret_prefix()
+            ))
+        );
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).starts_with("<mark color=\"#e7f3f8\">"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        cx.simulate_input("/default text");
+        draw(cx);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            !markdown(&editor, cx).contains("<span"),
+            "{}",
+            markdown(&editor, cx)
+        );
+    }
+
     #[gpui::test]
     fn slash_opens_narrows_and_picks_with_the_keyboard(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "First line");
@@ -3665,6 +3775,35 @@ mod tests {
         cx.simulate_input(" /zzz");
         draw(cx);
         assert_eq!(menu(&editor, cx), None);
+    }
+
+    /// A sentence after a slash closes the menu once nothing matches, and doesn't open it again
+    /// as the words go on; Enter is then Enter.
+    #[gpui::test]
+    fn words_after_a_slash_close_the_menu_and_enter_is_enter(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("and/or we could");
+        draw(cx);
+        assert_eq!(menu(&editor, cx), None);
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "and/or we could\n\n");
+        // At a line's start: open while it matches, then closed for good.
+        cx.simulate_input("/heading");
+        draw(cx);
+        assert!(menu(&editor, cx).is_some());
+        for c in " is fine, then heading 1".chars() {
+            cx.simulate_input(&c.to_string());
+            draw(cx);
+        }
+        assert_eq!(menu(&editor, cx), None, "never back once closed");
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).contains("/heading is fine, then heading 1\n\n"),
+            "{}",
+            markdown(&editor, cx)
+        );
     }
 
     #[gpui::test]
