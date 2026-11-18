@@ -1830,6 +1830,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-agents"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "gpui-core",
+ "gpui-pre",
+ "gpui-pre-apple",
+ "gpui-pre-macos",
+ "gpui-pre-platform",
+ "image",
+ "regex",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "gpui-blocks"
 version = "0.1.0"
 dependencies = [
@@ -1868,23 +1885,6 @@ dependencies = [
  "gpui-pre-macos",
  "gpui-pre-platform",
  "image",
-]
-
-[[package]]
-name = "gpui-chatwidgets"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "gpui-core",
- "gpui-pre",
- "gpui-pre-apple",
- "gpui-pre-macos",
- "gpui-pre-platform",
- "image",
- "regex",
- "serde",
- "serde_json",
- "url",
 ]
 
 [[package]]

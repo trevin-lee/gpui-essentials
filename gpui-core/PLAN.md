@@ -14,7 +14,7 @@ crates use only a small part of it. The inventory below comes from `rg` over the
 gpui-blocks' engine (`gpui-blocks/engine`) and the Mac
 app (`host-app/clients/desktop`), on 2026-11-15.
 
-| Item (kit path) | flow | calendar | chatwidgets | blocks (+fork) | Mac app |
+| Item (kit path) | flow | calendar | agents | blocks (+fork) | Mac app |
 | --- | :-: | :-: | :-: | :-: | :-: |
 | GPUI through the kit (`gpui_kit::*`, `prelude::FluentBuilder`, `actions!`) | ● | ● | ● | ● | ● |
 | `init`, `application`, `open_window`, `#[gpui_kit::test]` (99 uses) | ● | ● | ● | ● | ● |
@@ -32,8 +32,8 @@ app (`host-app/clients/desktop`), on 2026-11-15.
 | `base::text` markdown model: `MarkdownNode`, `MarkdownPlugin`, `MarkdownExtensions`, `editor_host::{BlockNode, TextMark, LinkMark, ColumnAlign, parse_markdown, …}` | | | | ● | |
 | `Toggle`, `DropdownMenu` / `PopupMenuItem`, `Toolbar`, `Separator`, `StyledExt`, `SemanticThemeTokens`, `base::input::Paste` | | | | ● (fork) | |
 
-The chatwidgets session's fuller inventory agrees with this one. It adds the call counts:
-inputs are built 27 times in 18 app files plus chatwidgets, with `.placeholder`,
+The gpui-agents session's fuller inventory agrees with this one. It adds the call counts:
+inputs are built 27 times in 18 app files plus gpui-agents, with `.placeholder`,
 `.appearance(false)`, `.auto_grow`, `.masked`, `.submit_on_enter` and the events PressEnter,
 Change, Focus and Blur. It also lists two kit quirks the app works around: the Input's 10 px
 padding even with `appearance(false)`, and the textarea placeholder overflowing. gpui-core
@@ -108,7 +108,7 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
    - the standard macOS key bindings, plus `OutdentInline`.
 5. **TextView** (markdown display with styles; links as events), on `pulldown-cmark`.
 6. **DatePicker** (popover with a month grid). Together with 3–5, this unlocks
-   gpui-chatwidgets.
+   gpui-agents.
 7. **A rich-text paragraph layer, for the blocks fork.** The fork owns its model, IME, keymap
    and undo, but draws through the kit's 34k-line text engine (`base::text::editor_host`). Agreed
    with the gpui-blocks session (2026-11-15):
@@ -128,7 +128,7 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
 ## After the kit: Popover, Menu, Picker
 
 No crate used the kit's popovers or menus: a host app, gpui-blocks' slash menu,
-gpui-chatwidgets' select and gpui-tables' header menus each build their own on GPUI's
+gpui-agents' select and gpui-tables' header menus each build their own on GPUI's
 `deferred(anchored())`. gpui-tables asked for shared ones (2026-11-16), in three layers, each on
 the one before:
 
@@ -157,7 +157,7 @@ the one before:
 
 Rules for all three, beyond the crate's:
 - no global state, and nothing drawn while closed;
-- colours from a palette the host passes in (gpui-chatwidgets' `CardTheme` and gpui-tables'
+- colours from a palette the host passes in (gpui-agents' `CardTheme` and gpui-tables'
   `TableTheme` have their own), with the global Theme as the default.
 
 ## Switch order
@@ -166,7 +166,7 @@ Rules for all three, beyond the crate's:
    `Theme::global(cx).colors` in `FlowColors::from_theme`, and `init` in its tests. It's the
    smallest real proof of the path change, the test macro and the theme.
 2. gpui-calendar, after step 2.
-3. gpui-chatwidgets, after step 6.
+3. gpui-agents, after step 6.
 4. gpui-blocks and its fork, after step 7.
 5. A host app, after everything above.
 

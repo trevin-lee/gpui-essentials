@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_chatwidgets::openui::{ImageSrc, Link, Store};
-use gpui_chatwidgets::*;
+use gpui_agents::openui::{ImageSrc, Link, Store};
+use gpui_agents::*;
 
 /// How the test host answers a card's images.
 #[derive(Clone, Copy, PartialEq)]

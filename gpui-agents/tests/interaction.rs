@@ -218,10 +218,9 @@ fn a_form_checks_its_rules_then_sends_its_values(cx: &mut TestAppContext) {
 fn choices_write_the_store(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("form-inputs"), &host, Some(736.));
-    let field =
-        |card: &Entity<gpui_chatwidgets::CardView>, cx: &mut VisualTestContext, name: &str| {
-            card.read_with(cx, |c, _| c.store().field(Some("prefs"), name))
-        };
+    let field = |card: &Entity<gpui_agents::CardView>, cx: &mut VisualTestContext, name: &str| {
+        card.read_with(cx, |c, _| c.store().field(Some("prefs"), name))
+    };
     // Chips and option cards start with their defaults in the form, as on the web.
     assert_eq!(field(&card, cx, "tools"), Some(json!(["figma"])));
     assert_eq!(field(&card, cx, "style"), Some(json!("collab")));
@@ -262,10 +261,9 @@ fn text_fields_and_the_slider_write_the_store_from_the_keyboard_and_the_pointer(
 ) {
     let host = TestHost::new(Images::Refuse);
     let (card, cx) = open(cx, &sample("form-inputs"), &host, Some(736.));
-    let field =
-        |card: &Entity<gpui_chatwidgets::CardView>, cx: &mut VisualTestContext, name: &str| {
-            card.read_with(cx, |c, _| c.store().field(Some("prefs"), name))
-        };
+    let field = |card: &Entity<gpui_agents::CardView>, cx: &mut VisualTestContext, name: &str| {
+        card.read_with(cx, |c, _| c.store().field(Some("prefs"), name))
+    };
     // A click puts the focus in a field, and Tab moves it through the fields in order.
     let at = cx
         .debug_bounds("field:t:r.c0/f0.field")
@@ -534,7 +532,7 @@ fn a_card_that_cant_be_read_says_so(cx: &mut TestAppContext) {
     let (card, cx) = open(cx, "just some prose", &host, Some(400.));
     assert_eq!(
         card.read_with(cx, |c, _| c.error().cloned()),
-        Some(gpui_chatwidgets::openui::CardError::NoRoot)
+        Some(gpui_agents::openui::CardError::NoRoot)
     );
     assert!(drawn(cx, "note"), "a note takes its place");
 }
@@ -544,12 +542,12 @@ fn a_card_too_large_says_so(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
     let big = format!(
         "root = Stack([TextContent(\"{}\")])",
-        "x".repeat(gpui_chatwidgets::openui::MAX_SOURCE_BYTES)
+        "x".repeat(gpui_agents::openui::MAX_SOURCE_BYTES)
     );
     let (card, cx) = open(cx, &big, &host, Some(400.));
     assert_eq!(
         card.read_with(cx, |c, _| c.error().cloned()),
-        Some(gpui_chatwidgets::openui::CardError::TooLarge)
+        Some(gpui_agents::openui::CardError::TooLarge)
     );
     assert!(drawn(cx, "note"));
 }
@@ -561,7 +559,7 @@ fn date_pickers_show_and_write_the_store_s_dates(cx: &mut TestAppContext) {
 $d = "2026-03-04"
 $r = {from: "2026-01-10", to: "2026-01-12"}"#;
     let (card, cx) = open(cx, program, &host, Some(400.));
-    let var = |card: &Entity<gpui_chatwidgets::CardView>, cx: &mut VisualTestContext, name| {
+    let var = |card: &Entity<gpui_agents::CardView>, cx: &mut VisualTestContext, name| {
         card.read_with(cx, |c, _| c.store().var(name))
     };
     let open_field = |cx: &mut VisualTestContext, sel: &'static str| {

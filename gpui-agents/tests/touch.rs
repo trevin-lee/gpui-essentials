@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use common::*;
 use gpui::*;
-use gpui_chatwidgets::CardTheme;
+use gpui_agents::CardTheme;
 use serde_json::json;
 // The built-in #[test] (which GPUI's test attribute expands to), not GPUI's, which
 // gpui::* brings in.

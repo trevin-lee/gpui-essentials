@@ -17,7 +17,7 @@ use ::gpui::TestDispatcher;
 use common::{draw, setup};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_chatwidgets::StreamingMarkdown;
+use gpui_agents::StreamingMarkdown;
 use gpui_core::text::{TextView, TextViewStyle};
 // The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
@@ -58,7 +58,7 @@ const TEXT: u32 = 0xeeeeee;
 /// brought in its place.
 struct Chat {
     draft: Entity<StreamingMarkdown>,
-    card: Option<Entity<gpui_chatwidgets::CardView>>,
+    card: Option<Entity<gpui_agents::CardView>>,
     width: Pixels,
     /// Some text laid out below the draft as one TextView, in the same style, and not painted:
     /// to measure how tall it is.
@@ -482,9 +482,9 @@ fn a_card_takes_the_draft_s_place_drawn_whole() {
     let chat = o.chat.clone();
     o.cx.update(|window, cx| {
         chat.update(cx, |c, cx| {
-            let h: Rc<dyn gpui_chatwidgets::CardHost> = host.clone();
+            let h: Rc<dyn gpui_agents::CardHost> = host.clone();
             let src = r#"root = Stack([CardHeader("Your week"), Buttons([Button("Book Tuesday"), Button("Book Thursday")])])"#;
-            c.card = Some(cx.new(|cx| gpui_chatwidgets::CardView::new(src, "c", h, window, cx)));
+            c.card = Some(cx.new(|cx| gpui_agents::CardView::new(src, "c", h, window, cx)));
             cx.notify();
         })
     });
