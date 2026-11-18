@@ -195,6 +195,10 @@ pub struct FlowOptions {
     /// How fast that moves, in points a sixtieth of a second at the very edge (React Flow's
     /// `autoPanSpeed`, 15 by default); slower the further in the pointer is.
     pub auto_pan_speed: f32,
+    /// A click (or tap) on a handle begins a connection, and one on another handle finishes it,
+    /// as React Flow's `connectOnClick`: no drag needed, which suits a finger. A click on the
+    /// same handle again, on the pane or on a node, or escape, lets it go. On by default.
+    pub connect_on_click: bool,
 }
 
 impl Default for FlowOptions {
@@ -237,6 +241,7 @@ impl Default for FlowOptions {
             auto_pan_on_node_drag: true,
             auto_pan_on_connect: true,
             auto_pan_speed: 15.,
+            connect_on_click: true,
         }
     }
 }
@@ -3064,6 +3069,7 @@ impl Flow {
         if let Some(took) = self.press_on_content(event, window, cx) {
             return took;
         }
+        self.let_go_of_click_connect(cx);
         // Inside a frame, the press is the pane's.
         let at = self.screen_to_flow(event.position);
         if self.node(id).is_some_and(|n| !self.takes_press(n, at)) {
@@ -3969,6 +3975,7 @@ impl Flow {
         if self.drag.is_some() || mode == PointerMode::Off {
             return;
         }
+        self.let_go_of_click_connect(cx);
         let pane = self.shared.pane_point(event.position);
         if mode == PointerMode::Edit
             && event.button == MouseButton::Left
@@ -4536,9 +4543,13 @@ impl Flow {
                 snap,
                 started,
                 pointer,
+                at,
                 ..
             } => {
-                if started {
+                if !started && self.options.connect_on_click {
+                    self.click_connect(from, at, cx);
+                } else if started {
+                    self.shared.click_connect.borrow_mut().take();
                     let to = snap.as_ref().map(|s| s.to.clone());
                     let made = snap
                         .filter(|s| s.valid)
@@ -4653,10 +4664,72 @@ impl Flow {
         if self.cancel_drag(cx) {
             return true;
         }
+        if self.let_go_of_click_connect(cx) {
+            return true;
+        }
         if self.nodes.iter().all(|n| !n.selected) && self.edges.iter().all(|e| !e.selected) {
             return false;
         }
         self.deselect_all(cx);
+        cx.notify();
+        true
+    }
+
+    /// A handle clicked rather than dragged from ([`FlowOptions::connect_on_click`]): it
+    /// begins a connection, or finishes the one a click on another handle began, as a drag
+    /// from that one dropped here would; the same handle again lets it go.
+    fn click_connect(&mut self, clicked: HandleRef, at: XY, cx: &mut Context<Self>) {
+        let first = self.shared.click_connect.borrow_mut().take();
+        match first {
+            None => {
+                cx.emit(FlowEvent::ConnectStart {
+                    node: clicked.node.clone(),
+                    handle: clicked.handle.clone(),
+                    kind: clicked.kind,
+                });
+                *self.shared.click_connect.borrow_mut() = Some(clicked);
+            }
+            Some(first) if first == clicked => cx.emit(FlowEvent::ConnectEnd {
+                from: first,
+                to: None,
+                connected: false,
+                pointer: at,
+            }),
+            Some(first) => {
+                let snap = self.snap_for(&first, at).filter(|s| s.to == clicked);
+                let made = snap
+                    .filter(|s| s.valid)
+                    .and_then(|s| self.connect(s.connection, cx));
+                let connected = made.is_some();
+                if let Some(edge) = made {
+                    cx.emit(FlowEvent::Connect(edge));
+                }
+                cx.emit(FlowEvent::ConnectEnd {
+                    from: first,
+                    to: Some(clicked),
+                    connected,
+                    pointer: at,
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// Lets go of a connection a click on a handle began, as a press elsewhere or escape
+    /// does. Says whether there was one.
+    fn let_go_of_click_connect(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(from) = self.shared.click_connect.borrow_mut().take() else {
+            return false;
+        };
+        let pointer = self
+            .handle_point(&from.node, from.kind, from.handle.as_deref())
+            .unwrap_or_default();
+        cx.emit(FlowEvent::ConnectEnd {
+            from,
+            to: None,
+            connected: false,
+            pointer,
+        });
         cx.notify();
         true
     }

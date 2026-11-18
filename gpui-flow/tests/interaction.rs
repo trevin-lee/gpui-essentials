@@ -528,3 +528,89 @@ fn react_flows_own_json_loads() {
     let bezier = serde_json::to_value(Edge::new("x", "1", "2")).unwrap();
     assert_eq!(bezier["type"], "default");
 }
+
+/// A click (no drag) on one handle and then on another connects them, as React Flow's
+/// `connectOnClick`: what a finger does more easily than a drag.
+fn click(cx: &mut gpui::VisualTestContext, at: gpui::Point<gpui::Pixels>) {
+    cx.simulate_mouse_down(at, gpui::MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(at, gpui::MouseButton::Left, Modifiers::none());
+    draw(cx);
+}
+
+#[gpui::test]
+fn a_click_on_one_handle_and_then_another_connects_them(cx: &mut TestAppContext) {
+    let (flow, events, cx) = open(cx, with_three);
+    let from = handle(&flow, cx, "a", HandleKind::Source);
+    let to = handle(&flow, cx, "c", HandleKind::Target);
+    click(cx, from);
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, FlowEvent::ConnectStart { node, .. } if node == "a"))
+    );
+    assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 1);
+    click(cx, to);
+    flow.read_with(cx, |f, _| {
+        assert_eq!(f.edges().len(), 2);
+        let edge = f.edges().last().unwrap();
+        assert_eq!((edge.source.as_ref(), edge.target.as_ref()), ("a", "c"));
+    });
+    assert!(events.borrow().iter().any(|e| matches!(e, FlowEvent::ConnectEnd { connected: true, to: Some(to), .. } if to.node == "c")));
+    // Finished: a click on another handle now only begins one.
+    click(cx, handle(&flow, cx, "b", HandleKind::Target));
+    assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 2);
+}
+
+#[gpui::test]
+fn a_click_connection_is_let_go_of_by_the_same_handle_the_pane_or_escape(cx: &mut TestAppContext) {
+    let (flow, events, cx) = open(cx, with_three);
+    let from = handle(&flow, cx, "a", HandleKind::Source);
+    let to = handle(&flow, cx, "c", HandleKind::Target);
+    let ends = |events: &Events| {
+        events
+            .borrow()
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    FlowEvent::ConnectEnd {
+                        connected: false,
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    // The same handle again.
+    click(cx, from);
+    click(cx, from);
+    click(cx, to);
+    assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 1);
+    assert_eq!(ends(&events), 1);
+    // The pane (the click on c began one; this lets it go).
+    click(cx, screen(&flow, cx, xy(600., 60.)));
+    assert_eq!(ends(&events), 2);
+    click(cx, from);
+    cx.simulate_keystrokes("escape");
+    draw(cx);
+    click(cx, to);
+    assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 1);
+    assert_eq!(ends(&events), 3);
+}
+
+#[gpui::test]
+fn connecting_by_clicks_can_be_turned_off(cx: &mut TestAppContext) {
+    let (flow, events, cx) = open(cx, |f| {
+        with_three(f).with_options(|o| o.connect_on_click = false)
+    });
+    click(cx, handle(&flow, cx, "a", HandleKind::Source));
+    click(cx, handle(&flow, cx, "c", HandleKind::Target));
+    assert_eq!(flow.read_with(cx, |f, _| f.edges().len()), 1);
+    assert!(
+        !events
+            .borrow()
+            .iter()
+            .any(|e| matches!(e, FlowEvent::ConnectStart { .. }))
+    );
+}
