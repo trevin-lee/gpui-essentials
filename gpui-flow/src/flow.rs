@@ -71,8 +71,18 @@ actions!(
         FocusPrevious,
         /// Selects the node or edge the keyboard is on.
         SelectFocused,
+        /// Puts the selected nodes, and the edges between them, on the clipboard.
+        CopySelection,
+        /// Copies the selected nodes, then deletes them.
+        CutSelection,
+        /// Adds the nodes on the clipboard, with new ids, a step along.
+        PasteClipboard,
+        /// Adds a copy of the selected nodes a step along, leaving the clipboard alone.
+        DuplicateSelection,
     ]
 );
+
+mod clipboard;
 
 const CONTEXT: &str = "Flow";
 
@@ -110,6 +120,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-z", Redo, c),
         KeyBinding::new("shift-tab", FocusPrevious, c),
         KeyBinding::new("space", SelectFocused, c),
+        KeyBinding::new("cmd-c", CopySelection, c),
+        KeyBinding::new("cmd-x", CutSelection, c),
+        KeyBinding::new("cmd-v", PasteClipboard, c),
+        KeyBinding::new("cmd-d", DuplicateSelection, c),
     ]);
 }
 
@@ -746,6 +760,9 @@ pub struct Flow {
     panels: Vec<(PanelPosition, PanelRenderer)>,
     node_toolbar: Option<(ToolbarPlace, ToolbarRenderer)>,
     valid_connection: Option<ConnectionCheck>,
+    /// What was last copied, cut or pasted (a hash of its JSON), and how many times it's been
+    /// pasted since: each paste lands a step further along.
+    pastes: Option<(u64, i32)>,
     delete_check: Option<DeleteCheck>,
     transform_listener: Option<TransformListener>,
     image_loader: Option<crate::node::ImageLoader>,
@@ -990,6 +1007,7 @@ impl Flow {
             panels: Vec::new(),
             node_toolbar: None,
             valid_connection: None,
+            pastes: None,
             delete_check: None,
             transform_listener: None,
             image_loader: None,
@@ -2480,20 +2498,10 @@ impl Flow {
             };
             let d = node.position - was.position;
             let transform = |n: &Node| n.data.get("ink").and_then(|i| i.get("transform")).cloned();
-            if (d.x == 0. && d.y == 0.) || transform(node) != transform(was) {
+            if transform(node) != transform(was) {
                 continue;
             }
-            let Some(ink) = node.data.get_mut("ink").and_then(|i| i.as_object_mut()) else {
-                continue;
-            };
-            let mut t: Vec<f64> = ink
-                .get("transform")
-                .and_then(|t| serde_json::from_value(t.clone()).ok())
-                .filter(|t: &Vec<f64>| t.len() == 6)
-                .unwrap_or_else(|| vec![1., 0., 0., 1., 0., 0.]);
-            t[4] += d.x as f64;
-            t[5] += d.y as f64;
-            ink.insert("transform".into(), serde_json::json!(t));
+            clipboard::shift_ink(node, d);
         }
     }
 
@@ -6849,6 +6857,26 @@ impl Render for Flow {
                 }
             }))
             .on_action(cx.listener(|flow, _: &SelectAll, _, cx| flow.select_all(cx)))
+            .on_action(cx.listener(|flow, _: &CopySelection, _, cx| {
+                if !flow.copy_selected(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &CutSelection, _, cx| {
+                if !flow.cut_selected(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &PasteClipboard, _, cx| {
+                if !flow.paste(cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &DuplicateSelection, _, cx| {
+                if !flow.duplicate_selected(cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|flow, _: &Cancel, _, cx| {
                 if !flow.cancel(cx) {
                     cx.propagate();
