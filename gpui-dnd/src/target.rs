@@ -1,0 +1,83 @@
+//! Drop targets: react-dnd's `useDrop`.
+
+use std::rc::Rc;
+
+use gpui::{App, Window};
+
+use crate::item::{DragItem, DropResult, ItemType};
+use crate::monitor::{DragMonitor, DropMonitor};
+
+/// What a target did with a drop. Targets are asked innermost first.
+#[derive(Clone, Debug)]
+pub enum DropOutcome {
+    /// Handled here; the targets outside aren't asked.
+    Handled(Option<DropResult>),
+    /// Handled here, and the targets outside are asked too: they see
+    /// [`did_drop`](DragMonitor::did_drop) and this result (react-dnd's chaining).
+    HandledContinue(Option<DropResult>),
+    /// Not handled; the next target out is asked as if this one weren't there.
+    Pass,
+}
+
+type CanDrop = Rc<dyn Fn(&DragItem, &DragMonitor, &App) -> bool>;
+type Hover = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App)>;
+type OnDrop = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropOutcome>;
+
+/// A drop target (react-dnd's `useDrop`): which items a [`dnd`](crate::dnd) element takes, and
+/// what it does with them.
+#[derive(Clone, Default)]
+pub struct DropTarget {
+    accepts: Vec<ItemType>,
+    pub(crate) can_drop: Option<CanDrop>,
+    pub(crate) on_hover: Option<Hover>,
+    pub(crate) on_drop: Option<OnDrop>,
+}
+
+impl DropTarget {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// An item type this target takes. Call once for each.
+    pub fn accept<T: 'static>(mut self) -> Self {
+        self.accepts.push(ItemType::of::<T>());
+        self
+    }
+
+    /// Whether it can take this item now (react-dnd's `canDrop`). Asked as the pointer moves
+    /// over it, and as the drag draws, for [`can_drop_style`](crate::Dnd::can_drop_style).
+    pub fn can_drop(mut self, f: impl Fn(&DragItem, &DragMonitor, &App) -> bool + 'static) -> Self {
+        self.can_drop = Some(Rc::new(f));
+        self
+    }
+
+    /// Called on every move while an item it accepts is over it, shallowly or deeply, whether
+    /// or not it can take it (react-dnd's `hover`). Innermost target first.
+    pub fn on_hover(
+        mut self,
+        f: impl Fn(&DragItem, &DropMonitor, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_hover = Some(Rc::new(f));
+        self
+    }
+
+    /// Called on a drop, innermost target first, for each target under the pointer that can
+    /// take the item. A target without it passes every drop out.
+    pub fn on_drop(
+        mut self,
+        f: impl Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropOutcome + 'static,
+    ) -> Self {
+        self.on_drop = Some(Rc::new(f));
+        self
+    }
+
+    pub(crate) fn accepts(&self, item_type: ItemType) -> bool {
+        self.accepts.contains(&item_type)
+    }
+
+    /// Accepts the item and, if it says, can take it.
+    pub(crate) fn takes(&self, item: &DragItem, monitor: &DragMonitor, cx: &App) -> bool {
+        self.accepts(item.item_type())
+            && self.can_drop.as_ref().is_none_or(|f| f(item, monitor, cx))
+    }
+}

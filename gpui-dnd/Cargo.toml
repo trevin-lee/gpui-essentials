@@ -1,0 +1,29 @@
+# Drag and drop for GPUI in the manner of react-dnd: sources, targets, a monitor, a drag layer,
+# and mouse, touch and keyboard backends, with sortable lists and auto-scroll on top.
+[package]
+name = "gpui-dnd"
+version = "0.1.0"
+description = "Drag and drop for GPUI in the manner of react-dnd"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["gpui", "drag-and-drop", "dnd", "sortable", "ui"]
+categories = ["gui"]
+publish = false
+
+[lib]
+name = "gpui_dnd"
+
+[dependencies]
+# GPUI under its own name, pinned exactly in the workspace (gpui-pre 0.3.12), and gpui-core for
+# the theme the previews and drop indicators take their colours from.
+gpui = { workspace = true }
+gpui-core = { path = "../gpui-core" }
+
+[features]
+# GPUI's test support (a headless window, simulated input), for hosts' tests.
+test-support = ["gpui/test-support"]
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

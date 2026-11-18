@@ -69,6 +69,14 @@ cut by their content mask, so a target scrolled out of its list isn't hit) conta
 position. The topmost is the one painted last; its chain of enclosing targets, outermost first,
 is the drag's **target stack** (react-dnd's `targetIds`).
 
+### Redrawing
+
+As the pointer moves, the provider's own view is notified, not the whole window: a
+`window.refresh()` would draw every cached view anew. Elements styled by the drag
+(`dragging_style`, `over_style`) are drawn with the provider's view; a view drawn from cache
+(`AnyView::cached`) that shows something about the drag collects it (`collect_dnd`) and is
+notified only when that changes.
+
 ### Idle costs nothing
 
 No timer or frame request exists unless a drag is moving, an auto-scroll is scrolling, or a
@@ -94,8 +102,10 @@ pub struct DndProvider { /* … */ }
 
 impl DndProvider {
     pub fn new(child: impl IntoElement) -> Self;
-    /// The backends that start drags. All three by default.
-    pub fn backends(self, backends: Backends) -> Self;
+    /// Whether each backend starts drags. All on by default.
+    pub fn mouse(self, on: bool) -> Self;
+    pub fn touch(self, touch: Option<TouchOptions>) -> Self;
+    pub fn keyboard(self, on: bool) -> Self;
     /// A custom drag layer (react-dnd's useDragLayer): called on every move while a drag whose
     /// preview is `Preview::Layer` is on, drawn above everything at no fixed place.
     pub fn layer(
@@ -108,13 +118,6 @@ impl DndProvider {
 impl RenderOnce for DndProvider {}
 
 #[derive(Clone, Debug)]
-pub struct Backends {
-    pub mouse: bool,                 // true
-    pub touch: Option<TouchOptions>, // Some(default)
-    pub keyboard: bool,              // true
-}
-
-#[derive(Clone, Debug)]
 pub struct TouchOptions {
     /// How a touch picks up a source that doesn't say: a long press (the default: a plain
     /// touch still scrolls) or at once (handles, canvases).
@@ -123,8 +126,11 @@ pub struct TouchOptions {
 pub enum TouchActivation { LongPress, Immediate }
 ```
 
-A host with gpui-core: `Root::new(cx.new(|_| App::new()), …)`, where `App::render` returns
-`DndProvider::new(content)`.
+With gpui-core the provider goes **inside** `Root`, as the content of the view Root shows:
+`Root::new(cx.new(|_| App::new()), …)`, where `App::render` returns
+`DndProvider::new(content)`. The preview is deferred at a higher priority than anything Root
+draws, so it's above Root's popovers, dialogs and toasts either way; inside, the provider's view
+is the app's, which is what's redrawn as the drag moves.
 
 ### Sources and targets: the `dnd` element
 
@@ -139,11 +145,13 @@ pub struct Dnd { /* a Stateful<Div> and the specs */ }
 impl Dnd {
     pub fn source<T: 'static>(self, source: DragSource<T>) -> Self;
     pub fn target(self, target: DropTarget) -> Self;
+    /// The theme's ring drawn round a target while an item it can take is over it. On.
+    pub fn drop_indicator(self, on: bool) -> Self;
     /// Styles while this element's own item is being dragged (react-dnd's collected
     /// isDragging, without a view re-render): typically `|s| s.opacity(0.4)`.
     pub fn dragging_style(self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self;
     /// Styles while an item this target can take is over it (shallow), and while one that it
-    /// can take is being dragged anywhere. Default: a `ring` outline over, nothing otherwise.
+    /// can take is being dragged anywhere.
     pub fn over_style(self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self;
     pub fn can_drop_style(self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self;
     /// The accessible name used in announcements ("Card: Write the brief").
@@ -168,6 +176,9 @@ pub struct DragSource<T: 'static> { /* … */ }
 impl<T: 'static> DragSource<T> {
     /// The item, made when the drag begins (react-dnd's `item` as a function).
     pub fn new(item: impl Fn(&mut App) -> T + 'static) -> Self;
+    /// Several items of one type dragged together (a selection): what gpui-tables' rows and
+    /// gpui-blocks' runs of blocks need. No drag begins when it makes none.
+    pub fn many(items: impl Fn(&mut App) -> Vec<T> + 'static) -> Self;
     /// The same item every time.
     pub fn item(item: T) -> Self where T: Clone;
     pub fn can_drag(self, can: impl Fn(&App) -> bool + 'static) -> Self;
@@ -178,7 +189,7 @@ impl<T: 'static> DragSource<T> {
     /// Whether this source's element counts as the one being dragged, for a source drawn anew
     /// mid-drag (a sortable item that moved lists): react-dnd's `isDragging(monitor)`. The
     /// default compares source ids.
-    pub fn is_dragging(self, f: impl Fn(&T) -> bool + 'static) -> Self;
+    pub fn is_dragging(self, f: impl Fn(&[T]) -> bool + 'static) -> Self;
     pub fn preview(self, preview: Preview<T>) -> Self;
     /// Only a `drag_handle` inside starts the drag.
     pub fn handle_only(self) -> Self;
@@ -189,25 +200,26 @@ impl<T: 'static> DragSource<T> {
 
 pub enum Preview<T: 'static> {
     /// A lifted copy: the element built by `build`, or, without one, a card of the source's
-    /// size in the theme's card colours with a ring and shadow. The grab point stays under the
-    /// pointer.
-    Default { build: Option<Rc<dyn Fn(&T, &mut Window, &mut App) -> AnyElement>> },
+    /// size in the theme's card colours with a ring and shadow, and a count badge when several
+    /// items are dragged. The grab point stays under the pointer.
+    Default(Option<Rc<dyn Fn(&[T], &mut Window, &mut App) -> AnyElement>>),
     /// The provider's `layer` draws it (react-dnd's custom drag layer).
     Layer,
     /// Nothing follows the pointer (the source shows the drag itself, as a sortable gap does).
     None,
 }
 impl<T> Preview<T> {
-    pub fn build(f: impl Fn(&T, &mut Window, &mut App) -> AnyElement + 'static) -> Self;
+    pub fn build(f: impl Fn(&[T], &mut Window, &mut App) -> AnyElement + 'static) -> Self;
 }
 
 pub struct DragEnd<'a, T> {
-    pub item: &'a T,
+    /// One, unless the source is a `many`; `end.item()` is the first.
+    pub items: &'a [T],
     /// Dropped on a target that handled it (react-dnd's didDrop).
     pub dropped: bool,
     /// Where: the target that handled it, and what it returned.
-    pub target: Option<ElementId>,
-    pub result: Option<DropResult>,
+    pub target: Option<&'a ElementId>,
+    pub result: Option<&'a DropResult>,
     /// Ended by Escape, a drop on nothing, a lost window or a cancelled touch.
     pub cancelled: bool,
     pub backend: Backend,
@@ -226,9 +238,11 @@ impl DropTarget {
     pub fn new() -> Self;
     /// An item type this target takes; call once per type.
     pub fn accept<T: 'static>(self) -> Self;
+    /// Asked as the pointer moves over it, and as the drag draws (for `can_drop_style`), so it
+    /// gets the drag's monitor rather than one for a target the pointer may not be over.
     pub fn can_drop(
         self,
-        f: impl Fn(&DragItem, &DropMonitor, &App) -> bool + 'static,
+        f: impl Fn(&DragItem, &DragMonitor, &App) -> bool + 'static,
     ) -> Self;
     /// Called on every move while an accepted item is over it, deep or shallow, whether or not
     /// it can drop (react-dnd's hover). Innermost first.
@@ -255,11 +269,14 @@ pub enum DropOutcome {
     Pass,
 }
 
-/// The dragged item, its type erased.
+/// The dragged item, its type erased: always a `Vec<T>` inside, one long for a single item.
 #[derive(Clone)]
-pub struct DragItem { /* Rc<dyn Any>, TypeId, type name, label */ }
+pub struct DragItem { /* Rc<dyn Any>, the count, ItemType, label */ }
 impl DragItem {
+    /// The item, or the first of several.
     pub fn get<T: 'static>(&self) -> Option<&T>;
+    pub fn all<T: 'static>(&self) -> Option<&[T]>;
+    pub fn count(&self) -> usize;
     pub fn is<T: 'static>(&self) -> bool;
     pub fn item_type(&self) -> ItemType;
     pub fn label(&self) -> Option<&SharedString>;
@@ -285,11 +302,14 @@ impl DropResult {
 
 ```rust
 /// The drag as it is now (react-dnd's DragSourceMonitor, DropTargetMonitor and
-/// DragLayerMonitor in one). Read anywhere with `DragMonitor::of(window, cx)`.
-pub struct DragMonitor<'a> { /* … */ }
+/// DragLayerMonitor in one). Read anywhere with `DragMonitor::of(cx)`. It's a snapshot (an `Rc`
+/// of the drag's state, made anew on each change), so it borrows nothing and a callback can keep
+/// it while it changes the app.
+#[derive(Clone, Default)]
+pub struct DragMonitor { /* Option<Rc<Snapshot>> */ }
 
-impl DragMonitor<'_> {
-    pub fn of<'a>(window: &Window, cx: &'a App) -> DragMonitor<'a>;
+impl DragMonitor {
+    pub fn of(cx: &App) -> DragMonitor;
     pub fn is_dragging(&self) -> bool;
     /// Whether this source's item is the one being dragged.
     pub fn is_dragging_source(&self, source: &ElementId) -> bool;
@@ -308,7 +328,7 @@ impl DragMonitor<'_> {
     pub fn source_client_offset(&self) -> Option<Point<Pixels>>;
     pub fn source_size(&self) -> Option<Size<Pixels>>;
     /// The targets under the pointer that accept the item, outermost first.
-    pub fn target_ids(&self) -> &[ElementId];
+    pub fn target_ids(&self) -> Vec<ElementId>;
     pub fn is_over(&self, target: &ElementId, depth: Over) -> bool;
     pub fn can_drop_on(&self, target: &ElementId) -> bool;
     /// During a drop: whether a target inside already handled it, and its result.
@@ -321,18 +341,19 @@ impl DragMonitor<'_> {
 pub enum Over { Shallow, Deep }
 
 /// A target's view of the monitor, given to its callbacks.
-pub struct DropMonitor<'a> { /* DragMonitor and the target */ }
-impl DropMonitor<'_> {
+pub struct DropMonitor { /* DragMonitor and the target */ }
+impl DropMonitor {
     pub fn target(&self) -> &ElementId;
     pub fn bounds(&self) -> Bounds<Pixels>;
     pub fn is_over(&self, depth: Over) -> bool;
     pub fn can_drop(&self) -> bool;
+    pub fn offset_in_target(&self) -> Option<Point<Pixels>>;
 }
-impl<'a> Deref for DropMonitor<'a> { type Target = DragMonitor<'a>; }
+impl Deref for DropMonitor { type Target = DragMonitor; }
 
 /// The drag layer's view: the monitor, plus where to draw the preview.
-pub struct DragLayerMonitor<'a> { /* … */ }
-impl<'a> Deref for DragLayerMonitor<'a> { type Target = DragMonitor<'a>; }
+pub struct DragLayerMonitor { /* … */ }
+impl Deref for DragLayerMonitor { type Target = DragMonitor; }
 
 /// react-dnd's `collect`: a value worked out from the monitor on every change, that notifies
 /// its view only when it changes. Dropping it unsubscribes.
@@ -358,8 +379,10 @@ Styling an element by the drag needs neither: `dragging_style`, `over_style` and
 
 ### Keyboard
 
-Every source is a Tab stop (its handle, if `handle_only`), described to VoiceOver as "Press
-Space to pick up". Then:
+A free-standing source is a Tab stop (its handle, if `handle_only`), described to VoiceOver as
+"Press Space to pick up". A `Sortable` is one Tab stop for the whole list, however long (ARIA's
+listbox pattern): the arrows move the focus between its items, and Space picks the focused one
+up. Then:
 
 | Key | Does |
 | --- | --- |
@@ -495,6 +518,7 @@ pub struct SortableMove<K> {
   so it stays right while the list scrolls under a held drag.
 - `Gap` slides the items apart in 150 ms (FLIP: each item keeps its old place and moves to the
   new one) and the dropped item settles into the gap; nothing animates under reduced motion.
+- The list is one Tab stop; before a pick-up the arrows move the focus between items.
 - The keyboard moves one slot per arrow along the axis, and across the axis to the
   neighbouring list of the group (the nearest one in that direction), at the nearest index.
 - A kanban board is a row of `Sortable`s with one `group`, inside an `auto_scroll` row, each
@@ -504,7 +528,7 @@ pub struct SortableMove<K> {
 
 | react-dnd | gpui-dnd |
 | --- | --- |
-| `<DndProvider backend={HTML5Backend}>` | `DndProvider::new(content)`; `Backends { mouse, touch, keyboard }` |
+| `<DndProvider backend={HTML5Backend}>` | `DndProvider::new(content)`; `.mouse(on)`, `.touch(options)`, `.keyboard(on)` |
 | `HTML5Backend`, `TouchBackend` | `Backend::Mouse`, `Backend::Touch` (long press or immediate) |
 | — | `Backend::Keyboard` (Space, arrows, Escape, announcements) |
 | `useDrag({ type, item, canDrag, end, isDragging, collect })` | `dnd(id).source(DragSource::new(item).can_drag(…).on_end(…).is_dragging(…))` |
@@ -516,6 +540,7 @@ pub struct SortableMove<K> {
 | outer target checking `monitor.didDrop()` | `DropOutcome::HandledContinue` / `Pass`; `monitor.did_drop()` |
 | `isOver({ shallow: true })` | `is_over(id, Over::Shallow)` |
 | `monitor.getItem()`, `getItemType()` | `item()`, `item_type()` |
+| — | `DragSource::many(…)`, `item.all::<T>()`, `item.count()` (a selection) |
 | `getInitialClientOffset()`, `getClientOffset()`, `getDifferenceFromInitialOffset()`, `getSourceClientOffset()` | `initial_client_offset()`, `client_offset()`, `difference_from_initial_offset()`, `source_client_offset()` |
 | `collect` → props | `cx.collect_dnd(…)` → `Collected<C>`; or `dragging_style` / `over_style` |
 | `useDragLayer` | `DndProvider::layer(…)` with `Preview::Layer` |
