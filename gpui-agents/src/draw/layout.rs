@@ -471,7 +471,7 @@ impl Draw<'_, '_> {
             )
             .on_scroll(swiped)
             .child(moving);
-        let controls = self.pager(path, index, slides.len());
+        let controls = self.pager(path, index, slides.len(), false);
         div()
             .w_full()
             .min_w_0()
@@ -519,10 +519,16 @@ impl Draw<'_, '_> {
         .into_any_element()
     }
 
-    /// Previous and next, with "2 / 5" between.
-    pub fn pager(&mut self, path: &str, index: usize, count: usize) -> AnyElement {
+    /// Previous and next, with "2 / 5" between: a carousel's, centred under its slide, or a
+    /// table's pages, at its right as react-ui has them (named "Previous page" and "Next page").
+    pub fn pager(&mut self, path: &str, index: usize, count: usize, pages: bool) -> AnyElement {
         let t = self.t;
         let arrow = |d: &mut Self, glyph: Glyph, to: usize, enabled: bool, name: &str| {
+            let label = match (pages, name) {
+                (true, "previous") => "Previous page",
+                (true, _) => "Next page",
+                (false, _) => name,
+            };
             let key = path.to_string();
             let turn = d.cx.listener(move |this, _, _, cx| {
                 let s = this.ui.carousel.entry(key.clone()).or_default();
@@ -533,7 +539,7 @@ impl Draw<'_, '_> {
                 cx.notify();
             });
             let press = pressable(d.id(&format!("{path}.{name}")), d.t)
-                .accessibility_label(name.to_string())
+                .accessibility_label(label.to_string())
                 .disabled(!enabled)
                 .focus_on_press(false)
                 .flex_none()
@@ -577,8 +583,13 @@ impl Draw<'_, '_> {
             .flex()
             .flex_row()
             .items_center()
-            .justify_center()
-            .gap(self.px(t.space.m))
+            .map(|d| {
+                if pages {
+                    d.justify_end().gap(self.px(8.))
+                } else {
+                    d.justify_center().gap(self.px(t.space.m))
+                }
+            })
             .child(prev)
             .child(
                 self.line(
