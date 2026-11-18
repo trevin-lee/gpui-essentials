@@ -35,6 +35,9 @@ pub struct CardView {
     pub(crate) limits: Limits,
     pub(crate) images: HashMap<ImageSrc, ImageState>,
     pub(crate) ui: Ui,
+    /// Each card block's width as last laid out, by path: what its grid's columns follow, as
+    /// react-ui's container queries do.
+    pub(crate) widths: Rc<std::cell::RefCell<HashMap<String, gpui::Pixels>>>,
     pub(crate) texts: HashMap<String, TextEntry>,
     pub(crate) sliders: HashMap<String, SliderEntry>,
     pub(crate) dates: HashMap<String, DateEntry>,
@@ -183,6 +186,7 @@ impl CardView {
             limits: Limits::default(),
             images: HashMap::new(),
             ui: Ui::default(),
+            widths: Default::default(),
             texts: HashMap::new(),
             sliders: HashMap::new(),
             dates: HashMap::new(),
