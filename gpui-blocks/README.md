@@ -57,6 +57,10 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   springs into it when you let go. Moving a top-level block with ⌘⇧↑ or ↓ (Ctrl on Linux and
   Windows), or undoing a move, slides the blocks to their new places. List items move within
   their list, without motion.
+- **Moving blocks by keyboard:** with blocks selected, Space (or Move in the block menu) picks
+  them up. ↑ and ↓ move them a place, → into a new column beside the block above, ← back out,
+  and Space or Enter puts them down as one undoable move; Escape puts them back. Each step is
+  said: "Paragraph first, below Paragraph second, 2 of 3".
 - **Typing shortcuts:** `->` becomes →, `<-` becomes ←, and `--` then a space becomes an em
   dash, as in Notion; never in code or a web address, and one undo puts back what was typed
   (`Options::typing_shortcuts(false)` turns them off).

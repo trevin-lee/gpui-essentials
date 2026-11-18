@@ -41,6 +41,8 @@ shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]
 name = "editor"
 
 [dev-dependencies]
+# The keyboard drag's announcements, read in the tests.
+gpui-dnd = { path = "../gpui-dnd" }
 futures = "0.3"
 gpui = { workspace = true, features = ["test-support"] }
 # The example's platform, as gpui-core's gallery opens it.

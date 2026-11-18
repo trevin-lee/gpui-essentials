@@ -5648,3 +5648,174 @@ fn a_long_press_beside_a_line_in_a_column_lifts_that_block(cx: &mut TestAppConte
     }
     assert_eq!(source(&editor, cx), "right\n\ntop\n\nleft");
 }
+
+// ---- Moving blocks by keyboard (gpui-dnd's keyboard drag) ---------------------------------
+
+fn said(cx: &mut VisualTestContext) -> String {
+    cx.update(|window, cx| gpui_dnd::announcement(window, cx))
+        .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
+/// Selects the top-level blocks `first..=last` (by index) whole.
+fn select_top(
+    editor: &Entity<BlockEditorState>,
+    cx: &mut VisualTestContext,
+    first: usize,
+    last: usize,
+) {
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    editor.update(cx, |e, _| {
+        e.model
+            .set_selection(BlockSelection::Blocks {
+                anchor: blocks[first].0,
+                head: blocks[last].0,
+            })
+            .unwrap()
+    });
+    draw(cx);
+}
+
+#[gpui::test]
+fn space_picks_selected_blocks_up_and_the_arrows_move_them_said_at_each_step(
+    cx: &mut TestAppContext,
+) {
+    let src = "first\n\nsecond\n\nthird";
+    let (editor, cx) = open(cx, src);
+    select_top(&editor, cx, 0, 0);
+    keys(cx, "space");
+    draw(cx);
+    assert!(editor.read_with(cx, |e, _| e.is_dragging_block()));
+    assert_eq!(
+        said(cx),
+        "Picked up Paragraph first. Arrow keys move it, Space drops it, Escape cancels."
+    );
+    keys(cx, "down");
+    assert_eq!(said(cx), "Paragraph first, below Paragraph second, 2 of 3");
+    keys(cx, "down");
+    assert_eq!(said(cx), "Paragraph first, below Paragraph third, 3 of 3");
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(said(cx), "Paragraph first, moved below Paragraph third");
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    assert_eq!(source(&editor, cx), "second\n\nthird\n\nfirst");
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), src, "one undo step");
+}
+
+#[gpui::test]
+fn a_keyboard_move_to_the_top_says_so(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "first\n\nsecond\n\nthird");
+    select_top(&editor, cx, 2, 2);
+    keys(cx, "space");
+    draw(cx);
+    keys(cx, "up");
+    keys(cx, "up");
+    assert_eq!(said(cx), "Paragraph third, at the top, 1 of 3");
+    keys(cx, "enter");
+    draw(cx);
+    assert_eq!(said(cx), "Paragraph third, moved to the top");
+    assert_eq!(source(&editor, cx), "third\n\nfirst\n\nsecond");
+}
+
+#[gpui::test]
+fn escape_puts_keyboard_picked_blocks_back(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\nthird";
+    let (editor, cx) = open(cx, src);
+    select_top(&editor, cx, 0, 1);
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(
+        said(cx),
+        "Picked up 2 blocks. Arrow keys move it, Space drops it, Escape cancels."
+    );
+    keys(cx, "down");
+    assert_eq!(said(cx), "2 blocks, below Paragraph third, 2 of 2");
+    keys(cx, "escape");
+    draw(cx);
+    assert_eq!(said(cx), "2 blocks, put back");
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    assert_eq!(source(&editor, cx), src);
+}
+
+#[gpui::test]
+fn right_puts_a_keyboard_picked_block_in_a_new_column_beside_the_one_above(
+    cx: &mut TestAppContext,
+) {
+    let (editor, cx) = open(cx, "first\n\nsecond\n\nthird");
+    select_top(&editor, cx, 2, 2);
+    keys(cx, "space");
+    draw(cx);
+    keys(cx, "right");
+    assert_eq!(
+        said(cx),
+        "Paragraph third, in a new column beside Paragraph second"
+    );
+    keys(cx, "left");
+    assert_eq!(said(cx), "Paragraph third, below Paragraph second, 3 of 3");
+    keys(cx, "right");
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(
+        said(cx),
+        "Paragraph third, moved into a new column beside Paragraph second"
+    );
+    let out = source(&editor, cx);
+    assert!(out.starts_with("first\n\n<!-- columns -->"), "{out}");
+    assert!(out.contains("second") && out.contains("third"), "{out}");
+}
+
+#[gpui::test]
+fn a_keyboard_picked_block_in_a_column_moves_out_of_the_columns(cx: &mut TestAppContext) {
+    let (editor, cx) = open(
+        cx,
+        "top\n\n<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->",
+    );
+    let right = editor.read_with(cx, |e, _| {
+        let blocks = e.top_level_blocks();
+        let cols = e.children_bounds(blocks[1].0);
+        e.children_bounds(cols[1].0)[0].0
+    });
+    editor.update(cx, |e, _| {
+        e.model
+            .set_selection(BlockSelection::Blocks {
+                anchor: right,
+                head: right,
+            })
+            .unwrap()
+    });
+    draw(cx);
+    keys(cx, "space");
+    draw(cx);
+    keys(cx, "up");
+    assert_eq!(
+        said(cx),
+        "Paragraph right, out of the columns, below Paragraph top"
+    );
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(said(cx), "Paragraph right, moved below Paragraph top");
+    assert_eq!(source(&editor, cx), "top\n\nright\n\nleft");
+}
+
+#[gpui::test]
+fn a_label_is_the_kind_and_six_words(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "## Plans for the third quarter of the year\n\nnext");
+    select_top(&editor, cx, 0, 0);
+    keys(cx, "space");
+    draw(cx);
+    assert_eq!(
+        said(cx),
+        "Picked up Heading Plans for the third quarter of. Arrow keys move it, Space drops it, Escape cancels."
+    );
+    keys(cx, "escape");
+}
+
+#[gpui::test]
+fn space_in_text_still_types_a_space(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "ab");
+    let _ = &editor;
+    keys(cx, "right space");
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    assert_eq!(source(&editor, cx), "a b");
+}

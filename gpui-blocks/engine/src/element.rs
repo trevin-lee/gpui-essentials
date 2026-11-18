@@ -605,6 +605,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .on_action(window.listener_for(s, BlockEditorState::on_duplicate))
             .on_action(window.listener_for(s, BlockEditorState::on_select_block))
+            .on_action(window.listener_for(s, BlockEditorState::on_pick_up_blocks))
             .children(super::table_ui::render_menu(
                 &self.state,
                 window.last_input_was_touch(),

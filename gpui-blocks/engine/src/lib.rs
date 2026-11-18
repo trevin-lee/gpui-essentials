@@ -110,7 +110,7 @@ pub use state::{
 /// The editor's clipboard and selection actions, for a host's own menu (an edit menu over a touch
 /// selection, say) to dispatch to the focused editor.
 pub mod actions {
-    pub use crate::state::{Copy, Cut, EditLink, Paste, PastePlain, SelectAll};
+    pub use crate::state::{Copy, Cut, EditLink, Paste, PastePlain, PickUpBlocks, SelectAll};
 }
 pub use style::BlockEditorStyle;
 pub use table::{TableEdit, TableLine};

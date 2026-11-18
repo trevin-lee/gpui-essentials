@@ -258,6 +258,17 @@ impl Editor {
             anchor: first,
             head: last,
         };
+        // Move (the desktop menu's): the blocks, selected whole, are picked up by the keyboard.
+        if id == "move-keys" {
+            self.state.update(cx, |state, cx| {
+                state.focus(window, cx);
+                if state.set_selection(whole, cx).is_ok() {
+                    state.pick_up_blocks(window, cx);
+                }
+            });
+            cx.notify();
+            return;
+        }
         let command = match id {
             "duplicate" => Some((whole, EditorCommand::DuplicateBlocks)),
             "delete" => Some((whole, EditorCommand::DeleteSelection)),
@@ -431,6 +442,12 @@ impl Editor {
             .items(self.resize_item(block, cx))
             .items(self.copy_code_item(block, cx))
             .items(self.copy_link_item())
+            // Move by keyboard: picked up, the arrows carry it, as Space does with it selected.
+            .item(
+                PopupMenuItem::new("move-keys", "Move")
+                    .icon(IconName::Move)
+                    .shortcut("Space"),
+            )
             .item(
                 PopupMenuItem::new("duplicate", "Duplicate")
                     .icon(IconName::Copy)
