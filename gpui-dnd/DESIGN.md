@@ -104,7 +104,7 @@ impl DndProvider {
     pub fn new(child: impl IntoElement) -> Self;
     /// Whether each backend starts drags. All on by default.
     pub fn mouse(self, on: bool) -> Self;
-    pub fn touch(self, touch: Option<TouchOptions>) -> Self;
+    pub fn touch(self, on: bool) -> Self;
     pub fn keyboard(self, on: bool) -> Self;
     /// A custom drag layer (react-dnd's useDragLayer): called on every move while a drag whose
     /// preview is `Preview::Layer` is on, drawn above everything at no fixed place.
@@ -117,12 +117,8 @@ impl DndProvider {
 }
 impl RenderOnce for DndProvider {}
 
-#[derive(Clone, Debug)]
-pub struct TouchOptions {
-    /// How a touch picks up a source that doesn't say: a long press (the default: a plain
-    /// touch still scrolls) or at once (handles, canvases).
-    pub activation: TouchActivation,
-}
+/// How a touch picks a source up (`DragSource::touch_activation`): after a long press (the
+/// default: a plain touch still scrolls) or as soon as the finger moves (handles, canvases).
 pub enum TouchActivation { LongPress, Immediate }
 ```
 
@@ -425,7 +421,10 @@ impl Default for Announcements {}
 - **At once** (`TouchActivation::Immediate`, for handles). The source claims the
   `TouchDragEvent` GPUI offers on touch-down, and the drag starts when the finger moves past
   GPUI's touch slop.
-- The preview, hover and drop follow the event's own position, not `window.mouse_position()`.
+- The preview, hover and drop follow the event's own position, not `window.mouse_position()`,
+  which GPUI leaves where an at-once touch drag started.
+- The source under the finger is found with `Hitbox::is_hovered_at(start_position)`, so a
+  popover over it still hides it.
 - Tests simulate `TouchEvent`s and advance the clock past the long-press delay.
 
 ### Previews and the drag layer

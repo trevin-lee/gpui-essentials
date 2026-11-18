@@ -188,11 +188,15 @@ pub(crate) struct DndState {
     pub provider_views: HashMap<WindowId, EntityId>,
     /// Whether each window's provider lets the keyboard drag, and what it says while it does.
     pub keyboard: HashMap<WindowId, bool>,
+    /// Whether each window's provider lets touches drag.
+    pub touch: HashMap<WindowId, bool>,
     pub announcements: HashMap<WindowId, crate::keyboard::Announcements>,
     /// What each window's live region says.
     pub said: HashMap<WindowId, SharedString>,
     pub drag: Option<ActiveDrag>,
     pub pending: Option<Pending>,
+    /// A touch on an at-once source that hasn't moved past the slop yet.
+    pub touch_pending: Option<Pending>,
     pub collectors: Vec<Weak<dyn Collector>>,
     /// How many providers are being laid out around the element being laid out now.
     pub provider_depth: usize,
