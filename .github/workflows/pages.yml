@@ -1,12 +1,15 @@
 name: pages
 
 # The documentation site (docs-site/): its renderer linted, every component drawn light and
-# dark, and the site uploaded as an artifact to look at. Publishing to GitHub Pages comes later.
+# dark, and the crates' API docs beside it as /api. On main (nightly, or by hand) it's
+# published to GitHub Pages; anywhere else the site is uploaded as an artifact to look at.
 on:
   pull_request:
     paths:
       - "docs-site/**"
       - ".github/workflows/pages.yml"
+  schedule:
+    - cron: "41 10 * * *"
   workflow_dispatch:
 
 permissions:
@@ -24,11 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       # rust-toolchain.toml pins the version; rustup installs it on first use. The renderer is
-      # its own workspace, so its build is cached apart from the crates'. Only main saves.
+      # its own workspace, cached beside the crates' (for the API docs). Only main saves.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: docs-site
-          workspaces: docs-site/render
+          workspaces: |
+            docs-site/render
+            .
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --manifest-path docs-site/render/Cargo.toml --check
       # The demos that are views are whole items, so rustfmt checks them too (the others are
@@ -36,8 +41,38 @@ jobs:
       - run: rustfmt --edition 2024 --check $(grep -l 'pub struct Example' docs-site/demos/*/*.rs)
       - run: cargo clippy --manifest-path docs-site/render/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo run --manifest-path docs-site/render/Cargo.toml --locked -- --out "$RUNNER_TEMP/site"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      # Every crate's rustdoc, which the pages' "Docs" links lead to. A pull request's checks
+      # already build each crate's docs, so only the published site builds them here.
+      - name: API docs
+        if: github.event_name != 'pull_request'
+        run: |
+          cargo doc --workspace --no-deps --locked
+          cp -R target/doc "$RUNNER_TEMP/site/api"
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: site
           path: ${{ runner.temp }}/site
           retention-days: 7
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site
+
+  # Publishes main's site. Pages must be on, with GitHub Actions as its source (Settings,
+  # Pages).
+  deploy:
+    needs: render
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
