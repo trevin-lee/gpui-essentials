@@ -33,10 +33,78 @@ pub(crate) enum Paint {
     Background(&'static PaletteColor),
 }
 
+/// What the Color menu shows checked: the selection's text and background colours, and
+/// whether it has none of each.
+type Checked = (
+    Option<&'static PaletteColor>,
+    Option<&'static PaletteColor>,
+    bool,
+    bool,
+);
+
+/// The Color menu's entries, after `menu`'s: Default text and each text colour, then Default
+/// background and each background colour, with `checked`'s checked. The format bar's menu and
+/// the block menu's Color.
+pub(crate) fn color_entries(
+    menu: PopupMenu,
+    theme: &gpui_core::Theme,
+    checked: Option<Checked>,
+) -> PopupMenu {
+    let dark = theme.mode.is_dark();
+    let swatch = |ink: Hsla, fill: Hsla| {
+        div()
+            .size(px(20.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.))
+            .border_1()
+            .border_color(theme.border)
+            .bg(fill)
+            .text_xs()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(ink)
+            .child("A")
+    };
+    let check = |item: PopupMenuItem, on: bool| match checked {
+        Some(_) => item.checked(on),
+        None => item,
+    };
+    let (text, background, no_text, no_background) = checked.unwrap_or((None, None, false, false));
+    let ink = theme.popover_foreground;
+    let mut menu = menu.heading("Text color").item(check(
+        PopupMenuItem::new("text-none", "Default text").chip(swatch(ink, transparent_black())),
+        no_text,
+    ));
+    for (ix, color) in TEXT_COLORS.iter().enumerate() {
+        menu = menu.item(check(
+            PopupMenuItem::new(format!("text-{ix}"), format!("{} text", color.name))
+                .chip(swatch(color.fill(dark), transparent_black())),
+            text == Some(color),
+        ));
+    }
+    menu = menu.heading("Background color").item(check(
+        PopupMenuItem::new("background-none", "Default background")
+            .chip(swatch(ink, transparent_black())),
+        no_background,
+    ));
+    for (ix, color) in BACKGROUNDS.iter().enumerate() {
+        menu = menu.item(check(
+            PopupMenuItem::new(
+                format!("background-{ix}"),
+                format!("{} background", color.name),
+            )
+            .chip(swatch(ink, color.fill(dark))),
+            background == Some(color),
+        ));
+    }
+    menu
+}
+
 impl Paint {
     /// The colour a Color menu entry gives, and whether it gives it (`false`: its Default,
     /// which takes the colour of its kind off).
-    fn of_menu_item(id: &str) -> Option<(Self, bool)> {
+    pub(crate) fn of_menu_item(id: &str) -> Option<(Self, bool)> {
         let (kind, rest) = id.split_once('-')?;
         let (palette, paint): (&'static [PaletteColor], fn(&'static PaletteColor) -> Self) =
             match kind {
@@ -159,51 +227,11 @@ impl Editor {
         let (text, background) = self.selection_paints(cx);
         let off = |kind| self.state.read(cx).model().mark_state(kind) == MarkState::Off;
         let (no_text, no_background) = (off(MarkKind::Color), off(MarkKind::Highlight));
-        let swatch = |ink: Hsla, fill: Hsla| {
-            div()
-                .size(px(20.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(4.))
-                .border_1()
-                .border_color(theme.border)
-                .bg(fill)
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(ink)
-                .child("A")
-        };
-        let ink = theme.popover_foreground;
-        let mut menu = PopupMenu::new("blocks-format-color-menu")
-            .heading("Text color")
-            .item(
-                PopupMenuItem::new("text-none", "Default text")
-                    .chip(swatch(ink, transparent_black()))
-                    .checked(no_text),
-            );
-        for (ix, color) in TEXT_COLORS.iter().enumerate() {
-            menu = menu.item(
-                PopupMenuItem::new(format!("text-{ix}"), format!("{} text", color.name))
-                    .chip(swatch(color.fill(dark), transparent_black()))
-                    .checked(text == Some(color)),
-            );
-        }
-        menu = menu.heading("Background color").item(
-            PopupMenuItem::new("background-none", "Default background")
-                .chip(swatch(ink, transparent_black()))
-                .checked(no_background),
+        let menu = color_entries(
+            PopupMenu::new("blocks-format-color-menu"),
+            &theme,
+            Some((text, background, no_text, no_background)),
         );
-        for (ix, color) in BACKGROUNDS.iter().enumerate() {
-            menu = menu.item(
-                PopupMenuItem::new(
-                    format!("background-{ix}"),
-                    format!("{} background", color.name),
-                )
-                .chip(swatch(ink, color.fill(dark)))
-                .checked(background == Some(color)),
-            );
-        }
         let trigger = div()
             .id("blocks-format-color")
             .debug_selector(|| "blocks-format-color".into())

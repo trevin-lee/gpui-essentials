@@ -20,7 +20,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   one to put a mention chip in the text.
 - **Side menu:** hover a block for its handles. "+" adds a line below with the menu open, and the
   grip drags the block. A click on the grip opens the block's menu: Turn into (the slash menu's
-  blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips to select several blocks
+  blocks), Color (a text or background colour over all its text), Duplicate (⌘D, Ctrl+D off
+  the Mac) and Delete. Shift-click grips to select several blocks
   whole: Delete, ⌘D, ⌘⇧↑ or ↓ and a selected block's menu act on them all.
 - **Format bar:** select text with the pointer for a bar above it: Turn into (every block the
   text runs through), bold, italic, underline, strikethrough, code, link (the app's link field,

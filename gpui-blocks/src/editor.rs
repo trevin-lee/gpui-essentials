@@ -2847,6 +2847,58 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "a\n\nb\n\nc");
     }
 
+    /// The block menu's Color gives all of the block's text, or every selected block's, a text
+    /// or background colour, as Notion colours a block; its Default takes it off.
+    #[gpui::test]
+    fn the_block_menu_colours_whole_blocks(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "one **two**\n\nthree\n\nfour");
+        let ids = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                e.state()
+                    .read(cx)
+                    .model()
+                    .document()
+                    .root()
+                    .children()
+                    .map(|b| b.id())
+                    .collect::<Vec<markdown_editor::BlockId>>()
+            })
+        };
+        let pick = |editor: &Entity<Editor>, cx: &mut VisualTestContext, block, id: &str| {
+            editor.update_in(cx, |e, window, cx| e.block_menu_pick(block, id, window, cx));
+            draw(cx);
+        };
+        let at = ids(&editor, cx);
+        // Red text (the ninth), on the first block alone.
+        pick(&editor, cx, at[0], "text-8");
+        assert_eq!(
+            markdown(&editor, cx),
+            "<span style=\"color:#d44c47\">one **two**</span>\n\nthree\n\nfour"
+        );
+        // A blue background (the sixth) on the two selected blocks.
+        let at = ids(&editor, cx);
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                s.set_selection(
+                    BlockSelection::Blocks {
+                        anchor: at[1],
+                        head: at[2],
+                    },
+                    cx,
+                )
+                .unwrap();
+            })
+        });
+        pick(&editor, cx, at[2], "background-5");
+        assert_eq!(
+            markdown(&editor, cx),
+            "<span style=\"color:#d44c47\">one **two**</span>\n\n<mark color=\"#e7f3f8\">three</mark>\n\n<mark color=\"#e7f3f8\">four</mark>"
+        );
+        let at = ids(&editor, cx);
+        pick(&editor, cx, at[0], "text-none");
+        assert!(markdown(&editor, cx).starts_with("one **two**\n\n"));
+    }
+
     /// Shift-clicks on grips select the blocks between, whole; a first one selects its block.
     #[gpui::test]
     fn shift_clicks_on_grips_select_blocks(cx: &mut TestAppContext) {
