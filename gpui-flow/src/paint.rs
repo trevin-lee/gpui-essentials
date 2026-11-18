@@ -335,13 +335,15 @@ impl Ink {
         }
     }
 
-    /// An arrowhead with its tip at `tip`, pointing the way the line arrives from `from`.
+    /// An arrowhead with its tip at `tip`, pointing the way the line arrives from `from`,
+    /// `marker.size` long times `scale` (the zoom, and how much wider than 1 the edge's line
+    /// is, so a thick line's arrowhead isn't lost in it).
     pub fn marker(
         &mut self,
         marker: &Marker,
         tip: XY,
         from: XY,
-        zoom: f32,
+        scale: f32,
         width: f32,
         color: Hsla,
     ) {
@@ -351,7 +353,7 @@ impl Ink {
         }
         let dir = (tip - from) * (1. / length);
         let normal = xy(-dir.y, dir.x);
-        let long = marker.size * zoom;
+        let long = marker.size * scale;
         let base = tip - dir * long;
         let a = base + normal * (long * 0.5);
         let b = base - normal * (long * 0.5);

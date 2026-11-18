@@ -235,7 +235,9 @@ made.
   - **Lines** can be solid, dashed or dotted (`Edge::dash`, saved in React Flow's
     `style.strokeDasharray`). They take a palette colour by name (`Edge::pencil`, saved as
     subcanvas's `color`) for the line, its arrowheads and its label, and arrowheads go at
-    either end, both or neither (`Edge::arrows`).
+    either end, both or neither (`Edge::arrows`). An arrowhead grows with a line wider than 1
+    (three times as long on a line 3 wide), as React Flow's `markerUnits="strokeWidth"`, so a
+    thick line's isn't lost in it; on a thinner line it stays its size.
   - **Labels** wrap at 180 units, keep to four lines with an ellipsis after, and sit on a
     small bordered patch.
   - `Flow::edge_line` and `Flow::edge_label_point` say where an edge and its label were
@@ -338,9 +340,8 @@ made.
   animated edges redraw the flow twenty times a second while one is on screen.
 - **Names.** React Flow's `Position` is `Side` and `Background` is `FlowBackground`, because
   GPUI exports both names and hosts import both crates whole.
-- **Not yet.** A node toolbar; edge
-  renderers of the host's own (a custom type is drawn as a bezier); `dragHandle`; markers that
-  scale with the line's width; a keyboard path through nodes and accessibility; undo.
+- **Not yet.** A node toolbar; edge renderers of the host's own (a custom type is drawn as a
+  bezier); `dragHandle`; a keyboard path through nodes and accessibility; undo.
 
 ## License
 

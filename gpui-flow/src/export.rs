@@ -544,11 +544,10 @@ fn marker(out: &mut String, m: &Marker, tip: XY, from: XY, width: f32, color: Hs
     }
     let dir = (tip - from) * (1. / length);
     let normal = xy(-dir.y, dir.x);
-    let base = tip - dir * m.size;
-    let (a, b) = (
-        base + normal * (m.size * 0.5),
-        base - normal * (m.size * 0.5),
-    );
+    // As drawn: longer on a line wider than 1.
+    let size = m.size * width.max(1.);
+    let base = tip - dir * size;
+    let (a, b) = (base + normal * (size * 0.5), base - normal * (size * 0.5));
     let color = m.color.map(|c| gpui::rgb(c).into()).unwrap_or(color);
     match m.kind {
         MarkerKind::ArrowClosed => {
