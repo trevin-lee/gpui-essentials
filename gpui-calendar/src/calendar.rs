@@ -58,6 +58,8 @@ actions!(
         DayView,
         WeekView,
         MonthView,
+        /// Shows the whole year as twelve small months.
+        YearView,
         /// Shows the agenda: two weeks of events as a list.
         AgendaView,
         PreviousPeriod,
@@ -100,6 +102,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("d", DayView, c),
         KeyBinding::new("w", WeekView, c),
         KeyBinding::new("m", MonthView, c),
+        KeyBinding::new("y", YearView, c),
         KeyBinding::new("a", AgendaView, c),
         KeyBinding::new("k", PreviousPeriod, c),
         KeyBinding::new("p", PreviousPeriod, c),
@@ -340,6 +343,8 @@ pub(crate) struct Laid {
     pub dst: Vec<(u32, DstChange)>,
     /// The agenda's days, in order: only days with events, and today.
     pub agenda: Vec<AgendaDay>,
+    /// The year view's days, from its first: how many events each has (up to 255).
+    pub year: Vec<u8>,
 }
 
 /// A day in the agenda and its events, all-day ones first and then by start.
@@ -444,7 +449,7 @@ pub struct Calendar {
     bar_drag: Option<(Pixels, f32)>,
     _bar_hide: Option<Task<()>>,
     now_override: Option<DateTime<Utc>>,
-    laid: Option<Rc<Laid>>,
+    pub(crate) laid: Option<Rc<Laid>>,
     last_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
 
     focus: FocusHandle,
@@ -1316,10 +1321,34 @@ impl Calendar {
         );
         let month = key.view == CalendarView::Month;
         let agenda = matches!(key.view, CalendarView::Agenda(_));
+        let year = key.view == CalendarView::Year;
         let mut visible = self.events_in(start, end);
-        // The month and the agenda show only what the query finds; the grid dims the rest.
-        if (month || agenda) && key.query.is_some() {
+        // The month, the agenda and the year show only what the query finds; the grid dims
+        // the rest.
+        if (month || agenda || year) && key.query.is_some() {
             visible.retain(|e| self.is_found(e));
+        }
+        // The year has no chips, only how busy each day is.
+        if year {
+            let mut counts = vec![0u8; days as usize];
+            for e in visible {
+                let (d0, d1) = time::event_days(&e.time, tz);
+                let mut d = d0.max(first);
+                while d <= d1.min(last) {
+                    let n = &mut counts[(d - first).num_days() as usize];
+                    *n = n.saturating_add(1);
+                    d += Duration::days(1);
+                }
+            }
+            return Laid {
+                key,
+                chips: Vec::new(),
+                timed: Vec::new(),
+                spans: Vec::new(),
+                dst: Vec::new(),
+                agenda: Vec::new(),
+                year: counts,
+            };
         }
         // Each agenda day's rows, with a key to sort them by: all-day first, then by start.
         let mut agenda_rows: Vec<Vec<(AgendaRow, (u8, i64))>> = if agenda {
@@ -1478,6 +1507,7 @@ impl Calendar {
             spans: out_spans,
             dst,
             agenda,
+            year: Vec::new(),
         }
     }
 
@@ -1586,6 +1616,12 @@ impl Calendar {
             Target::Date(date) => {
                 let date = *date;
                 self.view = CalendarView::Day;
+                self.go_to(date, cx);
+                return;
+            }
+            Target::Month(date) => {
+                let date = *date;
+                self.view = CalendarView::Month;
                 self.go_to(date, cx);
                 return;
             }
@@ -2211,13 +2247,21 @@ impl Calendar {
         on
     }
 
-    /// Arrow keys: a slot moves by a day or a slot (a week in the month); an event selection
-    /// moves to the next event that way, or to the slot there when there's none.
+    /// Arrow keys: a slot moves by a day or a slot (a week in the month and the year); an
+    /// event selection moves to the next event that way, or to the slot there when there's
+    /// none.
     fn move_selection(&mut self, dx: i32, dy: i32, cx: &mut Context<Self>) {
         if matches!(self.view, CalendarView::Agenda(_))
             && (dy != 0 || self.selected_event().is_some())
         {
             self.move_in_agenda(if dx + dy > 0 { 1 } else { -1 }, cx);
+            return;
+        }
+        // The year: a day, or a week up or down, whatever was selected.
+        if self.view == CalendarView::Year
+            && let Some((date, _)) = self.selection_place()
+        {
+            self.select_slot(date + Duration::days(dx as i64 + 7 * dy as i64), 0., cx);
             return;
         }
         let month = self.view == CalendarView::Month;
@@ -2371,7 +2415,9 @@ impl Calendar {
         let tz = self.options.time_zone;
         let length = self.options.default_duration;
         let time = match self.selection.clone() {
-            Some(Selection::Slot { date, .. }) if self.view == CalendarView::Month => {
+            Some(Selection::Slot { date, .. })
+                if matches!(self.view, CalendarView::Month | CalendarView::Year) =>
+            {
                 time::created_days(date, date)
             }
             Some(Selection::Slot { date, minute }) => {
@@ -2393,6 +2439,11 @@ impl Calendar {
     fn open_selected(&mut self, cx: &mut Context<Self>) {
         match self.selection.clone() {
             Some(Selection::Event(id)) => self.open_event(id, cx),
+            // The year's day opens as a day.
+            Some(Selection::Slot { date, .. }) if self.view == CalendarView::Year => {
+                self.view = CalendarView::Day;
+                self.go_to(date, cx);
+            }
             Some(Selection::Slot { date, minute }) => {
                 let tz = self.options.time_zone;
                 let time = if self.view == CalendarView::Month {
@@ -2798,6 +2849,7 @@ impl Calendar {
             (CalendarView::Day, "Day"),
             (CalendarView::Week, "Week"),
             (CalendarView::Month, "Month"),
+            (CalendarView::Year, "Year"),
             (CalendarView::AGENDA, "Agenda"),
         ];
         let title = if narrow {
@@ -2895,11 +2947,12 @@ impl Calendar {
         colors: CalendarColors,
         cx: &mut Context<Self>,
     ) -> DropdownMenu {
-        const VIEWS: [(&str, CalendarView, &str); 5] = [
+        const VIEWS: [(&str, CalendarView, &str); 6] = [
             ("day", CalendarView::Day, "Day"),
             ("days-3", CalendarView::Days(3), "3 Days"),
             ("week", CalendarView::Week, "Week"),
             ("month", CalendarView::Month, "Month"),
+            ("year", CalendarView::Year, "Year"),
             ("list", CalendarView::AGENDA, "List"),
         ];
         let view = self.view;
@@ -3008,6 +3061,7 @@ impl Calendar {
             CalendarView::Day,
             CalendarView::Week,
             CalendarView::Month,
+            CalendarView::Year,
             CalendarView::AGENDA,
         ];
         let pick = cx.entity().downgrade();
@@ -3140,6 +3194,7 @@ impl Render for Calendar {
             kind: match self.view {
                 CalendarView::Month => paint::Kind::Month,
                 CalendarView::Agenda(_) => paint::Kind::Agenda,
+                CalendarView::Year => paint::Kind::Year,
                 _ => paint::Kind::Grid,
             },
             first,
@@ -3222,6 +3277,7 @@ impl Render for Calendar {
             .on_action(cx.listener(|c, _: &DayView, _, cx| c.set_view(CalendarView::Day, cx)))
             .on_action(cx.listener(|c, _: &WeekView, _, cx| c.set_view(CalendarView::Week, cx)))
             .on_action(cx.listener(|c, _: &MonthView, _, cx| c.set_view(CalendarView::Month, cx)))
+            .on_action(cx.listener(|c, _: &YearView, _, cx| c.set_view(CalendarView::Year, cx)))
             .on_action(cx.listener(|c, _: &AgendaView, _, cx| c.set_view(CalendarView::AGENDA, cx)))
             .on_action(cx.listener(|c, _: &PreviousPeriod, _, cx| c.previous(cx)))
             .on_action(cx.listener(|c, _: &NextPeriod, _, cx| c.next(cx)))

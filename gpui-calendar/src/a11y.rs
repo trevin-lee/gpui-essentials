@@ -313,6 +313,32 @@ impl Calendar {
                 }
             }
             Kind::Agenda => {}
+            // The year: every day, which shows that day.
+            Kind::Year => {
+                let laid = self.laid.clone();
+                for (i, date) in geo.first.iter_days().take(geo.days as usize).enumerate() {
+                    let Some(bounds) = geo.year_cell(date) else {
+                        continue;
+                    };
+                    let mut label = day_label(date);
+                    if date == today {
+                        label.push_str(", today");
+                    }
+                    match laid.as_ref().and_then(|l| l.year.get(i)).copied() {
+                        Some(1) => label.push_str(", 1 event"),
+                        Some(n) if n > 1 => label.push_str(&format!(", {n} events")),
+                        _ => {}
+                    }
+                    out.push(A11yItem {
+                        role: Role::Button,
+                        label,
+                        bounds,
+                        selected: selected_slot.is_some_and(|(d, _)| d == date),
+                        read_only: false,
+                        target: A11yTarget::Day(date),
+                    });
+                }
+            }
         }
         out
     }
