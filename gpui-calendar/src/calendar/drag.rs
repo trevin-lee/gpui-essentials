@@ -11,12 +11,14 @@
 
 use std::rc::{Rc, Weak};
 
+use chrono::{Datelike as _, Duration, NaiveDate};
 use gpui::*;
 use gpui_dnd::{
     AutoScroll, Backend, DragSource, DropOutcome, DropTarget, Preview, Scrollable, dnd,
 };
 
 use super::{Calendar, Drag};
+use crate::model::EventTime;
 use crate::paint::{self, Area, Geo, Shared, Target};
 use crate::time;
 
@@ -159,7 +161,8 @@ impl Calendar {
         let Some(drag) = self.drag.clone() else {
             return;
         };
-        if matches!(drag, Drag::Press { .. }) {
+        // A keyboard drag moves by its steps (`key_step`), not by where its pointer is.
+        if matches!(drag, Drag::Press { .. }) || backend == Some(Backend::Keyboard) {
             return;
         }
         if backend == Some(Backend::Touch)
@@ -178,6 +181,7 @@ impl Calendar {
     pub(super) fn drop_target(&self, root: impl IntoElement, cx: &mut Context<Self>) -> Dnd {
         let view = cx.entity_id();
         let (hover, drop) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let (step, say) = (cx.entity().downgrade(), cx.entity().downgrade());
         dnd(ElementId::NamedInteger(
             "gpui-calendar-target".into(),
             view.as_u64(),
@@ -191,6 +195,17 @@ impl Calendar {
                 // Its own drags only, so two calendars in a window keep theirs.
                 .can_drop(move |item, _, _| {
                     item.get::<DraggedEvent>().is_some_and(|d| d.view == view)
+                })
+                .keyboard_step(move |_, m, dir, _, cx| {
+                    step.update(cx, |c, cx| c.key_step(dir, cx))
+                        .ok()
+                        .flatten()
+                        .or(m.client_offset())
+                })
+                .say(move |_, _, said, cx| {
+                    say.upgrade()
+                        .map(|c| c.read(cx).spoken(said))
+                        .unwrap_or_default()
                 })
                 .on_hover(move |_, m, _, cx| {
                     if let Some(at) = m.client_offset() {
@@ -217,7 +232,200 @@ impl Calendar {
     }
 }
 
-use gpui_dnd::Dnd;
+use gpui_dnd::{Dnd, Said};
+
+impl Calendar {
+    /// Space (Shift+Space for its end): the selected event picked up by the keyboard. The arrows
+    /// then move it a snap step (up and down) or a day (left and right) on the grid, a day or a
+    /// week in the month; Space or Enter puts it down as a mouse drop would (a repeating event's
+    /// question after), Escape puts it back. Each step is said in the calendar's own words.
+    pub(super) fn keyboard_drag(
+        &mut self,
+        resize: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.drag.is_some() || self.asking.is_some() {
+            return;
+        }
+        let Some(geo) = self.shared.geo.get() else {
+            return;
+        };
+        if geo.kind == paint::Kind::Agenda {
+            return;
+        }
+        let Some(id) = self.selected_event().cloned() else {
+            return;
+        };
+        // Only what a mouse could move: shown, and not read-only.
+        let Some(e) = self.editable(&id) else {
+            return;
+        };
+        let tz = self.options.time_zone;
+        let original = e.time;
+        let title = e.title.clone();
+        let month = geo.kind == paint::Kind::Month;
+        let (area, start, end) = match original {
+            EventTime::Timed { start, end } if !month => {
+                (Area::Grid, time::local(start, tz), time::local(end, tz))
+            }
+            EventTime::Timed { start, end } => (
+                Area::Month,
+                (time::local(start, tz).0, 0.),
+                (time::local(end, tz).0, 0.),
+            ),
+            EventTime::AllDay { start, end } => (
+                if month { Area::Month } else { Area::AllDay },
+                (start, 0.),
+                (end - Duration::days(1), 0.),
+            ),
+        };
+        let drag = if resize {
+            // A timed event's end moves on the grid; an all-day event's by days anywhere.
+            if area == Area::Month && !original.is_all_day() {
+                return;
+            }
+            Drag::Resize {
+                id,
+                original,
+                area,
+                now: end,
+                shift: 0.,
+            }
+        } else {
+            Drag::Move {
+                id,
+                original,
+                area,
+                over: area,
+                grab: start,
+                now: start,
+            }
+        };
+        self.drag = Some(drag);
+        let at = self
+            .point_at(start.0, start.1)
+            .unwrap_or_else(|| geo.bounds.center());
+        let held = self.held(at, CursorStyle::Arrow, cx);
+        let view = cx.entity().downgrade();
+        // gpui-dnd calls back into the calendar as the drag begins: not from inside its update.
+        window.defer(cx, move |window, cx| {
+            let press = gpui_dnd::Press {
+                label: Some(if title.trim().is_empty() {
+                    "Untitled event".into()
+                } else {
+                    title
+                }),
+                ..gpui_dnd::Press::new(Backend::Keyboard)
+            };
+            if !gpui_dnd::begin_at(window, cx, held.id, held.at, held.source, press) {
+                view.update(cx, |c, cx| c.drag_ended(cx)).ok();
+            }
+        });
+        cx.notify();
+    }
+
+    /// An arrow key during a keyboard drag: the event (or its end) a snap step or a day on the
+    /// grid, a day or a week in the month, brought into view. Where it is now on screen, if it
+    /// is.
+    fn key_step(&mut self, dir: Point<f32>, cx: &mut Context<Self>) -> Option<Point<Pixels>> {
+        let step = self.options.snap();
+        let (dx, dy) = (dir.x.round() as i64, dir.y.round() as i64);
+        let moved = |p: (NaiveDate, f32), area: Area| match area {
+            Area::Grid => (
+                p.0 + Duration::days(dx),
+                (p.1 + dy as f32 * step).clamp(0., time::DAY_MINUTES),
+            ),
+            Area::AllDay => (p.0 + Duration::days(dx), p.1),
+            Area::Month => (p.0 + Duration::days(dx + 7 * dy), p.1),
+        };
+        let (area, now) = match self.drag.as_mut()? {
+            Drag::Move { area, now, .. } | Drag::Resize { area, now, .. } => {
+                *now = moved(*now, *area);
+                (*area, *now)
+            }
+            _ => return None,
+        };
+        let minute = if area == Area::Grid { now.1 } else { -1. };
+        self.reveal(now.0, minute, cx);
+        cx.notify();
+        self.point_at(now.0, now.1.max(0.))
+    }
+
+    /// What a keyboard drag says, in the calendar's formats (12- or 24-hour, the display zone,
+    /// full day names, the day named when it changes): over the calendar, "Standup, Tuesday 9 to
+    /// 9:30 AM, moving to Wednesday 10 AM" ("…, ending at 10 AM" for its end); dropped,
+    /// "Standup, moved to Wednesday 10 AM" ("…, now ending at 10 AM").
+    pub(crate) fn spoken(&self, said: Said) -> SharedString {
+        let (id, original, resize) = match self.drag.as_ref() {
+            Some(Drag::Move { id, original, .. }) => (id, *original, false),
+            Some(Drag::Resize { id, original, .. }) => (id, *original, true),
+            _ => return SharedString::default(),
+        };
+        let Some((_, proposed)) = self.drag_proposal() else {
+            return SharedString::default();
+        };
+        let tz = self.options.time_zone;
+        let hour12 = self.options.hour12;
+        let title = self
+            .event(id)
+            .map(|e| e.title.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "Untitled event".into());
+        // A day as said beside where it was: its name within a week, its date further.
+        let day = |d: NaiveDate, from: NaiveDate| {
+            if (d - from).num_days().abs() < 7 {
+                time::weekday_name(d.weekday(), false).to_string()
+            } else {
+                crate::a11y::day_label(d)
+            }
+        };
+        // A time, with its day when that changed.
+        let at = |t: chrono::DateTime<chrono::Utc>, was: chrono::DateTime<chrono::Utc>| {
+            let (l, w) = (t.with_timezone(&tz), was.with_timezone(&tz));
+            let clock = time::format_time(l.time(), hour12);
+            if l.date_naive() == w.date_naive() {
+                clock
+            } else {
+                format!("{} {clock}", day(l.date_naive(), w.date_naive()))
+            }
+        };
+        let to = match (resize, original, proposed) {
+            (false, EventTime::Timed { start: was, .. }, EventTime::Timed { start, .. }) => {
+                at(start, was)
+            }
+            (true, EventTime::Timed { end: was, .. }, EventTime::Timed { end, .. }) => at(end, was),
+            (false, EventTime::AllDay { start: was, .. }, EventTime::AllDay { start, .. }) => {
+                day(start, was)
+            }
+            (true, EventTime::AllDay { end: was, .. }, EventTime::AllDay { end, .. }) => {
+                day(end - Duration::days(1), was - Duration::days(1))
+            }
+            // Into or out of the hours (only a pointer does that): where it lands.
+            (_, _, time) => crate::a11y::when(&time, tz, hour12),
+        };
+        let all_day = proposed.is_all_day();
+        let text = match (said, resize) {
+            (Said::Over, false) => format!(
+                "{title}, {}, moving to {to}",
+                crate::a11y::when(&original, tz, hour12)
+            ),
+            (Said::Over, true) => format!(
+                "{title}, {}, ending {}{to}",
+                crate::a11y::when(&original, tz, hour12),
+                if all_day { "on " } else { "at " }
+            ),
+            (Said::Dropped, false) => format!("{title}, moved to {to}"),
+            (Said::Dropped, true) => {
+                format!(
+                    "{title}, now ending {}{to}",
+                    if all_day { "on " } else { "at " }
+                )
+            }
+        };
+        text.into()
+    }
+}
 
 /// A long press's drag, begun once the calendar has made it (gpui-dnd calls back into the
 /// calendar as it begins, so not from inside the calendar's update).
