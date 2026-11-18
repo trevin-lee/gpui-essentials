@@ -166,8 +166,7 @@ fn group_shadows(h: &Entity<Host>, vcx: &mut VisualTestContext) -> usize {
                 let b = s.element_bounds;
                 s.inset != 0
                     && (b.origin.x.as_f32() / scale - (group.left().as_f32() - 3.)).abs() < 1.
-                    && (b.size.width.as_f32() / scale - (group.size.width.as_f32() + 6.)).abs()
-                        < 1.
+                    && (b.size.width.as_f32() / scale - (group.size.width.as_f32() + 6.)).abs() < 1.
             })
             .count()
     })
