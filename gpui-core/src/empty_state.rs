@@ -20,8 +20,7 @@ use gpui::{
     rems,
 };
 
-use crate::icon::Icon;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, Icon};
 
 fn css(v: f32) -> Rems {
     rems(v / 15.)

@@ -24,9 +24,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, relative, rems,
 };
 
-use crate::icon::Icon;
-use crate::press::Press;
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{ActiveTheme as _, Icon, Press, Theme};
 
 /// How a badge looks: shadcn's four.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

@@ -25,7 +25,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
-use crate::theme::ActiveTheme as _;
+use crate::base::ActiveTheme as _;
 
 /// A one-pixel line: across ([`horizontal`](Separator::horizontal)) or down
 /// ([`vertical`](Separator::vertical)). A horizontal one takes its parent's width; a vertical

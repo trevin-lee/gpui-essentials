@@ -28,12 +28,9 @@ use gpui::{
     accesskit::AriaCurrent, canvas, div, prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::a11y::Current;
-use crate::icon::{Icon, IconName};
-use crate::menu::{PopupMenu, PopupMenuItem};
-use crate::popover::Popover;
-use crate::press::Press;
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, Current, Icon, IconName, Popover, PopupMenu, PopupMenuItem, Press, Theme,
+};
 
 type OnNavigate = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
 
@@ -238,7 +235,7 @@ fn separator() -> gpui::Div {
 
 impl RenderOnce for Breadcrumb {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| BreadcrumbState::default());
         let (avail, open) = {
@@ -472,7 +469,7 @@ mod tests {
 
     #[gpui::test]
     fn links_and_the_page_have_their_roles(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
         vcx.update(|window, cx| {
             let theme = cx.theme().clone();

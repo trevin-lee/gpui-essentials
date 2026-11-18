@@ -33,9 +33,7 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
-use crate::icon::{Icon, IconName};
-use crate::size::{ControlSize, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, ControlSize, Icon, IconName, Sizable};
 
 fn css(v: f32) -> Rems {
     rems(v / 15.)

@@ -11,11 +11,10 @@ use gpui::{
     prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::popover::{Popover, PopoverColors};
-use crate::press::{Press, focus_ring};
-use crate::size::{Disableable, Selectable as _};
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{
+    ActiveTheme as _, Disableable, Icon, IconName, Popover, PopoverColors, Press, Selectable as _,
+    Theme, focus_ring,
+};
 
 actions!(
     gpui_core_date_picker,
@@ -139,7 +138,7 @@ fn add_months(d: NaiveDate, months: i32) -> NaiveDate {
 impl DatePickerState {
     /// Picks one date.
     pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-        crate::init(cx);
+        crate::base::init(cx);
         Self {
             value: DateValue::default(),
             range: false,

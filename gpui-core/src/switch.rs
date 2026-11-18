@@ -10,9 +10,7 @@ use gpui::{
     prelude::FluentBuilder as _, rems,
 };
 
-use crate::press::Press;
-use crate::size::{ControlSize, Disableable, Selectable as _, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, ControlSize, Disableable, Press, Selectable as _, Sizable};
 
 type OnClick = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 

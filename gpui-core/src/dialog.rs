@@ -2,7 +2,7 @@
 //! description, content, a footer of buttons and a close button; and an alert dialog, the same
 //! asking for a decision, which a press on the scrim doesn't close.
 //!
-//! The host owns whether it's open, as with a [`Popover`](crate::Popover): it draws
+//! The host owns whether it's open, as with a [`Popover`](crate::base::Popover): it draws
 //! `Dialog::new(id).open(open)` every frame and closes it from [`Dialog::on_dismiss`], which runs
 //! on Escape, a press on the scrim and the close button.
 //!
@@ -34,32 +34,21 @@
 //! ```
 
 use gpui::{
-    AnyElement, App, Bounds, ContentMask, Element, ElementId, FocusHandle, FontWeight,
-    GlobalElementId, Hsla, InspectorElementId, InteractiveElement as _, IntoElement, KeyBinding,
-    LayoutId, MouseButton, ParentElement, Pixels, Point, Position, Rems, RenderOnce, Role,
-    SharedString, Stateful, StatefulInteractiveElement as _, Style, StyleRefinement, Styled,
-    Window, actions, div, prelude::FluentBuilder as _, relative, rems,
+    AnyElement, App, ElementId, FocusHandle, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement, Rems, RenderOnce, Role, SharedString, Stateful,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder as _, relative, rems,
 };
 
+use crate::base::{
+    ActiveTheme as _, Dismiss, DismissReason, Icon, IconName, MODAL_CONTEXT, ModalElement,
+    POPOVER_CONTEXT, PopoverColors, Sizable as _, TrapNext, TrapPrev, cycle_focus, focus_first_in,
+    just_opened, overlay_focus,
+};
 use crate::button::{Button, ButtonVariants as _};
-use crate::icon::{Icon, IconName};
-use crate::popover::{
-    self, DismissFn, DismissReason, InLayer, MODAL_PRIORITY, PopoverColors, overlay_focus,
-};
-use crate::size::Sizable as _;
-use crate::theme::ActiveTheme as _;
 
-actions!(gpui_core_dialog, [TrapNext, TrapPrev]);
-
-/// A modal's context: Tab and shift-Tab go round what's inside it.
-pub(crate) const CONTEXT: &str = "GpuiCoreModal";
-
-pub(crate) fn init(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("tab", TrapNext, Some(CONTEXT)),
-        KeyBinding::new("shift-tab", TrapPrev, Some(CONTEXT)),
-    ]);
-}
+/// Runs on a dismiss, with why.
+type DismissFn = std::rc::Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
 
 /// A size in the web's CSS pixels, as rems of its 15 pixel text.
 fn css(v: f32) -> Rems {
@@ -68,63 +57,6 @@ fn css(v: f32) -> Rems {
 
 /// The web's `sm` breakpoint: narrower than this, a footer's buttons stack.
 const NARROW: f32 = 640.;
-
-/// Gives the keyboard to the first thing inside `container` that Tab stops on, and says
-/// whether there was one; if there wasn't, `container` keeps it.
-pub(crate) fn focus_first_in(container: &FocusHandle, window: &mut Window, cx: &mut App) -> bool {
-    window.focus(container, cx);
-    window.focus_next(cx);
-    let inside = container.contains_focused(window, cx) && !container.is_focused(window);
-    if !inside {
-        window.focus(container, cx);
-    }
-    inside
-}
-
-/// Moves the keyboard to the next (or the previous) thing Tab stops on inside `container`,
-/// going round from its last to its first: the window's other tab stops are passed over.
-pub(crate) fn cycle_focus(
-    container: &FocusHandle,
-    forward: bool,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let start = window.focused(cx);
-    let mut first = None;
-    loop {
-        if forward {
-            window.focus_next(cx);
-        } else {
-            window.focus_prev(cx);
-        }
-        let now = window.focused(cx);
-        if container.contains_focused(window, cx) && !container.is_focused(window) {
-            return;
-        }
-        // Once round the window with nothing inside to stop on (or nothing at all).
-        if now.is_none() || now == start || now == first {
-            break;
-        }
-        if first.is_none() {
-            first = now;
-        }
-    }
-    match start {
-        Some(start) => window.focus(&start, cx),
-        None => window.focus(container, cx),
-    }
-}
-
-/// Whether the overlay under `id` opened this frame (it was closed when last drawn).
-pub(crate) fn just_opened(id: &ElementId, open: bool, window: &mut Window, cx: &mut App) -> bool {
-    let key = ElementId::NamedChild(std::sync::Arc::new(id.clone()), "opened".into());
-    let state = window.use_keyed_state(key, cx, |_, _| false);
-    let was = *state.read(cx);
-    if was != open {
-        state.update(cx, |s, _| *s = open);
-    }
-    open && !was
-}
 
 /// A dialog: a panel in the middle of the window, over a scrim that dims and blocks the rest.
 /// It's at most [`max_width`](Dialog::max_width) wide (and 16 pixels in from each side of a
@@ -269,8 +201,9 @@ impl Dialog {
         self
     }
 
-    /// Its content reaches its edges: no padding round it.
-    pub(crate) fn bare(mut self) -> Self {
+    /// Its content reaches its edges: no padding round it, and no gap between the title, the
+    /// description, the content and the footer (a command palette's field and list).
+    pub fn bare(mut self) -> Self {
         self.bare = true;
         self
     }
@@ -297,7 +230,7 @@ impl Styled for Dialog {
 
 impl RenderOnce for Dialog {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let opened = just_opened(&self.id, self.open, window, cx);
         let focus = overlay_focus(
             &self.id,
@@ -332,7 +265,7 @@ impl RenderOnce for Dialog {
         let scrim = self
             .open
             .then(|| self.build(&focus, &footer_focus, window, cx));
-        ModalElement { scrim }
+        ModalElement::new(scrim)
     }
 }
 
@@ -443,7 +376,7 @@ impl Dialog {
         let mut panel = div()
             .id("dialog")
             .role(self.role)
-            .key_context(popover::CONTEXT)
+            .key_context(POPOVER_CONTEXT)
             .track_focus(focus)
             // Over the scrim, so a press inside isn't one on it.
             .occlude()
@@ -462,7 +395,7 @@ impl Dialog {
             .text_size(theme.text.sm)
             .shadow_lg()
             .debug_selector(|| "gpui-core-dialog".into())
-            .on_action(move |_: &popover::Dismiss, window, cx| {
+            .on_action(move |_: &Dismiss, window, cx| {
                 if let Some(f) = &on_escape {
                     f(&DismissReason::Escape, window, cx);
                 }
@@ -483,7 +416,7 @@ impl Dialog {
         let (next, prev) = (focus.clone(), focus.clone());
         div()
             .id(self.id.clone())
-            .key_context(CONTEXT)
+            .key_context(MODAL_CONTEXT)
             .occlude()
             .flex()
             .items_center()
@@ -631,79 +564,6 @@ impl RenderOnce for AlertDialog {
     }
 }
 
-/// Takes no room where it's declared, and draws an open modal's scrim over the whole window,
-/// in the modal layer (or the layer of the overlay it's drawn from inside, if that's higher).
-pub(crate) struct ModalElement {
-    pub(crate) scrim: Option<Stateful<gpui::Div>>,
-}
-
-impl IntoElement for ModalElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for ModalElement {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, ()) {
-        let style = Style {
-            position: Position::Absolute,
-            ..Style::default()
-        };
-        (window.request_layout(style, None, cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut (),
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let Some(scrim) = self.scrim.take() else {
-            return;
-        };
-        let layer = popover::layer(cx).max(MODAL_PRIORITY);
-        let view = window.viewport_size();
-        let scrim = scrim.w(view.width).h(view.height).into_any_element();
-        let mut scrim = InLayer::new(layer, scrim).into_any_element();
-        scrim.layout_as_root(view.map(gpui::AvailableSpace::Definite), window, cx);
-        window.defer_draw(scrim, Point::default(), layer, None::<ContentMask<Pixels>>);
-    }
-
-    fn paint(
-        &mut self,
-        _: Option<&GlobalElementId>,
-        _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut (),
-        _: &mut (),
-        _: &mut Window,
-        _: &mut App,
-    ) {
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -714,7 +574,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{Popover, Root};
+    use crate::base::{MODAL_PRIORITY, OVERLAY_PRIORITY, Popover, Root, overlay_layer};
 
     /// A dialog holding an open popover, each with a probe that records the layer it's placed in.
     struct Host {
@@ -724,7 +584,7 @@ mod tests {
     fn probe(name: &'static str, layers: &Rc<RefCell<Vec<(&'static str, usize)>>>) -> AnyElement {
         let layers = layers.clone();
         canvas(
-            move |_, _, cx| layers.borrow_mut().push((name, popover::layer(cx))),
+            move |_, _, cx| layers.borrow_mut().push((name, overlay_layer(cx))),
             |_, _, _, _| {},
         )
         .size(px(10.))
@@ -749,7 +609,7 @@ mod tests {
 
     #[gpui::test]
     fn what_a_dialog_draws_goes_over_it(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let layers: Rc<RefCell<Vec<(&'static str, usize)>>> = Rc::default();
         let l = layers.clone();
         let (_, vcx) = cx.add_window_view(move |window, cx| {
@@ -759,7 +619,7 @@ mod tests {
         vcx.run_until_parked();
         let seen = layers.borrow().clone();
         let last = |name| seen.iter().rev().find(|(n, _)| *n == name).map(|(_, l)| *l);
-        assert_eq!(last("page"), Some(popover::PRIORITY));
+        assert_eq!(last("page"), Some(OVERLAY_PRIORITY));
         assert_eq!(last("dialog"), Some(MODAL_PRIORITY));
         // Drawn from inside the dialog, so in its layer and over it.
         assert_eq!(last("popover"), Some(MODAL_PRIORITY));

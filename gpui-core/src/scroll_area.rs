@@ -14,8 +14,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::press::focus_ring;
-use crate::theme::ActiveTheme as _;
+use crate::base::{ActiveTheme as _, focus_ring};
 
 /// How long the bars stay after the last scroll, or after the pointer leaves (Radix's
 /// `scrollHideDelay`).

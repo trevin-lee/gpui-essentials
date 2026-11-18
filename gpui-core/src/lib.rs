@@ -39,6 +39,7 @@ mod alert;
 mod aspect_ratio;
 mod avatar;
 mod badge;
+pub mod base;
 mod breadcrumb;
 mod button;
 mod card;
@@ -66,6 +67,7 @@ mod item;
 mod kbd;
 mod menu;
 mod menubar;
+mod modal;
 mod navigation_menu;
 mod pagination;
 mod picker;
@@ -189,7 +191,7 @@ pub fn init(cx: &mut App) {
     toggle::init(cx);
     select::init(cx);
     date_picker::init(cx);
-    dialog::init(cx);
+    modal::init(cx);
     input::init(cx);
     menu::init(cx);
     navigation_menu::init(cx);
@@ -206,13 +208,7 @@ pub fn init(cx: &mut App) {
     chart::init(cx);
 }
 
-/// Runs [`init`] after this frame if it hasn't run: for a component with no state of its own to
-/// run it from (keys can't be bound in the middle of a draw).
-pub(crate) fn init_soon(cx: &mut App) {
-    if !cx.has_global::<Initialized>() {
-        cx.defer(init);
-    }
-}
+pub(crate) use base::init_soon;
 
 /// That [`init`] has run.
 struct Initialized;

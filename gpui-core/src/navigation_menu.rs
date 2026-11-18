@@ -43,10 +43,7 @@ use gpui::{
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::popover::Popover;
-use crate::press::Press;
-use crate::theme::{ActiveTheme as _, Theme};
+use crate::base::{ActiveTheme as _, Icon, IconName, Popover, Press, Theme};
 
 actions!(
     gpui_core_navigation_menu,
@@ -367,7 +364,7 @@ fn panel_link(
 
 impl RenderOnce for NavigationMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let n = self.items.len();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| NavState::default());
@@ -609,7 +606,7 @@ mod tests {
 
     #[gpui::test]
     fn triggers_and_links_have_their_roles(cx: &mut TestAppContext) {
-        cx.update(crate::init);
+        cx.update(crate::base::init);
         let (_, vcx) = cx.add_window_view(|_, _| gpui::Empty);
         vcx.update(|window, cx| {
             let theme = cx.theme().clone();

@@ -1,6 +1,6 @@
 //! A combobox, as shadcn/ui's: a button showing the option chosen (or a placeholder) that opens
 //! a [`Popover`] with a search field over the options, filtered as you type. It's a
-//! [`Picker`] under a trigger; a short list with no search is a [`Select`](crate::Select).
+//! [`Picker`] under a trigger; a short list with no search is a `Select`.
 //!
 //! ```no_run
 //! # use gpui::*;
@@ -30,13 +30,10 @@ use gpui::{
     StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
-use crate::icon::{Icon, IconName};
-use crate::menu::{MenuSelect, PopupMenuItem};
-use crate::picker::Picker;
-use crate::popover::Popover;
-use crate::press::Press;
-use crate::size::{ControlSize, Disableable, Sizable};
-use crate::theme::ActiveTheme as _;
+use crate::base::{
+    ActiveTheme as _, ControlSize, Disableable, Icon, IconName, MenuSelect, Picker, Popover,
+    PopupMenuItem, Press, Sizable,
+};
 
 actions!(
     gpui_core_combobox,
@@ -213,7 +210,7 @@ struct ComboboxState {
 
 impl RenderOnce for Combobox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let theme = cx.theme().clone();
         let dark = theme.mode.is_dark();
         let child = |name: &'static str| {

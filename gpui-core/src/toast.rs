@@ -16,16 +16,15 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, InteractiveElement as _, IntoElement, ParentElement as _, Role, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, rems,
+    AnyElement, App, AppContext as _, Context, InteractiveElement as _, IntoElement,
+    ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
+    WeakEntity, Window, div, prelude::FluentBuilder as _, rems,
 };
 
+use crate::base::{
+    ActiveTheme as _, Icon, IconName, OVERLAY_PRIORITY, Press, Root, Sizable as _, Theme,
+};
 use crate::button::{Button, ButtonVariants as _};
-use crate::icon::{Icon, IconName};
-use crate::press::Press;
-use crate::root::Root;
-use crate::size::Sizable as _;
-use crate::theme::Theme;
 
 /// How long a toast shows: long enough to read a line.
 pub const TOAST_DURATION: Duration = Duration::from_secs(4);
@@ -128,44 +127,63 @@ impl Toast {
             return;
         };
         let after = self.shown_for();
-        let seq = root.update(cx, |r, cx| {
-            r.next_toast += 1;
-            let seq = r.next_toast;
+        let stack = root.update(cx, |r, cx| {
+            r.overlay::<Toasts>().unwrap_or_else(|| {
+                let stack = cx.new(|_| Toasts::default());
+                r.set_overlay(stack.clone(), cx);
+                stack
+            })
+        });
+        let seq = stack.update(cx, |s, cx| {
+            s.next += 1;
+            let seq = s.next;
             if let Some(id) = &self.id {
-                r.toasts.retain(|(_, t)| t.id.as_ref() != Some(id));
+                s.shown.retain(|(_, t)| t.id.as_ref() != Some(id));
             }
-            r.toasts.push((seq, self));
-            while r.toasts.len() > MOST {
-                r.toasts.remove(0);
+            s.shown.push((seq, self));
+            while s.shown.len() > MOST {
+                s.shown.remove(0);
             }
             cx.notify();
             seq
         });
         // It goes by itself: one timer, the only thing that wakes the window.
-        let root = root.downgrade();
+        let stack = stack.downgrade();
         window
             .spawn(cx, async move |cx| {
                 cx.background_executor().timer(after).await;
-                let _ = root.update(cx, |r, cx| dismiss(r, seq, cx));
+                let _ = stack.update(cx, |s, cx| dismiss(s, seq, cx));
             })
             .detach();
     }
 }
 
-fn dismiss(root: &mut Root, seq: u64, cx: &mut gpui::Context<Root>) {
-    let before = root.toasts.len();
-    root.toasts.retain(|(s, _)| *s != seq);
-    if root.toasts.len() != before {
+/// A window's toasts: its [`Root`]'s overlay, set the first time one shows.
+#[derive(Default)]
+struct Toasts {
+    /// The toasts shown, each with its place in the order they came.
+    shown: Vec<(u64, Toast)>,
+    next: u64,
+}
+
+impl Render for Toasts {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        stack(&self.shown, cx.entity().downgrade(), &theme)
+            .unwrap_or_else(|| gpui::Empty.into_any_element())
+    }
+}
+
+fn dismiss(toasts: &mut Toasts, seq: u64, cx: &mut Context<Toasts>) {
+    let before = toasts.shown.len();
+    toasts.shown.retain(|(s, _)| *s != seq);
+    if toasts.shown.len() != before {
         cx.notify();
     }
 }
 
 /// The toasts shown, drawn at the bottom of the window over everything.
-pub(crate) fn stack(
-    toasts: &[(u64, Toast)],
-    root: gpui::WeakEntity<Root>,
-    theme: &Theme,
-) -> Option<AnyElement> {
+fn stack(toasts: &[(u64, Toast)], owner: WeakEntity<Toasts>, theme: &Theme) -> Option<AnyElement> {
     if toasts.is_empty() {
         return None;
     }
@@ -177,8 +195,8 @@ pub(crate) fn stack(
             ToastKind::Success => (IconName::CircleCheck, theme.foreground),
             ToastKind::Error => (IconName::CircleX, theme.destructive),
         };
-        let close = root.clone();
-        let act = root.clone();
+        let close = owner.clone();
+        let act = owner.clone();
         let selector = t.id.clone().unwrap_or_else(|| seq.to_string().into());
         div()
             .id(("gpui-core-toast", seq as usize))
@@ -270,7 +288,7 @@ pub(crate) fn stack(
                 .children(cards),
         )
         // Over popovers and sheets.
-        .with_priority(crate::popover::PRIORITY + 1)
+        .with_priority(OVERLAY_PRIORITY + 1)
         .into_any_element(),
     )
 }

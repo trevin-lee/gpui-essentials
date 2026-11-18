@@ -1,12 +1,12 @@
 //! A drawer: a modal panel that comes from an edge of the window (the bottom by default; the
 //! top, left or right too) over a scrim, with a title, a description, content and a footer.
 //!
-//! The host owns whether it's open, as with a [`Dialog`](crate::Dialog): it draws
+//! The host owns whether it's open, as with a `Dialog`: it draws
 //! `Drawer::new(id).open(open)` every frame and closes it from [`Drawer::on_dismiss`], which runs
 //! on Escape, a press on the scrim, and, for a bottom drawer, a drag down past a quarter of its
 //! height (a finger pulling it away).
 //!
-//! It's [`Sheet`](crate::Sheet)'s fuller form: a Sheet is a plain bottom panel of touch rows
+//! It's `Sheet`'s fuller form: a Sheet is a plain bottom panel of touch rows
 //! (an action sheet), with no title, footer or drag, which doesn't hold Tab inside it; a Drawer
 //! comes from any edge, has the header and footer, keeps Tab inside it as a dialog does, and a
 //! bottom one is dragged away.
@@ -43,11 +43,13 @@ use gpui::{
     Styled, Window, canvas, div, prelude::FluentBuilder as _, px, relative, rems,
 };
 
-use crate::dialog::{
-    CONTEXT, ModalElement, TrapNext, TrapPrev, cycle_focus, focus_first_in, just_opened,
+use crate::base::{
+    ActiveTheme as _, Dismiss, DismissReason, MODAL_CONTEXT, ModalElement, POPOVER_CONTEXT,
+    PopoverColors, TrapNext, TrapPrev, cycle_focus, focus_first_in, just_opened, overlay_focus,
 };
-use crate::popover::{self, DismissFn, DismissReason, PopoverColors, overlay_focus};
-use crate::theme::ActiveTheme as _;
+
+/// Runs on a dismiss, with why.
+type DismissFn = std::rc::Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
 
 /// A size in the web's CSS pixels, as rems of its 15 pixel text.
 fn css(v: f32) -> Rems {
@@ -78,7 +80,7 @@ pub enum DrawerSide {
 /// handle, and its handle and header can be dragged down to dismiss it. It's drawn only while
 /// open, over popovers.
 ///
-/// While open it has the keyboard, as a [`Dialog`](crate::Dialog): the first thing inside takes
+/// While open it has the keyboard, as a `Dialog`: the first thing inside takes
 /// it (or [`initial_focus`](Drawer::initial_focus)), Tab and shift-Tab go round inside, and on
 /// closing the focus goes back. Keep drawing it while it's closed for that.
 #[derive(IntoElement)]
@@ -217,7 +219,7 @@ struct Drag {
 
 impl RenderOnce for Drawer {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        crate::init_soon(cx);
+        crate::base::init_soon(cx);
         let opened = just_opened(&self.id, self.open, window, cx);
         let focus = overlay_focus(
             &self.id,
@@ -247,7 +249,7 @@ impl RenderOnce for Drawer {
             });
         }
         let scrim = self.open.then(|| self.build(&focus, &drag, cx));
-        ModalElement { scrim }
+        ModalElement::new(scrim)
     }
 }
 
@@ -411,7 +413,7 @@ impl Drawer {
         let mut panel = div()
             .id("drawer")
             .role(Role::Dialog)
-            .key_context(popover::CONTEXT)
+            .key_context(POPOVER_CONTEXT)
             .track_focus(focus)
             // Over the scrim, so a press inside isn't one on it.
             .occlude()
@@ -448,7 +450,7 @@ impl Drawer {
                     .border_l_1(),
             })
             .debug_selector(|| "gpui-core-drawer".into())
-            .on_action(move |_: &popover::Dismiss, window, cx| {
+            .on_action(move |_: &Dismiss, window, cx| {
                 if let Some(f) = &on_escape {
                     f(&DismissReason::Escape, window, cx);
                 }
@@ -467,7 +469,7 @@ impl Drawer {
         let (next, prev) = (focus.clone(), focus.clone());
         div()
             .id(self.id.clone())
-            .key_context(CONTEXT)
+            .key_context(MODAL_CONTEXT)
             .occlude()
             .flex()
             .map(|s| match side {
