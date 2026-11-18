@@ -1065,14 +1065,17 @@ The host is the app around the views. It:
 The target: a 10,000-row database scrolls, filters, sorts and regroups with no dropped frame, and
 nothing draws while nothing changes.
 
-- **The engine** builds each row's keys once and sorts indexes, never rows. Measured with `cargo
+- **The engine** builds each row's keys once and sorts indexes, never rows. A text filter or sort
+  reads each row's text lowercased once and kept (`RowText`) until the rows change, so a filter
+  typed a key at a time, or a sort changed, lowercases nothing again. Measured with `cargo
   test --release --test performance -- --nocapture` on an Apple M4 Pro, for 10,000 rows of every
   property type:
 
   | | median |
   |---|---|
   | The manual order alone | 0.06 ms |
-  | Sort by title | 1.5 ms |
+  | Sort by title / again, the titles kept | 1.2 / 0.9 ms |
+  | A text filter alone (the note contains a word) / again, the notes kept | 1.5 / 1.0 ms |
   | Sort by a select, then a number | 1.6 ms |
   | A filter of three conditions, two sorts, grouped by a select | 1.4 ms |
   | Twelve conditions, one per type | 1.7 ms |
@@ -1103,7 +1106,8 @@ nothing draws while nothing changes.
   |---|---|
   | The first draw | 2.5 ms |
   | A frame while scrolling down a page, or sideways | 2.8 ms |
-  | A sort, a filter and a group by select, worked out and drawn | 18 ms |
+  | A sort, a filter and a group by select, worked out / and drawn | 11 / 18 ms |
+  | A filter's value typed a key at a time, worked out (the notes kept) | 2.8 ms |
   | A value changed, regrouped by select / multi-select / date / person | 1.4 / 1.9 / 1.4 / 2.1 ms |
   | The same, regrouped and drawn | 4.0 / 4.2 / 4.2 / 4.8 ms |
   | Opening the search field, drawn (the rows' words then folded off the main thread, 11 ms) | 7.1 ms |

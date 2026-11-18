@@ -408,6 +408,8 @@ pub struct TableView {
     pub(crate) hovered_row: Option<String>,
     /// The search from the bar of views, and what it keeps between keystrokes.
     pub(crate) search: super::search::Search,
+    /// The rows' text the view's filter and sorts lowercased, kept until the rows change.
+    row_text: engine::RowText,
 }
 
 impl Focusable for TableView {
@@ -465,6 +467,7 @@ impl TableView {
             anchor: None,
             hovered_row: None,
             search: Default::default(),
+            row_text: engine::RowText::new(),
         }
     }
 
@@ -502,6 +505,7 @@ impl TableView {
             self.focus_before_rows = Some(self.focused_row_id());
         }
         self.rows = Arc::new(rows);
+        self.row_text.clear();
     }
 
     /// The row the focused line is on, as the lines were last worked out.
@@ -766,9 +770,11 @@ impl TableView {
             s.max_column_width,
         );
         // The bar's search, if any, on top of the view's own rows.
+        let mut row_text = std::mem::take(&mut self.row_text);
         let result = self.searched(fields, &view, &columns, || {
-            engine::query(fields, &view, &self.rows, &ecx)
+            engine::query_with(fields, &view, &self.rows, &ecx, &mut row_text)
         });
+        self.row_text = row_text;
         let mut items = Vec::with_capacity(result.rows.len() + 1);
         let mut collapsed = Vec::new();
         let groups = result.groups.unwrap_or_default();

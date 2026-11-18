@@ -184,7 +184,9 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
     let mut firsts = Vec::new();
     let mut scrolls = Vec::new();
     let mut sorts = Vec::new();
-    for run in 0..3 {
+    let mut works = Vec::new();
+    let mut keys = Vec::new();
+    for run in 0..5 {
         let mut app = TestAppContext::build_with_text_system(
             TestDispatcher::new(run),
             None,
@@ -242,16 +244,37 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
         let mut db = table.read_with(cx, |t, _| t.database().clone());
         db.database.as_mut().unwrap().views[0] = view;
         let start = Instant::now();
-        table.update(cx, |t, cx| t.set_database(db, cx));
+        // Worked out, timed alone (a test's update ends in a draw of its own).
+        works.push(table.update(cx, |t, cx| {
+            t.set_database(db, cx);
+            let start = Instant::now();
+            let _ = t.shown_rows().len();
+            start.elapsed()
+        }));
         cx.update(|window, cx| {
             window.refresh();
             let _ = window.draw(cx);
         });
         sorts.push(start.elapsed());
+        // A filter's value typed a key at a time: the same rows, their notes kept lowercased.
+        for typed in ["h", "ha", "har", "harb"] {
+            let mut db = table.read_with(cx, |t, _| t.database().clone());
+            let view = &mut db.database.as_mut().unwrap().views[0];
+            view.filter = Some(Filter::condition("note", FilterOp::Contains, json!(typed)));
+            keys.push(table.update(cx, |t, cx| {
+                t.set_database(db, cx);
+                let start = Instant::now();
+                let _ = t.shown_rows().len();
+                start.elapsed()
+            }));
+            draw(cx);
+        }
     }
     report("first draw of 10,000 rows", firsts, 50);
     report("a frame while scrolling", scrolls, 12);
+    report("sort, filter and group, worked out", works, 25);
     report("sort, filter and group, then draw", sorts, 50);
+    report("a filter's value typed, worked out", keys, 25);
 }
 
 #[test]

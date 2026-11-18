@@ -18,11 +18,13 @@ pub mod group;
 pub mod relation;
 pub mod search;
 pub mod sort;
+pub mod text;
 pub mod time;
 
 pub use calc::{Calculated, calculate, calculate_view};
 pub use filter::CompiledFilter;
 pub use group::{DateGroup, Group, GroupKey, Relative};
+pub use text::RowText;
 pub use time::DAY_MS;
 
 use crate::model::{
@@ -147,15 +149,37 @@ pub struct ViewRows {
 /// tombstoned rows, applies the filter, puts the rest in the manual order (`order`, then id),
 /// sorts them by the view's sorts (stably, so the manual order breaks ties), and groups them.
 pub fn query(db: &DatabaseFields, view: &View, rows: &[Doc], cx: &Context) -> ViewRows {
+    query_with(db, view, rows, cx, &mut RowText::new())
+}
+
+/// [`query`], keeping the rows' text its filter and sorts lowercase in `text` for the next
+/// query of the same rows: a view keeps one, and [clears](RowText::clear) it when its rows
+/// change.
+pub fn query_with(
+    db: &DatabaseFields,
+    view: &View,
+    rows: &[Doc],
+    cx: &Context,
+    text: &mut RowText,
+) -> ViewRows {
     let mut issues = Vec::new();
-    let (filter, filter_issues) = CompiledFilter::new(view.filter.as_ref(), db, cx);
+    let (mut filter, filter_issues) = CompiledFilter::new(view.filter.as_ref(), db, cx);
     issues.extend(filter_issues);
 
+    text.begin(rows);
+    filter.read_text(rows, text);
     let mut indexes: Vec<usize> = (0..rows.len())
-        .filter(|&i| !rows[i].is_deleted() && filter.matches(&rows[i]))
+        .filter(|&i| !rows[i].is_deleted() && filter.matches_at(rows, i, text))
         .collect();
     sort::manual(rows, &mut indexes);
-    issues.extend(sort::sort(db, &view.sort, rows, &mut indexes, cx));
+    issues.extend(sort::sort_with(
+        db,
+        &view.sort,
+        rows,
+        &mut indexes,
+        cx,
+        text,
+    ));
 
     let groups = view
         .group_by
