@@ -611,6 +611,8 @@ impl Root {
                 date = monday;
             }
             "month" | "month-drag" => view = CalendarView::Month,
+            // The whole year, its busy days shaded.
+            "year" => view = CalendarView::Year,
             // A crowded Wednesday in the all-day row, and a visit that goes on into next week.
             "all-day" | "all-day-month" | "all-day-drag" => {
                 let day = |n: i64| monday + Duration::days(n);
@@ -730,6 +732,10 @@ impl Root {
             if scene == "overlap" {
                 c.scroll_to_minute(8. * 60. + 30.);
             }
+            // The working week: Saturday and Sunday hidden.
+            if scene == "weekdays" {
+                c.options.show_weekends = false;
+            }
             c
         });
         let subscription =
@@ -744,7 +750,7 @@ impl Root {
         let status = if scene.starts_with("compact") {
             ""
         } else {
-            "Drag empty time to add an event; drag one to move it; t d w m a j k"
+            "Drag empty time to add an event; drag one to move it; t d w m y a j k"
         };
         Self {
             calendar,

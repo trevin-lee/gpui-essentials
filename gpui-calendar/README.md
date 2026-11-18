@@ -207,6 +207,8 @@ their look.
 | Overlapping events | The month |
 |---|---|
 | ![Three days with events side by side in columns](docs/overlap.png) | ![November with spans, dotted rows and "+N more"](docs/month.png) |
+| **The year** | **The working week** (`show_weekends` off) |
+| ![2026 as twelve small months, busy days shaded and today marked](docs/year.png) | ![Monday to Friday sharing the width, a span running from Friday on](docs/weekdays.png) |
 
 ## Use it
 
