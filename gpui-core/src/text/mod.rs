@@ -1,6 +1,7 @@
 //! Text: Markdown drawn natively ([`TextView`]), on a paragraph layer that lays styled text out
 //! and answers where things are in it.
 
+pub mod italic;
 mod markdown;
 pub mod paragraph;
 mod view;

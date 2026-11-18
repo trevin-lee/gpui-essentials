@@ -2252,7 +2252,7 @@ impl Element for TextBox {
             let lh = text_style.line_height_in_pixels(window.rem_size());
             let s = state.read(cx);
             let shown = s.shown();
-            let (text, runs) = runs_for(
+            let (text, mut runs) = runs_for(
                 s,
                 &shown,
                 text_style.color,
@@ -2260,6 +2260,7 @@ impl Element for TextBox {
                 text_style.font(),
                 None,
             );
+            crate::text::italic::italic_runs(&mut runs, window.text_system());
             let mut n = 0usize;
             for (_, line, lr) in split_lines(&text, &runs) {
                 let shaped = window
@@ -2332,7 +2333,7 @@ impl Element for TextBox {
                 .as_ref()
                 .and(s.highlights.as_ref())
                 .map(|(_, h)| h);
-            let (text, runs) = runs_for(
+            let (text, mut runs) = runs_for(
                 s,
                 &shown,
                 style.color,
@@ -2340,6 +2341,7 @@ impl Element for TextBox {
                 style.font(),
                 spans,
             );
+            crate::text::italic::italic_runs(&mut runs, window.text_system());
             // A code editor's lines don't wrap.
             let wrap = (s.multiline && !s.code).then_some(bounds.size.width);
             let mut lines = Vec::new();

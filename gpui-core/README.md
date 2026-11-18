@@ -11,6 +11,13 @@ item](docs/gallery.png)
 - **Theme.** `Theme` holds the colours, fonts and sizes. Its colour names are the web app's
   CSS variables in snake case (`background`, `muted_foreground`, `ring`, …). The host sets it
   with `Theme::set`, and components read it with `cx.theme()`.
+- **Italics that stay italic.** GPUI draws italic upright, silently, when the family has no
+  italic face (an app that bundles only upright Inter). gpui-core's text (TextView, the
+  paragraph layer, inputs' highlighted code) sets such a run in the system UI font's italic, at
+  the same weight, so emphasis still reads as emphasis. A host that wants its own family's
+  italics bundles those faces. GPUI can't slant glyphs, so there's no synthetic oblique, and
+  where the system font has no italic either, the run is drawn upright as before.
+  `gpui_core::text::italic::{italic_font, italic_runs}` do the same for a host's own text.
 - **Root.** It makes the theme's `font_size` the window's rem, so every size in rems follows
   the host's zoom. It draws the window's surface in the theme and moves the focus with Tab.
   It takes the window's first focus, which puts keys above your view: a view with key bindings
