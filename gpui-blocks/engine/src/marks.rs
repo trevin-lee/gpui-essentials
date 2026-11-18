@@ -12,6 +12,8 @@ pub enum MarkKind {
     Underline,
     Code,
     Highlight,
+    /// A colour of the text's own.
+    Color,
     Link,
 }
 
@@ -24,6 +26,7 @@ impl MarkKind {
             Self::Underline => mark.underline,
             Self::Code => mark.code,
             Self::Highlight => mark.highlight.is_some(),
+            Self::Color => mark.color.is_some(),
             Self::Link => mark.link.is_some(),
         }
     }
@@ -45,6 +48,11 @@ impl MarkSet {
 
     pub fn highlight(&self) -> Option<Hsla> {
         self.0.highlight
+    }
+
+    /// The text's own colour, if it has one.
+    pub fn color(&self) -> Option<Hsla> {
+        self.0.color
     }
 
     pub fn link_url(&self) -> Option<&SharedString> {
@@ -71,6 +79,7 @@ pub struct MarkChange {
     clear: Vec<MarkKind>,
     link: Option<LinkMark>,
     highlight: Option<Hsla>,
+    color: Option<Hsla>,
 }
 
 /// The highlight colour `<mark>` gets without a colour attribute.
@@ -137,6 +146,55 @@ pub const BACKGROUNDS: [PaletteColor; 9] = [
     },
 ];
 
+/// Notion's text colours, in its menu's order, stored as `<span style="color:#…">`.
+pub const TEXT_COLORS: [PaletteColor; 9] = [
+    PaletteColor {
+        name: "Gray",
+        light: 0x787774,
+        dark: 0x9b9b9b,
+    },
+    PaletteColor {
+        name: "Brown",
+        light: 0x9f6b53,
+        dark: 0xba856f,
+    },
+    PaletteColor {
+        name: "Orange",
+        light: 0xd9730d,
+        dark: 0xc77d48,
+    },
+    PaletteColor {
+        name: "Yellow",
+        light: 0xcb912f,
+        dark: 0xca9849,
+    },
+    PaletteColor {
+        name: "Green",
+        light: 0x448361,
+        dark: 0x529e72,
+    },
+    PaletteColor {
+        name: "Blue",
+        light: 0x337ea9,
+        dark: 0x379ad3,
+    },
+    PaletteColor {
+        name: "Purple",
+        light: 0x9065b0,
+        dark: 0x9d68d3,
+    },
+    PaletteColor {
+        name: "Pink",
+        light: 0xc14c8a,
+        dark: 0xd15796,
+    },
+    PaletteColor {
+        name: "Red",
+        light: 0xd44c47,
+        dark: 0xdf5452,
+    },
+];
+
 /// `color` as `0xrrggbb`, when it's opaque.
 pub(crate) fn rgb_of(color: Hsla) -> Option<u32> {
     let rgba = gpui::Rgba::from(color);
@@ -160,6 +218,18 @@ impl PaletteColor {
     pub fn fill(&self, dark: bool) -> Hsla {
         gpui::rgb(if dark { self.dark } else { self.light }).into()
     }
+}
+
+/// The text colour `color` is, if it's one of [`TEXT_COLORS`].
+pub fn text_color_of(color: Hsla) -> Option<&'static PaletteColor> {
+    let rgb = rgb_of(color)?;
+    TEXT_COLORS.iter().find(|c| c.light == rgb)
+}
+
+/// The colour text in `color` is drawn in: in a dark theme a text colour's lighter twin, so it
+/// reads on the dark page; else `color` itself.
+pub(crate) fn drawn_text_color(color: Hsla, dark: bool) -> Hsla {
+    text_color_of(color).map_or(color, |c| c.fill(dark))
 }
 
 /// The fill a highlight in `color` is drawn with: in a dark theme a background colour's dark
@@ -199,6 +269,12 @@ impl MarkChange {
         self.set(MarkKind::Highlight)
     }
 
+    /// Colours the text `color`.
+    pub fn with_color(mut self, color: Hsla) -> Self {
+        self.color = Some(color);
+        self.set(MarkKind::Color)
+    }
+
     pub(crate) fn apply(&self, mark: &TextMark) -> TextMark {
         let mut out = self.apply_raw(mark);
         // Inline code holds literal text: only a link may wrap it, so other
@@ -209,6 +285,7 @@ impl MarkChange {
             out.strikethrough = false;
             out.underline = false;
             out.highlight = None;
+            out.color = None;
         }
         out
     }
@@ -223,6 +300,7 @@ impl MarkChange {
                 MarkKind::Underline => out.underline = false,
                 MarkKind::Code => out.code = false,
                 MarkKind::Highlight => out.highlight = None,
+                MarkKind::Color => out.color = None,
                 MarkKind::Link => out.link = None,
             }
         }
@@ -235,6 +313,11 @@ impl MarkChange {
                 MarkKind::Code => out.code = true,
                 MarkKind::Highlight => {
                     out.highlight = Some(self.highlight.unwrap_or_else(default_highlight))
+                }
+                MarkKind::Color => {
+                    if let Some(color) = self.color {
+                        out.color = Some(color);
+                    }
                 }
                 MarkKind::Link => {
                     if let Some(link) = &self.link {

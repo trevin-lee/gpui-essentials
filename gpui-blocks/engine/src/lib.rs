@@ -119,7 +119,8 @@ pub(crate) fn init_for_tests(cx: &mut gpui::App) {
 pub use id::BlockId;
 pub use kind::BlockKind;
 pub use marks::{
-    BACKGROUNDS, MarkChange, MarkKind, MarkSet, MarkState, PaletteColor, background_of,
+    BACKGROUNDS, MarkChange, MarkKind, MarkSet, MarkState, PaletteColor, TEXT_COLORS,
+    background_of, text_color_of,
 };
 pub use position::{Affinity, BlockPosition, PositionError};
 pub use selection::{BlockSelection, SelectionError};
