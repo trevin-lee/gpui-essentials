@@ -53,6 +53,160 @@ use crate::text_mark::{ImageNode, LinkMark, TextMark};
 pub(crate) const SOURCE_BLOCK: &str = "editor-source-block";
 pub(crate) const SOURCE_INLINE: &str = "editor-source-inline";
 
+/// Documents shorter than this are parsed whole: splitting costs more than it saves.
+const PIECES_FROM: usize = 64 * 1024;
+
+/// A long document parsed in pieces on several threads: each piece's start and its tree, in
+/// order. `None` when it's short, has nowhere safe to split, or a piece doesn't parse.
+pub(crate) fn parse_in_pieces(source: &str) -> Option<Vec<(usize, Node)>> {
+    // No threads in a browser; and a short document parses faster whole.
+    if cfg!(target_family = "wasm") || source.len() < PIECES_FROM {
+        return None;
+    }
+    // At most one piece a core, and eight.
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(8);
+    parse_pieces(source, threads)
+}
+
+/// `source` parsed in about `count` pieces at once, each on a thread of its own.
+pub(crate) fn parse_pieces(source: &str, count: usize) -> Option<Vec<(usize, Node)>> {
+    let starts = pieces(source, count);
+    if starts.len() < 2 {
+        return None;
+    }
+    let ranges: Vec<(usize, usize)> = starts
+        .iter()
+        .enumerate()
+        .map(|(ix, start)| (*start, starts.get(ix + 1).copied().unwrap_or(source.len())))
+        .collect();
+    let trees: Vec<Option<Node>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = ranges
+            .iter()
+            .map(|(start, end)| {
+                let piece = &source[*start..*end];
+                scope.spawn(move || parse(piece, &options(true)).ok())
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().ok().flatten())
+            .collect()
+    });
+    starts
+        .into_iter()
+        .zip(trees)
+        .map(|(start, tree)| tree.map(|t| (start, t)))
+        .collect()
+}
+
+/// Where a long document can be parsed apart, about `count` pieces of it: byte offsets, the
+/// first 0. A split goes only before an ATX heading after a blank line, outside code and math
+/// fences, toggles and columns, which a heading ends whatever came before (a list, a quote, a
+/// paragraph). A document with link or footnote definitions, which reach across it, isn't
+/// split.
+pub(crate) fn pieces(source: &str, count: usize) -> Vec<usize> {
+    let mut starts = vec![0];
+    if count < 2 {
+        return starts;
+    }
+    let mut candidates = Vec::new();
+    let mut fence: Option<(u8, usize)> = None;
+    let (mut toggles, mut columns) = (0usize, 0usize);
+    let mut raw: Option<&str> = None;
+    let mut blank_before = false;
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let start = at;
+        at += line.len();
+        let text = line.trim_end_matches(['\n', '\r']);
+        let trimmed = text.trim_start();
+        let indent = text.len() - trimmed.len();
+        // A definition anywhere: not split.
+        if indent < 4 && trimmed.starts_with('[') && trimmed.contains("]:") {
+            return vec![0];
+        }
+        if let Some((ch, len)) = fence {
+            let run = trimmed.bytes().take_while(|b| *b == ch).count();
+            if run >= len && trimmed[run..].trim().is_empty() {
+                fence = None;
+            }
+            blank_before = false;
+            continue;
+        }
+        if indent < 4 {
+            for ch in *b"`~$" {
+                let run = trimmed.bytes().take_while(|b| *b == ch).count();
+                if run >= if ch == b'$' { 2 } else { 3 } {
+                    fence = Some((ch, run));
+                }
+            }
+            if fence.is_some() {
+                blank_before = false;
+                continue;
+            }
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        // HTML that runs past blank lines (a comment, `<pre>`, `<script>`…): until it closes.
+        if let Some(close) = raw {
+            if lower.contains(close) {
+                raw = None;
+            }
+            blank_before = false;
+            continue;
+        }
+        for (open, close) in [
+            ("<!--", "-->"),
+            ("<pre", "</pre>"),
+            ("<script", "</script>"),
+            ("<style", "</style>"),
+            ("<textarea", "</textarea>"),
+        ] {
+            if indent < 4 && lower.starts_with(open) && !lower[open.len()..].contains(close) {
+                raw = Some(close);
+            }
+        }
+        if raw.is_some() {
+            blank_before = false;
+            continue;
+        }
+        if lower.starts_with("<details") {
+            toggles += 1;
+        }
+        if lower.starts_with("</details") {
+            toggles = toggles.saturating_sub(1);
+        }
+        if trimmed.starts_with("<!-- columns -->") {
+            columns += 1;
+        }
+        if trimmed.starts_with("<!-- /columns -->") {
+            columns = columns.saturating_sub(1);
+        }
+        let hashes = trimmed.bytes().take_while(|b| *b == b'#').count();
+        let heading =
+            indent == 0 && (1..=6).contains(&hashes) && trimmed[hashes..].starts_with([' ', '\t']);
+        if heading && blank_before && toggles == 0 && columns == 0 {
+            candidates.push(start);
+        }
+        blank_before = trimmed.is_empty();
+    }
+    // The candidate nearest each even share of the document.
+    for k in 1..count {
+        let want = source.len() * k / count;
+        let best = candidates
+            .iter()
+            .copied()
+            .filter(|c| *c > *starts.last().unwrap_or(&0))
+            .min_by_key(|c| c.abs_diff(want));
+        if let Some(best) = best {
+            starts.push(best);
+        }
+    }
+    starts.dedup();
+    starts
+}
+
 fn options(math: bool) -> ParseOptions {
     let mut options = ParseOptions::gfm();
     // Math is read so an extension can claim it; unclaimed, it's read again as prose.
@@ -65,19 +219,43 @@ pub(crate) fn parse_document(
     source: &str,
     extensions: Arc<Extensions>,
 ) -> Result<EditorDocument, SharedString> {
+    // A long document is parsed in pieces at once, split before headings (see `pieces`); the
+    // blocks are the same as one parse gives.
+    read_document(source, extensions, parse_in_pieces(source))
+}
+
+/// The document `source` is, from its trees when it was parsed in pieces.
+pub(crate) fn read_document(
+    source: &str,
+    extensions: Arc<Extensions>,
+    parsed: Option<Vec<(usize, Node)>>,
+) -> Result<EditorDocument, SharedString> {
     // Text the parser fails on is read as plain text instead.
     let fallback;
-    let (source, root) = match parse(source, &options(true)) {
-        Ok(root) => (source, root),
-        Err(_) => {
-            fallback = literal(source);
-            let root = parse(&fallback, &options(true)).map_err(SharedString::from)?;
-            (fallback.as_str(), root)
-        }
+    let (source, roots) = match parsed {
+        Some(roots) => (source, roots),
+        None => match parse(source, &options(true)) {
+            Ok(root) => (source, vec![(0, root)]),
+            Err(_) => {
+                fallback = literal(source);
+                let root = parse(&fallback, &options(true)).map_err(SharedString::from)?;
+                (fallback.as_str(), vec![(0, root)])
+            }
+        },
     };
-    let reader = Reader::new(source, &extensions, &root);
-    let nodes = root.children().map(Vec::as_slice).unwrap_or_default();
-    let blocks = group_columns(reader.blocks(nodes));
+    let mut blocks = Vec::new();
+    let mut exterior_start = 0;
+    for (ix, (start, root)) in roots.iter().enumerate() {
+        let end = roots.get(ix + 1).map_or(source.len(), |(next, _)| *next);
+        let piece = &source[*start..end];
+        let reader = Reader::new(piece, &extensions, root);
+        let nodes = root.children().map(Vec::as_slice).unwrap_or_default();
+        blocks.extend(reader.blocks(nodes));
+        if let Some(last) = nodes.last().and_then(Node::position) {
+            exterior_start = start + last.end.offset;
+        }
+    }
+    let blocks = group_columns(blocks);
     let mut doc = EditorDocument::empty(extensions.clone());
     let root_id = doc.root;
     // Drop the placeholder paragraph of the empty document.
@@ -98,10 +276,6 @@ pub(crate) fn parse_document(
     // boundary as real document nodes, never a mutable raw-source shadow.
     // The last block's span tells exterior footer trivia from line endings
     // owned by an unterminated code fence/body.
-    let exterior_start = nodes
-        .last()
-        .and_then(Node::position)
-        .map_or(0, |p| p.end.offset);
     let exterior = source.get(exterior_start..).unwrap_or_default();
     let trimmed_spaces = exterior.trim_end_matches([' ', '\t']);
     let stripped = trimmed_spaces.trim_end_matches(['\r', '\n']);
