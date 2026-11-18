@@ -448,7 +448,7 @@ change is a batch of edits for the host ([Edits and events](#edits-and-events)),
 
 | | |
 |---|---|
-| ![The + menu: a new property's name typed over the fifteen types it can have](docs/table-columns.png) | ![Stage's column menu with its options open beside Edit options as their pills, and beside them the first option's submenu to rename, recolour, move or delete it](docs/table-options.png) |
+| ![The + menu: a new property's name typed over the fifteen types it can have](docs/table-columns.png) | ![Stage's column menu with its options open beside Edit options as their pills, and beside them the first option's submenu to rename, recolour or delete it, its grip showing it can be dragged](docs/table-options.png) |
 
 - **Adding.** The + after the last column (or Add a property in a column's menu) opens a field
   for the name over the types: every type but the title (gpui-core's `Picker`, its field naming
@@ -542,7 +542,7 @@ new docs, as a header's change is.
 
 | | |
 |---|---|
-| ![The bar's + menu: a new view's name typed over its three types, Board highlighted, under the +](docs/view-add.png) | ![The Pipeline board's menu under its tab, View settings open beside it (what it groups by, its card properties, its sort to remove), and beside that the card properties, shown then hidden](docs/view-settings.png) |
+| ![The bar's + menu: a new view's name typed over its three types, Board highlighted, under the +](docs/view-add.png) | ![The Pipeline board's menu under its tab, View settings open beside it (what it groups by, its card properties, its sort to remove), and beside that the card properties, shown (the highlighted one's grip to drag it) then hidden](docs/view-settings.png) |
 
 ```rust,ignore
 let table = cx.new(|cx| TableView::new(host, database, rows, cx).with_view_bar(true));
