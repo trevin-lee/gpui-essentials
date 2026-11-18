@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use ::gpui::TestDispatcher;
 use common::setup;
 use gpui::*;
-use gpui_chatwidgets::StreamingMarkdown;
+use gpui_agents::StreamingMarkdown;
 use gpui_core::text::{TextView, TextViewStyle};
 // The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;

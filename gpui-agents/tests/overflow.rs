@@ -231,7 +231,7 @@ fn every_card_keeps_its_text_in_its_place() {
 fn the_check_finds_text_past_its_box() {
     // A card whose one Text is drawn without wrapping, through a theme-less wrapper: the
     // check must see past the card's edge.
-    struct Boxed(bool, Entity<gpui_chatwidgets::CardView>);
+    struct Boxed(bool, Entity<gpui_agents::CardView>);
     impl Render for Boxed {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let text = format!("Too long for this box: {WORD}");
@@ -251,10 +251,10 @@ fn the_check_finds_text_past_its_box() {
         let mut app = app_with_text();
         setup(&mut app);
         let host = TestHost::new(Images::Refuse);
-        let h: Rc<dyn gpui_chatwidgets::CardHost> = host.clone();
+        let h: Rc<dyn gpui_agents::CardHost> = host.clone();
         let (_, cx) = app.add_window_view(move |window, cx| {
             let card = cx.new(|cx| {
-                gpui_chatwidgets::CardView::new(
+                gpui_agents::CardView::new(
                     "root = Stack([TextContent(\"ok\")])",
                     "t",
                     h,

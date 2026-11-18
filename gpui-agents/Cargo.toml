@@ -1,5 +1,5 @@
 [package]
-name = "gpui-chatwidgets"
+name = "gpui-agents"
 version = "0.1.0"
 description = "Draws AI agents' OpenUI cards (cards, tables, charts, forms, buttons) natively in GPUI"
 edition.workspace = true
@@ -12,10 +12,10 @@ categories = ["gui", "parser-implementations"]
 include = ["/src", "/examples", "/README.md"]
 
 [lib]
-name = "gpui_chatwidgets"
+name = "gpui_agents"
 
 [dependencies]
-# The parser and model (gpui_chatwidgets::openui), which build without GPUI.
+# The parser and model (gpui_agents::openui), which build without GPUI.
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 # An object keeps the order its keys came in, as JavaScript's does: a press's message to the

@@ -9,6 +9,13 @@ its tests.
 
 ## The crates
 
+### [gpui-agents](gpui-agents)
+
+Draws AI agents' [OpenUI](https://openui.com) cards (cards, tables, charts, forms, buttons)
+natively, with a parser that builds without GPUI.
+
+<img src="gpui-agents/docs/cards-kpi.png" width="520" alt="A card of account metrics: snippet cards with icons, values and trends, and a product card with a bar chart">
+
 ### [gpui-blocks](gpui-blocks)
 
 A Notion-like block editor: Markdown documents with a slash menu, drag handles, callouts,
@@ -22,13 +29,6 @@ Day, week, N-day, month and agenda views with a time grid; drag to create, move 
 time zones, recurring events, an event panel and a compact phone layout.
 
 ![A week in gpui-calendar: all-day spans, overlapping events side by side, and the line at the current time](gpui-calendar/docs/week.png)
-
-### [gpui-chatwidgets](gpui-chatwidgets)
-
-Draws AI agents' [OpenUI](https://openui.com) cards (cards, tables, charts, forms, buttons)
-natively, with a parser that builds without GPUI.
-
-<img src="gpui-chatwidgets/docs/cards-kpi.png" width="520" alt="A card of account metrics: snippet cards with icons, values and trends, and a product card with a bar chart">
 
 ### [gpui-core](gpui-core)
 
@@ -57,7 +57,7 @@ groups, with a model and engine that build without GPUI.
   on the first build here and leaves your default alone. The crates declare
   `rust-version = "1.100"`.
 - **macOS** to build and run the examples and tests: GPUI draws through Metal. The crates also
-  build for iOS (GPUI's `gpui-pre-ios`) with touch. gpui-chatwidgets' parser and gpui-tables'
+  build for iOS (GPUI's `gpui-pre-ios`) with touch. gpui-agents' parser and gpui-tables'
   engine build without GPUI on any platform.
 - **GPUI as `gpui-pre` `=0.3.12`**, a snapshot of Zed's GPUI, pinned exactly. Your app must use
   the same version, or two GPUIs would be linked. No crate here uses GPUI Kit any more.
@@ -72,7 +72,7 @@ commit (the same commit for all of them, since any commit can change an API):
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<rev>" }
 gpui-blocks = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<rev>" }
-# Any of the others the same way: gpui-calendar, gpui-chatwidgets, gpui-flow, gpui-tables.
+# Any of the others the same way: gpui-agents, gpui-calendar, gpui-flow, gpui-tables.
 
 # The app's window. Without `font-kit`, GPUI draws no text on macOS.
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
@@ -88,9 +88,9 @@ example that compiles (its README is built as a doctest).
 From the repository's root; each opens a window:
 
 ```sh
+cargo run --release -p gpui-agents --example gallery      # every card kind
 cargo run --release -p gpui-blocks --example editor       # a sample document
 cargo run --release -p gpui-calendar --example calendar   # a week of sample events
-cargo run --release -p gpui-chatwidgets --example gallery # every card kind
 cargo run -p gpui-core --example gallery                  # every component
 cargo run --release -p gpui-flow --example flow           # the canvas
 cargo run --release -p gpui-tables --example crm          # a CRM: people, companies, interactions
@@ -109,17 +109,17 @@ cargo test --workspace        # all of them
 
 Each crate has its own CI workflow in `.github/workflows`, run on GitHub's macOS runners when
 its folder, gpui-core (for the crates built on it) or the shared files change, and built for the
-iOS simulator; gpui-chatwidgets' parser-only build and gpui-tables' engine-only build are also
+iOS simulator; gpui-agents' parser-only build and gpui-tables' engine-only build are also
 tested on Linux.
 
 ## History
 
-gpui-blocks and gpui-calendar began as repositories of their own, and gpui-chatwidgets as a
+gpui-blocks and gpui-calendar began as repositories of their own, and gpui-agents as a
 local one; their histories are kept here, each in its folder. gpui-flow came in as one commit.
 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE), which carries every crate's
 third-party notices: GPUI Kit, from which gpui-blocks' engine derives, the
-gpui-kit-markdown-editor fork it is, OpenUI (MIT) for gpui-chatwidgets, and the Inter font in
+gpui-kit-markdown-editor fork it is, OpenUI (MIT) for gpui-agents, and the Inter font in
 the examples.

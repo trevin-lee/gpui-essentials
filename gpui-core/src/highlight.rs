@@ -3,7 +3,7 @@
 //!
 //! A [`Highlighter`] knows the languages; [`Highlighter::highlight`] gives a piece of code's
 //! ranges and styles in a [`SyntaxTheme`], and [`Highlighter::into_fn`] makes the
-//! [`HighlightFn`] that TextView, gpui-blocks and gpui-chatwidgets
+//! [`HighlightFn`] that TextView, gpui-blocks and gpui-agents
 //! take from their host. Nothing runs until code is highlighted, and nothing while idle.
 //!
 //! ```no_run
@@ -468,7 +468,7 @@ impl Highlighter {
         })
     }
 
-    /// A [`HighlightFn`] for hosts to hand TextView, gpui-blocks and gpui-chatwidgets. It
+    /// A [`HighlightFn`] for hosts to hand TextView, gpui-blocks and gpui-agents. It
     /// follows `theme` as given: on a theme switch, make a new one.
     pub fn into_fn(self, theme: SyntaxTheme) -> HighlightFn {
         Arc::new(move |lang: &str, code: &str| self.highlight(lang, code, &theme))

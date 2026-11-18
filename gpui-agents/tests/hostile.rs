@@ -159,7 +159,7 @@ fn past_the_limits_a_note_says_what_was_left_out(cx: &mut TestAppContext) {
     );
     let (card, cx) = open(cx, &src, &host, Some(400.));
     assert!(card.read_with(cx, |c, _| c.error().is_none()));
-    let limits = gpui_chatwidgets::Limits::default();
+    let limits = gpui_agents::Limits::default();
     assert!(limits.table_rows < 450 && limits.chart_points < 600);
     assert!(drawn(cx, "note"), "the chart's note");
     // The table draws its first rows and counts the rest; nothing past the limit is drawn.
