@@ -222,6 +222,14 @@ impl RenderOnce for BlockEditor {
             },
             code: &code_look,
             radius: in_px(look.radius_md()),
+            width: self
+                .state
+                .read(cx)
+                .frame
+                .borrow()
+                .content
+                .map(|c| c.size.width)
+                .filter(|w| *w > px(0.)),
         };
         let mut children: Vec<AnyElement> = Vec::new();
         {
@@ -762,8 +770,20 @@ impl Element for EditorRoot {
                 state.block_drag.is_some_and(|d| d.active)
                     && before.is_some_and(|top| Some(top) != frame.content.map(|c| c.top()))
             };
+            // A new width: rows of columns were drawn for the old one (whether they fit side by
+            // side), so draw again.
+            let resized = {
+                let state = self.state.read(cx);
+                let before = state.frame.borrow().content.map(|c| c.size.width);
+                let doc = &state.model.doc;
+                before != frame.content.map(|c| c.size.width)
+                    && doc
+                        .children(doc.root)
+                        .iter()
+                        .any(|c| doc.kind(*c) == Some(&super::kind::BlockKindData::Columns))
+            };
             *self.state.read(cx).frame.borrow_mut() = frame;
-            if moved_top {
+            if moved_top || resized {
                 let state = self.state.clone();
                 window.on_next_frame(move |_, cx| state.update(cx, |_, cx| cx.notify()));
             }

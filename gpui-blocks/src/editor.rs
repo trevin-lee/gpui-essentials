@@ -2948,6 +2948,68 @@ mod tests {
         );
     }
 
+    /// In the Mac app's page column (605 wide), rows of three, four and five columns fit side by
+    /// side, each its share; on a phone every column of a row stacks, each the whole width.
+    #[gpui::test]
+    fn columns_shrink_to_fit_and_stack_whole_on_a_phone(cx: &mut TestAppContext) {
+        let row = |shares: &[&str]| {
+            let mut s = String::from("<!-- columns -->");
+            for (ix, share) in shares.iter().enumerate() {
+                s.push_str(&format!(
+                    "\n\n<!-- column {share} -->\n\nColumn {ix} with a few words in it."
+                ));
+            }
+            s + "\n\n<!-- /columns -->"
+        };
+        let columns = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            draw(cx);
+            draw(cx);
+            editor.update(cx, |e, cx| {
+                let state = e.state().read(cx);
+                let row = state.top_level_blocks()[0].0;
+                state
+                    .children_bounds(row)
+                    .into_iter()
+                    .map(|(_, b)| b)
+                    .collect::<Vec<_>>()
+            })
+        };
+        for shares in [&["0.4", "0.3", "0.3"][..], &["0.25"; 4], &["0.2"; 5]] {
+            let (editor, cx) = open(cx, &row(shares));
+            // 605 of text: 733 less the two 64 gutters.
+            cx.simulate_resize(gpui::size(gpui::px(733.), gpui::px(800.)));
+            let cols = columns(&editor, cx);
+            assert_eq!(cols.len(), shares.len());
+            assert!(
+                cols.windows(2)
+                    .all(|w| (w[0].top() - w[1].top()).abs() < gpui::px(2.)
+                        && w[1].left() > w[0].right()),
+                "side by side: {cols:?}"
+            );
+            if shares.len() == 3 {
+                // 40/30/30: the first is the widest, by its share.
+                let (a, b) = (cols[0].size.width, cols[1].size.width);
+                assert!(a > b && (a / b - 4. / 3.).abs() < 0.1, "{a:?} {b:?}");
+            }
+        }
+        // A phone: all stacked, every one the whole width.
+        let (editor, cx) = open(cx, &row(&["0.4", "0.3", "0.3"]));
+        cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(800.)));
+        let cols = columns(&editor, cx);
+        let width = cols[0].size.width;
+        assert!(
+            cols.windows(2)
+                .all(|w| w[1].top() > w[0].bottom() - gpui::px(1.)),
+            "stacked: {cols:?}"
+        );
+        assert!(
+            cols.iter()
+                .all(|c| (c.size.width - width).abs() < gpui::px(1.)),
+            "each the same, whole width: {cols:?}"
+        );
+        assert!(width > gpui::px(300.), "{width:?}");
+    }
+
     /// A handle in the gap between two columns moves the line between them: letting go gives
     /// them their new widths, as one undo step.
     #[gpui::test]
