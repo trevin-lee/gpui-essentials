@@ -1,0 +1,10 @@
+// One item disabled.
+ToggleGroup::new("view")
+    .accessibility_label("View")
+    .outline()
+    .w(rems(20.))
+    .item("list", "List")
+    .item("board", "Board")
+    .item("timeline", "Timeline")
+    .disable("timeline")
+    .selected(["list"])
