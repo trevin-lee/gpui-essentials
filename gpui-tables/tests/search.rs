@@ -6,7 +6,8 @@
 //! 44-point targets on touch; and the rows' words folded as the field opens, off the main thread,
 //! so the first key only searches, never stale and never while the field's closed.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 
@@ -124,7 +125,7 @@ fn escape_clears_then_closes_and_cmd_f_opens(cx: &mut TestAppContext) {
     let all = titles(&table, cx);
     // ⌘F from the table.
     click(cx, cell(THEO, ROLE));
-    keys(cx, "cmd-f");
+    keys(cx, "secondary-f");
     assert!(drawn(cx, "view-search-field"));
     type_text(cx, "bluefin");
     assert_eq!(titles(&table, cx), ["Imani Castell", "Theo Brandt"]);
@@ -151,7 +152,7 @@ fn escape_clears_then_closes_and_cmd_f_opens(cx: &mut TestAppContext) {
     );
 
     // The × clears too, and keeps the field open.
-    keys(cx, "cmd-f");
+    keys(cx, "secondary-f");
     type_text(cx, "lumen");
     assert_eq!(titles(&table, cx).len(), 2);
     click(cx, "view-search-clear");
@@ -236,7 +237,7 @@ fn clearing_shows_the_view_as_it_was(cx: &mut TestAppContext) {
         [THEO]
     );
 
-    keys(cx, "cmd-f");
+    keys(cx, "secondary-f");
     type_text(cx, "duran");
     assert_eq!(titles(&table, cx), [DURAN]);
     assert!(drawn(cx, cell(ANA, NAME)), "the rows found from the top");
@@ -365,7 +366,7 @@ fn the_rows_are_folded_as_the_field_opens_so_the_first_key_only_searches(cx: &mu
     keys(cx, "escape");
     table.update(cx, |t, cx| t.set_view(PIPELINE, cx));
     draw(cx);
-    keys(cx, "cmd-f");
+    keys(cx, "secondary-f");
     assert_eq!(folds(&table, cx), 2, "the board's words, as it shows them");
     type_text(cx, "bluefin");
     assert_eq!(titles(&table, cx), ["Imani Castell", "Theo Brandt"]);

@@ -1197,6 +1197,7 @@ The views are for the Mac and for iPhone and iPad, through GPUI's iOS backend (`
 ```sh
 cargo test -p gpui-tables                              # everything
 cargo test -p gpui-tables --no-default-features        # the same, with no GPUI in the build
+cargo test -p gpui-tables --features test-support,gpui/bench-support  # off the Mac: all but Core Text's
 cargo test -p gpui-tables --release --test performance -- --nocapture
 cargo test -p gpui-tables --release --test view_performance -- --nocapture
 cargo run --release -p gpui-tables --features shots --example crm -- --shot out.png --scene menu

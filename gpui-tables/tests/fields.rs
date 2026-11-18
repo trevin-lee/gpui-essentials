@@ -38,7 +38,7 @@ fn typed(table: &Entity<TableView>, cx: &mut VisualTestContext) -> String {
 
 fn paste(cx: &mut VisualTestContext, text: String) {
     cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text)));
-    keys(cx, "cmd-v");
+    keys(cx, "secondary-v");
 }
 
 fn last_text(host: &TestHost) -> String {

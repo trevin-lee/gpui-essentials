@@ -3,7 +3,8 @@
 //! the mouse and a finger, sorted lists, multi-select groups, new rows, touch targets and no
 //! frames while idle, checking the edits it hands the host.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 

@@ -3,7 +3,8 @@
 //! date's time, a relation's database and other side and a person's kinds, and deletes after a
 //! confirm, each checked by the edits it hands the host; the title refused, and every limit.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 
@@ -83,7 +84,8 @@ fn properties(table: &Entity<TableView>, cx: &mut VisualTestContext) -> Vec<Prop
 
 /// Types into the open menu's field, replacing what's there.
 fn type_name(cx: &mut VisualTestContext, text: &str) {
-    keys(cx, "cmd-a");
+    // Select all: ⌘A on the Mac, Ctrl-A elsewhere (gpui-core's field binds each).
+    keys(cx, "secondary-a");
     type_text(cx, text);
 }
 
