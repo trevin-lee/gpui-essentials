@@ -425,7 +425,7 @@ impl Draw<'_, '_> {
             Component::Card(f) => self.flex(f, path, true),
             Component::Tabs(s) => self.tabs(s, path),
             Component::Accordion(s) => self.accordion(s, path),
-            Component::Steps(s) => self.steps(s),
+            Component::Steps(s) => self.steps(s, path),
             Component::Carousel { slides, surface } => self.carousel(slides, *surface, path),
             Component::Separator { vertical } => self.separator(*vertical),
             Component::Modal(m) => self.modal(m, path),

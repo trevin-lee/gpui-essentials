@@ -359,8 +359,9 @@ impl Draw<'_, '_> {
         list.into_any_element()
     }
 
-    /// Numbered circles joined by a line, each with its title and details.
-    pub fn steps(&mut self, steps: &[StepItem]) -> AnyElement {
+    /// Numbered circles joined by a line, each with its title and details. The details are
+    /// Markdown, as react-ui draws them (its `MarkDownRenderer`).
+    pub fn steps(&mut self, steps: &[StepItem], path: &str) -> AnyElement {
         let t = self.t;
         let mut col = div().w_full().min_w_0().flex().flex_col();
         let n = steps.len();
@@ -405,7 +406,16 @@ impl Draw<'_, '_> {
                     t.colors.text_muted,
                     self.regular(),
                 ))
-                .child(self.text(s.details.clone(), t.text.md, t.colors.text, self.regular()));
+                .child(
+                    self.markdown(
+                        &s.details,
+                        t.text.md,
+                        self.regular(),
+                        &format!("{path}.s{i}.d"),
+                    )
+                    .w_full()
+                    .text_color(t.colors.text),
+                );
             col = col.child(
                 div()
                     .w_full()
