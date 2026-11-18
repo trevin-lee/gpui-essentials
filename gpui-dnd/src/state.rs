@@ -490,6 +490,7 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
     };
     let mut taken_by: Option<ElementId> = None;
     let mut taken_label: Option<SharedString> = None;
+    let mut taken_said: Option<SharedString> = None;
     let mut result: Option<DropResult> = None;
     for (record, t) in records.iter().zip(snap.targets.clone()).rev() {
         if !t.can_drop {
@@ -497,6 +498,20 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
         }
         let Some(on_drop) = record.spec.on_drop.clone() else {
             continue;
+        };
+        // What the keyboard says of the target, asked while it still has the drag.
+        let (label, said) = if snap.backend == Backend::Keyboard {
+            (
+                crate::keyboard::target_name(record, &snap.item, cx),
+                crate::keyboard::target_sentence(
+                    record,
+                    &snap.item,
+                    crate::target::Said::Dropped,
+                    cx,
+                ),
+            )
+        } else {
+            (None, None)
         };
         let monitor = DragMonitor {
             snap: Some(Rc::new(snap.clone())),
@@ -509,7 +524,8 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
         };
         if let Some(r) = handled {
             taken_by = Some(record.id.clone());
-            taken_label = crate::keyboard::target_name(record, &snap.item, cx);
+            taken_label = label;
+            taken_said = said;
             if r.is_some() {
                 result = r;
             }
@@ -524,6 +540,7 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
         dropped: taken_by.is_some(),
         target: taken_by,
         target_label: taken_label,
+        said: taken_said,
         result,
         cancelled: false,
         backend: snap.backend,
@@ -552,6 +569,7 @@ pub(crate) fn cancel(window: &mut Window, cx: &mut App) {
             dropped: false,
             target: None,
             target_label: None,
+            said: None,
             result: None,
             cancelled: true,
             backend: snap.backend,
@@ -646,7 +664,9 @@ fn finish(end: EndInfo, window: &mut Window, cx: &mut App) {
     }
     if end.backend == Backend::Keyboard {
         let said = crate::keyboard::announcements(window, cx);
-        let text = if end.dropped {
+        let text = if let Some(own) = end.said.clone().filter(|_| end.dropped) {
+            own
+        } else if end.dropped {
             (said.dropped)(&drag.snap.item, end.target_label.as_ref())
         } else {
             (said.cancelled)(&drag.snap.item)
