@@ -304,7 +304,7 @@ impl RenderOnce for BlockEditor {
                 }
             }
             let reduce_motion = cx.reduce_motion();
-            let (offsets, moving, held) = self.state.update(cx, |state, _| {
+            let (offsets, moving, held, by_touch) = self.state.update(cx, |state, _| {
                 let top = state.content_top();
                 let dragged = state.live_block_drag().filter(|d| d.active);
                 let (offsets, moving) = state.reorder.frame(
@@ -316,7 +316,7 @@ impl RenderOnce for BlockEditor {
                 let held = dragged
                     .map(|d| state.dragged_blocks(&d))
                     .unwrap_or_default();
-                (offsets, moving, held)
+                (offsets, moving, held, dragged.is_some_and(|d| d.by_touch))
             });
             if moving {
                 window.request_animation_frame();
@@ -450,20 +450,24 @@ impl RenderOnce for BlockEditor {
                             &trees, 0, None, &ghost_cx, window, cx,
                         ));
                         let theme = gpui_core::Theme::global(cx);
+                        // Lifted by a finger, as iOS lifts things: a little bigger, and higher
+                        // off the page.
+                        let lift = if by_touch { px(4.) } else { px(0.) };
                         deferred(
                             div()
                                 .id(("dragged-block", block_id.as_u64() as usize))
                                 .absolute()
-                                .top(px(offset))
-                                .left(px(-12.))
-                                .right(px(-12.))
-                                .px(px(12.))
-                                .py(px(6.))
+                                .top(px(offset) - lift)
+                                .left(px(-12.) - lift)
+                                .right(px(-12.) - lift)
+                                .px(px(12.) + lift)
+                                .py(px(6.) + lift)
                                 .rounded(px(8.))
                                 .bg(theme.background)
                                 .border_1()
                                 .border_color(theme.border)
-                                .shadow_lg()
+                                .when(by_touch, |d| d.shadow_xl())
+                                .when(!by_touch, |d| d.shadow_lg())
                                 .child(copy),
                         )
                         .with_priority(1)
@@ -1054,7 +1058,9 @@ impl Element for EditorRoot {
             });
         });
         // Touch: a long press selects the word under the finger, and moving before letting go
-        // extends the selection. Taps arrive as mouse presses.
+        // extends the selection; begun off the text (the gutter, a picture, past a line's end),
+        // moving lifts the block instead (see `BlockEditorState::touch_moved`). Taps arrive as
+        // mouse presses.
         let entity = self.state.clone();
         let hitbox = prepaint.hitbox.clone();
         window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
@@ -1074,15 +1080,40 @@ impl Element for EditorRoot {
                         let focus = state.focus_handle.clone();
                         window.focus(&focus, cx);
                         state.dragging = false;
+                        state.touch_pressed(event.start_position);
                         state.mouse_at(event.start_position, false, cx);
                         state.select_unit(false, cx);
                     });
                 }
                 gpui::TouchPhase::Moved if window.has_long_press_capture(&entity) => {
                     cx.stop_propagation();
-                    entity.update(cx, |state, cx| state.mouse_at(event.position, true, cx));
+                    entity.update(cx, |state, cx| {
+                        if !state.touch_moved(event.start_position, event.position, cx) {
+                            state.mouse_at(event.position, true, cx)
+                        }
+                    });
+                }
+                gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => {
+                    let cancelled = event.phase == gpui::TouchPhase::Cancelled;
+                    entity.update(cx, |state, cx| state.touch_ended(cancelled, cx));
                 }
                 _ => {}
+            }
+        });
+        // A block lifted in place (the block sheet's Move) takes the next finger drag.
+        let entity = self.state.clone();
+        window.on_mouse_event(move |event: &gpui::TouchDragEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            let taken = entity.update(cx, |state, cx| {
+                state.lifted_touch(event.phase, event.start_position, event.position, cx)
+            });
+            if taken {
+                if event.phase == gpui::TouchPhase::Started {
+                    window.prevent_default();
+                }
+                cx.stop_propagation();
             }
         });
         let entity = self.state.clone();

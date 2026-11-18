@@ -52,7 +52,10 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   replaces every one as one undo step. Matching ignores case unless the bar's Aa is on.
 - **Touch:** on an iPhone or iPad, a tap puts the caret there and brings up the keyboard, a long
   press selects a word, handles at the selection's ends move them, and a menu over the
-  selection cuts, copies, pastes and selects all.
+  selection cuts, copies, pastes and selects all. A long press on the text that then moves
+  extends the selection; begun left of the text (or on a picture, a divider, past a line's end),
+  it lifts the block under the finger and drags it, scrolling the page near its top and bottom.
+  The block sheet's Move lifts a block for the next finger drag.
 - **Widgets:** blocks your app draws itself, such as a chart, kept in the file as fenced code.
 - **Links to other documents:** mentions inside text and sub-page blocks, drawn with the title
   and icon your app gives them.
@@ -146,9 +149,9 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   `reveal_block(id)`.
 - **Layout:** the text column is 720 wide, with 64 each side (`Options::gutter`; the left one
   holds the side menu) and 72 above (`Options::top`). Narrower than 600 (`Options::compact_below`;
-  `px(0.)` turns it off), the editor lays itself out for a phone: 16 each side and above, and no
-  side menu. By touch the side menu never shows; the long press's edit menu is there instead,
-  and its Block… opens the block menu (Turn into, Duplicate, Delete) in a sheet.
+  `px(0.)` turns it off), the editor lays itself out for a phone: 24 each side and 16 above, and
+  no side menu. By touch the side menu never shows; the long press's edit menu is there instead,
+  and its Block… opens the block menu (Turn into, Move, Duplicate, Delete) in a sheet.
 - **Keys:** the view's actions are in `gpui_blocks::actions`, and its key context is
   `BlocksEditor`. Bind them to other keys after `gpui_blocks::init`.
 - **Everything else:** `editor.state()` is the underlying gpui-kit-markdown-editor
