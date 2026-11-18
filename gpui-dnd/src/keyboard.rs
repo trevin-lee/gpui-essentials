@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::item::DragItem;
-use crate::monitor::DragMonitor;
+use crate::monitor::{DragMonitor, DropMonitor};
 use crate::source::Backend;
 use crate::state::{self, TargetRecord};
 
@@ -104,7 +104,7 @@ pub(crate) fn key(event: &KeystrokeEvent, window: &mut Window, cx: &mut App) -> 
             if !plain || !(key == "space" || key == "enter") {
                 return false;
             }
-            pick_up(window, cx)
+            pick_up_focused(window, cx)
         }
     }
 }
@@ -114,7 +114,7 @@ fn point(x: f32, y: f32) -> Point<f32> {
 }
 
 /// Picks up the source that has the focus, at its centre.
-fn pick_up(window: &mut Window, cx: &mut App) -> bool {
+fn pick_up_focused(window: &mut Window, cx: &mut App) -> bool {
     let shared = state::shared(cx);
     let window_id = state::window_id(window);
     let source = {
@@ -127,6 +127,29 @@ fn pick_up(window: &mut Window, cx: &mut App) -> bool {
     let Some(source) = source else {
         return false;
     };
+    start(source, window, cx)
+}
+
+/// Picks up the source with this id with the keyboard, as a list that's one Tab stop does
+/// for its focused item.
+pub(crate) fn pick_up(id: &ElementId, window: &mut Window, cx: &mut App) -> bool {
+    let shared = state::shared(cx);
+    let window_id = state::window_id(window);
+    let source = {
+        let mut state = shared.borrow_mut();
+        if !state.keyboard.get(&window_id).copied().unwrap_or(false) {
+            return false;
+        }
+        state.registry(window_id).source(id)
+    };
+    match source {
+        Some(source) => start(source, window, cx),
+        None => false,
+    }
+}
+
+fn start(source: Rc<crate::state::SourceRecord>, window: &mut Window, cx: &mut App) -> bool {
+    let shared = state::shared(cx);
     if !state::begin(
         &source,
         source.bounds.center(),
@@ -140,7 +163,7 @@ fn pick_up(window: &mut Window, cx: &mut App) -> bool {
         let said = announcements(window, cx).picked_up.clone();
         announce(said(&snap.item), window, cx);
         if let Some(drag) = shared.borrow_mut().drag.as_mut() {
-            drag.said_over = Some(None);
+            drag.said_over = None;
         }
     }
     true
@@ -166,17 +189,18 @@ fn step(direction: Point<f32>, window: &mut Window, cx: &mut App) {
         {
             continue;
         }
-        let at = target.spec.anchor(visible);
-        let d = at - from;
-        let (dx, dy) = (f32::from(d.x), f32::from(d.y));
-        let along = dx * direction.x + dy * direction.y;
-        let across = (dx * direction.y - dy * direction.x).abs();
-        if along < 1. {
-            continue;
-        }
-        let score = along + 2. * across;
-        if best.is_none_or(|(b, _)| score < b) {
-            best = Some((score, at));
+        for at in target.spec.keyboard_points(&snap.item, visible) {
+            let d = at - from;
+            let (dx, dy) = (f32::from(d.x), f32::from(d.y));
+            let along = dx * direction.x + dy * direction.y;
+            let across = (dx * direction.y - dy * direction.x).abs();
+            if along < 1. {
+                continue;
+            }
+            let score = along + 2. * across;
+            if best.is_none_or(|(b, _)| score < b) {
+                best = Some((score, at));
+            }
         }
     }
     let Some((_, at)) = best else {
@@ -189,21 +213,45 @@ fn step(direction: Point<f32>, window: &mut Window, cx: &mut App) {
 /// Says which target the drag is over, if that changed.
 fn announce_over(window: &mut Window, cx: &mut App) {
     let shared = state::shared(cx);
-    let over = {
+    let (item, over) = {
+        let state = shared.borrow();
+        let Some(drag) = state.drag.as_ref() else {
+            return;
+        };
+        let over: Option<Rc<TargetRecord>> = drag.targets.last().cloned();
+        (drag.snap.item.clone(), over)
+    };
+    let name = over.as_ref().and_then(|t| target_name(t, &item, cx));
+    let said = announcements(window, cx).over.clone();
+    let text = said(&item, name.as_ref());
+    {
         let mut state = shared.borrow_mut();
         let Some(drag) = state.drag.as_mut() else {
             return;
         };
-        let over: Option<&Rc<TargetRecord>> = drag.targets.last();
-        let id: Option<ElementId> = over.map(|t| t.id.clone());
-        if drag.said_over.as_ref() == Some(&id) {
+        if drag.said_over.as_ref() == Some(&text) {
             return;
         }
-        drag.said_over = Some(id);
-        (drag.snap.item.clone(), over.and_then(|t| t.label.clone()))
+        drag.said_over = Some(text.clone());
+    }
+    announce(text, window, cx);
+}
+
+/// What a keyboard drag calls a target: what it describes itself as, or its label.
+pub(crate) fn target_name(
+    target: &TargetRecord,
+    item: &DragItem,
+    cx: &App,
+) -> Option<SharedString> {
+    let monitor = DropMonitor {
+        monitor: DragMonitor::of(cx),
+        target: target.id.clone(),
+        bounds: target.bounds,
     };
-    let said = announcements(window, cx).over.clone();
-    announce(said(&over.0, over.1.as_ref()), window, cx);
+    target
+        .spec
+        .description(item, &monitor)
+        .or_else(|| target.label.clone())
 }
 
 pub(crate) fn announcements(window: &Window, cx: &mut App) -> Announcements {
