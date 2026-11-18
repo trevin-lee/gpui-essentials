@@ -8,7 +8,7 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use gpui::{App, Global, Hsla, Pixels, Rems, SharedString, px, rems, rgb, rgba};
+use gpui::{App, Global, Hsla, Pixels, Rems, Rgba, SharedString, px, rems, rgb, rgba};
 
 /// Light or dark: which way the colours run. Components never pick colours by mode; it's for
 /// hosts and for images that need a dark or a light variant.
@@ -114,6 +114,37 @@ pub struct Colors {
     pub chart_3: Hsla,
     pub chart_4: Hsla,
     pub chart_5: Hsla,
+    /// A warning callout's base colour, drawn at 10% for its fill and 25% for its border.
+    pub warning: Hsla,
+    /// A warning's icon and words.
+    pub warning_text: Hsla,
+    /// A warning callout's fill.
+    pub warning_fill: Hsla,
+    /// A warning callout's border.
+    pub warning_line: Hsla,
+    /// A done step's tick and words.
+    pub success_text: Hsla,
+    /// A solid success badge.
+    pub success_fill: Hsla,
+    /// A field's fill on a card or sheet: `input` at 30% over `card`, opaque, so a focus ring
+    /// stays a ring.
+    pub field_on_card: Hsla,
+    /// A search box's fill on the page: `secondary` at 60% over `background`, opaque.
+    pub field_on_page: Hsla,
+    /// A field's fill on the page: `input` at 30%.
+    pub input_fill: Hsla,
+    /// A choice tile's fill: `secondary` at 50%.
+    pub tile_fill: Hsla,
+    /// A menu's, popover's or dialog's border: `foreground` at 10%.
+    pub overlay_line: Hsla,
+    /// Quieter secondary text (a row's time): `muted_foreground` at 70%.
+    pub muted_70: Hsla,
+    /// An error's box: `destructive` at 10%.
+    pub destructive_fill: Hsla,
+    /// Under a sheet or dialog: black at 10%.
+    pub scrim: Hsla,
+    /// Under a modal that must be answered: black at 48%.
+    pub scrim_strong: Hsla,
 }
 
 /// A callout's box: its colour at 8%.
@@ -127,6 +158,19 @@ fn c(hex: u32) -> Hsla {
 
 fn ca(hex: u32) -> Hsla {
     rgba(hex).into()
+}
+
+/// `top` at `alpha` over the opaque `bottom`, as one opaque colour.
+fn over(top: u32, alpha: f32, bottom: u32) -> Hsla {
+    let (t, b) = (rgb(top), rgb(bottom));
+    let mix = |t: f32, b: f32| t * alpha + b * (1. - alpha);
+    Rgba {
+        r: mix(t.r, b.r),
+        g: mix(t.g, b.g),
+        b: mix(t.b, b.b),
+        a: 1.,
+    }
+    .into()
 }
 
 impl Colors {
@@ -145,23 +189,23 @@ impl Colors {
             secondary_foreground: c(0xededef),
             muted: c(0x1f1f23),
             muted_foreground: c(0x8b8b93),
-            accent: ca(0xffffff0f),
+            accent: ca(0xededef0d),
             accent_foreground: c(0xededef),
             destructive: c(0xe5665b),
             success: c(0x4cc38a),
             border: c(0x28282d),
             input: c(0x3a3a41),
-            ring: c(0xededef),
+            ring: c(0x9f9fa9),
             sidebar: c(0x0b0b0d),
             sidebar_foreground: c(0xededef),
             sidebar_primary: c(0xededef),
             sidebar_primary_foreground: c(0x0f0f11),
-            sidebar_accent: ca(0xffffff0f),
+            sidebar_accent: ca(0xededef0d),
             sidebar_accent_foreground: c(0xededef),
             sidebar_border: c(0x28282d),
-            sidebar_ring: c(0xededef),
+            sidebar_ring: c(0x9f9fa9),
             live: c(0x4cc38a),
-            attention: c(0xd9a441),
+            attention: c(0xe3b45a),
             attention_foreground: c(0xe3b45a),
             ready: c(0x4cc38a),
             bubble: c(0x2a2a30),
@@ -191,6 +235,21 @@ impl Colors {
             chart_3: c(0xfe9a00),
             chart_4: c(0xad46ff),
             chart_5: c(0xff2056),
+            warning: c(0xf59e0b),
+            warning_text: c(0xfbbf24),
+            warning_fill: ca(0xf59e0b1a),
+            warning_line: ca(0xf59e0b40),
+            success_text: c(0x34d399),
+            success_fill: c(0x10b981),
+            field_on_card: c(0x222226),
+            field_on_page: c(0x19191c),
+            input_fill: ca(0x3a3a414d),
+            tile_fill: ca(0x1f1f2380),
+            overlay_line: ca(0xededef1a),
+            muted_70: ca(0x8b8b93b3),
+            destructive_fill: ca(0xe5665b1a),
+            scrim: ca(0x0000001a),
+            scrim_strong: ca(0x0000007a),
         }
     }
 
@@ -255,6 +314,22 @@ impl Colors {
             chart_3: c(0x104e64),
             chart_4: c(0xffb900),
             chart_5: c(0xfe9a00),
+            // The same tokens on the light colours above, by the same recipes.
+            warning: c(0xf59e0b),
+            warning_text: c(0xb45309),
+            warning_fill: ca(0xf59e0b1a),
+            warning_line: ca(0xf59e0b40),
+            success_text: c(0x047857),
+            success_fill: c(0x10b981),
+            field_on_card: over(0xd9d9de, 0.3, 0xffffff),
+            field_on_page: over(0xf1f1f3, 0.6, 0xfafafa),
+            input_fill: ca(0xd9d9de4d),
+            tile_fill: ca(0xf1f1f380),
+            overlay_line: ca(0x0f0f111a),
+            muted_70: ca(0x6b6b73b3),
+            destructive_fill: ca(0xc7362b1a),
+            scrim: ca(0x0000001a),
+            scrim_strong: ca(0x0000007a),
         }
     }
 
@@ -288,10 +363,13 @@ pub struct TypeScale {
     pub base: Rems,
     pub lg: Rems,
     pub xl: Rems,
+    /// A page's title (the web's `text-2xl`).
+    pub title: Rems,
 }
 
 impl Default for TypeScale {
-    /// The web's: 11.25, 13.125, 15, 16.875 and 18.75 CSS pixels on a 15 pixel base.
+    /// The web's: 11.25, 13.125, 15, 16.875, 18.75 and (a title) 22.5 CSS pixels on a 15 pixel
+    /// base.
     fn default() -> Self {
         Self {
             xs: rems(0.75),
@@ -299,6 +377,7 @@ impl Default for TypeScale {
             base: rems(1.),
             lg: rems(1.125),
             xl: rems(1.25),
+            title: rems(1.5),
         }
     }
 }
@@ -370,6 +449,11 @@ impl Theme {
     /// `rounded-xl`: 1.4 times the radius.
     pub fn radius_xl(&self) -> Rems {
         rems(self.radius.0 * 1.4)
+    }
+
+    /// A chat card's corners (an agent's OpenUI card): 1.6 times the radius.
+    pub fn radius_card(&self) -> Rems {
+        rems(self.radius.0 * 1.6)
     }
 
     /// Makes `theme` the app's theme. Windows pick it up on their next draw; call
