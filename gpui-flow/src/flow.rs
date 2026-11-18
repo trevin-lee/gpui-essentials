@@ -187,6 +187,14 @@ pub struct FlowOptions {
     pub transition: Duration,
     /// How much room a fit leaves around the nodes: 0.1 shows an area a tenth larger.
     pub fit_padding: f32,
+    /// While nodes are dragged, the pointer within 40 points of the pane's edge moves the
+    /// viewport that way, the nodes with it, as React Flow's `autoPanOnNodeDrag`. On by default.
+    pub auto_pan_on_node_drag: bool,
+    /// The same while a connection is dragged (React Flow's `autoPanOnConnect`). On by default.
+    pub auto_pan_on_connect: bool,
+    /// How fast that moves, in points a sixtieth of a second at the very edge (React Flow's
+    /// `autoPanSpeed`, 15 by default); slower the further in the pointer is.
+    pub auto_pan_speed: f32,
 }
 
 impl Default for FlowOptions {
@@ -226,6 +234,9 @@ impl Default for FlowOptions {
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
             fit_padding: 0.1,
+            auto_pan_on_node_drag: true,
+            auto_pan_on_connect: true,
+            auto_pan_speed: 15.,
         }
     }
 }
@@ -642,6 +653,10 @@ pub struct Flow {
     shared: Rc<Shared>,
     focus: FocusHandle,
     drag: Option<Drag>,
+    /// Where the pointer of the drag under way last was, in the pane, and when the viewport
+    /// last moved for it being near the pane's edge (see [`FlowOptions::auto_pan_on_node_drag`]).
+    drag_pane: Option<XY>,
+    auto_panned: Option<Instant>,
     /// The button that began the drag: only its release ends it.
     drag_button: MouseButton,
     transition: Option<Transition>,
@@ -866,6 +881,8 @@ impl Flow {
             shared: Rc::default(),
             focus: cx.focus_handle(),
             drag: None,
+            drag_pane: None,
+            auto_panned: None,
             drag_button: MouseButton::Left,
             transition: None,
             pending_fit: None,
@@ -4226,6 +4243,7 @@ impl Flow {
         }
         let pane = self.shared.pane_point(event.position);
         let pointer = self.viewport.to_flow(pane);
+        self.drag_pane = Some(pane);
         match &mut drag {
             Drag::Draw { pen, points, began } => {
                 let t = now(cx).saturating_duration_since(*began).as_secs_f32();
@@ -4243,11 +4261,27 @@ impl Flow {
                 cx.notify();
                 return;
             }
+            Drag::Minimap => {
+                self.drag = Some(drag);
+                self.minimap_center(event.position, cx);
+                return;
+            }
             _ => {}
         }
+        self.drag = Some(drag);
+        self.drag_to(pane, cx);
+    }
+
+    /// The drag under way follows the pointer at `pane` (in the pane): the pointer moved, or
+    /// the viewport moved under it.
+    fn drag_to(&mut self, pane: XY, cx: &mut Context<Self>) {
+        let Some(mut drag) = self.drag.take() else {
+            return;
+        };
+        let pointer = self.viewport.to_flow(pane);
         match &mut drag {
-            // Taken above.
-            Drag::Draw { .. } | Drag::Erase { .. } => {}
+            // Taken by mouse_move.
+            Drag::Draw { .. } | Drag::Erase { .. } | Drag::Minimap => {}
             Drag::Pan {
                 start, last, moved, ..
             } => {
@@ -4415,7 +4449,6 @@ impl Flow {
                 cx.emit(FlowEvent::NodeResize(node.clone()));
                 cx.notify();
             }
-            Drag::Minimap => self.minimap_center(event.position, cx),
         }
         self.drag = Some(drag);
     }
@@ -4430,6 +4463,8 @@ impl Flow {
     /// Ends whatever the mouse was doing, as its release does.
     fn finish_drag(&mut self, cx: &mut Context<Self>) {
         self.guides.clear();
+        self.drag_pane = None;
+        self.auto_panned = None;
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -4708,6 +4743,47 @@ impl Flow {
     // Drawing.
 
     /// Moves a transition along, and asks for another frame until it's done.
+    /// While nodes or a connection are dragged with the pointer near the pane's edge, moves the
+    /// viewport that way a little each frame, the drag following the pointer as it does, as
+    /// React Flow's auto-pan. Its speed is React Flow's per frame at 60 a second, scaled to the
+    /// time since the last frame, so a 120-hertz display moves no faster.
+    fn auto_pan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let on = match &self.drag {
+            Some(Drag::Nodes {
+                moved: true,
+                origins,
+                ..
+            }) => self.options.auto_pan_on_node_drag && !origins.is_empty(),
+            Some(Drag::Connect { started: true, .. }) => self.options.auto_pan_on_connect,
+            _ => false,
+        };
+        let Some(pane) = self.drag_pane.filter(|_| on) else {
+            self.auto_panned = None;
+            return;
+        };
+        let (w, h) = self.pane_size();
+        let (dx, dy) = auto_pan_velocity(pane, (w, h), self.options.auto_pan_speed);
+        if dx == 0. && dy == 0. {
+            self.auto_panned = None;
+            return;
+        }
+        let now = self.frame_time;
+        // The first frame near the edge starts the clock; later ones move by the time since.
+        if let Some(last) = self.auto_panned {
+            let frames = now.saturating_duration_since(last).as_secs_f32().min(0.1) * 60.;
+            if frames > 0. {
+                let v = self.viewport;
+                self.move_viewport(
+                    Viewport::new(v.x + dx * frames, v.y + dy * frames, v.zoom),
+                    cx,
+                );
+                self.drag_to(pane, cx);
+            }
+        }
+        self.auto_panned = Some(now);
+        window.request_animation_frame();
+    }
+
     fn step_transition(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(t) = &self.transition else {
             return;
@@ -5477,6 +5553,7 @@ impl Render for Flow {
         self.follow_resize(cx);
         self.try_pending_fit(cx);
         self.step_transition(window, cx);
+        self.auto_pan(window, cx);
         self.keep_ticking(cx);
 
         let viewport = self.viewport;
@@ -5988,6 +6065,23 @@ fn distance(a: Point<Pixels>, b: Point<Pixels>) -> f32 {
 /// animations step the same however fast the machine draws.
 fn now(cx: &App) -> Instant {
     cx.background_executor().now()
+}
+
+/// How far the viewport moves a sixtieth of a second for a drag's pointer at `at` in a pane of
+/// `size`: `speed` at the pane's edge (or past it), less further in, and nothing more than 40
+/// in from it. React Flow's `calcAutoPan`.
+fn auto_pan_velocity(at: XY, size: (f32, f32), speed: f32) -> (f32, f32) {
+    const REACH: f32 = 40.;
+    let along = |value: f32, max: f32| {
+        if value < REACH {
+            (REACH - value).clamp(1., REACH) / REACH
+        } else if value > max - REACH {
+            -(value - (max - REACH)).clamp(1., REACH) / REACH
+        } else {
+            0.
+        }
+    };
+    (along(at.x, size.0) * speed, along(at.y, size.1) * speed)
 }
 
 /// Whether a node is a frame: the built-in kind that holds other nodes.

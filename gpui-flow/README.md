@@ -127,8 +127,10 @@ made.
   from elsewhere aren't in the history, and a step whose nodes have since gone is passed over.
 - **With the mouse and keys.** Drag the pane to pan; scroll or pinch to zoom about the pointer;
   drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
-  rectangle; drag from a handle to another (either direction) to connect; click an edge to
-  select it; delete, ⌘A, escape (which also puts back a drag, resize, pan or rectangle), the
+  rectangle; drag from a handle to another (either direction) to connect; a node or a
+  connection dragged to within 40 points of the pane's edge moves the view that way, faster the
+  nearer the edge (`auto_pan_on_node_drag`, `auto_pan_on_connect`, `auto_pan_speed`, as React
+  Flow's); click an edge to select it; delete, ⌘A, escape (which also puts back a drag, resize, pan or rectangle), the
   arrows (shift for four steps), ⌘+, ⌘−, ⌘0, ⇧1 to fit. The keys sit on a layer of their own
   beside the nodes, so they only act while the flow itself has the focus, never while a text
   field in a node or panel does, and a key with nothing to do goes on to the host.
@@ -333,8 +335,7 @@ made.
 - **Names.** React Flow's `Position` is `Side` and `Background` is `FlowBackground`, because
   GPUI exports both names and hosts import both crates whole.
 - **Not yet.** Reconnecting an existing edge by dragging its end; a node toolbar; edge
-  renderers of the host's own (a custom type is drawn as a bezier); panning when a drag nears
-  the pane's edge; connecting by clicking two handles in turn; `dragHandle`; markers that
+  renderers of the host's own (a custom type is drawn as a bezier); connecting by clicking two handles in turn; `dragHandle`; markers that
   scale with the line's width; a keyboard path through nodes and accessibility; undo.
 
 ## License
