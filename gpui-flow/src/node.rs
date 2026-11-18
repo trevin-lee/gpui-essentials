@@ -402,11 +402,17 @@ impl NodeContext {
         &self.flow
     }
 
+    /// What the link button is called to assistive technology.
+    fn link_name(&self) -> SharedString {
+        "Open the link".into()
+    }
+
     /// A small button that asks the host to open the node's link (a `FlowEvent::OpenLink`),
     /// or nothing when the node has none. The built-in kinds show it after their label; add
     /// it to a kind of your own wherever it fits.
     pub fn link_button(&self) -> Option<AnyElement> {
         self.link.as_ref()?;
+        gpui_core::audit("FlowNodeButton", Role::Button, Some(&self.link_name()));
         let (flow, id) = (self.flow.clone(), self.id.clone());
         Some(
             div()
@@ -422,6 +428,8 @@ impl NodeContext {
                 .cursor(CursorStyle::PointingHand)
                 .hover(|s| s.bg(self.colors.panel_hover))
                 .nodrag()
+                .role(Role::Button)
+                .aria_label(self.link_name())
                 .child("↗")
                 .on_click(move |_, _, cx| {
                     flow.update(cx, |flow, cx| flow.open_link(&id, cx)).ok();
@@ -1289,6 +1297,8 @@ pub fn link_node(node: &Node, ctx: &NodeContext, window: &mut Window, cx: &mut A
             .line_clamp(lines)
             .child(text)
     };
+    let open_name = SharedString::from("Open the page");
+    gpui_core::audit("FlowNodeButton", Role::Button, Some(&open_name));
     let open = {
         let (flow, id) = (ctx.flow.clone(), ctx.id.clone());
         div()
@@ -1304,6 +1314,8 @@ pub fn link_node(node: &Node, ctx: &NodeContext, window: &mut Window, cx: &mut A
             .cursor(CursorStyle::PointingHand)
             .hover(|s| s.bg(ctx.colors.panel_hover))
             .nodrag()
+            .role(Role::Button)
+            .aria_label(open_name.clone())
             .child("Open ↗")
             .on_click(move |_, _, cx| {
                 flow.update(cx, |flow, cx| flow.open_url(&id, cx)).ok();

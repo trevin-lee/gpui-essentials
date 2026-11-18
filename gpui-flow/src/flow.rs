@@ -5854,6 +5854,13 @@ impl Flow {
         } else {
             "−".into()
         };
+        let name = self.name_of(&node.id);
+        let spoken = SharedString::from(if node.collapsed {
+            format!("Show what's under {name}")
+        } else {
+            format!("Fold away what's under {name}")
+        });
+        gpui_core::audit("FlowNodeButton", Role::Button, Some(&spoken));
         let base = div()
             .id(SharedString::from(format!("collapse-{}", node.id)))
             .absolute()
@@ -5869,6 +5876,9 @@ impl Flow {
             .text_color(ctx.colors.muted_text)
             .cursor(CursorStyle::PointingHand)
             .nodrag()
+            .role(Role::Button)
+            .aria_label(spoken)
+            .aria_expanded(!node.collapsed)
             .child(label);
         let placed = match side {
             Side::Right => base.right(out).top(relative(0.5)).mt(units(-8.)),
@@ -6138,24 +6148,31 @@ impl Flow {
         .into_any_element()
     }
 
+    /// A button of the controls: an icon, named for assistive technology, pressed by a click,
+    /// a tap, or Enter or Space from the keyboard. A press leaves the focus where it was (the
+    /// canvas keeps its keys).
     fn control_button(
         &self,
         icon: Icon,
+        name: &'static str,
         colors: FlowColors,
         cx: &mut Context<Self>,
         act: fn(&mut Flow, &mut Context<Flow>),
-    ) -> Div {
-        div()
+    ) -> gpui_core::Press {
+        let this = cx.entity().downgrade();
+        gpui_core::audit("FlowControl", Role::Button, Some(&SharedString::from(name)));
+        gpui_core::Press::new(SharedString::from(format!("flow-control-{name}")))
+            .accessibility_label(name)
+            .debug_selector(move || format!("flow-control-{name}"))
+            .focus_on_press(false)
             .size(px(26.))
             .cursor(CursorStyle::PointingHand)
             .hover(move |s| s.bg(colors.panel_hover))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |flow, _, _, cx| {
-                    cx.stop_propagation();
-                    act(flow, cx);
-                }),
-            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let _ = this.update(cx, act);
+            })
             .child(
                 canvas(
                     |_, _, _| {},
@@ -6167,14 +6184,15 @@ impl Flow {
             )
     }
 
-    fn render_controls(&self, colors: FlowColors, cx: &mut Context<Self>) -> Div {
-        let lock = if self.interactive() {
-            Icon::Unlocked
+    fn render_controls(&self, colors: FlowColors, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (lock, lock_name) = if self.interactive() {
+            (Icon::Unlocked, "Lock the canvas")
         } else {
-            Icon::Locked
+            (Icon::Locked, "Unlock the canvas")
         };
         let line = || div().h(px(1.)).w_full().bg(colors.panel_border);
         div()
+            .id("flow-controls")
             .absolute()
             .left(px(15.))
             .bottom(px(15.))
@@ -6187,18 +6205,20 @@ impl Flow {
             .bg(colors.panel)
             .occlude()
             .on_scroll(|_, _, cx| cx.stop_propagation())
-            .child(self.control_button(Icon::Plus, colors, cx, |f, cx| f.zoom_in(cx)))
+            .role(Role::Group)
+            .aria_label("Canvas controls")
+            .child(self.control_button(Icon::Plus, "Zoom in", colors, cx, |f, cx| f.zoom_in(cx)))
             .child(line())
-            .child(self.control_button(Icon::Minus, colors, cx, |f, cx| f.zoom_out(cx)))
+            .child(self.control_button(Icon::Minus, "Zoom out", colors, cx, |f, cx| f.zoom_out(cx)))
             .child(line())
-            .child(self.control_button(Icon::Fit, colors, cx, |f, cx| f.fit_view(cx)))
+            .child(self.control_button(Icon::Fit, "Fit view", colors, cx, |f, cx| f.fit_view(cx)))
             .child(line())
-            .child(self.control_button(lock, colors, cx, |f, cx| {
+            .child(self.control_button(lock, lock_name, colors, cx, |f, cx| {
                 f.set_interactive(!f.interactive(), cx)
             }))
     }
 
-    fn render_minimap(&self, colors: FlowColors, cx: &mut Context<Self>) -> Div {
+    fn render_minimap(&self, colors: FlowColors, cx: &mut Context<Self>) -> Stateful<Div> {
         let nodes: Vec<(Rect, bool)> = self
             .nodes
             .iter()
@@ -6208,7 +6228,13 @@ impl Flow {
         let (w, h) = self.pane_size();
         let visible = self.viewport.visible(w.max(1.), h.max(1.));
         let shared = self.shared.clone();
+        // Named as React Flow's is; pressing or dragging in it moves the view.
+        let name = SharedString::from("Mini map");
+        gpui_core::audit("FlowMinimap", Role::Group, Some(&name));
         div()
+            .id("flow-minimap")
+            .role(Role::Group)
+            .aria_label(name)
             .absolute()
             .right(px(15.))
             .bottom(px(15.))
