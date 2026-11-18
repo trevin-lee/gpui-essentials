@@ -999,7 +999,12 @@ Up/Down PRs merge, when the lead says.
      layout.
    - Edge scrolling stays the editor's own. #397 made it ask for frames only while it scrolls,
      and its test drives it with frames drawn, not a clock.
-3. Keyboard pick-up with blocks' sentences.
+3. **Built.** The keyboard pick-up with blocks' sentences: Space with blocks selected, in a
+   `blocks_selected` key context so Space types elsewhere, and Move in the desktop block menu.
+   Its steps set the drop explicitly (`KeyDrop`, in `engine/src/dnd.rs`), not from pointer
+   geometry; the pointer only slides the other blocks aside. Taking a block out of a column
+   uses the new `top_level_gap_target`. The pick-up sentence is blocks' too
+   (`Press::picked_up`, new): "move them" for a run, so gpui-dnd composes no English for it.
 
 ## Later: gpui-flow's canvas
 

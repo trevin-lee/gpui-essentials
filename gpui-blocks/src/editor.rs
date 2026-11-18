@@ -4559,6 +4559,50 @@ mod tests {
 
     /// A press on a grip that doesn't drag opens the block menu; its entries turn the block into
     /// a heading, duplicate it and delete it.
+    /// The desktop block menu's Move picks the block up by the keyboard: the arrows carry it,
+    /// said in the editor's words, and Space drops it.
+    #[gpui::test]
+    fn the_block_menus_move_picks_the_block_up_for_the_arrows(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "first\n\nsecond");
+        let first = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .next()
+                .unwrap()
+                .id()
+        });
+        editor.update(cx, |e, cx| {
+            e.grip_pressed(first);
+            e.grip_released(cx);
+        });
+        draw(cx);
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(first, "move-keys", window, cx)
+        });
+        draw(cx);
+        assert!(editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
+        let said = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| gpui_dnd::announcement(window, cx))
+                .map(|s| s.to_string())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            said(cx),
+            "Picked up Paragraph first. Arrow keys move it, Space drops it, Escape cancels."
+        );
+        cx.simulate_keystrokes("down");
+        draw(cx);
+        assert_eq!(said(cx), "Paragraph first, below Paragraph second, 2 of 2");
+        cx.simulate_keystrokes("space");
+        draw(cx);
+        assert_eq!(said(cx), "Paragraph first, moved below Paragraph second");
+        assert_eq!(markdown(&editor, cx), "second\n\nfirst");
+    }
+
     #[gpui::test]
     fn the_block_menu_turns_duplicates_and_deletes(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "first\n\nsecond");

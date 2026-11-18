@@ -899,3 +899,20 @@ fn a_target_an_element_registers_from_its_prepaint_takes_drops_while_held(cx: &m
     assert_eq!(with(&log, "drop"), ["drop 1"], "no second drop");
     assert!(held.borrow().is_none());
 }
+
+#[gpui::test]
+fn a_keyboard_pick_up_says_the_hosts_own_sentence(cx: &mut TestAppContext) {
+    let log = log();
+    let event = Rc::new(Cell::new(1));
+    let mut o = open(cx, calendar(log.clone(), Start::Press, event, |t| t));
+    let t = o.center("t");
+    o.vcx.update(|window, cx| {
+        let press = Press {
+            picked_up: Some("Took the standup. Arrows carry it.".into()),
+            ..press(Backend::Keyboard)
+        };
+        assert!(begin_at(window, cx, "event", t, source(&log, 1), press))
+    });
+    assert_eq!(o.said().unwrap(), "Took the standup. Arrows carry it.");
+    o.keys("escape");
+}
