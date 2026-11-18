@@ -309,7 +309,10 @@ item](docs/gallery.png)
   drawn in the colours of the popover it's in, stays its entry's while entries come and go,
   can be made only when it opens (`submenu_with(|| …)`), and a menu can open with one open
   and the keyboard in it (`open_submenu(id)`).
-  `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
+  Entries given one `reorder_group(name)` can be put in another order by dragging them, or with
+  Alt-Up and Alt-Down; each finished move goes to `on_reorder(MenuReorder { group, id, from,
+  to })`, and the host reorders its entries and draws the menu again (the menus example has
+  one). `touch(true)` makes rows 44 points tall. (`Menu` and `MenuItem` are GPUI's app menus.)
 - **ContextMenu.** `ContextMenu::new(id, element).menu(|window, cx| PopupMenu::new(…)…)` opens
   the menu over everything: at the pointer on a right-click, where a finger rests on the
   element for half a second (GPUI's long press, with rows 44 points tall), and under the

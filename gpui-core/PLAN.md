@@ -234,3 +234,19 @@ at the adapted code. Lucide's ISC licence goes into NOTICE when the icons are ve
 `.github/workflows/gpui-core.yml` is copied from `gpui-flow.yml`: macos-latest, fmt, clippy
 (`-D warnings`, also with `shots`), test, and doc with warnings denied. A second job runs
 `cargo build -p gpui-core --target aarch64-apple-ios-sim`.
+
+
+## Possible later: shaping off the main thread
+
+Measured 2026-11-17 for gpui-tables' 10,000-row table, release, on an M4 Pro. After a sort,
+filter and group, the draw takes about 8 ms. About 5 ms of that is Core Text shaping the
+roughly 180 lines that come into view, about 30 µs a line, and the rest is an ordinary frame
+(about 2.5 ms). A frame that scrolls a page of new rows costs the same: about 11 ms, 159 lines
+shaped. Frames that bring in nothing new shape nothing, because GPUI's line cache keeps the
+last frame's lines. A cache can't help here, since the text was never shaped before.
+
+What would help is shaping the coming rows on a background thread (Core Text is thread-safe)
+and drawing them with a text element of gpui-core's own that paints pre-shaped lines. It saves
+about 5 ms on a sort or a page jump. Ordinary scrolling brings in a few lines a frame. Not now:
+the lead decided (2026-11-17) that a custom text element is too much risk for 5 ms.
+
