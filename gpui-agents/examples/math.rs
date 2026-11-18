@@ -9,8 +9,8 @@
 //! cargo run --release --features shots --example math -- --shots /tmp/math
 //! ```
 //!
-//! With `--shots <dir>` it draws each from a window that's never shown, saves
-//! `<name>-402.png` and `<name>-720.png`, then quits.
+//! With `--shots <dir>` it draws each from a window that's never shown, in the dark and the
+//! light, saves `<name>-<width>-<dark|light>.png`, then quits. `--light` shows the light one.
 
 use std::path::PathBuf;
 
@@ -38,11 +38,37 @@ The words after it start below it.
 
 const CAREER: &str = include_str!("replies/career-math.md");
 
-fn style() -> TextViewStyle {
+/// The page's colours: its ground, its text, and a code block's fill and edge.
+#[derive(Clone, Copy)]
+struct Look {
+    ground: u32,
+    text: u32,
+    code: u32,
+    edge: u32,
+    dark: bool,
+}
+
+const DARK: Look = Look {
+    ground: 0x111114,
+    text: 0xe8e8ea,
+    code: 0x1c1c1f,
+    edge: 0x2e2e33,
+    dark: true,
+};
+
+const LIGHT: Look = Look {
+    ground: 0xffffff,
+    text: 0x1d1d1f,
+    code: 0xf6f6f7,
+    edge: 0xe4e4e7,
+    dark: false,
+};
+
+fn style(look: Look) -> TextViewStyle {
     let mut code = StyleRefinement::default()
-        .bg(rgb(0x1c1c1f))
+        .bg(rgb(look.code))
         .border_1()
-        .border_color(rgb(0x2e2e33))
+        .border_color(rgb(look.edge))
         .rounded(px(10.))
         .px(px(12.))
         .py(px(10.));
@@ -63,17 +89,18 @@ fn style() -> TextViewStyle {
 /// A reply in a chat's column.
 struct Page {
     reply: Option<Entity<StreamingMarkdown>>,
+    look: Look,
 }
 
 impl Render for Page {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .bg(rgb(0x111114))
+            .bg(rgb(self.look.ground))
             .font_family("Inter")
             .text_size(px(14.))
             .line_height(px(14. * 1.625))
-            .text_color(rgb(0xe8e8ea))
+            .text_color(rgb(self.look.text))
             .p(px(16.))
             .children(self.reply.clone())
     }
@@ -112,9 +139,12 @@ fn application() -> Application {
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut shots: Option<PathBuf> = None;
+    let mut light = false;
     while let Some(a) = args.next() {
         if a == "--shots" {
             shots = args.next().map(PathBuf::from);
+        } else if a == "--light" {
+            light = true;
         }
     }
     application().with_assets(gpui_core::Icons).run(move |cx| {
@@ -134,45 +164,68 @@ fn main() {
         );
         let offscreen = shots.is_some();
         let widths: &[f32] = if offscreen { &[402., 720.] } else { &[720.] };
-        for &w in widths {
-            for (name, text, done) in texts() {
-                let height = if w < 500. { 2000. } else { 1300. };
-                let options = WindowOptions {
-                    titlebar: Some(TitlebarOptions {
-                        title: Some(format!("Math: {name}").into()),
+        let looks: &[Look] = match (offscreen, light) {
+            (true, _) => &[DARK, LIGHT],
+            (false, true) => &[LIGHT],
+            (false, false) => &[DARK],
+        };
+        for &look in looks {
+            Theme::set(
+                Theme {
+                    font_family: "Inter".into(),
+                    font_size: px(16.),
+                    ..if look.dark {
+                        Theme::dark()
+                    } else {
+                        Theme::light()
+                    }
+                },
+                cx,
+            );
+            for &w in widths {
+                for (name, text, done) in texts() {
+                    let height = if w < 500. { 2000. } else { 1300. };
+                    let options = WindowOptions {
+                        titlebar: Some(TitlebarOptions {
+                            title: Some(format!("Math: {name}").into()),
+                            ..Default::default()
+                        }),
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                            None,
+                            size(px(w), px(height)),
+                            cx,
+                        ))),
+                        focus: !offscreen,
+                        show: !offscreen,
                         ..Default::default()
-                    }),
-                    window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                        None,
-                        size(px(w), px(height)),
-                        cx,
-                    ))),
-                    focus: !offscreen,
-                    show: !offscreen,
-                    ..Default::default()
-                };
-                let (window, _) = gpui_core::open_window(options, cx, move |_, cx| {
-                    let reply = cx.new(|cx| {
-                        let mut r = StreamingMarkdown::new(format!("math-{name}"))
-                            .style(style())
-                            .selectable(true)
-                            .touch(w < 500.);
-                        if done {
-                            r.finish(&text, cx);
-                        } else {
-                            r.append(&text, cx);
-                        }
-                        r
-                    });
-                    cx.new(|_| Page { reply: Some(reply) })
-                })
-                .expect("the window");
-                if let Some(dir) = &shots {
-                    shot(window, dir, &format!("{name}-{w}"), cx);
-                    let _ = cx.update_window(window, |_, window, _| window.remove_window());
-                }
-                if !offscreen {
-                    break;
+                    };
+                    let (window, _) = gpui_core::open_window(options, cx, move |_, cx| {
+                        let reply = cx.new(|cx| {
+                            let mut r = StreamingMarkdown::new(format!("math-{name}"))
+                                .style(style(look))
+                                .selectable(true)
+                                .touch(w < 500.);
+                            if done {
+                                r.finish(&text, cx);
+                            } else {
+                                r.append(&text, cx);
+                            }
+                            r
+                        });
+                        cx.new(|_| Page {
+                            reply: Some(reply),
+                            look,
+                        })
+                    })
+                    .expect("the window");
+                    if let Some(dir) = &shots {
+                        let shade = if look.dark { "dark" } else { "light" };
+                        shot(window, dir, &format!("{name}-{w}-{shade}"), cx);
+                        let _ = cx.update_window(window, |_, window, _| window.remove_window());
+                    }
+                    if !offscreen {
+                        break;
+                    }
                 }
             }
         }

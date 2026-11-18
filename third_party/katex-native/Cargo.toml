@@ -1,0 +1,15 @@
+[package]
+name = "katex-native"
+# Vendored from katex-native 0.1.1 (crates.io, https://github.com/garlab/katex-native): KaTeX's
+# layout from katex-rs's HTML tree, as a display list. Changed here: no `raster` feature, and
+# only the font faces gpui-core draws, renamed (fonts/rename.py).
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.88"
+description = "Native layout for katex-rs (vendored from katex-native 0.1.1): KaTeX's CSS applied with its font metrics, as a display list."
+# The embedded fonts are KaTeX's, under the SIL Open Font License 1.1 (fonts/OFL.txt).
+license = "MIT AND OFL-1.1"
+publish = false
+
+[dependencies]
+katex-rs = "=0.3.0"

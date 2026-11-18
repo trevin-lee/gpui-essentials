@@ -7,6 +7,8 @@ on:
     paths:
       - "gpui-core/**"
       - "gpui-cli/**"
+      # The vendored katex-native and its fonts, which the math feature draws with.
+      - "third_party/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -15,6 +17,8 @@ on:
     paths:
       - "gpui-core/**"
       - "gpui-cli/**"
+      # The vendored katex-native and its fonts, which the math feature draws with.
+      - "third_party/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -60,7 +64,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then printf 'own=true\nrun=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
-          python3 .github/scripts/changes.py '^(gpui\-core/|gpui\-cli/|\.github/workflows/gpui\-core\.yml)' gpui-core gpui-cli >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/changes.py '^(gpui\-core/|gpui\-cli/|third_party/|\.github/workflows/gpui\-core\.yml)' gpui-core gpui-cli >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
@@ -84,6 +88,9 @@ jobs:
       - run: cargo clippy -p gpui-core --locked --all-targets --features highlight -- -D warnings
       - run: cargo test -p gpui-core --locked --features highlight --lib --test text_view_highlight
       - run: cargo test -p gpui-core --locked --features highlight --doc
+      # Typeset math (KaTeX's layout, vendored katex-native), off by default.
+      - run: cargo clippy -p gpui-core --locked --all-targets --features math -- -D warnings
+      - run: cargo test -p gpui-core --locked --features math --lib
       # Unit, interaction and headless tests, and the README's examples compiled.
       - run: cargo test -p gpui-core --locked
       - run: cargo doc -p gpui-core --locked --no-deps --features highlight
@@ -150,3 +157,4 @@ jobs:
       - run: rustup target add wasm32-unknown-unknown
       # Clippy, not just a check: lints that differ by target (pointer sizes) show up here.
       - run: cargo clippy -p gpui-core --locked --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo clippy -p gpui-core --locked --features math --target wasm32-unknown-unknown -- -D warnings

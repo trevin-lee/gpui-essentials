@@ -66,7 +66,8 @@ pub fn parse_with(source: &str, before: &str, after: &str) -> Parsed {
     while !source.is_char_boundary(end) {
         end -= 1;
     }
-    let source = &source[..end];
+    let source = tex_delimiters(&source[..end]);
+    let source = source.as_ref();
     // What fits of the others' definitions, within the limit.
     let cut = |text: &str, room: usize| -> usize {
         let mut n = room.min(text.len());
@@ -144,6 +145,11 @@ fn own_definitions(parser: &Parser, own: &std::ops::Range<usize>) -> String {
 /// ```` ```math ````). The TeX is kept as written and drawn as its source, on one line each line,
 /// in a box that scrolls sideways when it's wider than the view.
 pub const MATH_LANGUAGE: &str = "math";
+
+/// The language of a display equation shown as its TeX, never typeset: a fence of it
+/// (```` ```math-source ````), as a reply being written shows an equation it's still writing, so
+/// it doesn't flip between typeset and not as its TeX grows.
+pub const MATH_SOURCE_LANGUAGE: &str = "math-source";
 
 /// GitHub's flavour: tables, task lists, strikethrough, footnotes and math (`$…$` inline,
 /// `$$…$$` on a block of its own, the TeX in both kept as written).
@@ -537,6 +543,7 @@ impl Builder {
                 } else {
                     let marks = Marks {
                         code: true,
+                        math: true,
                         ..self.marks()
                     };
                     self.inline(&t, marks);
@@ -544,6 +551,127 @@ impl Builder {
             }
         }
     }
+}
+
+/// `\(…\)` as `$…$` and `\[…\]` as `$$…$$`, LaTeX's own delimiters, which models and Pandoc
+/// write, outside code: a pair in one paragraph (a `\[` to its `\]` across its lines). One
+/// whose backslash is escaped (`\\(`) is words, as is one with no partner.
+pub(crate) fn tex_delimiters(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source.contains("\\(") && !source.contains("\\[") {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let b = source.as_bytes();
+    // Which bytes are code: fences and indented-free inline code spans.
+    let mut code = vec![false; b.len()];
+    let mut fence: Option<(u8, usize)> = None;
+    let mut at = 0;
+    for line in source.split_inclusive('\n') {
+        let t = line.trim_start_matches(' ');
+        let mark = t.bytes().next().filter(|c| *c == b'`' || *c == b'~');
+        let run = mark.map_or(0, |m| t.bytes().take_while(|c| *c == m).count());
+        let opens = run >= 3 && line.len() - t.len() <= 3;
+        match fence {
+            Some((m, n)) => {
+                code[at..at + line.len()].iter_mut().for_each(|c| *c = true);
+                if opens && mark == Some(m) && run >= n && t[run..].trim().is_empty() {
+                    fence = None;
+                }
+            }
+            None if opens => {
+                fence = mark.map(|m| (m, run));
+                code[at..at + line.len()].iter_mut().for_each(|c| *c = true);
+            }
+            None => {
+                // Inline code: a run of backticks to the next run of the same length.
+                let mut i = 0;
+                let l = line.as_bytes();
+                while i < l.len() {
+                    if l[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if l[i] != b'`' {
+                        i += 1;
+                        continue;
+                    }
+                    let n = l[i..].iter().take_while(|c| **c == b'`').count();
+                    let mut j = i + n;
+                    let mut close = None;
+                    while j < l.len() {
+                        if l[j] == b'`' {
+                            let m = l[j..].iter().take_while(|c| **c == b'`').count();
+                            if m == n {
+                                close = Some(j);
+                                break;
+                            }
+                            j += m;
+                        } else {
+                            j += 1;
+                        }
+                    }
+                    match close {
+                        Some(j) => {
+                            code[at + i..at + j + n].iter_mut().for_each(|c| *c = true);
+                            i = j + n;
+                        }
+                        None => i += n,
+                    }
+                }
+            }
+        }
+        at += line.len();
+    }
+    // The delimiters outside code, each with whether its backslash is its own.
+    let mut marks: Vec<(usize, u8)> = Vec::new();
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] == b'\\' && !code[i] {
+            if matches!(b[i + 1], b'(' | b')' | b'[' | b']') {
+                marks.push((i, b[i + 1]));
+            }
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    // Pairs: an opener and the next closer of its kind, with no blank line between.
+    let mut out = String::with_capacity(source.len());
+    let mut copied = 0;
+    let mut k = 0;
+    while k < marks.len() {
+        let (open_at, open) = marks[k];
+        let close = match open {
+            b'(' => b')',
+            b'[' => b']',
+            _ => {
+                k += 1;
+                continue;
+            }
+        };
+        let Some(off) = marks[k + 1..].iter().position(|&(_, c)| c == close) else {
+            k += 1;
+            continue;
+        };
+        let (close_at, _) = marks[k + 1 + off];
+        let inner = &source[open_at + 2..close_at];
+        if inner.contains("\n\n") || inner.contains("\n\r\n") || inner.trim().is_empty() {
+            k += 1;
+            continue;
+        }
+        let dollars = if open == b'(' { "$" } else { "$$" };
+        out.push_str(&source[copied..open_at]);
+        out.push_str(dollars);
+        // Inline math's TeX can't start or end with a space (pulldown-cmark's rule).
+        out.push_str(if open == b'(' { inner.trim() } else { inner });
+        out.push_str(dollars);
+        copied = close_at + 2;
+        k += 1 + off + 1;
+    }
+    if copied == 0 {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    out.push_str(&source[copied..]);
+    std::borrow::Cow::Owned(out)
 }
 
 /// Takes the spaces and line ends off a paragraph's end (the soft break before a display
@@ -882,6 +1010,54 @@ mod tests {
         };
         assert_eq!(items[0].blocks.len(), 3, "{:#?}", items[0].blocks);
         assert_eq!(items[0].blocks[1], math(r"x_{k+1} = F x_k + w"));
+    }
+
+    #[test]
+    fn latex_delimiters_are_math_too() {
+        // \(…\) inline, \[…\] display (across lines too), as models and Pandoc write them.
+        let b = parse(r"The model \( x_{k+1} = F x_k \) holds, and \(J_{ij}\) too.");
+        assert_eq!(code_spans(&b[0]), [r"x_{k+1} = F x_k", r"J_{ij}"]);
+        let Block::Paragraph(p) = &b[0] else {
+            unreachable!()
+        };
+        assert!(p.spans.iter().filter(|(_, m)| m.code).all(|(_, m)| m.math));
+        assert_eq!(
+            parse(
+                "Its Jacobian:\n\\[\nJ_{ij} = \\frac{\\partial f_i}{\\partial x_j}\n\\]\nThen more."
+            ),
+            parse(
+                "Its Jacobian:\n$$\nJ_{ij} = \\frac{\\partial f_i}{\\partial x_j}\n$$\nThen more."
+            ),
+        );
+        // In code, escaped, unpaired or across a blank line: as they were.
+        for source in [
+            r"Run `echo \(x\)` here.",
+            "```tex\n\\[ a \\]\n```",
+            r"An escaped \\(x\\) stays.",
+            r"Only \( one.",
+            "Across \\( a\n\nb \\) paragraphs.",
+        ] {
+            let b = parse(source);
+            assert!(
+                b.iter()
+                    .all(|b| !matches!(b, Block::Code { lang: Some(l), .. } if l == MATH_LANGUAGE)),
+                "{source}: {b:?}"
+            );
+            if let Some(Block::Paragraph(p)) = b.first() {
+                assert!(p.spans.iter().all(|(_, m)| !m.math), "{source}: {p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_math_source_fence_is_an_equation_shown_as_its_tex() {
+        assert_eq!(
+            parse("```math-source\n\\frac{a}{b\n```"),
+            [Block::Code {
+                lang: Some(MATH_SOURCE_LANGUAGE.into()),
+                text: "\\frac{a}{b".into()
+            }]
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use gpui::TextAlign;
 use gpui::prelude::FluentBuilder as _;
 
-use super::markdown::{Align, Block, MATH_LANGUAGE, parse_with};
+use super::markdown::{Align, Block, MATH_LANGUAGE, MATH_SOURCE_LANGUAGE, parse_with};
 use super::paragraph::{Affinity, CodeStyle, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
 use crate::theme::{ActiveTheme as _, Theme};
 
@@ -669,7 +669,7 @@ impl ViewState {
                 }
                 out.push_str(leaf.separator);
             }
-            out.push_str(&t[s.min(t.len())..e.min(t.len())]);
+            leaf.copy(s.min(t.len()), e.min(t.len()), &mut out);
             above = Some(leaf.origin.y + leaf.layout.height);
         }
         Some(out)
@@ -684,7 +684,27 @@ struct Leaf {
     paragraph: Rc<Paragraph>,
     /// What goes before it when copied with the one above.
     separator: &'static str,
+    /// Its inline formulas typeset, each in an inline box of the paragraph's.
+    maths: Rc<Vec<InlineMath>>,
 }
+
+/// An inline formula typeset in a paragraph's inline box (at `offset`, its U+FFFC).
+#[derive(Debug)]
+struct InlineMath {
+    offset: usize,
+    tex: SharedString,
+    #[cfg(feature = "math")]
+    formula: Rc<super::math::Formula>,
+    /// Pixels an em, and the colour it's drawn in.
+    #[cfg(feature = "math")]
+    em: Pixels,
+    #[cfg(feature = "math")]
+    color: Hsla,
+}
+
+/// How much bigger than the text around it math is set, as KaTeX's stylesheet sets it.
+#[cfg(feature = "math")]
+const MATH_SCALE: f32 = 1.21;
 
 #[derive(Clone)]
 enum Deco {
@@ -722,6 +742,9 @@ struct MathLook {
     pad: [Pixels; 4],
     /// The box's border, inside which the TeX is clipped as it scrolls.
     border: Pixels,
+    /// The equation typeset, at pixels an em and in a colour; None to show its TeX.
+    #[cfg(feature = "math")]
+    formula: Option<(Rc<super::math::Formula>, Pixels, Hsla)>,
 }
 
 impl Deco {
@@ -1252,6 +1275,7 @@ fn lay_table(
                 layout: l,
                 paragraph: Rc::new(p),
                 separator: sep,
+                maths: Rc::default(),
             });
             row_bottom = row_bottom.max(row_top + pad * 2. + h);
         }
@@ -1326,7 +1350,10 @@ fn lay_code(
     mut cache: Option<&mut Vec<LineLaid>>,
 ) -> Pixels {
     if lang == Some(MATH_LANGUAGE) {
-        return lay_math(text, x, width, y, cx, out);
+        return lay_math(text, true, x, width, y, cx, out);
+    }
+    if lang == Some(MATH_SOURCE_LANGUAGE) {
+        return lay_math(text, false, x, width, y, cx, out);
     }
     let (s, fill_, border, bw, radius, [pt, pr, pb, pl]) = cx.code();
     let top = y;
@@ -1388,6 +1415,7 @@ fn lay_code(
             paragraph: Rc::new(laid.line.clone()),
             // The code's lines join with a line end when copied.
             separator: if i == 0 { sep } else { "\n" },
+            maths: Rc::default(),
         });
         y += laid.laid.height;
         kept.push(laid);
@@ -1419,6 +1447,7 @@ fn lay_code(
 /// it isn't selected with the text around it; its Copy button copies it.
 fn lay_math(
     text: &str,
+    typeset: bool,
     x: Pixels,
     width: Pixels,
     mut y: Pixels,
@@ -1431,7 +1460,22 @@ fn lay_math(
     let top = y;
     let code = text.trim_end_matches('\n');
     let lines: Vec<SharedString> = code.split('\n').map(|l| l.to_string().into()).collect();
-    y += pt + bw * 2. + pb + s.line_height * lines.len() as f32;
+    // Typeset (with the `math` feature), at the size of the text around it; else its TeX.
+    #[cfg(feature = "math")]
+    let formula = typeset
+        .then(|| super::math::typeset(code, true))
+        .flatten()
+        .map(|f| (f, cx.base.size * MATH_SCALE, cx.base.color));
+    #[cfg(not(feature = "math"))]
+    let _ = typeset;
+    let source = s.line_height * lines.len() as f32;
+    #[cfg(feature = "math")]
+    let tall = formula
+        .as_ref()
+        .map_or(source, |(f, em, _)| f.ascent(*em) + f.descent(*em));
+    #[cfg(not(feature = "math"))]
+    let tall = source;
+    y += pt + bw * 2. + pb + tall;
     let bounds = Bounds::new(point(x, top), size(width, y - top));
     out.decos.push(Deco::Box {
         bounds,
@@ -1452,6 +1496,8 @@ fn lay_math(
             color: s.color,
             pad: [pt, pr, pb, pl],
             border: bw,
+            #[cfg(feature = "math")]
+            formula,
         })),
     });
     y
@@ -1492,13 +1538,19 @@ fn math_overlay(code: &CodeBlock, m: &MathLook, beside: Option<AnyElement>) -> A
                 .pr(pr)
                 .pb(pb)
                 .pl(pl)
-                .children(m.lines.iter().map(|l| {
-                    div()
-                        .flex_none()
-                        .h(m.line_height)
-                        .whitespace_nowrap()
-                        .child(l.clone())
-                })),
+                .map(|d| match math_drawing(m) {
+                    // Typeset: the formula, at its size.
+                    Some(drawn) => d.child(drawn),
+                    // Its TeX, a line each.
+                    None => d.children(m.lines.iter().map(|l| {
+                        div()
+                            .flex_none()
+                            .h(m.line_height)
+                            .whitespace_nowrap()
+                            .child(l.clone())
+                            .into_any_element()
+                    })),
+                }),
         );
     // Inside the box's border, so what scrolls out of view goes under it, not over it.
     div()
@@ -1508,6 +1560,28 @@ fn math_overlay(code: &CodeBlock, m: &MathLook, beside: Option<AnyElement>) -> A
         .child(scroller)
         .children(beside.map(|el| div().flex_none().h_full().child(el)))
         .into_any_element()
+}
+
+/// A display equation typeset, as an element of its size that draws it.
+#[cfg(feature = "math")]
+fn math_drawing(m: &MathLook) -> Option<AnyElement> {
+    let (f, em, color) = m.formula.clone()?;
+    let (w, a, d) = (f.width(em), f.ascent(em), f.descent(em));
+    Some(
+        gpui::canvas(
+            |_, _, _| {},
+            move |b, _, window, cx| f.paint(point(b.left(), b.top() + a), em, color, window, cx),
+        )
+        .flex_none()
+        .w(w)
+        .h(a + d)
+        .into_any_element(),
+    )
+}
+
+#[cfg(not(feature = "math"))]
+fn math_drawing(_: &MathLook) -> Option<AnyElement> {
+    None
 }
 
 /// A cached line or item looked at, counted in tests: always true.
@@ -1704,15 +1778,63 @@ fn leaf(
     out: &mut ViewLayout,
     window: &mut Window,
 ) -> Pixels {
-    let l = ParagraphLayout::new(p, s, width, window);
+    let (p, maths) = with_maths(p, s);
+    let l = ParagraphLayout::new(&p, s, width, window);
     let h = l.height;
     out.leaves.push(Leaf {
         origin: point(x, y),
         layout: Rc::new(l),
-        paragraph: Rc::new(p.clone()),
+        paragraph: Rc::new(p.into_owned()),
         separator: sep,
+        maths: Rc::new(maths),
     });
     y + h
+}
+
+/// `p` with its inline math typeset: each formula that can be is an inline box of its size
+/// (its baseline on the line's), drawn by the view; the others stay their TeX in the code font.
+#[cfg(feature = "math")]
+fn with_maths<'a>(
+    p: &'a Paragraph,
+    s: &ParagraphStyle,
+) -> (std::borrow::Cow<'a, Paragraph>, Vec<InlineMath>) {
+    use super::paragraph::InlineBox;
+    if !p.boxes.is_empty() || !p.spans.iter().any(|(_, m)| m.math) {
+        return (std::borrow::Cow::Borrowed(p), Vec::new());
+    }
+    let em = s.size * MATH_SCALE;
+    let mut out = Paragraph::default();
+    let mut maths = Vec::new();
+    for (r, m) in &p.spans {
+        let text = &p.text[r.clone()];
+        match m.math.then(|| super::math::typeset(text, false)).flatten() {
+            Some(formula) => {
+                let (a, d) = (formula.ascent(em), formula.descent(em));
+                maths.push(InlineMath {
+                    offset: out.text.len(),
+                    tex: text.to_string().into(),
+                    em,
+                    color: m.color.unwrap_or(s.color),
+                    formula: formula.clone(),
+                });
+                out.push_box(InlineBox {
+                    width: formula.width(em),
+                    height: a + d,
+                    baseline: a,
+                });
+            }
+            None => out.push(text, m.clone()),
+        }
+    }
+    (std::borrow::Cow::Owned(out), maths)
+}
+
+#[cfg(not(feature = "math"))]
+fn with_maths<'a>(
+    p: &'a Paragraph,
+    _: &ParagraphStyle,
+) -> (std::borrow::Cow<'a, Paragraph>, Vec<InlineMath>) {
+    (std::borrow::Cow::Borrowed(p), Vec::new())
 }
 
 /// What a layout depends on besides its width: the text's size, colour and family, and the rem.
@@ -2081,6 +2203,20 @@ impl IntoElement for ViewElement {
 }
 
 impl Leaf {
+    /// Its text from `s` to `e` as copied: an inline formula as `$` its TeX `$`.
+    fn copy(&self, s: usize, e: usize, out: &mut String) {
+        let t = &self.paragraph.text;
+        let mut at = s;
+        for m in self.maths.iter().filter(|m| m.offset >= s && m.offset < e) {
+            out.push_str(&t[at..m.offset]);
+            out.push('$');
+            out.push_str(&m.tex);
+            out.push('$');
+            at = m.offset + super::paragraph::BOX.len_utf8();
+        }
+        out.push_str(&t[at.min(e)..e]);
+    }
+
     /// The paragraph's laid-out size.
     fn layout_size(&self) -> gpui::Size<Pixels> {
         size(self.layout.width, self.layout.height)
@@ -2451,7 +2587,23 @@ impl Element for ViewElement {
                 #[cfg(test)]
                 tests::PAINTED.with(|n| n.set(n.get() + 1));
                 window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
-                    leaf.layout.paint(o + leaf.origin, window, cx)
+                    leaf.layout.paint(o + leaf.origin, window, cx);
+                    #[cfg(feature = "math")]
+                    if !leaf.maths.is_empty() {
+                        let boxes = leaf.layout.boxes();
+                        for m in leaf.maths.iter() {
+                            if let Some((_, b)) = boxes.iter().find(|(at, _)| *at == m.offset) {
+                                let base = o + leaf.origin + b.origin;
+                                m.formula.paint(
+                                    point(base.x, base.y + m.formula.ascent(m.em)),
+                                    m.em,
+                                    m.color,
+                                    window,
+                                    cx,
+                                );
+                            }
+                        }
+                    }
                 });
             }
         }
@@ -2752,6 +2904,70 @@ mod tests {
         let copy = vcx.debug_bounds("copy").expect("the button");
         assert!(tex.right() <= copy.left(), "{tex:?} and {copy:?}");
         assert!(copy.right() <= px(402.), "{copy:?}");
+    }
+
+    /// Inline math typeset (the `math` feature): its formula is an inline box in its paragraph,
+    /// drawn by the view, and a selection across it copies its TeX between dollars.
+    #[cfg(feature = "math")]
+    #[gpui::test]
+    fn inline_math_is_typeset_in_its_line_and_copies_as_its_tex(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        struct Doc;
+        impl Render for Doc {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(402.)).child(
+                    TextView::markdown("inline", "A Jacobian $J_{ij}$ here.").selectable(true),
+                )
+            }
+        }
+        let (_, vcx) = cx.add_window_view(|window, cx| {
+            let v = cx.new(|_| Doc);
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        // A press in the text gives it the keyboard; then Select All and Copy.
+        vcx.simulate_click(gpui::point(px(4.), px(6.)), gpui::Modifiers::none());
+        vcx.dispatch_action(super::SelectAllText);
+        vcx.dispatch_action(super::CopySelection);
+        let copied = vcx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()));
+        assert_eq!(copied.as_deref(), Some("A Jacobian $J_{ij}$ here."));
+    }
+
+    /// A display equation typeset is as tall as its formula: a fraction's two levels, not a line
+    /// of its TeX.
+    #[cfg(feature = "math")]
+    #[gpui::test]
+    fn a_typeset_display_equation_is_as_tall_as_its_formula(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        struct Doc(&'static str);
+        impl Render for Doc {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(402.))
+                    .child(TextView::markdown("display", self.0))
+            }
+        }
+        let height = |cx: &mut TestAppContext, source: &'static str| {
+            let (_, vcx) = cx.add_window_view(move |window, cx| {
+                let v = cx.new(|_| Doc(source));
+                Root::new(v, window, cx)
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| window.draw(cx).clear(cx));
+            vcx.debug_bounds("math:0:0").expect("the box").size.height
+        };
+        let fraction = height(cx, r"$$\frac{\partial f_i}{\partial x_j}$$");
+        let flat = height(cx, r"$$a + b$$");
+        let source = height(
+            cx,
+            "```math-source\n\\frac{\\partial f_i}{\\partial x_j}\n```",
+        );
+        assert!(fraction > flat, "{fraction:?} {flat:?}");
+        assert!(
+            fraction != source,
+            "typeset, not its TeX: {fraction:?} {source:?}"
+        );
     }
 
     /// A selection dragged across a paragraph, a display equation and a paragraph copies the

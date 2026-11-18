@@ -34,6 +34,9 @@ pub struct Marks {
     pub highlight: Option<Hsla>,
     /// The text's own colour, over the style's.
     pub color: Option<Hsla>,
+    /// Inline math: the text is its TeX (also marked `code`, as it's drawn when it isn't
+    /// typeset). A TextView typesets it, with gpui-core's `math` feature.
+    pub math: bool,
 }
 
 /// A box in the text that the host draws an element in: its size, and where its baseline is
@@ -475,10 +478,45 @@ impl ParagraphLayout {
                 }
             }
 
+            // An inline box is glued to text that touches it (no space between), as a browser
+            // keeps an inline formula with the "-dimensional" or "," after it: no row breaks
+            // at a box's edge unless there's a space there.
+            let spaced_end =
+                |a: &Atom| !a.is_box && p.text[a.range.clone()].ends_with(char::is_whitespace);
+            let spaced_start =
+                |a: &Atom| !a.is_box && p.text[a.range.clone()].starts_with(char::is_whitespace);
+            let mut groups: Vec<Vec<Atom>> = Vec::new();
+            for atom in atoms {
+                let glued = groups.last().and_then(|g| g.last()).is_some_and(|prev| {
+                    (prev.is_box || atom.is_box) && !spaced_end(prev) && !spaced_start(&atom)
+                });
+                match groups.last_mut() {
+                    Some(g) if glued => g.push(atom),
+                    _ => groups.push(vec![atom]),
+                }
+            }
+
             // Greedy rows; a lone atom too wide for a row breaks between graphemes.
             let mut row_ranges: Vec<Vec<Range<usize>>> = vec![Vec::new()];
             let mut used = px(0.);
-            for atom in atoms {
+            for mut group in groups {
+                if group.len() > 1 {
+                    // Glued atoms go on one row together (past its end, if they must).
+                    let width = group.iter().fold(px(0.), |w, a| w + a.width);
+                    let last = group.last().expect("a group");
+                    let inked = width - last.width + last.inked;
+                    if used + inked > avail + px(0.01)
+                        && !row_ranges.last().is_some_and(Vec::is_empty)
+                    {
+                        row_ranges.push(Vec::new());
+                        used = px(0.);
+                    }
+                    used += width;
+                    let row = row_ranges.last_mut().expect("a row");
+                    row.extend(group.into_iter().map(|a| a.range));
+                    continue;
+                }
+                let atom = group.pop().expect("an atom");
                 let fits = used + atom.inked <= avail + px(0.01);
                 if !fits && !row_ranges.last().is_some_and(Vec::is_empty) {
                     row_ranges.push(Vec::new());
@@ -869,6 +907,57 @@ impl ParagraphLayout {
 #[cfg(test)]
 mod tests {
     use super::breaks;
+
+    /// An inline box (a formula) with text touching it, as in "an $n$-dimensional state": no
+    /// row breaks between the box and the "-dimensional" after it, or the "(" before it, even
+    /// where the row would otherwise end there; a space beside it still lets a row break.
+    #[gpui::test]
+    fn a_box_is_glued_to_the_text_touching_it(cx: &mut gpui::TestAppContext) {
+        use super::{InlineBox, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
+        use gpui::px;
+        let window = cx.add_window(|_, _| gpui::Empty);
+        let style = ParagraphStyle {
+            font: gpui::font("Helvetica"),
+            size: px(16.),
+            line_height: px(24.),
+            color: gpui::black(),
+            muted: gpui::black(),
+            link: gpui::black(),
+            code_family: "Menlo".into(),
+            code_background: gpui::transparent_black(),
+            align: gpui::TextAlign::Left,
+            code: Default::default(),
+        };
+        let b = InlineBox {
+            width: px(12.),
+            height: px(16.),
+            baseline: px(12.),
+        };
+        let mut p = Paragraph::default();
+        p.push("an (", Marks::default());
+        let at = p.text.len();
+        p.push_box(b);
+        p.push("-dimensional state", Marks::default());
+        let hyphen = p.text.find('-').expect("the hyphen");
+        window
+            .update(cx, |_, window, _| {
+                // Wide enough for "an (" and the box, not for "-dimensional" after them.
+                let wide = ParagraphLayout::new(&p, &style, px(1000.), window);
+                let end_of_box = wide.position_for(hyphen).x;
+                let end_of_word = wide.position_for(p.text.find(" state").unwrap()).x;
+                let width = (end_of_box + end_of_word) / 2.;
+                let l = ParagraphLayout::new(&p, &style, width, window);
+                let (box_at, dash) = (l.position_for(at), l.position_for(hyphen));
+                assert_eq!(box_at.y, dash.y, "the box and its hyphen on one row");
+                assert_eq!(
+                    l.position_for(at).y,
+                    l.position_for(at - 1).y,
+                    "the ( and its box on one row"
+                );
+                assert!(l.rows().len() >= 2, "the row still breaks, at the space");
+            })
+            .unwrap();
+    }
 
     #[test]
     fn rows_break_after_hyphens_between_words() {

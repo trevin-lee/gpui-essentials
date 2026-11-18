@@ -42,7 +42,7 @@ gpui-pre-macos = { workspace = true, features = ["test-support"], optional = tru
 default = ["gpui"]
 # The GPUI renderer. Without it (default-features = false) the crate is the parser and model
 # alone, with no GPUI in the build.
-gpui = ["dep:gpui", "dep:gpui-core", "dep:chrono"]
+gpui = ["dep:gpui", "dep:gpui-core", "gpui-core/math", "dep:chrono"]
 # Pictures of the gallery and stream examples rendered offscreen (`--shots`).
 shots = ["gpui", "gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 
