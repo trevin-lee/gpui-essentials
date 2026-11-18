@@ -327,9 +327,13 @@ impl RenderOnce for Toggle {
             })
             .when_some(self.label, |p, label| {
                 p.child(
+                    // Three pixels' room above and below for descenders and accents, which
+                    // reach past a line height of 1.
                     div()
                         .min_w_0()
                         .overflow_hidden()
+                        .py(css(3.))
+                        .my(css(-3.))
                         .text_ellipsis()
                         .child(label),
                 )

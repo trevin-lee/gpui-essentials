@@ -92,9 +92,13 @@ impl RenderOnce for Kbd {
         key.when_some(self.icon, |k, icon| k.child(icon.size(css(12.))))
             .when_some(self.label, |k, label| {
                 k.child(
+                    // Three pixels' room above and below for descenders and accents, which
+                    // reach past a line height of 1.
                     div()
                         .min_w_0()
                         .overflow_hidden()
+                        .py(css(3.))
+                        .my(css(-3.))
                         .text_ellipsis()
                         .child(label),
                 )

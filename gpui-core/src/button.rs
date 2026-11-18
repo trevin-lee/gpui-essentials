@@ -390,14 +390,15 @@ impl RenderOnce for Button {
             .when_some(self.icon, |b, icon| b.child(icon.size(m.icon)))
             .when_some(self.label, |b, label| {
                 b.child(
-                    // Clipped to its slot, with three pixels' room either side (taken from the
-                    // button's padding) for ink that reaches past its advance: an emoji, the
-                    // ellipsis. Squeezed narrower than the ellipsis, it cuts it, as browsers do.
+                    // Clipped to its slot, with three pixels' room on every side (taken from the
+                    // button's padding) for ink that reaches past its advance (an emoji, the
+                    // ellipsis) and past its line box, a line height of 1 (descenders, accents).
+                    // Squeezed narrower than the ellipsis, it cuts it, as browsers do.
                     div()
                         .min_w_0()
                         .overflow_hidden()
-                        .px(css(3.))
-                        .mx(css(-3.))
+                        .p(css(3.))
+                        .m(css(-3.))
                         .text_ellipsis()
                         .child(label),
                 )
