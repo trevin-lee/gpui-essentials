@@ -1404,7 +1404,9 @@ impl TableView {
                     gpui::size(w, self.header_height()),
                 )
             }
-            Popover::Picker { cell } | Popover::Date { cell } => self.cell_bounds(*cell),
+            Popover::Picker { cell } | Popover::Date { cell } => {
+                self.peek_anchor.unwrap_or_else(|| self.cell_bounds(*cell))
+            }
             Popover::AddProperty | Popover::AddRelation => self.add_button_bounds(),
             Popover::Property { property_id, .. } => self
                 .shown

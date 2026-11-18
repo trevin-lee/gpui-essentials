@@ -95,7 +95,7 @@ impl TableView {
                     .children(peek),
             )
             .capture_action(cx.listener(|this, _: &super::Cancel, _, cx| {
-                if this.peek.is_some() && this.popover.is_none() {
+                if this.peek.is_some() && this.popover.is_none() && this.editor.is_none() {
                     this.close_peek(cx);
                     cx.stop_propagation();
                 }
