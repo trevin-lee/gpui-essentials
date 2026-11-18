@@ -36,6 +36,15 @@ site on GitHub's macOS runner and uploads it as the `site` artifact (`gh run dow
 site`). Run it by hand from the Actions tab for any branch. Off macOS, `cargo clippy` still
 compiles the renderer and every demo; only drawing the pictures needs a Mac.
 
+## The live page
+
+`live.html` runs a small app built from gpui-core's components in the browser
+(`live/src/lib.rs`), on GPUI's web platform, single-threaded, so Pages needs no special
+headers. Nothing downloads until the visitor presses Start: then about 3 MB (gzipped) of wasm.
+It brings its own fonts (Inter, SIL OFL, cut down to Latin) and only the icons it draws.
+The pages workflow builds it on Linux with `live/build.sh` (the wasm32 target, wasm-bindgen at
+the version `live/Cargo.toml` pins, and binaryen's wasm-opt) into `live/` beside the pages.
+
 ## Publishing
 
 Every night, and when run by hand on main, the `pages` workflow renders the site, adds every
@@ -106,7 +115,7 @@ component! {
 - `about` is one line, under the name and on the index's card.
 - `docs` is the rustdoc page, from the API docs' root.
 - Its Installation section comes from gpui-core's `components.toml`, found by the name in
-  `docs`: `gpui-core add <name>` with what it also copies and the crates it needs, or, for
+  `docs`: `gpui add <name>` with what it also copies and the crates it needs, or, for
   what stays in gpui-core (inputs, popovers, charts…), the dependency alone.
 - The first variant is the picture on the index's card.
 
