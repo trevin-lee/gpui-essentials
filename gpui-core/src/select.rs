@@ -29,8 +29,9 @@ use std::rc::Rc;
 
 use gpui::{
     App, ElementId, InteractiveElement as _, IntoElement, KeyBinding, KeyDownEvent, Modifiers,
-    ParentElement as _, Rems, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, Window, actions, div, prelude::FluentBuilder as _, rems,
+    ParentElement as _, Rems, RenderOnce, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, actions, div,
+    prelude::FluentBuilder as _, rems,
 };
 
 use crate::base::{
@@ -91,6 +92,7 @@ pub struct Select {
     disabled: bool,
     invalid: bool,
     size: ControlSize,
+    max_height: Option<Rems>,
     style: StyleRefinement,
 }
 
@@ -106,8 +108,17 @@ impl Select {
             disabled: false,
             invalid: false,
             size: ControlSize::Medium,
+            max_height: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// The tallest its open list draws before it scrolls (24 rem by default, and never taller
+    /// than the window has room for). A list that scrolls opens scrolled to the chosen option
+    /// and follows the keys.
+    pub fn max_height(mut self, height: Rems) -> Self {
+        self.max_height = Some(height);
+        self
     }
 
     /// An option: `id` is what [`on_change`](Self::on_change) is told; `label` is shown.
@@ -221,6 +232,8 @@ struct SelectState {
     highlighted: Option<SharedString>,
     /// Where typing last moved the highlight (the menu's `move_highlight`).
     typed: Option<SharedString>,
+    /// The open list's scrolling, kept so the highlighted option stays in view.
+    scroll: ScrollHandle,
 }
 
 /// The option after `from` (going round) whose label starts with `typed`, case aside; from
@@ -276,13 +289,14 @@ impl RenderOnce for Select {
             )
             .read(cx)
             .clone();
-        let (open, menu_n, highlighted, typed_to) = {
+        let (open, menu_n, highlighted, typed_to, scroll) = {
             let s = state.read(cx);
             (
                 s.open && !self.disabled,
                 s.menu,
                 s.highlighted.clone(),
                 s.typed.clone(),
+                s.scroll.clone(),
             )
         };
         // Every option: its id, label and whether it can be chosen.
@@ -425,6 +439,7 @@ impl RenderOnce for Select {
         let selected = self.selected.clone();
         let mut menu = PopupMenu::new(ElementId::NamedInteger("select-menu".into(), menu_n))
             .touch(touch)
+            .keep_highlight_in_view(&scroll)
             .when_some(highlighted.clone(), |m, h| m.highlight(h))
             .when_some(typed_to, |m, to| m.move_highlight(to))
             .on_highlight({
@@ -529,6 +544,8 @@ impl RenderOnce for Select {
                     "popover".into(),
                 ))
                 .open(open)
+                .track_scroll(&scroll)
+                .when_some(self.max_height, |p, h| p.max_height(h))
                 .role(Role::ListBox)
                 .when_some(self.label, |p, l| p.accessibility_label(l))
                 .return_focus(&focus)

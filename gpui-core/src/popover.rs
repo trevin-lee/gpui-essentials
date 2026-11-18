@@ -281,6 +281,8 @@ pub struct Popover {
     /// Exactly the trigger's width, rather than at least.
     fit_trigger_width: bool,
     max_height: Rems,
+    /// What tracks its content's scrolling, from the host.
+    scroll: Option<gpui::ScrollHandle>,
     match_trigger_width: bool,
     close_when_scrolled_away: bool,
     side: PopoverSide,
@@ -304,6 +306,7 @@ impl Popover {
             return_focus: None,
             fit_trigger_width: false,
             max_height: rems(24.),
+            scroll: None,
             match_trigger_width: true,
             close_when_scrolled_away: true,
             side: PopoverSide::Bottom,
@@ -362,6 +365,14 @@ impl Popover {
     /// than the room the window has.
     pub fn max_height(mut self, height: Rems) -> Self {
         self.max_height = height;
+        self
+    }
+
+    /// Tracks its content's scrolling (past [`max_height`](Self::max_height)) with `handle`,
+    /// as a long menu in it needs to keep its highlight in view
+    /// ([`PopupMenu::keep_highlight_in_view`](crate::base::PopupMenu::keep_highlight_in_view)).
+    pub fn track_scroll(mut self, handle: &gpui::ScrollHandle) -> Self {
+        self.scroll = Some(handle.clone());
         self
     }
 
@@ -536,6 +547,9 @@ impl Popover {
             .min_h_0()
             .min_w_0()
             .overflow_y_scroll();
+        if let Some(handle) = &self.scroll {
+            scroll = scroll.track_scroll(handle);
+        }
         gpui::Refineable::refine(scroll.style(), &self.style);
         let scroll = scroll.children(std::mem::take(&mut self.children));
         let mut panel = div()
