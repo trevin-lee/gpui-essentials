@@ -698,6 +698,15 @@ impl EditorRoot {
         let mut view = handle.bounds();
         view.origin.y += padding.top;
         view.size.height = (view.size.height - padding.top - padding.bottom).max(Pixels::ZERO);
+        // Not behind what covers the window: a phone's software keyboard, the status bar.
+        let visible = window.fully_visible_bounds();
+        let (top, bottom) = (
+            view.top().max(visible.top()),
+            view.bottom().min(visible.bottom() - px(8.)),
+        );
+        if bottom > top {
+            view = Bounds::from_corners(point(view.left(), top), point(view.right(), bottom));
+        }
         let mut offset = handle.offset();
         if caret.top() < view.top() {
             offset.y += view.top() - caret.top();

@@ -50,6 +50,9 @@ const COMPACT_INSET: f32 = 16.;
 /// left of the text to lift its block.
 const COMPACT_SIDE: f32 = 24.;
 
+/// The room below the last line, so it can be scrolled up from the window's bottom edge.
+const PAGE_BOTTOM: f32 = 240.;
+
 /// How far below the top of the page a block gone to lands.
 const GO_TO_MARGIN: f32 = 48.;
 
@@ -3152,6 +3155,10 @@ impl Render for Editor {
             )
             .size_0()
         });
+        // Room below the last line: enough to scroll it above a phone's software keyboard when
+        // one covers the page.
+        let keyboard = window.viewport_size().height - window.fully_visible_bounds().bottom();
+        let bottom_room = px(PAGE_BOTTOM).max(keyboard + px(96.));
         let page = div()
             .id("gpui-blocks")
             .size_full()
@@ -3199,7 +3206,7 @@ impl Render for Editor {
                             .min_h_full()
                             .px(gutter)
                             .pt(top)
-                            .pb(px(240.)),
+                            .pb(bottom_room),
                     ),
             )
             .children(side_menu)
@@ -3507,6 +3514,53 @@ mod tests {
         });
         draw(cx);
         tall(cx, "find-next");
+    }
+
+    /// On a phone the caret stays above the software keyboard as you type, the last line too:
+    /// the page has room below to scroll it up.
+    #[gpui::test]
+    fn the_caret_stays_above_the_keyboard(cx: &mut TestAppContext) {
+        let source = (1..=60)
+            .map(|n| format!("Line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (editor, cx) = open(cx, &source);
+        cx.simulate_resize(gpui::size(gpui::px(402.), gpui::px(874.)));
+        draw(cx);
+        // The keyboard comes up over the bottom 340 points.
+        let keyboard_top = gpui::px(874. - 340.);
+        let window = gpui::VisualContext::window_handle(cx);
+        cx.simulate_window_visual_viewport_change(
+            window,
+            gpui::Bounds::new(
+                gpui::point(gpui::px(0.), gpui::px(0.)),
+                gpui::size(gpui::px(402.), keyboard_top),
+            ),
+        );
+        draw(cx);
+        let caret_bottom = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                e.state().read(cx).caret_bounds().unwrap().bottom()
+            })
+        };
+        for leaf in [16, 59] {
+            // A line under where the keyboard is (and the last), then a letter typed there.
+            editor.update(cx, |e, cx| {
+                e.state().update(cx, |s, cx| {
+                    let id = s.model().document().leaves().nth(leaf).unwrap().id();
+                    let _ = s.set_selection(BlockSelection::caret(BlockPosition::new(id, 4)), cx);
+                })
+            });
+            cx.simulate_input("x");
+            for _ in 0..4 {
+                draw(cx);
+            }
+            let bottom = caret_bottom(&editor, cx);
+            assert!(
+                bottom <= keyboard_top,
+                "line {leaf}: caret at {bottom:?}, keyboard at {keyboard_top:?}"
+            );
+        }
     }
 
     /// Page Down and Up move the caret a page with the view, ⇧ extending the selection; past
