@@ -97,10 +97,10 @@ async fn render_site(args: &Args, components: &[Component], cx: &mut AsyncApp) -
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         for v in &c.variants {
             let what = format!("{}/{}", c.slug, v.slug);
-            let light = shot::capture(v.demo, false, cx)
+            let light = shot::capture(v.demo, v.act, false, cx)
                 .await
                 .with_context(|| format!("drawing {what} (light)"))?;
-            let dark = shot::capture(v.demo, true, cx)
+            let dark = shot::capture(v.demo, v.act, true, cx)
                 .await
                 .with_context(|| format!("drawing {what} (dark)"))?;
             let [light, dark] = shot::crop_pair(light, dark, &what)?;
