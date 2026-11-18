@@ -60,6 +60,7 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 type BuildMenu = Rc<dyn Fn(&mut Window, &mut App) -> PopupMenu>;
+type OnOpenChange = Rc<dyn Fn(bool, &mut App)>;
 
 /// Wraps an element (a list's row, a file, a doc) and opens a [`PopupMenu`] over everything
 /// else:
@@ -83,6 +84,7 @@ pub struct ContextMenu {
     id: ElementId,
     child: AnyElement,
     menu: Option<BuildMenu>,
+    on_open_change: Option<OnOpenChange>,
     style: StyleRefinement,
 }
 
@@ -92,8 +94,18 @@ impl ContextMenu {
             id: id.into(),
             child: child.into_any_element(),
             menu: None,
+            on_open_change: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// Told `true` when the menu opens and `false` when it closes, however it does (a pick,
+    /// Escape, a press outside, its element scrolled away). For a host with something drawn
+    /// over the window that the menu must not go under, such as a native web view it hides
+    /// while a menu is up.
+    pub fn on_open_change(mut self, f: impl Fn(bool, &mut App) + 'static) -> Self {
+        self.on_open_change = Some(Rc::new(f));
+        self
     }
 
     /// Makes the menu, each time it's drawn while open. Without one nothing opens.
@@ -121,24 +133,38 @@ enum Opened {
     Keys,
 }
 
-/// What a context menu remembers between frames: whether it's open, and where.
+/// What a context menu remembers between frames: whether it's open, and where, and who's told
+/// when that changes.
 struct State {
     open: Option<Opened>,
+    on_open_change: Option<OnOpenChange>,
 }
 
 fn set(state: &Entity<State>, open: Option<Opened>, cx: &mut App) {
-    state.update(cx, |s, cx| {
-        if s.open != open {
-            s.open = open;
-            cx.notify();
+    let told = state.update(cx, |s, cx| {
+        if s.open == open {
+            return None;
         }
+        let was = s.open.is_some();
+        s.open = open;
+        cx.notify();
+        (was != open.is_some())
+            .then(|| s.on_open_change.clone())
+            .flatten()
     });
+    if let Some(f) = told {
+        f(open.is_some(), cx);
+    }
 }
 
 impl RenderOnce for ContextMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         crate::base::init_soon(cx);
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State { open: None });
+        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State {
+            open: None,
+            on_open_change: None,
+        });
+        state.update(cx, |s, _| s.on_open_change = self.on_open_change.clone());
         let open = state.read(cx).open;
         let menu = match (open, &self.menu) {
             (Some(opened), Some(build)) => {
