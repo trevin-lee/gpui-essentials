@@ -54,8 +54,11 @@ their look.
   and the month). On the grid a move crosses between the all-day row and the hours: an all-day
   event dropped in the hours becomes a timed one starting there, `default_duration` long, and
   a timed one dropped in the all-day row becomes that whole day. Drags snap to 15 minutes (`snap_minutes`), show a ghost of where the event would
-  land with the original faded, and Escape drops them. Near the grid's top or bottom a drag
-  scrolls it. Read-only events, and events in read-only calendars, can be selected and opened
+  land with the original faded, and Escape drops them. Near the grid's top or bottom, or past
+  them, a drag scrolls the hours on each frame, also while the pointer rests there. A drag let
+  go beside the calendar lands at the nearest spot on it. The drags run on
+  [gpui-dnd](../gpui-dnd), which follows the pointer and the finger, takes Escape and sets the
+  cursor; the calendar works out what each one proposes. Read-only events, and events in read-only calendars, can be selected and opened
   but not moved.
 - **Links:** an event can link to docs and agents. A chip with room lists them under its text,
   each with a mark (a page for a doc, a ring for an agent) and its label. A smaller chip shows
@@ -438,8 +441,6 @@ Not done yet:
 - A context menu (Delete is the key for now).
 - Year, resource and timeline views.
 - A scrollbar on the grid.
-- A drag that keeps scrolling while the pointer rests at the grid's edge. Today it scrolls only
-  while the pointer moves.
 - In narrow columns, titles are cut to one line with "…" rather than wrapped.
 
 ## License

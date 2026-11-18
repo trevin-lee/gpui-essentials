@@ -23,6 +23,7 @@ use crate::layout::{self, Column};
 use crate::model::*;
 
 mod crowd;
+pub(crate) mod drag;
 mod mini;
 mod panel;
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
@@ -1573,6 +1574,7 @@ impl Calendar {
             target,
             held: None,
         });
+        self.hand_over(event.position, gpui_dnd::Backend::Mouse, window, cx);
         cx.notify();
     }
 
@@ -1580,20 +1582,21 @@ impl Calendar {
         let Some(geo) = self.shared.geo.get() else {
             return;
         };
-        let Some(drag) = self.drag.clone() else {
-            let cursor = paint::cursor_at(&geo, &self.shared, event.position);
-            if cursor != self.hover_cursor {
-                self.hover_cursor = cursor;
-                cx.notify();
+        match &self.drag {
+            None => {
+                let cursor = paint::cursor_at(&geo, &self.shared, event.position);
+                if cursor != self.hover_cursor {
+                    self.hover_cursor = cursor;
+                    cx.notify();
+                }
             }
-            return;
-        };
-        if event.pressed_button != Some(MouseButton::Left) {
-            // Let go outside the window.
-            self.finish(cx);
-            return;
+            // A press let go outside the window, before it was a drag.
+            Some(Drag::Press { .. }) if event.pressed_button != Some(MouseButton::Left) => {
+                self.finish(cx)
+            }
+            // gpui-dnd carries a press past its threshold, and the drag after it.
+            Some(_) => {}
         }
-        self.drag_to(drag, event.position, false, cx);
     }
 
     /// Carries a press or a drag to `p`. A press becomes a drag once it has moved a few pixels,
@@ -1729,35 +1732,31 @@ impl Calendar {
                 to: geo.pos(p, area).0,
             },
         };
-        // Near the grid's top or bottom edge, a drag scrolls it.
-        if geo.kind == paint::Kind::Grid
-            && matches!(
-                next,
-                Drag::Create { .. }
-                    | Drag::Move {
-                        over: Area::Grid,
-                        ..
-                    }
-                    | Drag::Resize {
-                        area: Area::Grid,
-                        ..
-                    }
-            )
-        {
-            let edge = px(18. * geo.s);
-            let step = 20.;
-            if p.y < geo.grid_top + edge {
-                self.scroll_by(-step, &geo);
-            } else if p.y > geo.grid_bottom - edge {
-                self.scroll_by(step, &geo);
-            }
-        }
+        // Near the grid's top or bottom edge, or past it, gpui-dnd scrolls the hours for these.
+        self.shared.drag_scrolls.set(
+            geo.kind == paint::Kind::Grid
+                && matches!(
+                    next,
+                    Drag::Create { .. }
+                        | Drag::Move {
+                            over: Area::Grid,
+                            ..
+                        }
+                        | Drag::Resize {
+                            area: Area::Grid,
+                            ..
+                        }
+                ),
+        );
         self.drag = Some(next);
         cx.notify();
     }
 
+    /// A press let go before it was a drag: a click. A drag's release is gpui-dnd's.
     pub(crate) fn mouse_up(&mut self, _: &MouseUpEvent, cx: &mut Context<Self>) {
-        self.finish(cx);
+        if matches!(self.drag, Some(Drag::Press { .. })) {
+            self.finish(cx);
+        }
     }
 
     fn finish(&mut self, cx: &mut Context<Self>) {
@@ -1867,70 +1866,66 @@ impl Calendar {
     // Touch.
 
     /// A long press: on an event it picks the event up, on empty time it makes one an hour
-    /// long (the usual length), and the finger then drags either. Returns whether it took it.
-    pub(crate) fn long_press(&mut self, event: &LongPressEvent, cx: &mut Context<Self>) -> bool {
-        let Some(geo) = self.shared.geo.get() else {
-            return false;
-        };
-        match event.phase {
-            TouchPhase::Started => {
-                if geo.kind == paint::Kind::Agenda || self.drag.is_some() {
-                    return false;
-                }
-                let target = match paint::target_at(&geo, &self.shared, event.start_position) {
-                    Target::Link {
-                        id,
-                        area,
-                        read_only,
-                        ..
-                    } => Target::Event {
-                        id,
-                        area,
-                        resize: false,
-                        read_only,
-                    },
-                    other => other,
-                };
-                let take = match &target {
-                    Target::Event { id, read_only, .. } => {
-                        !read_only && self.editable(id).is_some()
-                    }
-                    Target::Grid { .. } | Target::Day { .. } => self.new_event_calendar().is_some(),
-                    _ => false,
-                };
-                if !take {
-                    return false;
-                }
-                if let Target::Event { id, .. } = &target {
-                    self.select(Some(Selection::Event(id.clone())), cx);
-                }
-                self.touch_from = Some(event.start_position);
-                self.touch_moved = false;
-                let at = event.start_position;
-                self.drag_to(
-                    Drag::Press {
-                        at,
-                        target,
-                        held: None,
-                    },
-                    at,
-                    true,
-                    cx,
-                );
-                if let Some(Drag::Create { from, to, .. }) = &mut self.drag {
-                    *from = time::snap_floor(*from, self.options.snap());
-                    *to = *from + self.options.default_duration.num_minutes() as f32;
-                }
-                cx.notify();
-                true
-            }
-            _ => self.touch_follow(event.phase, event.position, true, &geo, cx),
+    /// long (the usual length), and gpui-dnd then follows the finger with either
+    /// (`drag::long_press`). The drag for gpui-dnd to begin, if it took it.
+    pub(crate) fn long_press(
+        &mut self,
+        event: &LongPressEvent,
+        cx: &mut Context<Self>,
+    ) -> Option<drag::Held> {
+        let geo = self.shared.geo.get()?;
+        // The rest of the long press is gpui-dnd's drag.
+        if event.phase != TouchPhase::Started || self.drag.is_some() {
+            return None;
         }
+        let target = match paint::target_at(&geo, &self.shared, event.start_position) {
+            Target::Link {
+                id,
+                area,
+                read_only,
+                ..
+            } => Target::Event {
+                id,
+                area,
+                resize: false,
+                read_only,
+            },
+            other => other,
+        };
+        let cursor = self.drag_cursor(&target, &geo)?;
+        if let Target::Event { id, .. } = &target {
+            self.select(Some(Selection::Event(id.clone())), cx);
+        }
+        self.touch_from = Some(event.start_position);
+        self.touch_moved = false;
+        let at = event.start_position;
+        self.drag_to(
+            Drag::Press {
+                at,
+                target,
+                held: None,
+            },
+            at,
+            true,
+            cx,
+        );
+        if let Some(Drag::Create { from, to, .. }) = &mut self.drag {
+            *from = time::snap_floor(*from, self.options.snap());
+            *to = *from + self.options.default_duration.num_minutes() as f32;
+        }
+        cx.notify();
+        Some(self.held(at, cursor, cx))
     }
 
     /// A touch landing on the selected event, or on its handle: it drags the event (or its
-    /// end) straight away rather than scrolling. Let go without moving, it opens the event.
-    pub(crate) fn touch_drag(&mut self, event: &TouchDragEvent, cx: &mut Context<Self>) -> bool {
+    /// end) straight away rather than scrolling, gpui-dnd taking it once the finger moves. Let
+    /// go without moving, it opens the event.
+    pub(crate) fn touch_drag(
+        &mut self,
+        event: &TouchDragEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(geo) = self.shared.geo.get() else {
             return false;
         };
@@ -1954,50 +1949,45 @@ impl Calendar {
                     target,
                     held: None,
                 });
+                self.hand_over(at, gpui_dnd::Backend::Touch, window, cx);
                 true
             }
-            _ => self.touch_follow(event.phase, event.position, false, &geo, cx),
+            _ => self.touch_follow(event.phase, event.position, &geo, cx),
         }
     }
 
-    /// The rest of a touch that's dragging something: it follows the finger once the finger
-    /// has moved off where it landed, and proposes what it made when the finger lifts.
+    /// The rest of a touch on the selected event before it's a drag (gpui-dnd follows it
+    /// once it is): a tap on it, let go without moving, opens it.
     fn touch_follow(
         &mut self,
         phase: TouchPhase,
         p: Point<Pixels>,
-        long: bool,
         geo: &Geo,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(from) = self.touch_from else {
             return false;
         };
+        if !matches!(self.drag, Some(Drag::Press { .. })) {
+            return false;
+        }
         match phase {
             TouchPhase::Started | TouchPhase::Moved => {
-                let moved = (p - from).magnitude() as f32 >= 8. * geo.s;
-                self.touch_moved |= moved;
-                if self.touch_moved
-                    && let Some(drag) = self.drag.clone()
-                {
-                    self.drag_to(drag, p, long, cx);
-                }
+                self.touch_moved |= (p - from).magnitude() as f32 >= 8. * geo.s;
             }
             TouchPhase::Ended => {
                 self.touch_from = None;
-                // A touch on the selected event that didn't move is a tap on it: open it.
-                if !long
-                    && !self.touch_moved
+                if !self.touch_moved
                     && let Some(Drag::Press {
                         target: Target::Event { id, .. },
                         ..
                     }) = self.drag.take()
                 {
                     self.open_event(id, cx);
-                    cx.notify();
-                    return true;
+                } else {
+                    self.drag = None;
                 }
-                self.finish(cx);
+                cx.notify();
             }
             TouchPhase::Cancelled => {
                 self.touch_from = None;
@@ -2125,7 +2115,7 @@ impl Calendar {
 
     // The keyboard.
 
-    fn cancel(&mut self, cx: &mut Context<Self>) {
+    fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.mini_open {
             self.mini_open = false;
             cx.notify();
@@ -2136,6 +2126,8 @@ impl Calendar {
         } else if self.panel.is_some() {
             self.close_panel(cx);
         } else if self.drag.take().is_some() {
+            // A press gpui-dnd holds, not yet a drag, is forgotten too.
+            gpui_dnd::cancel(window, cx);
             cx.notify();
         } else if self.selection.is_some() {
             self.select(None, cx);
@@ -3143,7 +3135,7 @@ impl Render for Calendar {
         let crowd = self.render_crowd(window, cx);
         let (aside, mini) = self.render_mini(window, cx);
         let ring = self.focus.is_focused(window) && window.last_input_was_keyboard();
-        div()
+        let root = div()
             .id("calendar")
             .tab_group()
             .relative()
@@ -3192,7 +3184,7 @@ impl Render for Calendar {
                 }
             }))
             .on_action(cx.listener(|c, _: &DeleteSelected, _, cx| c.delete_selected(cx)))
-            .on_action(cx.listener(|c, _: &Cancel, _, cx| c.cancel(cx)))
+            .on_action(cx.listener(|c, _: &Cancel, window, cx| c.cancel(window, cx)))
             .on_action(cx.listener(|_, _: &Find, _, cx| cx.emit(CalendarEvent::Find)))
             .on_action(cx.listener(|c, _: &GoToDate, window, cx| c.toggle_mini_month(window, cx)))
             .on_action(cx.listener(|c, _: &EditPanelEvent, _, cx| c.edit_panel_event(cx)))
@@ -3241,6 +3233,9 @@ impl Render for Calendar {
             .children(panel)
             .children(crowd)
             .children(mini)
-            .children(question)
+            .children(question);
+        // The calendar's drags run on gpui-dnd: its own provider (the window's first drawn
+        // one does the work), and the calendar as their target.
+        gpui_dnd::DndProvider::new(self.drop_target(root, cx))
     }
 }
