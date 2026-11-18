@@ -81,10 +81,14 @@ actions!(
         DuplicateSelection,
         /// Resizes the node the keyboard is on (or the one selected) with the arrows.
         ResizeFocused,
+        /// Begins a connection from the node the keyboard is on (or the one selected), which
+        /// Enter on another node finishes.
+        ConnectFocused,
     ]
 );
 
 mod clipboard;
+mod key_connect;
 mod key_resize;
 
 const CONTEXT: &str = "Flow";
@@ -128,6 +132,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-v", PasteClipboard, c),
         KeyBinding::new("cmd-d", DuplicateSelection, c),
         KeyBinding::new("r", ResizeFocused, c),
+        KeyBinding::new("c", ConnectFocused, c),
     ]);
 }
 
@@ -6930,8 +6935,19 @@ impl Render for Flow {
                     cx.propagate();
                 }
             }))
+            .on_action(cx.listener(|flow, _: &ConnectFocused, _, cx| {
+                if !flow.start_keyboard_connect(cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|flow, _: &Cancel, _, cx| {
                 if flow.end_keyboard_resize(false, cx) {
+                    return;
+                }
+                if let Some(from) = flow.keyboard_connecting() {
+                    flow.let_go_of_click_connect(cx);
+                    let words = format!("Stopped connecting from {}", flow.name_of(&from));
+                    flow.announce(words, cx);
                     return;
                 }
                 if !flow.cancel(cx) {
@@ -6988,7 +7004,7 @@ impl Render for Flow {
                 }
             }))
             .on_action(cx.listener(|flow, _: &AddSibling, _, cx| {
-                if flow.end_keyboard_resize(true, cx) {
+                if flow.end_keyboard_resize(true, cx) || flow.finish_keyboard_connect(cx) {
                     return;
                 }
                 if !flow.add_sibling(cx) && !flow.select_focused(cx) {
