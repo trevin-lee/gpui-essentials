@@ -21,7 +21,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The live page's app (docs-site/live), built for the browser: wasm32, wasm-bindgen's glue
+  # and wasm-opt. Linux, since it draws nothing here.
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: docs-site-live
+          workspaces: docs-site/live
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # wasm-bindgen's CLI at the version docs-site/live/Cargo.toml pins, and binaryen's
+      # wasm-opt: their release builds, checked against their published checksums.
+      - name: Tools
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/tools" && cd "$RUNNER_TEMP/tools"
+          wb=wasm-bindgen-0.2.130-x86_64-unknown-linux-musl
+          curl -sSfLO "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/$wb.tar.gz"
+          echo "9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f  $wb.tar.gz" | sha256sum -c -
+          tar xzf "$wb.tar.gz"
+          by=binaryen-version_133-x86_64-linux
+          curl -sSfLO "https://github.com/WebAssembly/binaryen/releases/download/version_133/$by.tar.gz"
+          echo "2dc9c7813f5375db93d96ead4b78222fcc3e2677bbb832297af4797782a37489  $by.tar.gz" | sha256sum -c -
+          tar xzf "$by.tar.gz"
+          echo "$RUNNER_TEMP/tools/$wb" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/tools/binaryen-version_133/bin" >> "$GITHUB_PATH"
+      # rust-toolchain.toml pins the version; this adds its wasm32 target.
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo fmt --manifest-path docs-site/live/Cargo.toml --check
+      - run: cargo clippy --manifest-path docs-site/live/Cargo.toml --locked --target wasm32-unknown-unknown -- -D warnings
+      - run: docs-site/live/build.sh "$RUNNER_TEMP/live"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live
+          path: ${{ runner.temp }}/live
+          retention-days: 1
+
   render:
+    needs: live
     # The pictures are GPUI's offscreen rendering, which needs macOS (Metal).
     runs-on: macos-latest
     steps:
@@ -41,6 +80,11 @@ jobs:
       - run: rustfmt --edition 2024 --check $(grep -l 'pub struct Example' docs-site/demos/*/*.rs)
       - run: cargo clippy --manifest-path docs-site/render/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo run --manifest-path docs-site/render/Cargo.toml --locked -- --out "$RUNNER_TEMP/site"
+      # The live page's app, beside live.html.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: live
+          path: ${{ runner.temp }}/site/live
       # Every crate's rustdoc, which the pages' "Docs" links lead to. A pull request's checks
       # already build each crate's docs, so only the published site builds them here.
       - name: API docs

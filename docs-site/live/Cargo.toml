@@ -1,0 +1,32 @@
+# The docs site's live page: gpui-core's components running in the browser, built for
+# wasm32-unknown-unknown. See ../README.md ("The live page").
+[package]
+name = "docs-site-live"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.100"
+license = "Apache-2.0"
+publish = false
+
+# Its own workspace, with its own Cargo.lock, like the renderer's.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+gpui-core = { path = "../../gpui-core" }
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+# GPUI's platforms; in a browser, its web platform. Without `multithreaded` (on by default),
+# GPUI runs on the page's one thread, so the page needs no cross-origin isolation headers,
+# which GitHub Pages can't send.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", default-features = false }
+# Exactly the version of the wasm-bindgen CLI that the pages workflow installs: the two must
+# match.
+wasm-bindgen = "=0.2.130"
+
+# Small rather than fast: the page downloads it. wasm-opt (build.sh) shrinks it further.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1

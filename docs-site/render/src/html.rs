@@ -42,7 +42,64 @@ const THEME_SCRIPT: &str = r#"<script>
 /// Sets the saved theme's class before the page draws, so it doesn't flash the other one.
 const EARLY_THEME_SCRIPT: &str = r#"<script>try { var t = localStorage.getItem("gpui-essentials-theme"); if (t) document.documentElement.classList.add(t); } catch (e) {}</script>"#;
 
-/// Writes `index.html`, a page per component and per crate, and `style.css` into `out`.
+/// The live page: nothing downloads until the visitor presses Start. Then it loads the app
+/// (`live/live.js` and its wasm, which the pages workflow builds from docs-site/live), starts
+/// it in the site's theme, and moves GPUI's canvas (which it adds to the end of `<body>` once
+/// the graphics are ready) into the stage. Where there's no WebGPU, GPUI draws with WebGL2, and the page says so.
+const LIVE_BODY: &str = r#"<h1>Try it live</h1>
+<p class="lead">gpui-core's components running in your browser: the same Rust as on the Mac, drawn by GPUI with WebGPU.</p>
+<div class="live-start" id="live-start">
+<p>Downloads about 3 MB; runs real gpui-core components with WebGPU.</p>
+<p class="note" id="live-gpu" hidden>This browser has no WebGPU, so GPUI draws with WebGL2 instead, which can be slower.</p>
+<button class="button primary" id="live-go" type="button">Start</button>
+<p class="note" id="live-error" hidden></p>
+</div>
+<div class="live-stage" id="live-stage" hidden></div>
+<script type="module">
+const go = document.getElementById("live-go");
+const error = document.getElementById("live-error");
+if (!("gpu" in navigator)) document.getElementById("live-gpu").hidden = false;
+function fail(e) {
+  error.textContent = "It couldn't start in this browser (" + e + "). A recent Chrome, Edge or Safari runs it.";
+  error.hidden = false;
+  document.getElementById("live-start").hidden = false;
+  document.getElementById("live-stage").hidden = true;
+  go.textContent = "Start";
+  go.disabled = false;
+}
+go.addEventListener("click", async () => {
+  go.disabled = true;
+  go.textContent = "Loading…";
+  error.hidden = true;
+  window.addEventListener("unhandledrejection", (e) => fail(e.reason), { once: true });
+  try {
+    const live = await import("./live/live.js");
+    await live.default();
+    const stage = document.getElementById("live-stage");
+    stage.hidden = false;
+    document.getElementById("live-start").hidden = true;
+    const root = document.documentElement;
+    const dark = root.classList.contains("dark") ||
+      (!root.classList.contains("light") && matchMedia("(prefers-color-scheme: dark)").matches);
+    // GPUI adds its canvas to <body> once the graphics are ready, a moment after start.
+    const moved = new MutationObserver(() => {
+      const canvas = document.querySelector("body > canvas");
+      if (canvas) {
+        stage.appendChild(canvas);
+        moved.disconnect();
+      }
+    });
+    moved.observe(document.body, { childList: true });
+    live.start(dark);
+  } catch (e) {
+    fail(e);
+  }
+});
+</script>
+"#;
+
+/// Writes `index.html`, `live.html`, a page per component and per crate, and `style.css` into
+/// `out`.
 pub fn write_site(
     out: &Path,
     components: &[Component],
@@ -60,6 +117,8 @@ pub fn write_site(
         &index_body(out, components, crates),
     );
     fs::write(out.join("index.html"), index)?;
+    let live = page("Try it live", "", &nav("", Some("live")), LIVE_BODY);
+    fs::write(out.join("live.html"), live)?;
     for c in components {
         let current = format!("components/{}", c.slug);
         let html = page(
@@ -168,6 +227,7 @@ fn page(title: &str, root: &str, nav: &str, body: &str) -> String {
 <header class="topbar">
   <a class="brand" href="{root}index.html">gpui-essentials</a>
   <nav class="links">
+    <a href="{root}live.html">Try it live</a>
     <a href="{root}api/gpui_core/index.html">API</a>
     <a href="{REPO}">GitHub</a>
     <button id="theme" type="button" aria-label="Switch between light and dark">
