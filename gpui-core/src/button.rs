@@ -1,12 +1,17 @@
 //! Buttons as the web app draws them (its `button.tsx`): primary, outline, secondary, ghost,
 //! destructive and link variants in five sizes, with a label, an icon or both, and groups of
-//! them joined edge to edge.
+//! them joined edge to edge. Anything else it holds (a count, a shortcut) goes in as children,
+//! after the label; restyle it as any element (`.w_full()`, `.flex_row_reverse()`).
+//!
+//! What assistive technology calls it is its [`Button::accessibility_label`], or else its
+//! [`Button::label`]; its icon and children are only drawn. A button with no label (an icon
+//! only) needs an accessibility label.
 
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Refineable as _, Rems, RenderOnce, SharedString,
+    AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, Refineable as _, Rems, RenderOnce, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _, px, relative, rems,
 };
@@ -211,6 +216,8 @@ pub struct Button {
     /// Whether what it opens is open, for assistive tech (a menu's trigger).
     expanded: Option<bool>,
     style: StyleRefinement,
+    /// Drawn after the icon and the label, in order.
+    children: Vec<AnyElement>,
     /// Where it sits in a group, which squares its inner corners.
     joined: Joined,
 }
@@ -238,6 +245,7 @@ impl Button {
             on_click: None,
             expanded: None,
             style: StyleRefinement::default(),
+            children: Vec::new(),
             joined: Joined::Alone,
         }
     }
@@ -254,7 +262,9 @@ impl Button {
         self
     }
 
-    /// What it's called to assistive technology, when the label doesn't say (an icon only).
+    /// What it's called to assistive technology. Without it, the [`label`](Self::label) is its
+    /// name; an icon, or anything else drawn in it as a child, never is. So a button without a
+    /// label (an icon only, or children only) must have this.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
@@ -311,12 +321,21 @@ impl Styled for Button {
     }
 }
 
+/// What it draws after its icon and label: a count, a shortcut, a chevron, a spinner. Children
+/// are drawn, not announced: the button's name is its
+/// [`accessibility_label`](Button::accessibility_label) or its [`label`](Button::label).
+impl ParentElement for Button {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.children.extend(elements);
+    }
+}
+
 impl RenderOnce for Button {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.theme().clone();
         let m = metrics(self.size, &theme);
         let p = paint(self.variant, self.selected, &theme);
-        let icon_only = self.label.is_none() && self.icon.is_some();
+        let icon_only = self.label.is_none() && self.icon.is_some() && self.children.is_empty();
         let touch = self.size == ControlSize::Touch;
         let min_touch: Pixels = theme.touch_target;
         let link = self.variant == ButtonVariant::Link;
@@ -327,7 +346,10 @@ impl RenderOnce for Button {
         let radius = m.radius;
         let joined = self.joined;
 
+        // Its id is also its test selector, so a host's tests find it as they name it.
+        let selector = self.id.to_string();
         let mut press = Press::new(self.id)
+            .debug_selector(move || selector)
             .flex()
             // A label gives way (it ends in an ellipsis) rather than run out of the space the
             // button has; an icon alone keeps its size.
@@ -403,6 +425,7 @@ impl RenderOnce for Button {
                         .child(label),
                 )
             })
+            .children(self.children)
             .line_height(relative(1.))
     }
 }
