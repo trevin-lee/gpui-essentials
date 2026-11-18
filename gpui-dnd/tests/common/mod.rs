@@ -7,9 +7,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, Bounds, Context, Entity, IntoElement, Modifiers, MouseButton, ParentElement as _,
-    Pixels, Point, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px,
-    size,
+    AnyElement, AppContext as _, Bounds, Context, Entity, IntoElement, Modifiers, MouseButton,
+    ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext, VisualTestContext,
+    Window, div, point, px, size,
 };
 use gpui_dnd::DndProvider;
 
@@ -45,6 +45,35 @@ pub fn open(
     build: impl Fn(&mut Window, &mut Context<Host>) -> AnyElement + 'static,
 ) -> Opened<'_> {
     open_with(cx, |p| p, build)
+}
+
+/// As `open`, inside gpui-core's `Root` (which moves the focus with Tab), as in an app.
+pub fn open_in_root(
+    cx: &mut TestAppContext,
+    build: impl Fn(&mut Window, &mut Context<Host>) -> AnyElement + 'static,
+) -> Opened<'_> {
+    cx.update(gpui_core::init);
+    let renders = Rc::new(Cell::new(0));
+    let r = renders.clone();
+    let build: Build = Rc::new(build);
+    let made = Rc::new(RefCell::new(None));
+    let m = made.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let host = cx.new(|_| Host {
+            build,
+            wrap: Rc::new(|p| p),
+            renders: r,
+        });
+        *m.borrow_mut() = Some(host.clone());
+        gpui_core::Root::new(host, window, cx)
+    });
+    vcx.simulate_resize(size(px(800.), px(600.)));
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    let host = made.borrow().clone().expect("made");
+    let mut o = Opened { host, renders, vcx };
+    o.settle();
+    o
 }
 
 /// As `open`, with the provider set up by `wrap`.
@@ -150,6 +179,12 @@ impl Opened<'_> {
     /// How many callbacks wait for the next frame: none when nothing is animating.
     pub fn frames_wanted(&mut self) -> usize {
         self.vcx.update(|window, cx| window.simulate_next_frame(cx))
+    }
+
+    /// What the live region says.
+    pub fn said(&mut self) -> Option<String> {
+        self.vcx
+            .update(|window, cx| gpui_dnd::announcement(window, cx).map(|s| s.to_string()))
     }
 
     pub fn keys(&mut self, keys: &str) {

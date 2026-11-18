@@ -391,7 +391,13 @@ up. Then:
 | Space, Enter | pick up the focused source; drop where it is |
 | ↑ ↓ ← → | move to the nearest target in that direction that can take the item (innermost first); in a sortable, to the next slot |
 | Escape | cancel: the preview goes back and the source keeps its focus |
-| Tab | nothing while a drag is on (the drag holds the keyboard) |
+| Tab, and every other key | nothing while a keyboard drag is on: it holds the keyboard |
+
+Keys reach the drag through `cx.intercept_keystrokes`, before any binding or element. A source
+takes no focus from a mouse press (a focus change redraws every view), and a press anywhere ends
+a keyboard drag. A source that the keyboard shouldn't pick up says `DragSource::keyboard(false)`.
+The live region's text is also readable with `gpui_dnd::announcement(window, cx)`, for a host
+that routes announcements itself; mouse and touch drags aren't announced.
 
 The keyboard's pointer sits at each target's `keyboard_anchor`, so hover and drop run exactly as
 for the mouse, offsets included. Each step is announced in a live region (a `Role::Status`

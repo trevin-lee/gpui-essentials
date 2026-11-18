@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use gpui::{App, Window};
+use gpui::{App, Bounds, Pixels, Point, Window};
 
 use crate::item::{DragItem, DropResult, ItemType};
 use crate::monitor::{DragMonitor, DropMonitor};
@@ -22,6 +22,7 @@ pub enum DropOutcome {
 type CanDrop = Rc<dyn Fn(&DragItem, &DragMonitor, &App) -> bool>;
 type Hover = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App)>;
 type OnDrop = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropOutcome>;
+type Anchor = Rc<dyn Fn(Bounds<Pixels>) -> Point<Pixels>>;
 
 /// A drop target (react-dnd's `useDrop`): which items a [`dnd`](crate::dnd) element takes, and
 /// what it does with them.
@@ -31,6 +32,7 @@ pub struct DropTarget {
     pub(crate) can_drop: Option<CanDrop>,
     pub(crate) on_hover: Option<Hover>,
     pub(crate) on_drop: Option<OnDrop>,
+    anchor: Option<Anchor>,
 }
 
 impl DropTarget {
@@ -69,6 +71,23 @@ impl DropTarget {
     ) -> Self {
         self.on_drop = Some(Rc::new(f));
         self
+    }
+
+    /// Where a keyboard drag puts its pointer on this target, given the target's visible
+    /// bounds: its centre unless given.
+    pub fn keyboard_anchor(
+        mut self,
+        f: impl Fn(Bounds<Pixels>) -> Point<Pixels> + 'static,
+    ) -> Self {
+        self.anchor = Some(Rc::new(f));
+        self
+    }
+
+    pub(crate) fn anchor(&self, visible: Bounds<Pixels>) -> Point<Pixels> {
+        match &self.anchor {
+            Some(f) => f(visible),
+            None => visible.center(),
+        }
     }
 
     pub(crate) fn accepts(&self, item_type: ItemType) -> bool {
