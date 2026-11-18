@@ -47,6 +47,12 @@ pub enum EditorCommand {
     SetCodeBlock {
         lang: Option<String>,
     },
+    /// Lay the caret's top-level block out in `count` columns (2 to `MAX_COLUMNS`): it's the
+    /// first column, and each of the others starts with an empty line. The caret stays where
+    /// it was. Unsupported in columns already.
+    InsertColumns {
+        count: usize,
+    },
     /// Insert an empty table (`rows` includes the header row) after the
     /// caret's block, replacing it when it is an empty paragraph.
     InsertTable {
@@ -1163,6 +1169,40 @@ impl BlockEditorModel {
         self.wrap_caret_block("toggle", BlockKindData::Toggle { open: true })
     }
 
+    fn insert_columns(&mut self, count: usize) -> Result<bool, CommandError> {
+        let count = count.clamp(2, crate::kind::MAX_COLUMNS);
+        let pos = self.caret_resolved()?.pos;
+        let root = self.doc.root;
+        let mut top = pos.block;
+        while let Some((parent, _)) = self.doc.index_in_parent(top)
+            && parent != root
+        {
+            top = parent;
+        }
+        if matches!(self.doc.kind(top), Some(BlockKindData::Columns)) {
+            return Err(CommandError::Unsupported("columns in columns"));
+        }
+        self.transact(EditOrigin::Command("insert_columns"), |tx| {
+            let (_, index) = tx
+                .doc
+                .index_in_parent(top)
+                .ok_or(StepError::UnknownBlock(top))?;
+            let first = tx.remove_block(top)?;
+            let width = 1. / count as f32;
+            let column = |blocks| DetachedBlock::container(BlockKindData::Column { width }, blocks);
+            let mut columns = vec![column(vec![first])];
+            for _ in 1..count {
+                columns.push(column(vec![DetachedBlock::paragraph(InlineText::new())]));
+            }
+            tx.insert(
+                root,
+                index,
+                vec![DetachedBlock::container(BlockKindData::Columns, columns)],
+            )?;
+            Ok(caret(pos))
+        })
+    }
+
     /// Wrap the caret's paragraph, heading or code block in a new container.
     fn wrap_caret_block(
         &mut self,
@@ -1654,6 +1694,7 @@ impl BlockEditorModel {
             EditorCommand::Indent | EditorCommand::Outdent if self.current_cell().is_some() => {
                 self.tab_cell(command == EditorCommand::Outdent)
             }
+            EditorCommand::InsertColumns { count } => self.insert_columns(count),
             EditorCommand::InsertTable { rows, cols } => self.insert_table(rows, cols),
             EditorCommand::EditTable(edit) => self.edit_table(edit),
             EditorCommand::Indent => self.indent(),

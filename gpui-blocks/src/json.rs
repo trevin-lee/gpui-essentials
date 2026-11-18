@@ -78,7 +78,7 @@ pub struct Block {
 }
 
 /// The `type`s this version reads: [`Kind`]'s.
-const TYPES: [&str; 17] = [
+const TYPES: [&str; 19] = [
     "paragraph",
     "heading",
     "quote",
@@ -95,6 +95,8 @@ const TYPES: [&str; 17] = [
     "toc",
     "embed",
     "widget",
+    "columns",
+    "column",
     "markdown",
 ];
 
@@ -237,6 +239,14 @@ pub enum Kind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         meta: Option<String>,
         body: String,
+    },
+    /// Blocks side by side. Children: 2 to [`markdown_editor::MAX_COLUMNS`] columns. Only at
+    /// the top level.
+    Columns,
+    /// One of a columns block's columns: `width` is its share of the row, the shares adding up
+    /// to 1. Children: any blocks but columns.
+    Column {
+        width: f64,
     },
     /// Anything else, kept as the Markdown it was written as: a link definition, HTML, a block
     /// a later version knows.
@@ -564,6 +574,8 @@ fn same_kind(b: BlockRef<'_>, kind: &Kind) -> bool {
             | (BlockKind::Table, Kind::Table { .. })
             | (BlockKind::TableRow, Kind::Row)
             | (BlockKind::TableCell, Kind::Cell { .. })
+            | (BlockKind::Columns, Kind::Columns)
+            | (BlockKind::Column, Kind::Column { .. })
             | (
                 BlockKind::Custom,
                 Kind::Page { .. }
@@ -658,6 +670,29 @@ fn block(b: BlockRef<'_>, ids: &mut Ids) -> Block {
                         _ => None,
                     })
                     .collect(),
+            },
+            children(),
+        ),
+        BlockKind::Columns => {
+            // The widths as shares of 1, as the Markdown writes them.
+            let mut columns: Vec<Block> = children();
+            let widths: Vec<f32> = b
+                .children()
+                .map(|c| c.column_width().unwrap_or(1.))
+                .collect();
+            for (column, width) in columns
+                .iter_mut()
+                .zip(markdown_editor::written_widths(&widths))
+            {
+                if let Kind::Column { width: w } = &mut column.kind {
+                    *w = f64::from(width);
+                }
+            }
+            (Kind::Columns, columns)
+        }
+        BlockKind::Column => (
+            Kind::Column {
+                width: f64::from(b.column_width().unwrap_or(1.)),
             },
             children(),
         ),
@@ -785,6 +820,17 @@ fn markdown(b: &Block) -> String {
             )
         }
         Kind::Quote => quoted(&join(&b.children)),
+        Kind::Columns => markdown_editor::columns_markdown(
+            &b.children
+                .iter()
+                .map(|column| match column.kind {
+                    Kind::Column { width } => (width as f32, join(&column.children)),
+                    // Not a column (JSON from elsewhere): a column of its own.
+                    _ => (0., markdown(column)),
+                })
+                .collect::<Vec<_>>(),
+        ),
+        Kind::Column { .. } => join(&b.children),
         Kind::Callout { name } => {
             let name: String = name.chars().filter(char::is_ascii_alphanumeric).collect();
             let marker = format!("> [!{}]", name.to_ascii_uppercase());
@@ -999,10 +1045,10 @@ mod tests {
     fn a_newer_type_is_read_as_what_it_holds() {
         let json = r#"{"format":"gpui-blocks","version":1,"blocks":[
             {"id":"a","type":"paragraph","text":"before"},
-            {"id":"cols","type":"columns","children":[
-                {"id":"c1","type":"column","width":0.5,"children":[
+            {"id":"cols","type":"split","children":[
+                {"id":"c1","type":"pane","width":0.5,"children":[
                     {"id":"p1","type":"paragraph","text":"left"}]},
-                {"id":"c2","type":"column","width":0.5,"children":[
+                {"id":"c2","type":"pane","width":0.5,"children":[
                     {"id":"p2","type":"heading","level":2,"text":"right"},
                     {"id":"p3","type":"paragraph","text":"more"}]}]},
             {"id":"q","type":"quote","children":[
@@ -1045,6 +1091,49 @@ mod tests {
         // A known type with what it needs missing is still refused.
         let bad = r#"{"format":"gpui-blocks","version":1,"blocks":[{"id":"h","type":"heading"}]}"#;
         assert!(Document::from_json(bad).is_err());
+    }
+
+    /// Columns go to JSON and back with their ids and widths, and to the Markdown agents read.
+    #[test]
+    fn columns_keep_their_ids_and_widths() {
+        let source = "<!-- columns -->\n\n<!-- column 0.25 -->\n\nleft\n\n<!-- column 0.75 -->\n\n## right\n\nmore\n\n<!-- /columns -->";
+        round_trips(source);
+        let doc = Document::from_markdown(source, &[]);
+        assert_eq!(doc.blocks[0].kind, Kind::Columns);
+        let widths: Vec<f64> = doc.blocks[0]
+            .children
+            .iter()
+            .map(|c| match c.kind {
+                Kind::Column { width } => width,
+                _ => panic!("{c:?}"),
+            })
+            .collect();
+        assert_eq!(widths, [0.25, 0.75]);
+        // JSON from elsewhere: shares that don't add up, read and written as shares of 1.
+        let json = r#"{"format":"gpui-blocks","version":1,"blocks":[
+            {"id":"cols","type":"columns","children":[
+                {"id":"c1","type":"column","width":0.3,"children":[{"id":"p1","type":"paragraph","text":"a"}]},
+                {"id":"c2","type":"column","width":0.3,"children":[{"id":"p2","type":"paragraph","text":"b"}]}]}]}"#;
+        let doc = Document::from_json(json).unwrap();
+        assert!(
+            doc.to_markdown().contains("<!-- column 0.5 -->"),
+            "{}",
+            doc.to_markdown()
+        );
+        let model =
+            BlockEditorModel::from_markdown(&doc.to_markdown(), crate::extensions(&[])).unwrap();
+        let mut ids = Ids::default();
+        ids.adopt(&model, &doc.blocks);
+        let back = Document::from_model(&model, String::new(), &mut ids);
+        fn ids_of(blocks: &[Block], out: &mut Vec<String>) {
+            for b in blocks {
+                out.push(b.id.clone());
+                ids_of(&b.children, out);
+            }
+        }
+        let mut got = Vec::new();
+        ids_of(&back.blocks, &mut got);
+        assert_eq!(got, ["cols", "c1", "p1", "c2", "p2"]);
     }
 
     /// Every kind's `type` is one this version reads.
@@ -1098,6 +1187,8 @@ mod tests {
                 meta: None,
                 body: String::new(),
             },
+            Kind::Columns,
+            Kind::Column { width: 0.5 },
             Kind::Markdown {
                 markdown: String::new(),
             },

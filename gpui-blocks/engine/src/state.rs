@@ -3537,6 +3537,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::SelectAll => "select_all",
         EditorCommand::DeleteSelection => "delete_selection",
         EditorCommand::SetCodeBlock { .. } => "code_block",
+        EditorCommand::InsertColumns { .. } => "insert_columns",
         EditorCommand::InsertTable { .. } => "insert_table",
         EditorCommand::EditTable(_) => "edit_table",
     }

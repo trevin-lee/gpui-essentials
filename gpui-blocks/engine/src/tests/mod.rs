@@ -1,4 +1,5 @@
 // Changed in Trevin Lee's fork (2026): the containers test module.
+mod columns;
 mod commands;
 mod containers;
 mod host;

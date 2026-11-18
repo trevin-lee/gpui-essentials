@@ -2746,6 +2746,47 @@ mod tests {
         assert!(!hovered, "compact: no side menu");
     }
 
+    /// Columns sit side by side in a wide editor, and one under another, in order, on a phone.
+    #[gpui::test]
+    fn columns_sit_side_by_side_and_stack_on_a_phone(cx: &mut TestAppContext) {
+        let (editor, cx) = open(
+            cx,
+            "<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->",
+        );
+        // Where each column's first line is drawn.
+        let places = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            draw(cx);
+            draw(cx);
+            editor.update(cx, |e, cx| {
+                let state = e.state().read(cx);
+                let leaves: Vec<_> = state.model().document().leaves().map(|l| l.id()).collect();
+                let at = |ix: usize| {
+                    state
+                        .position_bounds(BlockPosition::new(leaves[ix], 0))
+                        .unwrap()
+                };
+                (at(0), at(1))
+            })
+        };
+        cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(800.)));
+        let (left, right) = places(&editor, cx);
+        assert!(
+            (left.top() - right.top()).abs() < gpui::px(2.),
+            "{left:?} {right:?}"
+        );
+        assert!(
+            right.left() > left.left() + gpui::px(200.),
+            "{left:?} {right:?}"
+        );
+        cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(800.)));
+        let (left, right) = places(&editor, cx);
+        assert!(right.top() > left.top(), "stacked: {left:?} {right:?}");
+        assert!(
+            (right.left() - left.left()).abs() < gpui::px(2.),
+            "{left:?} {right:?}"
+        );
+    }
+
     /// `compact_below(px(0.))` keeps the wide layout on a narrow editor, with the host's own
     /// insets.
     #[gpui::test]
