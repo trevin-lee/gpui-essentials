@@ -415,6 +415,9 @@ pub struct TableView {
     pub(crate) anchor: Option<String>,
     /// The row a pointer is over: its handle is made, the others' aren't.
     pub(crate) hovered_row: Option<String>,
+    /// The row in the peek panel ([`TableView::peek`]), and whether opening a row peeks it.
+    pub(crate) peek: Option<String>,
+    pub(crate) peek_mode: bool,
     /// The one drag source every row's handle, card and line shares, built on first use:
     /// each gives only its row and group.
     pub(crate) card_drag: std::cell::OnceCell<gpui_dnd::SharedSource<super::board::DraggedCard>>,
@@ -478,6 +481,8 @@ impl TableView {
             selected: Vec::new(),
             anchor: None,
             hovered_row: None,
+            peek: None,
+            peek_mode: false,
             card_drag: std::cell::OnceCell::new(),
             search: Default::default(),
             row_text: engine::RowText::new(),
@@ -1138,6 +1143,12 @@ impl TableView {
 
     /// Opens a row's page.
     pub(crate) fn open_row(&mut self, row: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.peek_mode {
+            if let Some(id) = self.shown_row(row).map(|r| r.id.clone()) {
+                self.peek(&id, cx);
+            }
+            return;
+        }
         if let Some(r) = self.shown_row(row) {
             self.emit(
                 TableEvent::OpenRow {
