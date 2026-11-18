@@ -374,7 +374,8 @@ made.
   host's palette entries are gpui-dnd sources carrying a node template
   (`dnd(id).source(item.source())`) and the pane takes them. While one is over the pane the flow
   draws where it would land, at its zoom and on its grid; a drop sends `FlowEvent::NodeDropped`
-  with that corner in the flow, for the host to add (`item.node_at(id, position)`). Dropped
+  with that corner in the flow, for the host to add (`item.node_at(id, position)`). Held near
+  the pane's edges it pans the canvas (gpui-dnd's `auto_scroll_zone`). Dropped
   anywhere else, it slides back to the palette. The window needs a `gpui_dnd::DndProvider`; the
   example has a palette beside its canvas.
 

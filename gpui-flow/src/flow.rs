@@ -750,6 +750,9 @@ pub struct Flow {
     /// frame looks nodes up by id several times each.
     index: RefCell<Option<FastMap<NodeId, usize>>>,
     shared: Rc<Shared>,
+    /// The viewport as gpui-dnd pans it while a palette item is held near the pane's edges,
+    /// made on the first frame.
+    palette_pan: Option<(Rc<dyn gpui_dnd::Scrollable>, gpui_dnd::AutoScroll)>,
     focus: FocusHandle,
     drag: Option<Drag>,
     /// The press under way is on a node's drag handle.
@@ -988,6 +991,7 @@ impl Flow {
             asked: HashSet::new(),
             index: RefCell::new(None),
             shared: Rc::default(),
+            palette_pan: None,
             focus: cx.focus_handle(),
             drag: None,
             by_drag_handle: false,
@@ -6347,6 +6351,13 @@ impl Render for Flow {
         let flow_id = cx.entity_id();
         let ready = self.ready;
 
+        // A palette item held near the pane's edges pans it, as a node dragged there does.
+        let palette_pan = (self.options.pointer_mode != PointerMode::Off).then(|| {
+            self.palette_pan
+                .get_or_insert_with(|| crate::palette::pan(this.clone(), shared.clone()))
+                .clone()
+        });
+
         // Under everything: the pane's own bounds, its pattern, and the listeners that follow
         // the mouse wherever a drag takes it.
         let pane = {
@@ -6371,6 +6382,9 @@ impl Render for Flow {
                         && shared.transform.replace(Some(transform)) != Some(transform)
                     {
                         listener(transform, window, cx);
+                    }
+                    if let Some((scroller, options)) = palette_pan {
+                        gpui_dnd::auto_scroll_zone(window, cx, bounds, scroller, options);
                     }
                     let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
                     (shared, hitbox)
