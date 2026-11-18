@@ -148,4 +148,5 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Into the toolchain rust-toolchain.toml pins, which rustup installs here first.
       - run: rustup target add wasm32-unknown-unknown
-      - run: cargo check -p gpui-core --locked --target wasm32-unknown-unknown
+      # Clippy, not just a check: lints that differ by target (pointer sizes) show up here.
+      - run: cargo clippy -p gpui-core --locked --target wasm32-unknown-unknown -- -D warnings
