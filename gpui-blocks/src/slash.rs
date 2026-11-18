@@ -36,6 +36,10 @@ pub enum SlashAction {
     /// ([`EditorEvent::EmbedRequested`](crate::EditorEvent::EmbedRequested)). The app calls
     /// [`Editor::insert_embed`](crate::Editor::insert_embed).
     Embed,
+    /// Ask the app for a web page's address
+    /// ([`EditorEvent::BookmarkRequested`](crate::EditorEvent::BookmarkRequested)). The app
+    /// calls [`Editor::insert_bookmark`](crate::Editor::insert_bookmark).
+    Bookmark,
     /// Make the line a toggle heading of this level (1 to 3): a heading whose blocks after
     /// it fold away.
     ToggleHeading(u8),
@@ -347,6 +351,16 @@ pub fn doc_items() -> Vec<SlashItem> {
             .aliases(["view", "linked", "database", "board", "mindmap"])
             .icon("▣")
             .group(DOCS),
+    ]
+}
+
+/// The item [`crate::Options::unfurl`] adds: a web page as a card.
+pub fn bookmark_items() -> Vec<SlashItem> {
+    vec![
+        SlashItem::new("Bookmark", SlashAction::Bookmark)
+            .hint("A web page as a card")
+            .aliases(["web bookmark", "link preview", "url", "website"])
+            .icon("🔖"),
     ]
 }
 

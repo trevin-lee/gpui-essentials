@@ -41,6 +41,7 @@
 //! ```
 
 mod block_menu;
+pub mod bookmark;
 mod code_chrome;
 mod columns_ui;
 mod comments;

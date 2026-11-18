@@ -291,6 +291,19 @@ the address `doc:id`) offers to show it as a mention, a sub-page or an embed.
 never opens anything itself. After your documents change, call `editor.refresh_docs(cx)` to
 draw the links again.
 
+## Bookmarks
+
+A **bookmark** is a web page as a card, Notion's web bookmark: its title, two lines of its
+description, its address and its picture. The editor never fetches a page. Give it
+`Options::unfurl(|url, cx| ...)`, which asks your server about the page and returns a
+`Task<Option<Unfurl>>` with the title, description and picture, the picture as your own stored
+copy (`asset:<sha256>`), which loads through `Options::images`. A card shows the address until
+the answer comes, and a click on it sends `LinkClicked`.
+
+`Options::unfurl` adds Bookmark to the slash menu, which sends `BookmarkRequested`; answer with
+`editor.insert_bookmark(url, cx)`. A web address pasted on a line of its own offers to show it
+as a bookmark.
+
 ## Mentions
 
 Typing `@` at the start of a line, after a space or after `(` opens a menu of who and what can
@@ -387,6 +400,9 @@ CommonMark, with GitHub's tables and task lists:
   level between blank lines, so it stays Markdown, and an open toggle says `open`.
 - **Widgets** are fenced blocks, as above.
 - **Links to other documents** are links to `doc:` and an id, as above.
+- **Bookmarks** are a link titled `bookmark` on a line of its own, then a comment holding the
+  description and picture as JSON, which GitHub doesn't show:
+  `[Title](https://example.com "bookmark") <!-- {"description":"…","image":"asset:…"} -->`.
 
 Saving writes the editor's own form of Markdown, so a file it didn't write can change in how
 it's written, though not in what it says:
