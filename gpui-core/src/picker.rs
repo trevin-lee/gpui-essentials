@@ -27,6 +27,7 @@ pub(crate) const VIRTUAL_AFTER: usize = 100;
 const CREATE: &str = "\u{0}gpui-core-picker-create";
 
 type OnCreate = Rc<dyn Fn(&str, &mut Window, &mut App)>;
+type OnQueryChange = Rc<dyn Fn(&str, &mut App)>;
 
 actions!(
     gpui_core_picker,
@@ -101,6 +102,10 @@ pub(crate) fn init(cx: &mut App) {
 pub struct Picker {
     id: ElementId,
     items: Vec<PopupMenuItem>,
+    /// For each entry, whether it's one the host found for the query: shown as it is, not
+    /// filtered.
+    found: Vec<bool>,
+    on_query_change: Option<OnQueryChange>,
     /// Each group's heading, with the index of its first entry.
     headings: Vec<(usize, SharedString)>,
     placeholder: SharedString,
@@ -127,6 +132,8 @@ impl Picker {
         Self {
             id: id.into(),
             items: Vec::new(),
+            found: Vec::new(),
+            on_query_change: None,
             headings: Vec::new(),
             placeholder: "Search".into(),
             empty: "No matches".into(),
@@ -152,6 +159,25 @@ impl Picker {
 
     pub fn items(mut self, items: impl IntoIterator<Item = PopupMenuItem>) -> Self {
         self.items.extend(items);
+        self
+    }
+
+    /// Entries the host found for what's typed (a search it ran from
+    /// [`on_query_change`](Self::on_query_change)): shown as they are, as typing doesn't filter
+    /// them, since what was found needn't hold the words typed (a search by meaning).
+    pub fn found(mut self, items: impl IntoIterator<Item = PopupMenuItem>) -> Self {
+        self.found.resize(self.items.len(), false);
+        for item in items {
+            self.items.push(item);
+            self.found.push(true);
+        }
+        self
+    }
+
+    /// Told what's typed each time it changes (not on the frame it's drawn in), for a host that
+    /// searches for it and gives what it finds to [`found`](Self::found).
+    pub fn on_query_change(mut self, f: impl Fn(&str, &mut App) + 'static) -> Self {
+        self.on_query_change = Some(Rc::new(f));
         self
     }
 
@@ -301,6 +327,8 @@ struct PickerState {
     /// The highlighted entry, by its id: it stays that entry's while the host's entries come, go
     /// and move, so Enter picks the entry that's shown highlighted.
     highlighted_id: Option<SharedString>,
+    /// The query the host was last told of (`on_query_change`).
+    told: SharedString,
 }
 
 /// The entry, if it's one to pick (not a heading).
@@ -325,6 +353,7 @@ impl RenderOnce for Picker {
         crate::init_soon(cx);
         let placeholder = self.placeholder.clone();
         let start = self.query.clone();
+        let told = start.clone().unwrap_or_default();
         let state = window.use_keyed_state(self.id.clone(), cx, |window, cx| {
             let query = cx.new(|cx| {
                 let q = InputState::new(window, cx).placeholder(placeholder);
@@ -345,6 +374,7 @@ impl RenderOnce for Picker {
                 seen: None,
                 highlighted: None,
                 highlighted_id: None,
+                told,
             }
         });
         let query = state.read(cx).query.clone();
@@ -352,6 +382,20 @@ impl RenderOnce for Picker {
         let max_chars = self.max_chars;
         query.update(cx, |q, _| q.set_max_chars(max_chars));
         let text = query.read(cx).value();
+        // A new query: the host is told, after this frame.
+        if let Some(f) = self.on_query_change.clone() {
+            let changed = state.update(cx, |s, _| {
+                let changed = s.told != text;
+                if changed {
+                    s.told = text.clone();
+                }
+                changed
+            });
+            if changed {
+                let text = text.clone();
+                cx.defer(move |cx| f(&text, cx));
+            }
+        }
 
         let typed = text.trim().to_string();
         let exact = self
@@ -363,6 +407,7 @@ impl RenderOnce for Picker {
         // Each heading kept, with the index among the matches of its group's first.
         let mut heads: Vec<(usize, SharedString)> = Vec::new();
         let mut headings = self.headings.into_iter().peekable();
+        let found = self.found;
         for (i, item) in self.items.into_iter().enumerate() {
             let mut head = None;
             while let Some((_, title)) = headings.next_if(|(at, _)| *at <= i) {
@@ -371,7 +416,7 @@ impl RenderOnce for Picker {
             if let Some(title) = head {
                 heads.push((items.len(), title));
             }
-            if !filter || matches(&item.label, &text) {
+            if !filter || found.get(i) == Some(&true) || matches(&item.label, &text) {
                 items.push(item);
             }
         }

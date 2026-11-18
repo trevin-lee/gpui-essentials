@@ -49,6 +49,8 @@ use crate::dialog::Dialog;
 type DismissFn = Rc<dyn Fn(&DismissReason, &mut Window, &mut App)>;
 /// Runs with a pick.
 type OnSelect = Rc<dyn Fn(&MenuSelect, &mut Window, &mut App)>;
+/// Runs with what's typed.
+type OnQueryChange = Rc<dyn Fn(&str, &mut App)>;
 
 /// A size in the web's CSS pixels, as rems of its 15 pixel text.
 fn css(v: f32) -> Rems {
@@ -70,7 +72,9 @@ pub struct CommandDialog {
     open: bool,
     on_dismiss: Option<DismissFn>,
     on_select: Option<OnSelect>,
-    groups: Vec<(SharedString, Vec<PopupMenuItem>)>,
+    /// Each group: its heading, its commands, and whether they're found ones (not filtered).
+    groups: Vec<(SharedString, Vec<PopupMenuItem>, bool)>,
+    on_query_change: Option<OnQueryChange>,
     placeholder: SharedString,
     empty: SharedString,
     label: SharedString,
@@ -86,6 +90,7 @@ impl CommandDialog {
             on_dismiss: None,
             on_select: None,
             groups: Vec::new(),
+            on_query_change: None,
             placeholder: "Type a command or search…".into(),
             empty: "No results found.".into(),
             label: "Command palette".into(),
@@ -107,7 +112,26 @@ impl CommandDialog {
         commands: impl IntoIterator<Item = PopupMenuItem>,
     ) -> Self {
         self.groups
-            .push((heading.into(), commands.into_iter().collect()));
+            .push((heading.into(), commands.into_iter().collect(), false));
+        self
+    }
+
+    /// A group of what the host found for what's typed (docs, people, a search by meaning),
+    /// under a heading: shown as given, since typing doesn't filter them. The host searches
+    /// from [`on_query_change`](Self::on_query_change).
+    pub fn found(
+        mut self,
+        heading: impl Into<SharedString>,
+        items: impl IntoIterator<Item = PopupMenuItem>,
+    ) -> Self {
+        self.groups
+            .push((heading.into(), items.into_iter().collect(), true));
+        self
+    }
+
+    /// Told what's typed each time it changes, for a host that searches for it.
+    pub fn on_query_change(mut self, f: impl Fn(&str, &mut App) + 'static) -> Self {
+        self.on_query_change = Some(Rc::new(f));
         self
     }
 
@@ -179,8 +203,16 @@ impl RenderOnce for CommandDialog {
         .placeholder(self.placeholder)
         .empty_text(self.empty)
         .touch(self.touch);
-        for (heading, commands) in self.groups {
-            picker = picker.heading(heading).items(commands);
+        for (heading, commands, found) in self.groups {
+            picker = picker.heading(heading);
+            picker = if found {
+                picker.found(commands)
+            } else {
+                picker.items(commands)
+            };
+        }
+        if let Some(f) = self.on_query_change {
+            picker = picker.on_query_change(move |text, cx| f(text, cx));
         }
         if let Some(f) = self.on_select {
             picker = picker.on_select(move |pick, window, cx| f(pick, window, cx));
