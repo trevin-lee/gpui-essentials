@@ -415,6 +415,9 @@ pub struct TableView {
     pub(crate) anchor: Option<String>,
     /// The row a pointer is over: its handle is made, the others' aren't.
     pub(crate) hovered_row: Option<String>,
+    /// The one drag source every row's handle, card and line shares, built on first use:
+    /// each gives only its row and group.
+    pub(crate) card_drag: std::cell::OnceCell<gpui_dnd::SharedSource<super::board::DraggedCard>>,
     /// The search from the bar of views, and what it keeps between keystrokes.
     pub(crate) search: super::search::Search,
     /// The rows' text the view's filter and sorts lowercased, kept until the rows change.
@@ -475,6 +478,7 @@ impl TableView {
             selected: Vec::new(),
             anchor: None,
             hovered_row: None,
+            card_drag: std::cell::OnceCell::new(),
             search: Default::default(),
             row_text: engine::RowText::new(),
         }

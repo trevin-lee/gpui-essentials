@@ -4,7 +4,7 @@
 //! board goes back, nothing emitted by either; a carried card has one picture; and two lists keep
 //! their drags apart the same way.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 

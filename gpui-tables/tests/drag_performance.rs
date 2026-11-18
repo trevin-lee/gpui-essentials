@@ -1,11 +1,10 @@
 //! How long a frame of a drag takes with 10,000 rows, in a table (a row by its handle), a board
 //! (a card across the columns) and a list (a line down it): a move of the pointer a frame, the
-//! landing following it, with the test platform's own text system. Gated to the Mac like the
-//! other view tests (the crate takes GPUI's test support there only); it runs on Linux too with
-//! that support added. Ignored by default:
+//! landing following it, with the test platform's own text system. Runs on Linux with
+//! `--features test-support,gpui/bench-support`. Ignored by default:
 //! `cargo test --release -p gpui-tables --test drag_performance -- --ignored --nocapture`.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 

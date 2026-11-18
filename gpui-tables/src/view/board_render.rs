@@ -14,7 +14,7 @@ use gpui::{
 use gpui_core::{IconName, Press, Selectable as _};
 use gpui_dnd::dnd;
 
-use super::board::{BoardMetrics, BoardSpot, CardGhost};
+use super::board::{BoardMetrics, BoardSpot, CardGhost, DraggedCard};
 use super::render::{icon, line};
 use super::table::TableView;
 use crate::model::{PropertyType, Value};
@@ -620,7 +620,7 @@ impl TableView {
         .w_full()
         .h(m.card)
         .drop_indicator(false)
-        .source(self.card_source(rid, from, cx))
+        .shared_source(&self.card_source(cx), DraggedCard { row_id: rid, from })
         .child(press)
         .into_any_element()
     }
