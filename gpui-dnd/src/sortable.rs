@@ -11,7 +11,12 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// GPUI's clock: std's Instant, but in a browser (which has none) web-time's.
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use gpui::{
     AnyElement, App, Axis, Bounds, Element, ElementId, Entity, FocusHandle, GlobalElementId,
