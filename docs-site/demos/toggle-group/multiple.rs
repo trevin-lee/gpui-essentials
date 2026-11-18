@@ -1,0 +1,10 @@
+// Several on at once, outlined, with labels.
+ToggleGroup::new("marks")
+    .accessibility_label("Text style")
+    .outline()
+    .w(rems(20.))
+    .multiple(true)
+    .item("bold", "Bold")
+    .item_with_icon("italic", "Italic", IconName::Italic)
+    .item_with_icon("underline", "Underline", IconName::Underline)
+    .selected(["bold", "underline"])
