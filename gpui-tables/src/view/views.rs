@@ -52,11 +52,13 @@ pub(crate) enum ViewPage {
     GroupDate,
     /// The properties a board's cards or a list's lines show, in order.
     Properties,
+    /// A filter rule's value, typed (its index among the rules).
+    RuleValue(usize),
 }
 
 impl ViewPage {
     pub(crate) fn is_field(&self) -> bool {
-        *self == Self::Rename
+        matches!(self, Self::Rename | Self::RuleValue(_))
     }
 }
 
@@ -129,6 +131,18 @@ pub(crate) enum ViewAction {
     Columns,
     ClearSorts,
     ClearFilter,
+    /// The filter's rules: any of them, or all.
+    FilterAny(bool),
+    /// A rule added for this property.
+    AddRule(String),
+    /// Rule `0` deleted.
+    RemoveRule(usize),
+    /// Rule `0` made to test this property instead (a new rule for it).
+    RuleProperty(usize, String),
+    /// Rule `0`'s condition.
+    RuleOp(usize, crate::model::FilterOp),
+    /// Rule `0`'s value, picked.
+    RuleValue(usize, serde_json::Value),
 }
 
 /// A board being added that waits to be told what to group by: its name, as typed.
@@ -283,7 +297,7 @@ impl TableView {
             .unwrap_or_default()
     }
 
-    fn view_by_id(&self, id: &str) -> Option<&View> {
+    pub(crate) fn view_by_id(&self, id: &str) -> Option<&View> {
         self.database.database.as_ref()?.view(id)
     }
 
@@ -443,7 +457,9 @@ impl TableView {
         self.date = None;
         self.close_property_menu();
         self.menu_serial += 1;
-        if page == ViewPage::Rename {
+        if let ViewPage::RuleValue(i) = page {
+            self.open_rule_value(&view_id, i, window, cx);
+        } else if page == ViewPage::Rename {
             let max = self.host.limits().name_chars;
             self.open_field(
                 FieldFor::RenameView(view_id.clone()),
@@ -598,7 +614,7 @@ impl TableView {
             ViewPage::Group => self.group_entries(v),
             ViewPage::GroupDate => self.group_date_entries(v),
             ViewPage::Properties => self.card_entries(v),
-            ViewPage::Rename => Vec::new(),
+            ViewPage::Rename | ViewPage::RuleValue(_) => Vec::new(),
         }
     }
 
@@ -678,9 +694,16 @@ impl TableView {
                 );
             }
         }
-        if !v.sort.is_empty() || v.filter.is_some() {
-            out.push(Entry::heading("Sort and filter"));
-        }
+        out.push(Entry::heading("Sort and filter"));
+        let r = ops::rules(v);
+        out.push(
+            Entry::sub(super::filter_rules::FILTER, self.filter_rule_entries(v))
+                .icon(I::Funnel)
+                .hint(match r.rules.len() {
+                    0 => "None".to_owned(),
+                    _ => self.filter_summary(v),
+                }),
+        );
         if !v.sort.is_empty() {
             out.push(
                 act("Remove sorts", A::ClearSorts)
@@ -975,6 +998,15 @@ impl TableView {
                 v.filter = None;
                 self.emit_views(vec![self.view_changed(v)], None, window, cx);
             }
+            a @ (ViewAction::FilterAny(_)
+            | ViewAction::AddRule(_)
+            | ViewAction::RemoveRule(_)
+            | ViewAction::RuleProperty(..)
+            | ViewAction::RuleOp(..)
+            | ViewAction::RuleValue(..)) => {
+                let Some(v) = current else { return };
+                self.apply_rule_action(v, a, window, cx);
+            }
         }
     }
 
@@ -1007,6 +1039,10 @@ impl TableView {
                 Some(ops::view_type_label(&ViewType::Board).into()),
             )
         };
+        if let ViewPage::RuleValue(i) = page {
+            self.rule_value_back(view_id, i, window, cx);
+            return;
+        }
         let to = match (page, anchor) {
             (ViewPage::BoardGroup, ViewAnchor::Settings) => Some((ViewPage::Settings, board())),
             (ViewPage::BoardGroup, ViewAnchor::Tab) => Some((ViewPage::Menu, board())),
@@ -1067,6 +1103,16 @@ impl TableView {
         if changed != v {
             self.emit_views(vec![self.view_changed(changed)], None, window, cx);
         }
+    }
+
+    /// A view's change shown and handed to the host, as any setting's is.
+    pub(crate) fn emit_view_change(
+        &mut self,
+        view: View,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.emit_views(vec![self.view_changed(view)], None, window, cx);
     }
 
     fn view_changed(&self, view: View) -> Edit {

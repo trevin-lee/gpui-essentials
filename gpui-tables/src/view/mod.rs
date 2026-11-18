@@ -41,6 +41,7 @@
 mod board;
 mod board_render;
 mod calc;
+mod filter_rules;
 pub mod format;
 mod host;
 mod list;
