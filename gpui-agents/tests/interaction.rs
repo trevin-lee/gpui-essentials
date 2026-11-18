@@ -84,6 +84,36 @@ fn a_steps_details_are_markdown(cx: &mut TestAppContext) {
     );
 }
 
+/// Where react-ui draws a short text through its InlineMarkdownRenderer (an inline header, an
+/// entity list's sides, an option card's label), Markdown in it is drawn as such: its link goes
+/// to the host, and an option card with a bold label is still chosen by a press. Text with no
+/// Markdown in it is drawn as it always was.
+#[gpui::test]
+fn short_texts_take_inline_markdown_as_react_ui_does(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    let program = r#"root = Stack([InlineHeader("**Due** today", "See [the docs](https://example.com/docs)"), EntityList([{left: "**Rent**", right: "$1,200"}, {left: "Food", right: "$340"}]), InlineHeader("Plain", null), Form("prefs", Buttons([Button("Save")]), [FormControl("Speed", OptionCards("speed", "single", [OptionCard("fast", "**Fast**", "Quick _setup_"), OptionCard("slow", "Slow", null)]))])])"#;
+    let (card, cx) = open(cx, program, &host, Some(400.));
+    for md in ["md:r.c0.h", "md:r.c0.d", "md:r.c1.r0.l"] {
+        assert!(drawn(cx, md), "{md}");
+    }
+    for plain in ["md:r.c1.r1.l", "md:r.c1.r0.r", "md:r.c2.h"] {
+        assert!(!drawn(cx, plain), "{plain} has no Markdown");
+    }
+    let link = cx.debug_bounds("t:md:r.c0.d").unwrap();
+    // "See " then the link.
+    cx.simulate_click(link.origin + point(px(60.), px(8.)), Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        host.opened.borrow().as_slice(),
+        ["https://example.com/docs"]
+    );
+    click(cx, "option:**Fast**");
+    assert_eq!(
+        card.read_with(cx, |c, _| c.store().field(Some("prefs"), "speed")),
+        Some(json!("fast"))
+    );
+}
+
 #[gpui::test]
 fn a_markdown_link_goes_to_the_host_and_markdown_copies(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);
