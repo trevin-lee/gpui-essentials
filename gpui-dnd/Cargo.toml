@@ -21,9 +21,34 @@ name = "gpui_dnd"
 gpui = { workspace = true }
 gpui-core = { path = "../gpui-core" }
 
+# Only for the shots feature: the macOS platform with its test support (offscreen rendering)
+# on, and GPUI's version of the image crate to save the picture.
+gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
 [features]
 # GPUI's test support (a headless window, simulated input), for hosts' tests.
 test-support = ["gpui/test-support"]
+# Pictures of the examples' windows rendered offscreen (`--shot out.png --scene <name>`).
+shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
+
+[[example]]
+name = "kanban"
+
+[[example]]
+name = "sortable"
+
+[[example]]
+name = "nested"
+
+[[example]]
+name = "custom_preview"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+# The examples' window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+# Its shaders compiled when the window opens, so the examples build without Xcode's separate
+# Metal Toolchain.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
