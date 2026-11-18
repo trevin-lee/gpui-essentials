@@ -340,8 +340,15 @@ made.
   animated edges redraw the flow twenty times a second while one is on screen.
 - **Names.** React Flow's `Position` is `Side` and `Background` is `FlowBackground`, because
   GPUI exports both names and hosts import both crates whole.
+- **Accessibility.** As React Flow's: the canvas is a group named by
+  `FlowOptions::aria_label` ("Canvas" by default), and each node and each edge a group in it,
+  named by its `ariaLabel` (`Node::aria_label`, `Edge::aria_label`, saved under React Flow's
+  name). Without one, a node is named by its label (or its kind) and an edge "Edge from … to …"
+  with its nodes' names, after its own label. Edges, which are painted, are the canvas's own
+  nodes, where their lines are.
 - **Not yet.** A node toolbar; edge renderers of the host's own (a custom type is drawn as a
-  bezier); `dragHandle`; a keyboard path through nodes and accessibility; undo.
+  bezier); `dragHandle`; a keyboard path through nodes, and announcing
+  changes as they happen; undo.
 
 ## License
 

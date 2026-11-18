@@ -203,6 +203,10 @@ pub struct FlowOptions {
     /// Flow's `edgesReconnectable`: a press within 10 points of the end (a finger's reach on
     /// touch) takes it. On by default.
     pub edges_reconnectable: bool,
+    /// What assistive technology calls the canvas ("Mind map", say); "Canvas" by default.
+    /// Each node in it is a group named by [`Node::accessible_name`], and each edge one named
+    /// by [`Flow::edge_name`].
+    pub aria_label: SharedString,
 }
 
 impl Default for FlowOptions {
@@ -247,6 +251,7 @@ impl Default for FlowOptions {
             auto_pan_speed: 15.,
             connect_on_click: true,
             edges_reconnectable: true,
+            aria_label: "Canvas".into(),
         }
     }
 }
@@ -2640,6 +2645,27 @@ impl Flow {
                 nodes: now.0,
                 edges: now.1,
             });
+        }
+    }
+
+    /// What assistive technology calls an edge: its `ariaLabel` (see [`Edge::aria_label`]),
+    /// else "Edge from … to …" with its nodes' names, after its label when it has one.
+    pub fn edge_name(&self, edge: &Edge) -> SharedString {
+        let given = edge
+            .extra
+            .get("ariaLabel")
+            .and_then(serde_json::Value::as_str);
+        if let Some(name) = given.map(str::trim).filter(|s| !s.is_empty()) {
+            return name.to_string().into();
+        }
+        let name = |id: &NodeId| {
+            self.node(id)
+                .map_or_else(|| id.clone(), Node::accessible_name)
+        };
+        let between = format!("from {} to {}", name(&edge.source), name(&edge.target));
+        match edge.label.as_ref().filter(|l| !l.trim().is_empty()) {
+            Some(label) => format!("{label}, edge {between}").into(),
+            None => format!("Edge {between}").into(),
         }
     }
 
@@ -5245,6 +5271,13 @@ impl Flow {
                 node.id.clone(),
             ))
             .children(content);
+        // A group named for the node, for assistive technology (React Flow's node wrapper).
+        let name = node.accessible_name();
+        gpui_core::audit("FlowNode", Role::Group, Some(&name));
+        let wrapper = wrapper
+            .id(SharedString::from(format!("node-{}", node.id)))
+            .role(Role::Group)
+            .aria_label(name);
         Zoomed::new(zoom, wrapper)
     }
 
@@ -6266,8 +6299,61 @@ impl Render for Flow {
             .on_action(cx.listener(|f, _: &MoveDownFar, _, cx| f.nudge_or_pass(0., 1., true, cx)))
             .child(pane);
 
+        // Each edge drawn, as assistive technology gets it: a group named for it, where its line
+        // was last painted. Edges are painted, not elements, so they're nodes of the canvas's own.
+        let edge_names: Vec<(EdgeId, SharedString)> = self
+            .edges
+            .iter()
+            .filter(|e| !e.hidden)
+            .map(|e| (e.id.clone(), self.edge_name(e)))
+            .collect();
+        for (_, name) in &edge_names {
+            gpui_core::audit("FlowEdge", Role::Group, Some(name));
+        }
+        let edge_nodes = {
+            let shared = self.shared.clone();
+            let scale = window.scale_factor();
+            move |builder: &mut A11ySubtreeBuilder| {
+                let lines = shared.edges.borrow();
+                let pane = shared.pane.get().origin;
+                for (id, name) in &edge_names {
+                    let Some(line) = lines.iter().find(|l| &l.id == id) else {
+                        continue;
+                    };
+                    let mut node = accesskit::Node::new(Role::Group);
+                    node.set_label(name.to_string());
+                    node.set_role_description("edge");
+                    if !line.points.is_empty() {
+                        let (ox, oy) = (f32::from(pane.x), f32::from(pane.y));
+                        let fold = |pick: fn(f32, f32) -> f32, of: fn(&XY) -> f32, start: f32| {
+                            line.points.iter().map(of).fold(start, pick)
+                        };
+                        let (x0, x1) = (
+                            fold(f32::min, |p| p.x, f32::MAX),
+                            fold(f32::max, |p| p.x, f32::MIN),
+                        );
+                        let (y0, y1) = (
+                            fold(f32::min, |p| p.y, f32::MAX),
+                            fold(f32::max, |p| p.y, f32::MIN),
+                        );
+                        node.set_bounds(accesskit::Rect {
+                            x0: ((ox + x0) * scale) as f64,
+                            y0: ((oy + y0) * scale) as f64,
+                            x1: ((ox + x1) * scale) as f64,
+                            y1: ((oy + y1) * scale) as f64,
+                        });
+                    }
+                    builder.push_child(builder.synthetic_node_id(id.as_ref()), node);
+                }
+            }
+        };
+        gpui_core::audit("Flow", Role::Group, Some(&self.options.aria_label));
+
         div()
             .id("flow")
+            .role(Role::Group)
+            .aria_label(self.options.aria_label.clone())
+            .a11y_synthetic_children(edge_nodes)
             .relative()
             .size_full()
             .overflow_hidden()
