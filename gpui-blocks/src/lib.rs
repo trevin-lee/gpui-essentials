@@ -107,7 +107,19 @@ pub mod actions {
             /// Page Down, extending the selection (⇧Page Down).
             SelectPageDown,
             /// Page Up, extending the selection (⇧Page Up).
-            SelectPageUp
+            SelectPageUp,
+            /// Opens the block menu for the caret's block, or the selected blocks (⌘/), as a
+            /// click on its grip does; on a phone, the block sheet.
+            OpenBlockMenu,
+            /// Checks or unchecks the caret's to-do, or opens or closes the toggle whose title
+            /// the caret is in (⌘↵), as Notion's; elsewhere ⌘↵ does what it did.
+            CheckOrFold,
+            /// Opens the link, mention, sub-page, embed or bookmark at the caret (⌥↵), as a
+            /// click on it does: the app hears `LinkClicked`, `DocClicked` or `MentionClicked`.
+            OpenAtCaret,
+            /// Asks the app for a comment on the selection (⌘⇧M), as the format bar's Comment
+            /// does, when the editor takes comments.
+            Comment
         ]
     );
 }
