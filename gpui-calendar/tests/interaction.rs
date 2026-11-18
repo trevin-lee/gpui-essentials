@@ -960,7 +960,12 @@ fn a_query_dims_the_grid_and_filters_the_month_and_agenda(cx: &mut TestAppContex
 #[gpui::test]
 fn command_f_asks_the_host_and_typing_stays_keys_until_asked(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
-    cx.simulate_keystrokes("cmd-f");
+    // Command-F on the Mac and the iPad, Control-F elsewhere, as the calendar binds it.
+    cx.simulate_keystrokes(if cfg!(any(target_os = "macos", target_os = "ios")) {
+        "cmd-f"
+    } else {
+        "ctrl-f"
+    });
     assert!(has(&seen, &CalendarEvent::Find));
     // Unasked, letters are still the calendar's keys: m is the month.
     cx.simulate_keystrokes("m");
