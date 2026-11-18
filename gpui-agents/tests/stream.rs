@@ -1090,6 +1090,48 @@ fn copy_says_copied_for_a_moment_then_nothing_draws() {
 }
 
 #[test]
+fn a_hosts_copy_button_is_drawn_in_its_place_and_still_copies() {
+    let mut app = app();
+    let mut o = open(&mut app, 520.);
+    let chat = o.chat.clone();
+    let draft = o.cx.update(|_, cx| {
+        let d = cx.new(|_| {
+            StreamingMarkdown::new("h")
+                .style(style())
+                .copy_button(|copied, _, _| {
+                    div()
+                        .debug_selector(move || format!("host-copy:{copied}"))
+                        .w(px(48.))
+                        .h(px(24.))
+                        .child(if copied { "Done" } else { "Take" })
+                        .into_any_element()
+                })
+        });
+        chat.update(cx, |c, cx| {
+            c.draft = d.clone();
+            cx.notify();
+        });
+        d
+    });
+    o.draft = draft;
+    append(&mut o, CODE);
+    let d = o.draft.clone();
+    o.cx.update(|_, cx| d.update(cx, |d, cx| d.end(cx)));
+    draw(o.cx);
+    // The host's look, as the crate's button: one a block, in its corner.
+    let buttons = copy_buttons(&mut o, "h");
+    assert_eq!(buttons.len(), 2, "{buttons:?}");
+    assert_eq!(buttons[0].0.size, size(px(48.), px(24.)));
+    assert!(o.cx.debug_bounds("host-copy:false").is_some());
+    // A press copies the code and tells the look it was copied.
+    assert_eq!(
+        clipped(&mut o, buttons[0].0.center()),
+        "fn main() {\n    println!(\"hi\");\n}"
+    );
+    assert!(o.cx.debug_bounds("host-copy:true").is_some());
+}
+
+#[test]
 fn for_a_finger_copy_takes_presses_across_44_points() {
     let mut app = app();
     let mut o = open(&mut app, 520.);

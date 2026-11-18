@@ -269,6 +269,8 @@ draft.update(cx, |d, cx| d.finish(&message_body, cx));     // its message's text
 |---|---|
 | `StreamingMarkdown::new(id) -> StreamingMarkdown` | An empty draft, being written, showing only the caret. `id` prefixes its TextView's element id. |
 | `.style(TextViewStyle)`, `.selectable(bool)`, `.on_link_click(f)` | As gpui-core's `TextView`'s. The text's colour, size, line height and font come from around it, as a TextView's do. |
+| `.touch(bool)` | Copy buttons always shown and 44-point presses (by default on iOS and Android). |
+| `.copy_button(f)` | The code blocks' Copy button drawn the host's way: `f(copied, window, cx)` returns its look (say "Copied" while `copied`). The crate still places it in the block's corner, shows it on hover, names it Copy and copies on a press. |
 | `append(&mut self, text: &str, cx)` | Adds a delta. |
 | `replace(&mut self, text: &str, cx)` | The whole draft so far, in place of what it had. What the two share stays laid out. |
 | `end(&mut self, cx)` | The draft is finished: the caret goes and the text stays, read as written. |
