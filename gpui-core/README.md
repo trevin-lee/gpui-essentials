@@ -436,13 +436,63 @@ fn run(cx: &mut App) {
 Components draw Lucide icons from gpui-core's assets, so the app serves them:
 `gpui_platform::application().with_assets(gpui_core::Icons)`.
 
+## Copy a component into your crate
+
+You can also copy a component's source into your own crate, the way shadcn/ui's components
+are copied, and change it however you like. A copy builds on `gpui_core::base`, so gpui-core
+stays a dependency. Install the CLI from this repository:
+
+```sh
+cargo install --locked --git https://github.com/trevin-lee/gpui-essentials gpui-core-cli
+```
+
+Then, in your crate:
+
+```sh
+gpui-core add select dialog
+```
+
+That copies `select.rs` and `dialog.rs` into `src/ui/`, with `button.rs` because the dialog uses
+it, and writes `src/ui/mod.rs`. Add `mod ui;` to your crate root and call `ui::init(cx)` at
+startup. It runs `gpui_core::init` and binds the copies' keys. Then use `ui::Select` where you
+used `gpui_core::Select`. `gpui-core list` names every component (`date-picker` and
+`date_picker` both work), and `gpui-core add --all` copies them all.
+
+- **Which gpui-core.** The files come from GitHub at the gpui-core revision in your Cargo.lock,
+  so a copy matches the base it builds on. A crates.io version maps to the tag
+  `gpui-core-v<version>`. `--rev <commit, tag or branch>` takes another revision, `--repo
+  <owner/repo>` a fork, and `--path <checkout>` a local checkout. `--dir` puts the copies
+  somewhere other than `src/ui`.
+- **Names that don't clash.** A copy's actions move to your namespace
+  (`gpui_core_select::Open` becomes `ui_select::Open`), and its key contexts take your prefix
+  (`GpuiCoreSelect` becomes `UiSelect`). So a copy and gpui-core's original can work in one
+  app; bind your keymap to the copy's names. `--namespace app` gives `app_select` and
+  `AppSelect` instead.
+- **What changes in a copy.** `crate::base::…` becomes `gpui_core::base::…`, a component it uses
+  becomes `super::…`, and the rest of the file is left as written, comments included. Its
+  in-file tests are left out, and its doc examples are marked `ignore`: they show gpui-core's
+  own version.
+- **Updating.** Each copy starts with a header naming the revision it came from and a hash of
+  what was written. Running `add` again changes nothing, and it never overwrites a copy unless
+  you pass `--force`. `gpui-core add select --diff` shows what a newer gpui-core would change in
+  your copy, and `--force` replaces it, your edits included.
+- **What it leaves to you.** It doesn't edit `Cargo.toml` or your crate root. It names the
+  crates the copies need that `Cargo.toml` lacks: `gpui` and `gpui-core`, plus `chrono` for
+  date-picker and `unicode-segmentation` for avatar, at the versions in gpui-core's
+  `Cargo.toml`.
+
+Charts, menus, popovers, pickers, inputs and the other modules behind `gpui_core::base` aren't
+copied; the copies use them from gpui-core. Copying keeps no feature flags to trim gpui-core:
+the whole crate builds in about 4.5 s on its own, so per-component features wouldn't pay for
+themselves.
+
 ## Stability
 
-`gpui_core::base` is **semver-stable**. It's what components copied into a host's own crate
-(`gpui-core add select`, shadcn's way) are built on: the theme, sizes, `Press`, icons, the
-overlays' layers and focus, menus, fields and `Root`. A breaking change to anything in it breaks
-copied code, so it's a breaking change for gpui-core. `components.toml` lists the components a
-host can copy, what each needs, and the keys and actions it binds.
+`gpui_core::base` is **semver-stable**. Copied components are built on it: the theme, sizes,
+`Press`, icons, the overlays' layers and focus, menus, fields and `Root`. A breaking change to
+anything in it breaks copied code, so it's a breaking change for gpui-core. `components.toml`
+lists the components `gpui-core add` can copy, what each needs, and the keys and actions each
+binds. It's generated from the source and checked in CI.
 
 ## The gallery
 
