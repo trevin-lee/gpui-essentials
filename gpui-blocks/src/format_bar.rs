@@ -16,7 +16,7 @@
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::{ActiveTheme as _, Icon, IconName, Popover, PopupMenu, PopupMenuItem};
+use gpui_core::{ActiveTheme as _, Icon, IconName, Popover, PopupMenu, PopupMenuItem, Sheet};
 use markdown_editor::actions::EditLink;
 use markdown_editor::{
     BACKGROUNDS, BlockSelection, EditorCommand, MarkChange, MarkKind, MarkState, PaletteColor,
@@ -217,6 +217,46 @@ impl Editor {
         }
         self.state.update(cx, |state, cx| state.focus(window, cx));
         cx.notify();
+    }
+
+    /// The touch edit menu's Color: a sheet of the colours, for the selection. Drawn closed
+    /// too, so the focus goes back to the page when it closes.
+    pub(crate) fn color_sheet(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let menu = self.color_sheet.then(|| {
+            let (text, background) = self.selection_paints(cx);
+            let off = |kind| self.state.read(cx).model().mark_state(kind) == MarkState::Off;
+            let checked = (
+                text,
+                background,
+                off(MarkKind::Color),
+                off(MarkKind::Highlight),
+            );
+            let this = cx.entity().downgrade();
+            color_entries(
+                PopupMenu::new("blocks-color-sheet-menu").touch(true),
+                &theme,
+                Some(checked),
+            )
+            .on_select(move |picked, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.color_sheet = false;
+                    this.color_menu_pick(&picked.id, window, cx);
+                });
+            })
+        });
+        let dismiss = cx.entity().downgrade();
+        Sheet::new("blocks-color-sheet")
+            .open(self.color_sheet)
+            .on_dismiss(move |_, _, cx| {
+                let _ = dismiss.update(cx, |this, cx| {
+                    this.color_sheet = false;
+                    cx.notify();
+                });
+            })
+            .accessibility_label("Color")
+            .children(menu)
+            .into_any_element()
     }
 
     /// The Color button and its menu, as Notion's: Default text and each text colour, then

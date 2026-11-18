@@ -414,6 +414,8 @@ pub struct Editor {
     pub(crate) format_turn: bool,
     /// Whether the format bar's Color menu is open.
     pub(crate) format_color: bool,
+    /// Whether the touch edit menu's Color sheet is open.
+    pub(crate) color_sheet: bool,
     /// The colour last picked in the Color menu, which ⌘⇧H gives again.
     pub(crate) last_paint: Option<crate::format_bar::Paint>,
     scroll: ScrollHandle,
@@ -622,6 +624,7 @@ impl Editor {
             block_sheet: None,
             format_turn: false,
             format_color: false,
+            color_sheet: false,
             last_paint: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
@@ -2037,7 +2040,37 @@ impl Editor {
         let at = point(x, first.top() - px(18.));
         let readonly = state.is_readonly();
         // The format bar's marks and Link, as a second row.
-        let format_row = (!readonly).then(|| self.format_buttons(px(44.), cx));
+        let format_row = (!readonly).then(|| {
+            let mut row = self.format_buttons(px(44.), cx);
+            // Color: the colours in a sheet, for the selection.
+            let theme = cx.theme();
+            let this = cx.entity().downgrade();
+            row.push(
+                div()
+                    .id("blocks-touch-color")
+                    .debug_selector(|| "blocks-touch-color".into())
+                    .role(Role::Button)
+                    .aria_label("Color")
+                    .size(px(44.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(17.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.popover_foreground)
+                    .child("A")
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                        cx.stop_propagation();
+                        let _ = this.update(cx, |this, cx| {
+                            this.used_menu(cx);
+                            this.color_sheet = true;
+                            cx.notify();
+                        });
+                    })
+                    .into_any_element(),
+            );
+            row
+        });
         let theme = cx.theme();
         let (bg, fg, border) = (theme.popover, theme.popover_foreground, theme.border);
         let this = cx.entity().downgrade();
@@ -2254,6 +2287,7 @@ impl Render for Editor {
         let edit_menu = self.edit_menu(window, cx);
         let format_bar = self.format_bar(window, cx);
         let block_sheet = self.block_sheet(cx);
+        let color_sheet = self.color_sheet(cx);
         let find_bar = self.find_bar(compact, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
         let grip_watch = self.grip_down.is_some().then(|| {
@@ -2322,6 +2356,7 @@ impl Render for Editor {
             .children(edit_menu)
             .children(format_bar)
             .child(block_sheet)
+            .child(color_sheet)
             .children(grip_watch)
             .child(self.long_press_watch(cx));
         // The find bar stays at the top while the page scrolls under it.
@@ -3454,6 +3489,38 @@ mod tests {
         );
         cx.simulate_keystrokes(key);
         assert_eq!(markdown(&editor, cx), "hello world again");
+    }
+
+    /// On touch, the edit menu's Color opens the colours in a sheet; a pick colours the
+    /// selection and closes it.
+    #[gpui::test]
+    fn touch_colours_the_selection_from_a_sheet(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world again");
+        let at = point_at(&editor, cx, 8);
+        long_press(cx, at);
+        tap(cx, "blocks-touch-color");
+        assert!(
+            editor.read_with(cx, |e, _| e.color_sheet),
+            "the sheet opens"
+        );
+        assert!(
+            cx.debug_bounds("blocks-edit-menu").is_none(),
+            "the menu goes"
+        );
+        let red = cx
+            .debug_bounds("menu-item-text-8")
+            .expect("the text colours are in the sheet")
+            .center();
+        cx.simulate_click(red, gpui::Modifiers::none());
+        draw(cx);
+        assert_eq!(
+            markdown(&editor, cx),
+            "hello <span style=\"color:#d44c47\">world</span> again"
+        );
+        assert!(
+            !editor.read_with(cx, |e, _| e.color_sheet),
+            "picking closes it"
+        );
     }
 
     /// No bar in a read-only document; on touch the marks are the edit menu's second row.
