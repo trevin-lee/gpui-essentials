@@ -614,13 +614,15 @@ impl TableView {
             }));
         // The card is a gpui-dnd drag source: the mouse past a few pixels or a finger's long
         // press picks it up.
-        dnd(ElementId::Name(format!("gpui-tables-card:{rid}").into()))
-            .w_full()
-            .h(m.card)
-            .drop_indicator(false)
-            .source(self.card_source(rid, from, cx))
-            .child(press)
-            .into_any_element()
+        dnd(ElementId::Name(
+            format!("gpui-tables-card:{rid}:{from}").into(),
+        ))
+        .w_full()
+        .h(m.card)
+        .drop_indicator(false)
+        .source(self.card_source(rid, from, cx))
+        .child(press)
+        .into_any_element()
     }
 }
 

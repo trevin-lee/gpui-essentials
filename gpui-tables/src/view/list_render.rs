@@ -371,12 +371,14 @@ impl TableView {
             }));
         // The line is a gpui-dnd drag source: the mouse past a few pixels or a finger's long
         // press picks it up.
-        dnd(ElementId::Name(format!("gpui-tables-line:{rid}").into()))
-            .size_full()
-            .drop_indicator(false)
-            .source(self.card_source(rid, from, cx))
-            .child(press)
-            .into_any_element()
+        dnd(ElementId::Name(
+            format!("gpui-tables-line:{rid}:{from}").into(),
+        ))
+        .size_full()
+        .drop_indicator(false)
+        .source(self.card_source(rid, from, cx))
+        .child(press)
+        .into_any_element()
     }
 
     fn render_list_group(

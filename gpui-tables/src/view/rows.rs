@@ -726,14 +726,16 @@ impl TableView {
             }));
         // The handle is the row's drag source (gpui-dnd): by the mouse past a few pixels, or a
         // finger's long press. The table takes it up as its own drag when it begins.
-        dnd(ElementId::Name(format!("gpui-tables-row:{rid}").into()))
-            .flex_none()
-            .w(self.handle_width())
-            .h_full()
-            .drop_indicator(false)
-            .source(self.card_source(rid, lane_key, cx))
-            .child(press)
-            .into_any_element()
+        dnd(ElementId::Name(
+            format!("gpui-tables-row:{rid}:{lane_key}").into(),
+        ))
+        .flex_none()
+        .w(self.handle_width())
+        .h_full()
+        .drop_indicator(false)
+        .source(self.card_source(rid, lane_key, cx))
+        .child(press)
+        .into_any_element()
     }
 
     /// While rows are dragged in a sorted view: that the sort places them, so they can only
