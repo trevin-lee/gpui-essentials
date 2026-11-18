@@ -361,9 +361,11 @@ tabs over one entity and switches with `set_view`.
 - **Scrolling.** The board scrolls sideways, and each column up and down on its own (by trackpad,
   wheel or finger). Only the cards on screen are drawn (a `uniform_list` per column), so every
   card in a board is the same height: as tall as the view's card properties need.
-- **Dragging.** With a mouse, a card drags through GPUI's drag and drop (`on_drag`, with
-  `on_drag_move` and `on_drop` on the board); with a finger, a long press picks it up and the
-  finger carries it, while a plain pan scrolls. The card fades where it was, a copy of it
+- **Dragging.** A card drags through [gpui-dnd](../gpui-dnd): the card is its source and the
+  board its target, so a mouse past a few pixels or a finger's long press picks it up (a plain
+  pan scrolls), gpui-dnd draws the card's picture and takes Escape, and a card let go where it
+  can't land slides back. Boards side by side, each with its own provider, keep their drags
+  apart. The card fades where it was, a copy of it
   follows the pointer, the column it would land in is outlined, and a line shows where. Near
   the board's edges, or a column's top or bottom, each move scrolls them a step. Escape puts it
   back.
@@ -426,8 +428,8 @@ A view of type `list` draws as a list: again the same `TableView` entity, `Table
   the group it would join is marked rather than a place in it), and keys that can't be put
   between renumber the manual order. Over a line's upper half the row lands above it, over its
   lower half below; over a header, at its group's top; over a New line, at its group's end. With a
-  mouse it's GPUI's drag and drop; with a finger, a long press picks the row up while a plain pan
-  scrolls. Escape puts it back. `TableView::list_groups` gives the groups `move_card` takes.
+  mouse or a finger's long press it's gpui-dnd's drag (a plain pan scrolls), as on the board.
+  Escape puts it back. `TableView::list_groups` gives the groups `move_card` takes.
 - **New rows.** The New line of each group (or of the list) is a `rowCreated` with the group's
   value, what the filter asks for and an order key after every row's. When the host hands it
   back, the new row's line is focused.

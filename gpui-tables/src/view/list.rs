@@ -5,7 +5,7 @@
 //! A view of type `list` draws through the same [`TableView`] entity as a table or a board. Its
 //! lines are the table's [`Item`]s (group headers, rows and New lines, all one height, so
 //! `uniform_list` draws only those on screen), its focus is the table's focused line, and its
-//! drags are the board's: the same [`TableView::move_card`], drop and long press, with its
+//! drags are the board's: the same [`TableView::move_card`], drop and gpui-dnd source, with its
 //! groups as the board's columns. Only where a pointer is (which line, and which slot in which
 //! group) is its own.
 
@@ -150,19 +150,6 @@ impl TableView {
             return None;
         }
         Some((ix as usize, y - ix))
-    }
-
-    /// The row line under a point: its row's id, its group's key and its bounds.
-    pub(crate) fn line_at(&self, at: Point<Pixels>) -> Option<(String, String, Bounds<Pixels>)> {
-        let (ix, _) = self.item_at(at)?;
-        let Item::Row { row, .. } = *self.shown.items.get(ix)? else {
-            return None;
-        };
-        let lane = self.lane_of(ix)?;
-        let key = self.move_lanes()?.get(lane)?.key_string();
-        let b = self.item_bounds(ix)?;
-        let id = self.shown_row(row)?.id.clone();
-        b.contains(&at).then_some((id, key, b))
     }
 
     /// The group (a place in [`TableView::list_groups`]) a line is in.

@@ -7,18 +7,23 @@
 //! [`TableView::set_view`] switches between them.
 //!
 //! A list and a table move their rows by the same rules: their groups are [`BoardColumn`]s too,
-//! and the drag state, [`TableView::move_rows`], the drop and the finger's long press here serve
-//! all three. Only where a pointer is (which column and slot, or which line) and what picks a row
-//! up (a card, a line, a table row's handle) are each view's own.
+//! and the drag state, [`TableView::move_rows`] and the drop here serve all three. The drag
+//! itself is gpui-dnd's: a card, a line or a table row's handle is its source
+//! (`card_source`), the view its target (`card_drop_target`), and gpui-dnd draws the picture,
+//! takes the mouse and a finger's long press, and handles Escape. Only where a pointer is (which
+//! column and slot, or which line) is each view's own.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, Bounds, Context, Entity, Pixels, Point, ScrollHandle, ScrollStrategy,
-    UniformListScrollHandle, Window, point, px,
+    AnyElement, AnyView, App, AppContext as _, Bounds, Context, ElementId, Entity, IntoElement,
+    ParentElement as _, Pixels, Point, ScrollHandle, ScrollStrategy, Styled as _,
+    UniformListScrollHandle, Window, div, point, px,
 };
+
+use gpui_dnd::{Backend, DragMonitor, DragSource, DropOutcome, DropTarget, Preview, dnd};
 
 use super::host::person_label;
 use super::ops;
@@ -77,14 +82,15 @@ pub(crate) struct BoardFocus {
     pub spot: SpotId,
 }
 
-/// What GPUI carries while a mouse drags a card.
+/// What gpui-dnd carries while a card (or a list's or table's row) is dragged.
 #[derive(Clone, Debug)]
 pub(crate) struct DraggedCard {
     pub row_id: String,
     pub from: String,
 }
 
-/// A card being dragged, by the mouse (GPUI's drag and drop) or a finger (a long press).
+/// A card (or a list's or table's row) being dragged, through gpui-dnd: by the mouse or a
+/// finger's long press.
 #[derive(Clone, Debug)]
 pub(crate) struct CardDrag {
     pub row_id: String,
@@ -93,14 +99,11 @@ pub(crate) struct CardDrag {
     /// The other rows carried with it (a table's selected rows), each with the key of the
     /// group it's in, in the view's order.
     pub others: Vec<(String, String)>,
-    /// Where in the card it was taken, from its top left corner.
-    pub offset: Point<Pixels>,
     /// The pointer or finger, in the window.
     pub at: Point<Pixels>,
     /// Where it would land: a column and a slot among its cards as drawn (0 is above the first
     /// card, the count is below the last), or None over nowhere it can go.
     pub target: Option<(usize, usize)>,
-    pub touch: bool,
     /// What's drawn under a finger (the mouse's is drawn by GPUI).
     pub ghost: Entity<CardGhost>,
 }
@@ -841,18 +844,15 @@ impl TableView {
 
     // --- Dragging ---------------------------------------------------------------------------
 
-    /// Picks a card (or a list's or table's row) up, with `others` (a table's other selected
-    /// rows, each with its group's key) carried along: by the mouse (GPUI's drag has begun) or
-    /// a finger (a long press). Returns the picture to draw under the pointer.
-    #[allow(clippy::too_many_arguments)]
+    /// Picks a card (or a list's or table's row) up as gpui-dnd's drag begins, with `others` (a
+    /// table's other selected rows, each with its group's key) carried along. Returns the picture
+    /// gpui-dnd draws under the pointer.
     pub(crate) fn begin_card_drag(
         &mut self,
         row_id: &str,
         from: &str,
         others: Vec<(String, String)>,
-        offset: Point<Pixels>,
         at: Point<Pixels>,
-        touch: bool,
         cx: &mut Context<Self>,
     ) -> Entity<CardGhost> {
         self.ensure();
@@ -887,10 +887,8 @@ impl TableView {
             row_id: row_id.to_owned(),
             from: from.to_owned(),
             others,
-            offset,
             at,
             target: None,
-            touch,
             ghost: ghost.clone(),
         });
         self.drag_card_to(at, cx);
@@ -954,34 +952,6 @@ impl TableView {
         let cols = self.board.columns.borrow();
         cols.iter()
             .position(|b| b.is_some_and(|b| at.x >= b.left() && at.x < b.right()))
-    }
-
-    /// The card under a point: its column and place.
-    pub(crate) fn card_at(&self, at: Point<Pixels>) -> Option<(usize, usize, Bounds<Pixels>)> {
-        let column = self.column_at(at)?;
-        let col = self.shown.board.as_ref()?.get(column)?;
-        let list = self.list_bounds(column)?;
-        if !list.contains(&at) {
-            return None;
-        }
-        let m = self.board_metrics();
-        let scrolled = self
-            .board
-            .lists
-            .get(&col.key_string())
-            .map_or(px(0.), |l| l.0.borrow().base_handle.offset().y);
-        let y = at.y - list.top() - scrolled;
-        let index = (y / m.item).floor();
-        if index < 0. || index as usize >= col.rows.len() {
-            return None;
-        }
-        let index = index as usize;
-        let top = list.top() + scrolled + m.item * index as f32 + (m.item - m.card) / 2.;
-        let card = Bounds::new(
-            point(list.left() + m.inset, top),
-            gpui::size(list.size.width - m.inset * 2., m.card),
-        );
-        card.contains(&at).then_some((column, index, card))
     }
 
     /// Where a card dragged to `at` would land: a column it can go to and a slot among the cards
@@ -1131,17 +1101,121 @@ impl TableView {
         }
     }
 
-    /// Escape: puts a dragged card (or list's row) back, else lets go of the focus.
-    pub(crate) fn board_cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(d) = self.board.drag.take() {
-            if !d.touch {
-                cx.stop_active_drag(window);
-            }
-        } else {
+    /// Escape: lets go of the focus. (During a drag gpui-dnd takes Escape first and puts the card
+    /// back.)
+    pub(crate) fn board_cancel(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.board.drag.take().is_none() {
             self.board.focus = None;
             self.cell = None;
         }
         cx.notify();
+    }
+
+    /// What a row's drag starts from (a table row's handle, a board's card, a list's line): a
+    /// gpui-dnd source by the mouse past a few pixels or a finger's long press. The view takes it
+    /// up as its own drag when it begins (with a table's selected rows), draws its picture, and
+    /// lets go when it ends.
+    pub(crate) fn card_source(
+        &self,
+        row_id: String,
+        from: String,
+        cx: &mut Context<Self>,
+    ) -> DragSource<DraggedCard> {
+        let (began, ended, preview) = (
+            cx.entity().downgrade(),
+            cx.entity().downgrade(),
+            cx.entity().downgrade(),
+        );
+        DragSource::item(DraggedCard { row_id, from })
+            .keyboard(false)
+            .on_begin(move |m, window, cx| {
+                let (Some(d), Some(at)) = (
+                    m.item().and_then(|i| i.get::<DraggedCard>()).cloned(),
+                    m.initial_client_offset(),
+                ) else {
+                    return;
+                };
+                let touch = m.backend() == Some(Backend::Touch);
+                began
+                    .update(cx, |this, cx| {
+                        if touch {
+                            window.focus(&this.focus, cx);
+                        }
+                        let others = this.carried_with(&d.row_id);
+                        this.begin_card_drag(&d.row_id, &d.from, others, at, cx);
+                    })
+                    .ok();
+            })
+            .on_end(move |_, _, cx| {
+                ended
+                    .update(cx, |this, cx| {
+                        if this.board.drag.take().is_some() {
+                            cx.notify();
+                        }
+                    })
+                    .ok();
+            })
+            .preview(Preview::build(move |_, _, cx| {
+                match preview
+                    .upgrade()
+                    .and_then(|t| t.read(cx).board.drag.as_ref().map(|d| d.ghost.clone()))
+                {
+                    Some(ghost) => AnyView::from(ghost).into_any_element(),
+                    None => div().into_any_element(),
+                }
+            }))
+    }
+
+    /// The view (a table, board or list) as the target of its rows' drags: where a row would land
+    /// follows the pointer (scrolling near the edges a step a move), and a drop where it can land
+    /// moves it; elsewhere (a sorted view, another view's rows) the picture goes back.
+    pub(crate) fn card_drop_target(
+        &self,
+        root: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (hover, drop) = (cx.entity().downgrade(), cx.entity().downgrade());
+        dnd(ElementId::NamedInteger(
+            "gpui-tables-rows-target".into(),
+            cx.entity_id().as_u64(),
+        ))
+        .size_full()
+        .drop_indicator(false)
+        .target(
+            DropTarget::new()
+                .accept::<DraggedCard>()
+                .on_hover(move |_, m, _, cx| {
+                    if let Some(at) = m.client_offset() {
+                        hover.update(cx, |this, cx| this.drag_card_to(at, cx)).ok();
+                    }
+                })
+                .on_drop(move |_, m, window, cx| {
+                    drop.update(cx, |this, cx| {
+                        if let Some(at) = m.client_offset() {
+                            this.drag_card_to(at, cx);
+                        }
+                        if this.board.drag.as_ref().and_then(|d| d.target).is_none() {
+                            return DropOutcome::Pass;
+                        }
+                        this.drop_card(window, cx);
+                        DropOutcome::Handled(None)
+                    })
+                    .unwrap_or(DropOutcome::Pass)
+                }),
+        )
+        .child(root)
+        .into_any_element()
+    }
+
+    /// A row's drag that gpui-dnd ended (dropped where it couldn't land, Escape, a lost touch:
+    /// its picture going back) is over for the view.
+    pub(crate) fn forget_ended_drag(&mut self, cx: &App) {
+        if self.board.drag.is_some() {
+            let m = DragMonitor::of(cx);
+            if !m.is_dragging() || m.is_returning() {
+                self.board.drag = None;
+            }
+        }
     }
 
     /// The words of a card for assistive technology: its title and values.
