@@ -569,6 +569,16 @@ impl Root {
                 FlowEvent::ConnectEnd {
                     connected: false, ..
                 } => "No connection made".into(),
+                // From the palette: the flow says where, the example adds it.
+                FlowEvent::NodeDropped { item, position } => {
+                    this.added += 1;
+                    let node = item.node_at(format!("new-{}", this.added), *position);
+                    flow.update(cx, |f, cx| f.add_node(node, cx));
+                    format!(
+                        "Added {} at {:.0}, {:.0}",
+                        item.name, position.x, position.y
+                    )
+                }
                 _ => return,
             };
             this.status = said.into();
@@ -751,6 +761,71 @@ fn toolbar(root: &WeakEntity<Root>, this: &Flow, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
+/// What the palette offers: a node of each kind the example draws.
+fn palette_items() -> Vec<FlowPaletteItem> {
+    vec![
+        FlowPaletteItem::new("Step", Node::new("", xy(0., 0.)).label("A step")),
+        FlowPaletteItem::new(
+            "Agent",
+            Node::new("", xy(0., 0.))
+                .kind("agent")
+                .data(json!({ "name": "Agent", "role": "Does what it's asked", "mark": "🤖" })),
+        ),
+        FlowPaletteItem::new(
+            "Note",
+            Node::new("", xy(0., 0.))
+                .kind("note")
+                .size(190., 84.)
+                .data(json!({ "text": "A note" })),
+        ),
+        FlowPaletteItem::new(
+            "Output",
+            Node::new("", xy(0., 0.)).kind("output").label("Done"),
+        ),
+    ]
+}
+
+/// A column beside the canvas of node kinds to drag onto it (gpui-dnd sources), or to pick up
+/// with Tab and Space.
+fn palette(cx: &App) -> Div {
+    let c = Theme::global(cx).colors;
+    div()
+        .w(px(132.))
+        .h_full()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .p(px(12.))
+        .border_r_1()
+        .border_color(c.border)
+        .bg(c.popover)
+        .child(
+            div()
+                .text_size(px(11.))
+                .text_color(c.muted_foreground)
+                .child("Drag onto the canvas"),
+        )
+        .children(palette_items().into_iter().enumerate().map(|(i, item)| {
+            gpui_dnd::dnd(("palette", i))
+                .label(item.name.clone())
+                .debug_selector(move || format!("palette-{i}"))
+                .h(px(32.))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .rounded(px(5.))
+                .border_1()
+                .border_color(c.border)
+                .bg(c.background)
+                .text_size(px(12.))
+                .text_color(c.foreground)
+                .cursor(CursorStyle::OpenHand)
+                .dragging_style(|s| s.opacity(0.4))
+                .child(item.name.clone())
+                .source(item.source())
+        }))
+}
+
 /// The bottom panel: what the flow last said.
 fn status_line(root: &WeakEntity<Root>, cx: &mut App) -> AnyElement {
     let c = Theme::global(cx).colors;
@@ -841,7 +916,15 @@ impl Render for Root {
             .absolute()
             .size_0()
         });
-        div().size_full().child(self.flow.clone()).children(probe)
+        // The provider follows the palette's drags across the window and draws them on top.
+        gpui_dnd::DndProvider::new(
+            div()
+                .size_full()
+                .flex()
+                .when(self.bench.is_none(), |d| d.child(palette(cx)))
+                .child(div().flex_1().h_full().child(self.flow.clone()))
+                .children(probe),
+        )
     }
 }
 

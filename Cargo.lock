@@ -1952,6 +1952,7 @@ dependencies = [
  "base64",
  "foldhash",
  "gpui-core",
+ "gpui-dnd",
  "gpui-pre",
  "gpui-pre-apple",
  "gpui-pre-macos",

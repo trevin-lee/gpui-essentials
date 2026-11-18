@@ -43,6 +43,7 @@ pub mod json;
 pub mod limits;
 pub mod node;
 mod paint;
+pub mod palette;
 pub mod routing;
 pub mod shapes;
 mod theme;
@@ -63,6 +64,7 @@ pub use node::{
     shape_node, text_node, topic_node, units,
 };
 pub use paint::{BackgroundVariant, FlowBackground};
+pub use palette::FlowPaletteItem;
 pub use theme::{FlowColors, Palette, Pencil};
 pub use tree::{Layout, Tree, TreeDirection, TreeLayout};
 pub use types::*;
