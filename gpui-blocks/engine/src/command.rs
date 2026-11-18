@@ -79,6 +79,14 @@ pub enum EditorCommand {
     /// spaces or `]`, not starting with a letter) or with no block surface
     /// registered on the editor's extensions is `Unsupported`.
     SetCallout(SharedString),
+    /// Give the callout `callout` this icon (one emoji) and background colour (one of
+    /// `CALLOUT_COLORS`), or none, as one undo step; its kind stays. Unsupported for an invalid
+    /// value.
+    SetCalloutLook {
+        callout: BlockId,
+        icon: Option<SharedString>,
+        color: Option<SharedString>,
+    },
     /// Make the caret's paragraph or heading the summary of a new open
     /// toggle, its body empty.
     WrapInToggle,
@@ -1156,12 +1164,49 @@ impl BlockEditorModel {
         if let Some(callout) =
             resolved.nearest(&self.doc, |k| matches!(k, BlockKindData::Callout { .. }))
         {
+            // A new kind keeps the callout's own icon and colour.
+            let (icon, color) = match self.doc.kind(callout) {
+                Some(BlockKindData::Callout { icon, color, .. }) => (icon.clone(), color.clone()),
+                _ => (None, None),
+            };
             return self.transact(EditOrigin::Command("set_callout"), |tx| {
-                tx.set_kind(callout, BlockKindData::Callout { name })?;
+                tx.set_kind(callout, BlockKindData::Callout { name, icon, color })?;
                 Ok(None)
             });
         }
-        self.wrap_caret_block("callout", BlockKindData::Callout { name })
+        self.wrap_caret_block(
+            "callout",
+            BlockKindData::Callout {
+                name,
+                icon: None,
+                color: None,
+            },
+        )
+    }
+
+    fn set_callout_look(
+        &mut self,
+        callout: BlockId,
+        icon: Option<SharedString>,
+        color: Option<SharedString>,
+    ) -> Result<bool, CommandError> {
+        let Some(BlockKindData::Callout { name, .. }) = self.doc.kind(callout).cloned() else {
+            return Err(CommandError::Unsupported("not a callout"));
+        };
+        if icon
+            .as_deref()
+            .is_some_and(|i| !crate::callout::callout_icon_ok(i))
+            || color
+                .as_deref()
+                .is_some_and(|c| !crate::callout::callout_color_ok(c))
+        {
+            return Err(CommandError::Unsupported("callout look"));
+        }
+        let selection = self.selection.clone();
+        self.transact(EditOrigin::Command("set_callout_look"), |tx| {
+            tx.set_kind(callout, BlockKindData::Callout { name, icon, color })?;
+            Ok(Some(selection))
+        })
     }
 
     fn wrap_in_toggle(&mut self) -> Result<bool, CommandError> {
@@ -1732,6 +1777,11 @@ impl BlockEditorModel {
             EditorCommand::SetCodeBlock { lang } => self.set_code_block(lang),
             EditorCommand::ToggleBlockquote => self.toggle_blockquote(),
             EditorCommand::SetCallout(name) => self.set_callout(name),
+            EditorCommand::SetCalloutLook {
+                callout,
+                icon,
+                color,
+            } => self.set_callout_look(callout, icon, color),
             EditorCommand::WrapInToggle => self.wrap_in_toggle(),
             EditorCommand::InsertMarkdown(markdown) => self.insert_markdown(&markdown),
             EditorCommand::ReplaceBlock { block, markdown } => self.replace_block(block, &markdown),

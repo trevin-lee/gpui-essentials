@@ -69,7 +69,7 @@ pub(crate) fn block(doc: &EditorDocument, id: BlockId) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
         // GitHub's and Obsidian's callout: the marker alone on the first line.
-        (BlockKindData::Callout { name }, _) => {
+        (BlockKindData::Callout { name, icon, color }, _) => {
             let body = join_blocks(doc, children)
                 .lines()
                 .map(|line| {
@@ -80,7 +80,11 @@ pub(crate) fn block(doc: &EditorDocument, id: BlockId) -> String {
                     }
                 })
                 .collect::<Vec<_>>();
-            let marker = format!("> [!{}]", name.to_ascii_uppercase());
+            let marker = format!(
+                "> [!{}]{}",
+                name.to_ascii_uppercase(),
+                crate::callout::callout_look_comment(icon.as_deref(), color.as_deref())
+            );
             std::iter::once(marker)
                 .chain(body)
                 .collect::<Vec<_>>()

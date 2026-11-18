@@ -5,7 +5,7 @@
 //! cargo run --release --example editor -- notes.md    # a file, saved as you type (rewritten
 //!                                                      # in the editor's own Markdown)
 //! cargo run --release --example editor -- --bench     # the measurements, then quits
-//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format]
+//! cargo run --release --features shots --example editor -- --shot out.png [--scene slash|hover|drag|touch|find|block-menu|phone|mention|format|callouts|callouts-light]
 //! ```
 //!
 //! `--bench` types into the sample and into a 5,000-line document, scrolls the long one end to
@@ -15,7 +15,8 @@
 //! a picture of the window without showing it: `doc` (the sample), `slash` (the slash menu
 //! open), `hover` (the side menu beside a block), `drag` (a block carried mid-drag) or `end`
 //! (the sample's end). `phone` is the find bar open in a phone-sized window, where the editor lays
-//! itself out compact.
+//! itself out compact. `callouts` is a page of callouts with their own icons and colours, every
+//! colour, and `callouts-light` the same in the light theme.
 
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
@@ -103,6 +104,31 @@ fn apply_theme(cx: &mut App) {
         },
         cx,
     );
+}
+
+/// The `callouts` scene's page: each of the nine colours with an icon (a joined emoji among
+/// them), then a callout with only an icon and one with neither.
+fn callouts() -> String {
+    let looks = [
+        ("NOTE", "💡", "gray"),
+        ("TIP", "🌱", "brown"),
+        ("IMPORTANT", "🔥", "orange"),
+        ("WARNING", "⚠️", "yellow"),
+        ("TIP", "✅", "green"),
+        ("NOTE", "👩‍💻", "blue"),
+        ("NOTE", "🔮", "purple"),
+        ("TIP", "🌸", "pink"),
+        ("CAUTION", "🛑", "red"),
+    ];
+    let mut out = vec!["# Callouts".to_string()];
+    for (kind, icon, color) in looks {
+        out.push(format!(
+            "> [!{kind}] <!-- icon:{icon} color:{color} -->\n> A {color} callout with its own icon."
+        ));
+    }
+    out.push("> [!WARNING] <!-- icon:📣 -->\n> An icon on the warning's own colour.".into());
+    out.push("> [!NOTE]\n> No icon and no colour: the note's own look.".into());
+    out.join("\n\n")
 }
 
 /// When frames start and finish, read by `--bench`. Every frame renders the root again, so
@@ -290,8 +316,10 @@ fn main() {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => exit(&format!("{} can't be opened: {e}", path.display())),
         },
+        None if args.scene.starts_with("callouts") => callouts(),
         None => SAMPLE.trim_end().to_string(),
     };
+    let light = args.scene.ends_with("-light");
     let quiet = args.bench || args.shot.is_some();
     gpui_platform::application()
         .with_assets(gpui_core::Icons)
@@ -299,6 +327,15 @@ fn main() {
             gpui_core::init(cx);
             gpui_blocks::init(cx);
             apply_theme(cx);
+            if light {
+                Theme::set(
+                    Theme {
+                        font_size: px(15.),
+                        ..Theme::light()
+                    },
+                    cx,
+                );
+            }
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.on_action(|_: &Quit, cx| cx.quit());
             // An iPhone's size for the phone scene; the editor goes compact below 600 wide.

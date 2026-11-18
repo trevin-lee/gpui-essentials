@@ -367,7 +367,8 @@ note a document id first, then answers `Targets` with them, so each link to anot
 becomes a mention of that note's document:
 
 - Notion's page ids are taken off file names, and its URL-encoded links between pages, its
-  `<aside>` callouts and the title heading every page opens with are handled.
+  `<aside>` callouts (with their icons) and the title heading every page opens with are
+  handled.
 - Obsidian's `[[links]]`, `![[embeds]]` (a note embedded on its own line becomes a sub-page),
   callouts of any kind (a foldable one becomes a toggle) and `==highlights==` are handled.
 - Pictures and other files load from where your app put them, or are left as their
@@ -379,7 +380,9 @@ becomes a mention of that note's document:
 CommonMark, with GitHub's tables and task lists:
 
 - **Callouts** are GitHub's alerts (`> [!NOTE]`, `> [!WARNING]` and the rest, with the marker
-  alone on its line). GitHub and Obsidian draw them too.
+  alone on its line). GitHub and Obsidian draw them too. A callout's own icon and colour, set
+  from its block menu, are a comment after the marker, which they don't show:
+  `> [!TIP] <!-- icon:💡 color:yellow -->`.
 - **Toggles** are HTML's `<details>` with a `<summary>`. The body is written at the toggle's own
   level between blank lines, so it stays Markdown, and an open toggle says `open`.
 - **Widgets** are fenced blocks, as above.

@@ -52,7 +52,7 @@ stored text is read as a space.
 | `paragraph` | `text` | |
 | `heading` | `level` (1 to 6), `text` | |
 | `quote` | | any blocks |
-| `callout` | `name`: GitHub's alert name in lowercase (`note`, `tip`, `important`, `warning`, `caution`) | any blocks |
+| `callout` | `name`: GitHub's alert name in lowercase (`note`, `tip`, `important`, `warning`, `caution`); optional `icon`: one emoji; optional `color`: `gray`, `brown`, `orange`, `yellow`, `green`, `blue`, `purple`, `pink` or `red` | any blocks |
 | `toggle` | `open` | the summary (a `paragraph`, or a `heading` of level 1 to 3 for a toggle heading), then the body |
 | `list` | `ordered`, `start` (an ordered list's first number, absent when it's 1) | `item`s |
 | `item` | `checked` (`true` or `false` for a to-do item, absent otherwise), `spread` (`true` for an item written with blank lines between its blocks) | any blocks |
@@ -96,6 +96,13 @@ A bare `<!-- column -->` takes an even share. Markers that don't make a whole co
 the top level are read as the HTML they are, and nothing between them is lost: for example a
 column outside columns, a missing `<!-- /columns -->`, nesting, a bad width, or one or more
 than five columns.
+
+A callout's `icon` and `color` are its own look over its kind's, which it keeps. The icon is
+one grapheme of at most 16 bytes, with no space or control character and not an `asset:`. In
+Markdown they're a comment on the marker's line, either key optional:
+`> [!TIP] <!-- icon:💡 color:yellow -->`. A comment that isn't exactly that (another key, an
+invalid value, more after it) stays as the callout's first paragraph. An invalid icon or
+colour in JSON is read as none.
 
 A `markdown` block is what the editor keeps as is: a link definition, an HTML block, and in
 later versions any type a reader doesn't know.

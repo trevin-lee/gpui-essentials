@@ -3892,6 +3892,7 @@ fn command_name(command: &EditorCommand) -> &'static str {
         EditorCommand::ToggleTask => "toggle_task",
         EditorCommand::ToggleBlockquote => "toggle_blockquote",
         EditorCommand::SetCallout(_) => "set_callout",
+        EditorCommand::SetCalloutLook { .. } => "set_callout_look",
         EditorCommand::WrapInToggle => "wrap_in_toggle",
         EditorCommand::SetToggleOpen { .. } => "set_toggle_open",
         EditorCommand::Unwrap => "unwrap",

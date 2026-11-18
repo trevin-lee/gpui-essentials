@@ -458,7 +458,24 @@ impl<'a> BlockRef<'a> {
     /// A callout's name in ASCII lowercase, such as `note`.
     pub fn callout_name(&self) -> Option<&'a str> {
         match self.doc.kind(self.id)? {
-            BlockKindData::Callout { name } => Some(name.as_ref()),
+            BlockKindData::Callout { name, .. } => Some(name.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// A callout's icon, one emoji, when it has one.
+    pub fn callout_icon(&self) -> Option<&'a str> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::Callout { icon, .. } => icon.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// A callout's background colour's name (one of [`crate::CALLOUT_COLORS`]), when it has
+    /// one.
+    pub fn callout_color(&self) -> Option<&'a str> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::Callout { color, .. } => color.as_deref(),
             _ => None,
         }
     }

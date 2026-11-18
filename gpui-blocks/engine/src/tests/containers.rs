@@ -80,6 +80,83 @@ fn backspace_at_the_start_of_a_callout_lifts_its_first_line() {
 }
 
 #[test]
+fn a_callouts_look_round_trips_and_reads_strictly() {
+    for source in [
+        "> [!TIP] <!-- icon:💡 color:yellow -->\n> Try it.",
+        "> [!NOTE] <!-- color:blue -->",
+        "> [!WARNING] <!-- icon:🔥 -->\n> one\n>\n> two",
+        "> [!NOTE] <!-- icon:👩‍💻 -->\n> - a\n> - b",
+    ] {
+        assert_eq!(surfaced(source).source(), source);
+    }
+    let m = surfaced("> [!TIP] <!-- icon:💡 color:yellow -->\n> Try it.");
+    let callout = m.document().root().children().next().unwrap();
+    assert_eq!(callout.callout_name(), Some("tip"));
+    assert_eq!(callout.callout_icon(), Some("💡"));
+    assert_eq!(callout.callout_color(), Some("yellow"));
+    assert_eq!(callout.children().count(), 1);
+    // Not a look, or more after it: the callout's first paragraph, as written.
+    for (source, first) in [
+        (
+            "> [!TIP] <!-- color:teal -->\n> Try it.",
+            "<!-- color:teal -->",
+        ),
+        ("> [!TIP] <!-- icon:ab -->", "<!-- icon:ab -->"),
+        ("> [!TIP] <!-- a note -->", "<!-- a note -->"),
+        ("> [!TIP] <!-- icon:💡 --> more", "<!-- icon:💡 --> more"),
+    ] {
+        let m = surfaced(source);
+        let callout = m.document().root().children().next().unwrap();
+        assert_eq!(callout.callout_name(), Some("tip"), "{source}");
+        assert_eq!(callout.callout_icon(), None, "{source}");
+        let text = callout.children().next().unwrap().inline_markdown();
+        assert!(
+            text.as_deref().is_some_and(|t| t.starts_with(first)),
+            "{source}: {text:?}"
+        );
+    }
+}
+
+#[test]
+fn a_callouts_look_is_set_in_one_step_and_kept_on_rename() {
+    let mut m = surfaced("> [!NOTE]\n> a");
+    let callout = m.document().root().children().next().unwrap().id();
+    m.run(EditorCommand::SetCalloutLook {
+        callout,
+        icon: Some("💡".into()),
+        color: Some("yellow".into()),
+    })
+    .unwrap();
+    assert_eq!(m.source(), "> [!NOTE] <!-- icon:💡 color:yellow -->\n> a");
+    caret_in(&mut m, 0, 1);
+    m.run(EditorCommand::SetCallout("tip".into())).unwrap();
+    assert_eq!(m.source(), "> [!TIP] <!-- icon:💡 color:yellow -->\n> a");
+    for (icon, color) in [
+        (Some("ab"), None),
+        (None, Some("teal")),
+        (Some("asset:x"), None),
+    ] {
+        assert!(
+            m.run(EditorCommand::SetCalloutLook {
+                callout,
+                icon: icon.map(Into::into),
+                color: color.map(Into::into),
+            })
+            .is_err()
+        );
+    }
+    m.run(EditorCommand::SetCalloutLook {
+        callout,
+        icon: None,
+        color: None,
+    })
+    .unwrap();
+    assert_eq!(m.source(), "> [!TIP]\n> a");
+    m.undo();
+    assert_eq!(m.source(), "> [!TIP] <!-- icon:💡 color:yellow -->\n> a");
+}
+
+#[test]
 fn set_callout_wraps_then_renames() {
     let mut m = surfaced("a");
     caret_in(&mut m, 0, 1);
