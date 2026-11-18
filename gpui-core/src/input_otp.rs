@@ -364,7 +364,7 @@ impl RenderOnce for InputOtp {
                         .when(first, |d| d.border_l_1().rounded_l(radius))
                         .when(last, |d| d.rounded_r(radius))
                         .border_color(if on { theme.ring } else { border })
-                        .when(dark, |d| d.bg(theme.input.opacity(0.3)))
+                        .when(dark, |d| d.bg(theme.control.opacity(0.3)))
                         .when(on, |d| {
                             d.shadow(vec![crate::base::ring_inside(focus_ring(cx))])
                         })

@@ -220,7 +220,7 @@ impl RenderOnce for InputGroup {
             .rounded(theme.radius_md())
             .border_1()
             .border_color(border)
-            .when(dark, |d| d.bg(theme.input.opacity(0.3)))
+            .when(dark, |d| d.bg(theme.control.opacity(0.3)))
             // The ring (or an invalid field's red one) drawn just outside it, not under it, so
             // the group doesn't clip: its text addons and its input clip themselves.
             .relative()

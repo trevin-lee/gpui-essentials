@@ -259,13 +259,13 @@ impl RenderOnce for Combobox {
         // shadcn's trigger: an outline button, pressed in while open.
         let (fill, border, hover) = match (dark, open) {
             (true, false) => (
-                theme.input.opacity(0.3),
+                theme.control.opacity(0.3),
                 theme.input,
-                theme.input.opacity(0.5),
+                theme.control.opacity(0.5),
             ),
-            (true, true) => (theme.input, theme.input, theme.input),
-            (false, false) => (theme.background, theme.border, theme.muted),
-            (false, true) => (theme.muted, theme.border, theme.muted),
+            (true, true) => (theme.control, theme.input, theme.control),
+            (false, false) => (theme.background, theme.input, theme.muted),
+            (false, true) => (theme.muted, theme.input, theme.muted),
         };
         let text = chosen.clone().unwrap_or_else(|| self.placeholder.clone());
         let mut trigger = Press::new(child("trigger"))

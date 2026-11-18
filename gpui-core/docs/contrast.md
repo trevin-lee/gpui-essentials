@@ -8,13 +8,13 @@ An audit of every foreground and background pair gpui-core's components draw, in
 
 Each pair was read from the component that draws it; the last column says where. Some colours are used only by the apps, not by gpui-core's components (the status colours). They're in their own section, because the apps draw them with these tokens.
 
-This is a report only. The colours come from `design/tokens.json`, the apps' shared design file, so any change goes through that file and the apps' design review. This report proposes changes; it doesn't make them.
+The audit found 26 pairs below AA. Every fix it suggested is now applied (the last section says what changed), and `tests/contrast.rs` computes every pair below in both themes and fails on any that drops under its level, so this can't regress. The dark theme's colours come from `design/tokens.json`, the apps' shared design file (open-cloud-agents #796 changed them there).
 
 Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audit confirms it for every one of them.
 
 ## Dark theme
 
-67 pairs; 12 below the WCAG 2.2 AA level they need.
+67 pairs. All meet WCAG 2.2 AA except two decorative lines, which AA doesn't require (see the end).
 
 ### Text
 
@@ -29,7 +29,7 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Ghost button or row hover (accent_foreground on accent over background) | `#ededef` on `#1a1a1c` | 14.86:1 | 4.5:1 | pass | button.rs Ghost, sidebar.rs:433 |
 | Menu row hover (accent_foreground on accent over popover) | `#ededef` on `#232326` | 13.41:1 | 4.5:1 | pass | menus over popover |
 | Outline button (foreground on its fill over background) | `#ededef` on `#1c1c1f` | 14.54:1 | 4.5:1 | pass | button.rs Outline (dark) |
-| Selected outline or ghost button (foreground on input / muted) | `#ededef` on `#3a3a41` | 9.65:1 | 4.5:1 | pass | button.rs selected (dark: input) |
+| Selected outline or ghost button (foreground on control / muted) | `#ededef` on `#3a3a41` | 9.65:1 | 4.5:1 | pass | button.rs selected (dark: control) |
 | Tooltip (background on foreground) | `#0f0f11` on `#ededef` | 16.38:1 | 4.5:1 | pass | tooltip.rs:90 |
 | Sidebar text (sidebar_foreground on sidebar) | `#ededef` on `#0b0b0d` | 16.82:1 | 4.5:1 | pass | sidebar.rs:769 |
 | Sidebar selected row (sidebar_accent_foreground on sidebar_accent over sidebar) | `#ededef` on `#171719` | 15.31:1 | 4.5:1 | pass | sidebar.rs:433 |
@@ -43,9 +43,9 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Muted text on a card (muted_foreground on card) | `#8b8b93` on `#18181b` | 5.24:1 | 4.5:1 | pass | alert.rs description, card.rs |
 | Muted text in a popover (muted_foreground on popover) | `#8b8b93` on `#18181b` | 5.24:1 | 4.5:1 | pass | toast.rs description |
 | Muted text on a muted fill (muted_foreground on muted) | `#8b8b93` on `#1f1f23` | 4.86:1 | 4.5:1 | pass | kbd.rs:84, tabs.rs (inactive tab), segmented.rs (unselected) |
-| Placeholder in a field on the page (muted_foreground on input at 30% over background) | `#8b8b93` on `#1c1c1f` | 5.03:1 | 4.5:1 | pass | input.rs:2361 (placeholder), input.rs fill |
+| Placeholder in a field on the page (muted_foreground on control at 30% over background) | `#8b8b93` on `#1c1c1f` | 5.03:1 | 4.5:1 | pass | input.rs:2361 (placeholder), input.rs fill |
 | Placeholder in a field on a card (muted_foreground on field_on_card) | `#8b8b93` on `#222226` | 4.69:1 | 4.5:1 | pass | input.rs:2361, tokens field-on-card |
-| Sidebar row time (muted_70 on sidebar) | `#65656b` on `#0b0b0d` | 3.40:1 | 4.5:1 | **fail** | tokens muted-70 (the apps' sidebar) |
+| Sidebar row time (muted_70, at 86%, on sidebar) | `#797980` on `#0b0b0d` | 4.55:1 | 4.5:1 | pass | tokens muted-70 (the apps' sidebar) |
 
 ### Status text
 
@@ -105,32 +105,32 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 
 | Pair | Colours (as drawn) | Ratio | Needed | Result | Where |
 | --- | --- | --- | --- | --- | --- |
-| Focus ring (ring at 50%) against the page | `#57575d` on `#0f0f11` | 2.67:1 | 3:1 | **fail** | theme.rs focus_ring(), press.rs:24 |
-| Focus ring (ring at 50%) against a card | `#5c5c62` on `#18181b` | 2.67:1 | 3:1 | **fail** | theme.rs focus_ring() |
-| Focus ring (ring at 50%) against a muted list (tabs, segments) | `#5f5f66` on `#1f1f23` | 2.59:1 | 3:1 | **fail** | tabs.rs, segmented.rs |
+| Focus ring (ring at 60%) against the page | `#65656c` on `#0f0f11` | 3.33:1 | 3:1 | pass | theme.rs focus_ring(), press.rs:24 |
+| Focus ring (ring at 60%) against a card | `#696970` on `#18181b` | 3.25:1 | 3:1 | pass | theme.rs focus_ring() |
+| Focus ring (ring at 60%) against a muted list (tabs, segments) | `#6c6c73` on `#1f1f23` | 3.15:1 | 3:1 | pass | tabs.rs, segmented.rs |
 | Focused field border (ring) against the page | `#9f9fa9` on `#0f0f11` | 7.30:1 | 3:1 | pass | input.rs (focused border) |
-| Field border (input) against the page | `#3a3a41` on `#0f0f11` | 1.70:1 | 3:1 | **fail** | input.rs, checkbox.rs outline, toggle.rs outline |
-| Field border (input) against a card | `#3a3a41` on `#18181b` | 1.57:1 | 3:1 | **fail** | input.rs on a card |
-| Switch track off (input at 80%) against the page | `#313137` on `#0f0f11` | 1.48:1 | 3:1 | **fail** | switch.rs:125 (dark) |
-| Outline button border against the page | `#3a3a41` on `#0f0f11` | 1.70:1 | 3:1 | **fail** | button.rs Outline (dark: input) |
-| Border against the page (dividers, card edges) | `#28282d` on `#0f0f11` | 1.31:1 | 3:1 | **fail** | card.rs, separator.rs, alert.rs |
-| Menu and popover edge (overlay_line over popover) against the page | `#2e2e31` on `#0f0f11` | 1.41:1 | 3:1 | **fail** | tokens overlay-line |
+| Field border (input) against the page | `#656571` on `#0f0f11` | 3.33:1 | 3:1 | pass | input.rs, checkbox.rs outline, toggle.rs outline |
+| Field border (input) against a card | `#656571` on `#18181b` | 3.08:1 | 3:1 | pass | input.rs on a card |
+| Switch track off (input) against the page | `#656571` on `#0f0f11` | 3.33:1 | 3:1 | pass | switch.rs (input, both themes) |
+| Outline button border against the page | `#656571` on `#0f0f11` | 3.33:1 | 3:1 | pass | button.rs Outline (input) |
+| Border against the page (dividers, card edges) | `#28282d` on `#0f0f11` | 1.31:1 | 3:1 | advisory | card.rs, separator.rs, alert.rs (decorative) |
+| Menu and popover edge (overlay_line over popover) against the page | `#2e2e31` on `#0f0f11` | 1.41:1 | 3:1 | advisory | tokens overlay-line (decorative) |
 
 ### Charts (3:1)
 
 | Pair | Colours (as drawn) | Ratio | Needed | Result | Where |
 | --- | --- | --- | --- | --- | --- |
-| chart_1 against the page | `#1447e6` on `#0f0f11` | 2.80:1 | 3:1 | **fail** | chart.rs (series colours) |
+| chart_1 against the page | `#2556ec` on `#0f0f11` | 3.30:1 | 3:1 | pass | chart.rs (series colours) |
 | chart_2 against the page | `#00bc7d` on `#0f0f11` | 7.74:1 | 3:1 | pass | chart.rs |
 | chart_3 against the page | `#fe9a00` on `#0f0f11` | 8.97:1 | 3:1 | pass | chart.rs |
 | chart_4 against the page | `#ad46ff` on `#0f0f11` | 4.65:1 | 3:1 | pass | chart.rs |
 | chart_5 against the page | `#ff2056` on `#0f0f11` | 5.10:1 | 3:1 | pass | chart.rs |
-| chart_1 against a card | `#1447e6` on `#18181b` | 2.59:1 | 3:1 | **fail** | chart.rs in a card |
+| chart_1 against a card | `#2556ec` on `#18181b` | 3.05:1 | 3:1 | pass | chart.rs in a card |
 | chart_3 against a card | `#fe9a00` on `#18181b` | 8.30:1 | 3:1 | pass | chart.rs in a card |
 
 ## Light theme
 
-66 pairs; 14 below the WCAG 2.2 AA level they need.
+66 pairs. All meet WCAG 2.2 AA except two decorative lines, which AA doesn't require (see the end).
 
 ### Text
 
@@ -158,19 +158,19 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Muted text on a card (muted_foreground on card) | `#6b6b73` on `#ffffff` | 5.28:1 | 4.5:1 | pass | alert.rs description, card.rs |
 | Muted text in a popover (muted_foreground on popover) | `#6b6b73` on `#ffffff` | 5.28:1 | 4.5:1 | pass | toast.rs description |
 | Muted text on a muted fill (muted_foreground on muted) | `#6b6b73` on `#f1f1f3` | 4.68:1 | 4.5:1 | pass | kbd.rs:84, tabs.rs (inactive tab), segmented.rs (unselected) |
-| Placeholder in a field on the page (muted_foreground on input at 30% over background) | `#6b6b73` on `#f0f0f2` | 4.64:1 | 4.5:1 | pass | input.rs:2361 (placeholder), input.rs fill |
+| Placeholder in a field on the page (muted_foreground on control at 30% over background) | `#6b6b73` on `#f0f0f2` | 4.64:1 | 4.5:1 | pass | input.rs:2361 (placeholder), input.rs fill |
 | Placeholder in a field on a card (muted_foreground on field_on_card) | `#6b6b73` on `#f4f4f5` | 4.81:1 | 4.5:1 | pass | input.rs:2361, tokens field-on-card |
-| Sidebar row time (muted_70 on sidebar) | `#939399` on `#f1f1f3` | 2.71:1 | 4.5:1 | **fail** | tokens muted-70 (the apps' sidebar) |
+| Sidebar row time (muted_70, which is muted_foreground itself, on sidebar) | `#6b6b73` on `#f1f1f3` | 4.68:1 | 4.5:1 | pass | tokens muted-70 (the apps' sidebar) |
 
 ### Status text
 
 | Pair | Colours (as drawn) | Ratio | Needed | Result | Where |
 | --- | --- | --- | --- | --- | --- |
-| Destructive text on the page (destructive on background) | `#c7362b` on `#fafafa` | 5.04:1 | 4.5:1 | pass | input.rs error, toast.rs |
-| Destructive text on a card (destructive on card) | `#c7362b` on `#ffffff` | 5.26:1 | 4.5:1 | pass | alert.rs title |
-| Destructive description on a card (destructive at 90% on card) | `#cd4a40` on `#ffffff` | 4.52:1 | 4.5:1 | pass | alert.rs description |
-| Destructive button and badge (destructive on its fill over background) | `#c7362b` on `#f5e6e5` | 4.34:1 | 4.5:1 | **fail** | button.rs Destructive (light 10%), badge.rs |
-| Destructive in a toast (destructive on popover) | `#c7362b` on `#ffffff` | 5.26:1 | 4.5:1 | pass | toast.rs |
+| Destructive text on the page (destructive on background) | `#c1342a` on `#fafafa` | 5.31:1 | 4.5:1 | pass | input.rs error, toast.rs |
+| Destructive text on a card (destructive on card) | `#c1342a` on `#ffffff` | 5.54:1 | 4.5:1 | pass | alert.rs title |
+| Destructive description on a card (destructive at 90% on card) | `#c7483f` on `#ffffff` | 4.73:1 | 4.5:1 | pass | alert.rs description |
+| Destructive button and badge (destructive on its fill over background) | `#c1342a` on `#f4e6e5` | 4.57:1 | 4.5:1 | pass | button.rs Destructive (light 10%), badge.rs |
+| Destructive in a toast (destructive on popover) | `#c1342a` on `#ffffff` | 5.54:1 | 4.5:1 | pass | toast.rs |
 
 ### Callouts
 
@@ -203,11 +203,11 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | --- | --- | --- | --- | --- | --- |
 | success_text on background | `#047857` on `#fafafa` | 5.25:1 | 4.5:1 | pass | tokens success-text |
 | success_text on card | `#047857` on `#ffffff` | 5.48:1 | 4.5:1 | pass | tokens success-text |
-| warning_text on warning_fill over background | `#b45309` on `#f9f1e2` | 4.47:1 | 4.5:1 | **fail** | tokens warning-text, warning-fill |
-| attention_foreground on background | `#a8701a` on `#fafafa` | 4.03:1 | 4.5:1 | **fail** | tokens attention |
-| live (as text) on background | `#1f8f5c` on `#fafafa` | 3.91:1 | 4.5:1 | **fail** | tokens live |
-| live status dot against the page | `#1f8f5c` on `#fafafa` | 3.91:1 | 3:1 | pass | tokens live |
-| attention status dot against the page | `#d9a441` on `#fafafa` | 2.15:1 | 3:1 | **fail** | tokens attention |
+| warning_text on warning_fill over background | `#b25209` on `#faf1e2` | 4.56:1 | 4.5:1 | pass | tokens warning-text, warning-fill |
+| attention_foreground on background | `#9c6818` on `#fafafa` | 4.57:1 | 4.5:1 | pass | tokens attention |
+| live (as text) on background | `#1c8254` on `#fafafa` | 4.60:1 | 4.5:1 | pass | tokens live |
+| live status dot against the page | `#1c8254` on `#fafafa` | 4.60:1 | 3:1 | pass | tokens live |
+| attention status dot against the page | `#ba8625` on `#fafafa` | 3.08:1 | 3:1 | pass | tokens attention |
 
 ### Disabled (exempt)
 
@@ -220,16 +220,16 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 
 | Pair | Colours (as drawn) | Ratio | Needed | Result | Where |
 | --- | --- | --- | --- | --- | --- |
-| Focus ring (ring at 50%) against the page | `#848486` on `#fafafa` | 3.58:1 | 3:1 | pass | theme.rs focus_ring(), press.rs:24 |
-| Focus ring (ring at 50%) against a card | `#878788` on `#ffffff` | 3.59:1 | 3:1 | pass | theme.rs focus_ring() |
-| Focus ring (ring at 50%) against a muted list (tabs, segments) | `#808082` on `#f1f1f3` | 3.49:1 | 3:1 | pass | tabs.rs, segmented.rs |
+| Focus ring (ring at 60%) against the page | `#6d6d6e` on `#fafafa` | 4.95:1 | 3:1 | pass | theme.rs focus_ring(), press.rs:24 |
+| Focus ring (ring at 60%) against a card | `#6f6f70` on `#ffffff` | 5.02:1 | 3:1 | pass | theme.rs focus_ring() |
+| Focus ring (ring at 60%) against a muted list (tabs, segments) | `#69696b` on `#f1f1f3` | 4.83:1 | 3:1 | pass | tabs.rs, segmented.rs |
 | Focused field border (ring) against the page | `#0f0f11` on `#fafafa` | 18.34:1 | 3:1 | pass | input.rs (focused border) |
-| Field border (input) against the page | `#d9d9de` on `#fafafa` | 1.35:1 | 3:1 | **fail** | input.rs, checkbox.rs outline, toggle.rs outline |
-| Field border (input) against a card | `#d9d9de` on `#ffffff` | 1.41:1 | 3:1 | **fail** | input.rs on a card |
-| Switch track off (input) against the page | `#d9d9de` on `#fafafa` | 1.35:1 | 3:1 | **fail** | switch.rs:125 (light) |
-| Outline button border against the page | `#e4e4e7` on `#fafafa` | 1.22:1 | 3:1 | **fail** | button.rs Outline (light: border) |
-| Border against the page (dividers, card edges) | `#e4e4e7` on `#fafafa` | 1.22:1 | 3:1 | **fail** | card.rs, separator.rs, alert.rs |
-| Menu and popover edge (overlay_line over popover) against the page | `#e7e7e7` on `#fafafa` | 1.18:1 | 3:1 | **fail** | tokens overlay-line |
+| Field border (input) against the page | `#8f8f9e` on `#fafafa` | 3.05:1 | 3:1 | pass | input.rs, checkbox.rs outline, toggle.rs outline |
+| Field border (input) against a card | `#8f8f9e` on `#ffffff` | 3.19:1 | 3:1 | pass | input.rs on a card |
+| Switch track off (input) against the page | `#8f8f9e` on `#fafafa` | 3.05:1 | 3:1 | pass | switch.rs (input, both themes) |
+| Outline button border against the page | `#8f8f9e` on `#fafafa` | 3.05:1 | 3:1 | pass | button.rs Outline (input; was border) |
+| Border against the page (dividers, card edges) | `#e4e4e7` on `#fafafa` | 1.22:1 | 3:1 | advisory | card.rs, separator.rs, alert.rs (decorative) |
+| Menu and popover edge (overlay_line over popover) against the page | `#e7e7e7` on `#fafafa` | 1.18:1 | 3:1 | advisory | tokens overlay-line (decorative) |
 
 ### Charts (3:1)
 
@@ -238,61 +238,48 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | chart_1 against the page | `#f54900` on `#fafafa` | 3.45:1 | 3:1 | pass | chart.rs (series colours) |
 | chart_2 against the page | `#009689` on `#fafafa` | 3.52:1 | 3:1 | pass | chart.rs |
 | chart_3 against the page | `#104e64` on `#fafafa` | 8.76:1 | 3:1 | pass | chart.rs |
-| chart_4 against the page | `#ffb900` on `#fafafa` | 1.65:1 | 3:1 | **fail** | chart.rs |
-| chart_5 against the page | `#fe9a00` on `#fafafa` | 2.05:1 | 3:1 | **fail** | chart.rs |
+| chart_4 against the page | `#ad46ff` on `#fafafa` | 3.95:1 | 3:1 | pass | chart.rs |
+| chart_5 against the page | `#e60076` on `#fafafa` | 4.35:1 | 3:1 | pass | chart.rs |
 | chart_1 against a card | `#f54900` on `#ffffff` | 3.60:1 | 3:1 | pass | chart.rs in a card |
 | chart_3 against a card | `#104e64` on `#ffffff` | 9.15:1 | 3:1 | pass | chart.rs in a card |
 
-## Summary of failures, with values that would pass
+## What changed, and why
 
-The main text passes in both themes: the foreground on every fill, the primary, secondary and selected states, tooltips, the sidebar, destructive text in the dark theme, every callout and every syntax colour. The failures are secondary text in the sidebar, the boundaries that show controls, the dark focus ring, a few status colours and two chart colours per theme.
+The audit found these below AA. Each fix keeps the colour's hue and moves its lightness (or opacity) only as far as needed, with a little margin, against every fill it's drawn on.
 
-Each suggestion below keeps the colour's hue. It moves the lightness (or the opacity) only as far as needed to pass, with a little margin, against every fill the colour is drawn on.
-
-### Must fix for AA
-
-| Token | Theme | Now | Ratio now | Suggested | Ratio then | Why |
-| --- | --- | --- | --- | --- | --- | --- |
-| `muted-70` (sidebar row time) | dark | `#8b8b93` at 70% | 3.40:1 | `#8b8b93` at 86% | 4.55:1 | text (1.4.3) |
-| `muted-70` (sidebar row time) | light | `#6b6b73` at 70% | 2.71:1 | `muted-foreground` itself, at 100% | 4.68:1 | text; 70% can't pass in light |
-| focus ring (`ring` at 50%) | dark | `#9f9fa9` at 50% | 2.59–2.67:1 | `#9f9fa9` at 60% (`Colors::focus_ring`) | 3.15–3.31:1 on page, card and muted | focus indicator (2.4.13, 1.4.11) |
-| `input` (a field's border, a checkbox's outline, the off switch's track) | dark | `#3a3a41` | 1.57–1.70:1 | `#656571` | 3.08:1 | the boundary that shows the control (1.4.11) |
-| off switch track | dark | `input` at 80% | 1.48:1 | the new `input` at 100% (`switch.rs:125` draws it at 80%) | 3.08:1 | state of the control (1.4.11) |
-| `input` (same uses) | light | `#d9d9de` | 1.35–1.41:1 | `#8f8f9e` | 3.05:1 | as above |
-| `destructive` | light | `#c7362b` | 4.34:1 on its 10% fill | `#c1342a` | 4.57:1 | destructive button and badge text |
-| `chart-1` | dark | `#1447e6` | 2.59–2.80:1 | `#2556ec` | 3.05:1 | chart series (1.4.11) |
-| `chart-4` | light | `#ffb900` | 1.65:1 | `#bb8700` | 3.06:1 | chart series |
-| `chart-5` | light | `#fe9a00` | 2.05:1 | `#cf7d00` | 3.05:1 | chart series |
-
-Notes on these:
-- **The field and checkbox outline (`input`)** is the largest visual change. In the dark theme a field's fill is `input` at 30% over the page (1.15:1), so its outline is what shows where the field is, and WCAG asks 3:1 for it. An alternative that keeps the quiet outline is a fill that reaches 3:1 against the page, but that's a bigger change to the look.
-- **The light theme's `muted-70`** can't reach 4.5:1 below about 99% opacity, so it is simply `muted-foreground`.
-- **The light theme's `chart-4` and `chart-5`** are both oranges. Darkened, they come close to each other, so a different hue for one of them may be better than these values.
-
-### Fix where the apps use them (status colours)
-
-These tokens aren't drawn by gpui-core's components, but the apps use them, so they're part of the same compliance answer.
-
-| Token | Theme | Now | Ratio now | Suggested | Ratio then |
+| Token | Theme | Was | Ratio was | Now | Ratio now |
 | --- | --- | --- | --- | --- | --- |
+| `muted-70` (sidebar row time) | dark | `#8b8b93` at 70% | 3.40:1 | `#8b8b93` at 86% | 4.55:1 |
+| `muted-70` | light | `#6b6b73` at 70% | 2.71:1 | `muted-foreground` itself | 4.68:1 |
+| focus ring | both | `ring` at 50% | 2.59–2.67:1 (dark) | `ring` at 60% (`Colors::focus_ring`) | 3.15–3.33:1 (dark), 4.83–5.02:1 (light) |
+| `input` (a field's border, a checkbox's and a radio's outline, the off switch's track, the outline button's border) | dark | `#3a3a41` | 1.57–1.70:1 | `#656571` | 3.08–3.33:1 |
+| `input` | light | `#d9d9de` | 1.35–1.41:1 | `#8f8f9e` | 3.05–3.19:1 |
+| off switch track | dark | `input` at 80% | 1.48:1 | `input` at 100% | 3.33:1 |
+| outline button border | light | `border` | 1.22:1 | `input` | 3.05:1 |
+| `destructive` | light | `#c7362b` | 4.34:1 on its 10% fill | `#c1342a` | 4.57:1 |
+| `chart-1` | dark | `#1447e6` | 2.59–2.80:1 | `#2556ec` | 3.05–3.30:1 |
+| `chart-4` | light | `#ffb900` | 1.65:1 | `#ad46ff` (purple) | 3.95:1 |
+| `chart-5` | light | `#fe9a00` | 2.05:1 | `#e60076` (rose) | 4.35:1 |
 | `warning-text` on `warning-fill` | light | `#b45309` | 4.47:1 | `#b25209` | 4.56:1 |
-| `attention` as text (`attention_foreground`) | light | `#a8701a` | 4.03:1 | `#9c6818` | 4.57:1 |
-| `live` as text | light | `#1f8f5c` | 3.91:1 | `#1c8254` | 4.60:1 |
-| `attention` as a status dot | light | `#d9a441` | 2.15:1 | `#ba8625` | 3.08:1 |
+| `attention_foreground` | light | `#a8701a` | 4.03:1 | `#9c6818` | 4.57:1 |
+| `live` (and `success`, `ready`) | light | `#1f8f5c` | 3.91:1 as text | `#1c8254` | 4.60:1 |
+| `attention` (a status dot) | light | `#d9a441` | 2.15:1 | `#ba8625` | 3.08:1 |
 
-`live` and `attention` are fine as dots in the dark theme (3:1 and above). As text in the light theme they need the darker values, or a separate text token like `attention_foreground` that's used for all of it.
+Notes:
+- **Fills don't follow `input`.** A field's fill was `input` at 30%. At the new `input` that would be `#29292e`, with its placeholder at 4.29:1. So there's a new token, `control` (`#3a3a41` dark, `#d9d9de` light: the old `input`), and every fill mixes from it: a field's fill (30%), a hovered one (50%), a pressed toggle and a selected button (100%). They look as they did. Only the boundaries changed.
+- **The light theme's `chart-4` and `chart-5`** were amber and orange. Darkened to 3:1 they turned muddy and close to each other and to `chart-1`, so they take the dark theme's purple and rose instead.
+- **The light theme's `muted-70`** can't reach 4.5:1 below about 99% opacity, so it is `muted-foreground`.
+- **The combobox's trigger and pagination's current page** in the light theme looked like outline buttons with `border` as their only edge, so they take `input` too.
 
 ### Advisory: decorative lines
 
-WCAG doesn't require 3:1 for lines that only decorate, such as dividers between rows, a card's edge, or a menu's or popover's edge. The content is identifiable without them, so these failures are listed for completeness, not as AA failures.
+WCAG doesn't require 3:1 for lines that only decorate, such as dividers between rows, a card's edge, or a menu's or popover's edge. The content is identifiable without them, so these are listed for completeness, unchanged.
 
 | Token | Theme | Now | Ratio | A value at 3:1 |
 | --- | --- | --- | --- | --- |
 | `border` | dark | `#28282d` | 1.31:1 | `#60606c` |
 | `border` | light | `#e4e4e7` | 1.22:1 | `#8f8f9c` |
 | `overlay-line` (menu edge) | both | foreground at 10% | 1.18–1.41:1 | (decorative) |
-
-One exception: in the light theme the outline button's border is `border`. If an outline button has no other visible boundary (its fill is the page's colour), its border is what identifies it, and it should use the new `input` instead.
 
 ### Disabled controls
 

@@ -189,7 +189,7 @@ impl RenderOnce for Checkbox {
             .border_1()
             .border_color(border)
             .when(on, |d| d.bg(theme.primary))
-            .when(!on && dark, |d| d.bg(theme.input.opacity(0.3)))
+            .when(!on && dark, |d| d.bg(theme.control.opacity(0.3)))
             // The ring (or an invalid box's red one) drawn just outside it, not under it.
             .relative()
             .children({

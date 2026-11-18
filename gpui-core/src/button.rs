@@ -151,15 +151,17 @@ fn paint(variant: ButtonVariant, selected: bool, theme: &Theme) -> Paint {
             hover: c.primary.opacity(0.8),
         },
         ButtonVariant::Outline if dark => Paint {
-            fill: c.input.opacity(0.3),
+            fill: c.control.opacity(0.3),
             text: c.foreground,
             border: c.input,
-            hover: c.input.opacity(0.5),
+            hover: c.control.opacity(0.5),
         },
+        // Its border is all that shows it on the page, so it's the control's boundary colour
+        // (3:1), not the quieter divider one.
         ButtonVariant::Outline => Paint {
             fill: c.background,
             text: c.foreground,
-            border: c.border,
+            border: c.input,
             hover: c.muted,
         },
         ButtonVariant::Secondary => Paint {
@@ -190,9 +192,9 @@ fn paint(variant: ButtonVariant, selected: bool, theme: &Theme) -> Paint {
     };
     // Selected (one of a group, or a toggle that's on) reads as pressed in: the web's
     // `aria-expanded` look, muted. In the dark, muted is all but the outline's own fill
-    // (the input colour at 30%), so there it's the input colour itself.
+    // (the control colour at 30%), so there it's the control colour itself.
     if selected && matches!(variant, ButtonVariant::Outline | ButtonVariant::Ghost) {
-        p.fill = if dark { c.input } else { c.muted };
+        p.fill = if dark { c.control } else { c.muted };
         p.hover = p.fill;
         p.text = c.foreground;
     }
