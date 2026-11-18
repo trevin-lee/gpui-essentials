@@ -370,7 +370,6 @@ made.
   point and the side it leaves or arrives on), as an `EdgePath` of lines and curves, with its
   label's place. The flow draws it in the edge's look, with arrowheads, label, dashes and
   animation, takes clicks along it and exports it. A kind without one is drawn as a bezier.
-- **Not yet.** Undo.
 
 ## License
 
