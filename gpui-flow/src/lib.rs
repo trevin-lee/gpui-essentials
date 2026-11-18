@@ -51,12 +51,13 @@ pub mod tree;
 mod types;
 
 pub use flow::{
-    AddChild, AddSibling, Align, Cancel, CanvasTransform, ContextTarget, DeleteSelected,
-    Distribute, EdgeDefaults, EdgeEnds, EdgePathFn, FitView, Flow, FlowEvent, FlowItem,
-    FlowOptions, FocusPrevious, FrameSelection, Guide, HandleRef, MoveDown, MoveDownFar, MoveLeft,
-    MoveLeftFar, MoveRight, MoveRightFar, MoveUp, MoveUpFar, OpenLink, PanelPosition, Pen,
-    PointerMode, Redo, SelectAll, SelectFocused, Tool, ToolbarAlign, ToolbarPlace, Undo, Unframe,
-    ZoomIn, ZoomOut, ZoomReset, bind_keys,
+    AddChild, AddSibling, Align, Cancel, CanvasTransform, ContextTarget, CopySelection,
+    CutSelection, DeleteSelected, Distribute, DuplicateSelection, EdgeDefaults, EdgeEnds,
+    EdgePathFn, FitView, Flow, FlowEvent, FlowItem, FlowOptions, FocusPrevious, FrameSelection,
+    Guide, HandleRef, MoveDown, MoveDownFar, MoveLeft, MoveLeftFar, MoveRight, MoveRightFar,
+    MoveUp, MoveUpFar, OpenLink, PanelPosition, PasteClipboard, Pen, PointerMode, Redo, SelectAll,
+    SelectFocused, Tool, ToolbarAlign, ToolbarPlace, Undo, Unframe, ZoomIn, ZoomOut, ZoomReset,
+    bind_keys,
 };
 pub use node::{
     HANDLE_SIZE, Handle, ImageLoader, NodeContext, NodeInput, NodeRenderer, drawing_node,
