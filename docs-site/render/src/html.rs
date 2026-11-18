@@ -9,7 +9,7 @@ use anyhow::{Context as _, Result};
 
 use crate::install::Installs;
 use crate::shot::STAGE_WIDTH;
-use crate::site::{Component, Family};
+use crate::site::{Component, Crate, Family};
 
 const STYLE: &str = include_str!("../../static/style.css");
 const REPO: &str = "https://github.com/trevin-lee/gpui-essentials";
@@ -42,27 +42,44 @@ const THEME_SCRIPT: &str = r#"<script>
 /// Sets the saved theme's class before the page draws, so it doesn't flash the other one.
 const EARLY_THEME_SCRIPT: &str = r#"<script>try { var t = localStorage.getItem("gpui-essentials-theme"); if (t) document.documentElement.classList.add(t); } catch (e) {}</script>"#;
 
-/// Writes `index.html`, a page per component and `style.css` into `out`.
-pub fn write_site(out: &Path, components: &[Component], installs: &Installs) -> Result<()> {
+/// Writes `index.html`, a page per component and per crate, and `style.css` into `out`.
+pub fn write_site(
+    out: &Path,
+    components: &[Component],
+    crates: &[Crate],
+    installs: &Installs,
+) -> Result<()> {
     fs::create_dir_all(out.join("components"))?;
+    fs::create_dir_all(out.join("crates"))?;
     fs::write(out.join("style.css"), STYLE)?;
+    let nav = |root: &str, current: Option<&str>| sidebar(root, components, crates, current);
     let index = page(
         "Components",
         "",
-        components,
-        None,
-        &index_body(out, components),
+        &nav("", None),
+        &index_body(out, components, crates),
     );
     fs::write(out.join("index.html"), index)?;
     for c in components {
+        let current = format!("components/{}", c.slug);
         let html = page(
             c.name,
             "../",
-            components,
-            Some(c.slug),
+            &nav("../", Some(&current)),
             &component_body(out, c, installs),
         );
         let path = out.join("components").join(format!("{}.html", c.slug));
+        fs::write(&path, html).with_context(|| format!("writing {}", path.display()))?;
+    }
+    for c in crates {
+        let current = format!("crates/{}", c.slug);
+        let html = page(
+            c.name,
+            "../",
+            &nav("../", Some(&current)),
+            &crate_body(out, c),
+        );
+        let path = out.join("crates").join(format!("{}.html", c.slug));
         fs::write(&path, html).with_context(|| format!("writing {}", path.display()))?;
     }
     Ok(())
@@ -97,33 +114,46 @@ fn by_family(components: &[Component]) -> Vec<(Family, Vec<&Component>)> {
         .collect()
 }
 
-/// A page: the top bar, the sidebar and `body`. `root` leads from the page to the site's root
-/// ("" or "../"); `current` is the component the page shows, marked in the sidebar.
-fn page(
-    title: &str,
+/// The sidebar's links: the components by family, then the crates. `root` leads from the page
+/// to the site's root ("" or "../"); `current` is the page's own path without `.html`
+/// (`components/button`), marked.
+fn sidebar(
     root: &str,
     components: &[Component],
+    crates: &[Crate],
     current: Option<&str>,
-    body: &str,
 ) -> String {
     let mut nav = String::new();
+    let link = |nav: &mut String, path: String, name: &str| {
+        let here = if current == Some(path.as_str()) {
+            r#" aria-current="page""#
+        } else {
+            ""
+        };
+        let _ = write!(
+            nav,
+            r#"<li><a href="{root}{path}.html"{here}>{}</a></li>"#,
+            esc(name)
+        );
+    };
     for (family, list) in by_family(components) {
         let _ = write!(nav, "<h4>{}</h4><ul>", family.name());
         for c in list {
-            let here = if current == Some(c.slug) {
-                r#" aria-current="page""#
-            } else {
-                ""
-            };
-            let _ = write!(
-                nav,
-                r#"<li><a href="{root}components/{slug}.html"{here}>{name}</a></li>"#,
-                slug = c.slug,
-                name = esc(c.name),
-            );
+            link(&mut nav, format!("components/{}", c.slug), c.name);
         }
         nav.push_str("</ul>");
     }
+    nav.push_str("<h4>Crates</h4><ul>");
+    for c in crates {
+        link(&mut nav, format!("crates/{}", c.slug), c.name);
+    }
+    nav.push_str("</ul>");
+    nav
+}
+
+/// A page: the top bar, the sidebar's `nav` and `body`. `root` leads from the page to the
+/// site's root ("" or "../").
+fn page(title: &str, root: &str, nav: &str, body: &str) -> String {
     format!(
         r#"<!doctype html>
 <html lang="en">
@@ -182,7 +212,7 @@ fn picture(out: &Path, root: &str, component: &Component, variant: &str, alt: &s
     )
 }
 
-fn index_body(out: &Path, components: &[Component]) -> String {
+fn index_body(out: &Path, components: &[Component], crates: &[Crate]) -> String {
     let mut body = String::from(
         r#"<h1>Components</h1>
 <p class="lead">GPUI components for macOS and iOS apps, drawn in the host's theme. Each page shows
@@ -210,6 +240,59 @@ every variant in the light and the dark theme, beside the code that drew it.</p>
             );
         }
         body.push_str("</div></section>\n");
+    }
+    body.push_str(
+        r#"<section class="family"><h2>Crates</h2><p class="lead">Larger pieces built on these components, each in its own crate.</p><div class="grid">"#,
+    );
+    for c in crates {
+        let thumb = c
+            .pictures
+            .first()
+            .map(|(file, alt)| crate_picture(out, "", c, file, alt))
+            .unwrap_or_default();
+        let _ = write!(
+            body,
+            r#"<a class="tile" href="crates/{slug}.html"><div class="thumb">{thumb}</div><div class="tile-text"><strong>{name}</strong><span>{about}</span></div></a>"#,
+            slug = c.slug,
+            name = esc(c.name),
+            about = esc(c.about),
+        );
+    }
+    body.push_str("</div></section>\n");
+    body
+}
+
+/// One of a crate's pictures, at its size (halved: they're drawn at 2×).
+fn crate_picture(out: &Path, root: &str, c: &Crate, file: &str, alt: &str) -> String {
+    let path = format!("img/crates/{}/{file}", c.slug);
+    let size = image::image_dimensions(out.join(&path))
+        .map(|(w, h)| format!(r#" width="{}" height="{}""#, w / 2, h / 2))
+        .unwrap_or_default();
+    format!(
+        r#"<img src="{root}{path}"{size} alt="{}" loading="lazy">"#,
+        esc(alt)
+    )
+}
+
+fn crate_body(out: &Path, c: &Crate) -> String {
+    let mut body = format!(
+        r#"<p class="crumb">Crates</p>
+<h1>{name}</h1>
+<p class="lead">{about}</p>
+<p class="actions"><a class="button" href="../api/{lib}/index.html">Docs</a> <a class="button" href="{REPO}/tree/main/{dir}#readme">README</a></p>
+"#,
+        name = esc(c.name),
+        about = esc(c.about),
+        lib = c.lib,
+        dir = c.dir,
+    );
+    for (file, alt) in &c.pictures {
+        let _ = writeln!(
+            body,
+            r#"<figure class="shot">{}<figcaption>{}</figcaption></figure>"#,
+            crate_picture(out, "../", c, file, alt),
+            esc(alt)
+        );
     }
     body
 }

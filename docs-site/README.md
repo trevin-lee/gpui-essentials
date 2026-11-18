@@ -106,6 +106,14 @@ component! {
 
 Then render it with `--only <slug>` and look at both pictures.
 
+## Add a crate's page
+
+A crate's page shows pictures already in its `docs/` folder (the ones its README shows), with
+links to its API docs and its README. Add a `Crate { … }` to `crates()` in
+`render/src/registry.rs`: its name, a slug for the page, its folder, its library's name, a
+line about it and its pictures, each with what it shows (its README's alt text). The renderer
+scales them to 1600 pixels wide at most and saves them in 256 colours, as it does the rest.
+
 ## How the pictures are made
 
 Each variant is drawn in the middle of a hidden window 720 by 600 points, once in

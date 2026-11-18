@@ -20,7 +20,7 @@
 
 use gpui::{AnyElement, AnyView, App, AppContext as _, Window};
 
-use crate::site::{Act, Component, Demo, Family, Variant};
+use crate::site::{Act, Component, Crate, Demo, Family, Variant};
 
 /// What the pointer does before a variant's picture: none, `click`, `right_click` or `hover`.
 macro_rules! act {
@@ -680,6 +680,152 @@ pub fn components() -> Vec<Component> {
             about: "Markdown drawn as selectable text.",
             docs: "gpui_core/struct.TextView.html",
             variants: [demo("Default", "default")],
+        },
+    ]
+}
+
+/// The crates built on gpui-core, each with pictures already in its `docs/` folder (the ones
+/// its README shows), in the order their pages show them.
+pub fn crates() -> Vec<Crate> {
+    vec![
+        Crate {
+            name: "gpui-blocks",
+            slug: "blocks",
+            dir: "gpui-blocks",
+            lib: "gpui_blocks",
+            about: "A block editor: Markdown documents with a slash menu, drag handles, callouts, toggles and widget blocks.",
+            pictures: vec![
+                (
+                    "doc.png",
+                    "A document: headings, a to-do list, a numbered list, callouts and toggles",
+                ),
+                ("slash.png", "The slash menu open under a \"/\""),
+                ("hover.png", "\"+\" and a grip beside a to-do list"),
+                (
+                    "drag.png",
+                    "A heading carried down past a to-do list, which slides up to make room",
+                ),
+            ],
+        },
+        Crate {
+            name: "gpui-calendar",
+            slug: "calendar",
+            dir: "gpui-calendar",
+            lib: "gpui_calendar",
+            about: "Day, week, month and agenda views with a time grid, dragging, a mini month and time zones.",
+            pictures: vec![
+                (
+                    "week.png",
+                    "A week: all-day spans, overlapping events side by side, and the line at the current time",
+                ),
+                (
+                    "month.png",
+                    "A month with spans, dotted rows and \"+N more\"",
+                ),
+                (
+                    "drag-move.png",
+                    "An event carried to another day, the original faded",
+                ),
+                (
+                    "agenda.png",
+                    "A day's events listed with their times, colours and links",
+                ),
+                (
+                    "compact.png",
+                    "A day at 390 pixels wide, with the compact header",
+                ),
+            ],
+        },
+        Crate {
+            name: "gpui-agents",
+            slug: "agents",
+            dir: "gpui-agents",
+            lib: "gpui_agents",
+            about: "Draws AI agents' OpenUI cards natively: cards, tables, charts, forms and buttons.",
+            pictures: vec![
+                (
+                    "cards-kpi.png",
+                    "A card of account metrics: snippet cards with icons, values and trends, and a product card with a bar chart",
+                ),
+                (
+                    "form.png",
+                    "A form with text fields, a select, a date picker, a slider, checkboxes, radios, chips and option cards",
+                ),
+                (
+                    "charts.png",
+                    "Grouped bars with a negative value, and a horizontal bar chart",
+                ),
+                (
+                    "pies.png",
+                    "A pie, a donut, a half pie, radial rings and a single stacked bar, each with its legend",
+                ),
+                ("table.png", "A table with tags and buttons in its cells"),
+            ],
+        },
+        Crate {
+            name: "gpui-dnd",
+            slug: "dnd",
+            dir: "gpui-dnd",
+            lib: "gpui_dnd",
+            about: "Drag and drop in the manner of react-dnd: sources, nested targets, a preview, sortable lists and kanban boards.",
+            pictures: vec![
+                (
+                    "kanban-drag.png",
+                    "A kanban board: a card lifted out of To do and held over Doing, where the cards have parted to open a gap for it",
+                ),
+                (
+                    "sortable-drag.png",
+                    "A list of tasks with one lifted and held lower, the others parted around the gap, beside a row of tag chips",
+                ),
+                (
+                    "nested-hover.png",
+                    "Nested targets: a file held over a folder inside a drive; the folder shows it's under the pointer and the drive that it's inside",
+                ),
+                (
+                    "custom_preview-drag.png",
+                    "Two photos picked up together, drawn by a custom layer as a stack with a count, held over an album",
+                ),
+            ],
+        },
+        Crate {
+            name: "gpui-flow",
+            slug: "flow",
+            dir: "gpui-flow",
+            lib: "gpui_flow",
+            about: "A canvas for flowcharts and whiteboards: shaped nodes, edges, groups, ink, controls and a minimap.",
+            pictures: vec![(
+                "whiteboard.png",
+                "A flowchart: shaped nodes, labelled and dotted edges, a group, pen and marker strokes, the controls and the minimap",
+            )],
+        },
+        Crate {
+            name: "gpui-tables",
+            slug: "tables",
+            dir: "gpui-tables",
+            lib: "gpui_tables",
+            about: "Notion-style database views (table, board and list), with a model and engine that build without GPUI.",
+            pictures: vec![
+                (
+                    "table-people.png",
+                    "A table of people: names, companies, roles, stages and tags, sorted by name",
+                ),
+                (
+                    "board.png",
+                    "A board with a column for each stage, each card a person with their company, last contact and owner",
+                ),
+                (
+                    "list-grouped.png",
+                    "People by stage: a header for each stage with its count, and the people under it",
+                ),
+                (
+                    "table-grouped.png",
+                    "Interactions grouped by month, each group with its count and a New row",
+                ),
+                (
+                    "table-date.png",
+                    "A date's month under its cell, the day it holds picked and today ringed",
+                ),
+            ],
         },
     ]
 }
