@@ -1041,7 +1041,16 @@ impl Calendar {
         self.options.show_weekends || !matches!(self.view, CalendarView::Week | CalendarView::Month)
     }
 
+    /// Shows another view, on the selected day when one is selected on screen: `d` on a
+    /// selected Thursday shows that Thursday, and `m` on a day of the year shows its month, as
+    /// a click on a day's name or a month's name does.
     pub fn set_view(&mut self, view: CalendarView, cx: &mut Context<Self>) {
+        if let Some((date, _)) = self.selection_place() {
+            let (first, days) = self.visible_days();
+            if date >= first && (date - first).num_days() < days as i64 {
+                self.anchor = date;
+            }
+        }
         self.view = view;
         self.range_changed(cx);
     }
@@ -2676,6 +2685,7 @@ impl Calendar {
             let this = this.clone();
             let highlighted = i == asking.highlighted;
             Press::new(("scope", i))
+                .accessibility_label(scope.label())
                 .flex()
                 .items_center()
                 .w_full()
@@ -2720,6 +2730,7 @@ impl Calendar {
             let cancel = {
                 let this = this.clone();
                 Press::new("scope-cancel")
+                    .accessibility_label("Cancel")
                     .flex()
                     .items_center()
                     .justify_center()

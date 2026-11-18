@@ -576,6 +576,7 @@ impl Calendar {
                 let id = other.id.clone();
                 cal = cal.child(
                     Press::new(("panel-calendar", i))
+                        .accessibility_label(other.name.clone())
                         .flex()
                         .items_center()
                         .gap(rems(8. / 15.))
@@ -639,6 +640,7 @@ impl Calendar {
                 };
                 links = links.child(
                     Press::new(("panel-link", i))
+                        .accessibility_label(link.label.clone())
                         .flex()
                         .items_center()
                         .gap(rems(8. / 15.))
@@ -678,6 +680,7 @@ impl Calendar {
                 IconName::ExternalLink,
                 row_line,
                 Press::new("panel-url")
+                    .accessibility_label(label.clone())
                     .flex()
                     .items_center()
                     .min_h(row_h)
