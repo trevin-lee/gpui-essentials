@@ -357,8 +357,12 @@ made.
   focus moving: a node moved by keyboard and where to ("Moved Start. New position, x: 105,
   y: 100", as React Flow's), a connection made ("Connected Start to Ship it") or moved, and
   what was deleted. `Flow::announce` says something of the host's; `announcement` reads it.
-- **Not yet.** A node toolbar; edge renderers of the host's own (a custom type is drawn as a
-  bezier); `dragHandle`; undo.
+- **A node toolbar** (`Flow::with_node_toolbar`, as React Flow's `NodeToolbar`): the host's
+  content beside the one selected node, at its size on screen whatever the zoom, on any side,
+  lined up at its start, middle or end, 10 points off by default (`ToolbarPlace`). It hides
+  while nothing or several are selected and during a drag, and presses on it stay its own.
+- **Not yet.** Edge renderers of the host's own (a custom type is drawn as a bezier);
+  `dragHandle`; undo.
 
 ## License
 
