@@ -443,7 +443,7 @@ impl Draw<'_, '_> {
             Component::InlineHeader {
                 heading,
                 description,
-            } => self.inline_header(heading, description.as_deref()),
+            } => self.inline_header(heading, description.as_deref(), path),
             Component::Table(t) => self.table(t, path),
             Component::EditableTable(t) => self.editable_table(t, path),
             Component::Chart(c) => self.chart(c, path),
@@ -465,7 +465,7 @@ impl Draw<'_, '_> {
                 .tag(&t.text, t.icon.as_ref(), t.size, t.tone)
                 .into_any_element(),
             Component::Icon(i) => self.icon_element(&i.name, 20., self.t.colors.text),
-            Component::EntityList(e) => self.entity_list(e),
+            Component::EntityList(e) => self.entity_list(e, path),
             Component::List(l) => self.list(l, path),
             Component::Cards(b) => self.cards(b, path),
             Component::Line(l) => self.line_component(l),

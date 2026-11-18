@@ -174,23 +174,40 @@ impl Draw<'_, '_> {
             .into_any_element()
     }
 
-    pub fn inline_header(&mut self, heading: &str, description: Option<&str>) -> AnyElement {
+    pub fn inline_header(
+        &mut self,
+        heading: &str,
+        description: Option<&str>,
+        path: &str,
+    ) -> AnyElement {
         let t = self.t;
+        let heading = self.inline_text(
+            heading,
+            t.text.md,
+            t.colors.text,
+            t.text.medium,
+            &format!("{path}.h"),
+            true,
+        );
+        let regular = self.regular();
+        let description = description.map(|s| {
+            self.inline_text(
+                s,
+                t.text.md,
+                t.colors.text_muted,
+                regular,
+                &format!("{path}.d"),
+                true,
+            )
+        });
         div()
             .w_full()
             .min_w_0()
             .flex()
             .flex_col()
             .gap(self.px(2.))
-            .child(self.text(heading.to_string(), t.text.md, t.colors.text, t.text.medium))
-            .when_some(description, |d, s| {
-                d.child(self.text(
-                    s.to_string(),
-                    t.text.md,
-                    t.colors.text_muted,
-                    self.regular(),
-                ))
-            })
+            .child(heading)
+            .children(description)
             .into_any_element()
     }
 
@@ -200,6 +217,37 @@ impl Draw<'_, '_> {
     /// and a link goes to the host as an event. The text takes the card's colour from around
     /// it, and everything else (links, markers, lines, code, the selection) the card's theme.
     pub fn markdown(&mut self, md: &str, size: f32, weight: f32, path: &str) -> Div {
+        self.markdown_with(md, size, weight, path, true)
+    }
+
+    /// A short text as react-ui's `InlineMarkdownRenderer` draws one (an inline header, an
+    /// entity list's sides, an option card's label): its bold, italic, code and links when it
+    /// has any, in `color`; else the plain text it always was. `selectable` is false inside
+    /// something pressable, so a press on the text is the control's.
+    pub fn inline_text(
+        &mut self,
+        s: &str,
+        size: f32,
+        color: Hsla,
+        weight: f32,
+        path: &str,
+        selectable: bool,
+    ) -> Div {
+        if !s.contains(['*', '_', '`', '[', '~']) {
+            return self.text(s.to_string(), size, color, weight);
+        }
+        self.markdown_with(s, size, weight, path, selectable)
+            .text_color(color)
+    }
+
+    fn markdown_with(
+        &mut self,
+        md: &str,
+        size: f32,
+        weight: f32,
+        path: &str,
+        selectable: bool,
+    ) -> Div {
         let t = self.t;
         let rem = self.window.rem_size();
         let css = |v: f32| t.px(v).to_pixels(rem);
@@ -306,7 +354,7 @@ impl Draw<'_, '_> {
         let view = self.cx.entity().downgrade();
         let text = TextView::markdown(self.id(&format!("{path}.md")), md.to_string())
             .style(style)
-            .selectable(true)
+            .selectable(selectable)
             .on_link_click(move |url, _, _, cx| {
                 let url = url.to_string();
                 let _ = view.update(cx, |v, cx| v.open_markdown_link(&url, cx));
@@ -586,7 +634,7 @@ impl Draw<'_, '_> {
     }
 
     /// Label and value rows; the header muted, the footer's value larger.
-    pub fn entity_list(&mut self, e: &EntityList) -> AnyElement {
+    pub fn entity_list(&mut self, e: &EntityList, path: &str) -> AnyElement {
         let t = self.t;
         let size = if e.small { t.text.sm } else { t.text.md };
         let rows: Vec<(&crate::openui::Entity, u8)> = e
@@ -609,6 +657,28 @@ impl Draw<'_, '_> {
             } else {
                 size
             };
+            let regular = self.regular();
+            let left = self
+                .inline_text(
+                    &r.left,
+                    size,
+                    color,
+                    regular,
+                    &format!("{path}.r{i}.l"),
+                    true,
+                )
+                .flex_1();
+            let right = self
+                .inline_text(
+                    &r.right,
+                    right_size,
+                    color,
+                    if kind == 0 { regular } else { t.text.medium },
+                    &format!("{path}.r{i}.r"),
+                    true,
+                )
+                .flex_1()
+                .text_right();
             let row = div()
                 .w_full()
                 .min_w_0()
@@ -619,24 +689,8 @@ impl Draw<'_, '_> {
                 .gap(self.px(t.space.m))
                 .py(self.px(t.space.m))
                 .when(i + 1 < n, |d| d.border_b_1().border_color(t.colors.line))
-                .child(
-                    self.text(r.left.clone(), size, color, self.regular())
-                        .flex_1(),
-                )
-                .child(
-                    self.text(
-                        r.right.clone(),
-                        right_size,
-                        color,
-                        if kind == 0 {
-                            self.regular()
-                        } else {
-                            t.text.medium
-                        },
-                    )
-                    .flex_1()
-                    .text_right(),
-                );
+                .child(left)
+                .child(right);
             col = col.child(row);
         }
         col.into_any_element()

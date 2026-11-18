@@ -619,6 +619,28 @@ impl Draw<'_, '_> {
                 (None, Some(icon)) => Some(self.icon_element(&icon.name, 20., t.colors.text)),
                 _ => None,
             };
+            let regular = self.regular();
+            let label = self
+                .inline_text(
+                    &o.label,
+                    t.text.sm,
+                    t.colors.text,
+                    t.text.medium,
+                    &format!("{key}.card{i}.l"),
+                    false,
+                )
+                .w_full();
+            let description = o.description.as_deref().map(|d| {
+                self.inline_text(
+                    d,
+                    t.text.sm,
+                    t.colors.text_muted,
+                    regular,
+                    &format!("{key}.card{i}.d"),
+                    false,
+                )
+                .w_full()
+            });
             let card = pressable(self.id(&format!("{key}.card{i}")), self.t)
                 .role(if multiple {
                     Role::CheckBox
@@ -649,16 +671,8 @@ impl Draw<'_, '_> {
                     move || sel
                 })
                 .children(top)
-                .child(
-                    self.text(o.label.clone(), t.text.sm, t.colors.text, t.text.medium)
-                        .w_full(),
-                )
-                .when_some(o.description.clone(), |c, d| {
-                    c.child(
-                        self.text(d, t.text.sm, t.colors.text_muted, self.regular())
-                            .w_full(),
-                    )
-                })
+                .child(label)
+                .children(description)
                 .on_click(self.cx.listener(move |this, _, _, cx| {
                     let mut now = chosen_of(this.read(&binding).as_ref());
                     let value = if multiple {
