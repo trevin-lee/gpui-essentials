@@ -427,6 +427,11 @@ pub(crate) struct BlockDrag {
     pub(crate) revision: u64,
     /// Lifted by a finger: a long press, then a move (see [`BlockEditorState::touch_moved`]).
     pub(crate) by_touch: bool,
+    /// Whether the blocks are dragged out of a column, not from the top level: they don't
+    /// slide the others aside, and drop where `side` says.
+    pub(crate) nested: bool,
+    /// Where they drop when it isn't a gap between top-level blocks (see `side_drop.rs`).
+    pub(crate) side: Option<super::side_drop::Target>,
 }
 
 impl BlockDrag {
@@ -448,6 +453,8 @@ impl BlockDrag {
             start_top: top,
             revision,
             by_touch: false,
+            nested: false,
+            side: None,
         }
     }
 
@@ -2104,15 +2111,22 @@ impl BlockEditorState {
     /// there.
     pub fn begin_block_drag(&mut self, block: BlockId, at: Point<Pixels>) {
         let doc = &self.model.doc;
-        if self.readonly || doc.parent(block) != Some(doc.root) {
+        let parent = doc.parent(block);
+        // A top-level block, or one in a column.
+        let nested = parent
+            .and_then(|p| doc.kind(p))
+            .is_some_and(|k| matches!(k, super::kind::BlockKindData::Column { .. }));
+        if self.readonly || (parent != Some(doc.root) && !nested) {
             return;
         }
-        self.block_drag = Some(BlockDrag::new(
+        let mut drag = BlockDrag::new(
             self.drag_run(block),
             at,
             self.content_top(),
             self.model.revision(),
-        ));
+        );
+        drag.nested = nested;
+        self.block_drag = Some(drag);
     }
 
     /// What pressing the top-level `block` drags: the run of selected
@@ -2122,7 +2136,8 @@ impl BlockEditorState {
         let doc = &self.model.doc;
         match self.model.selected_blocks() {
             Some((parent, range))
-                if parent == doc.root && doc.children(parent)[range.clone()].contains(&block) =>
+                if Some(parent) == doc.parent(block)
+                    && doc.children(parent)[range.clone()].contains(&block) =>
             {
                 (doc.children(parent)[range.start], range.len())
             }
@@ -2133,7 +2148,10 @@ impl BlockEditorState {
     /// The top-level blocks an active drag holds, in order.
     pub(crate) fn dragged_blocks(&self, drag: &BlockDrag) -> Vec<BlockId> {
         let doc = &self.model.doc;
-        let children = doc.children(doc.root);
+        let Some(parent) = doc.parent(drag.block) else {
+            return Vec::new();
+        };
+        let children = doc.children(parent);
         children
             .iter()
             .position(|id| *id == drag.block)
@@ -2335,6 +2353,27 @@ impl BlockEditorState {
             .collect()
     }
 
+    /// Where `drag`'s blocks drop beside or among others, if anywhere: a top-level drag only
+    /// once the pointer has gone sideways (a block dragged straight up or down from its handle
+    /// passes over the others' edges); one out of a column, wherever it is.
+    fn side_target_of(
+        &self,
+        drag: &BlockDrag,
+        held: &[BlockId],
+    ) -> Option<super::side_drop::Target> {
+        let sideways = (drag.at.x - drag.start.x).abs() >= gpui::px(24.);
+        (drag.nested || sideways)
+            .then(|| self.side_target(held, drag.at, drag.nested))
+            .flatten()
+    }
+
+    /// The line that shows where dragged blocks would drop beside or among others, in window
+    /// coordinates, while a drag has one.
+    pub(crate) fn drop_line(&self) -> Option<Bounds<Pixels>> {
+        let drag = self.block_drag?;
+        drag.active.then_some(drag.side?.line)
+    }
+
     /// D22: the top-level table or code block whose edge handle
     /// (`block_handle_at`) is under `at`; only those can be dragged.
     pub(crate) fn drag_handle_at(&self, at: Point<Pixels>) -> Option<BlockId> {
@@ -2382,13 +2421,16 @@ impl BlockEditorState {
         self.selection_changed(cx);
         // The middles of the blocks' text as drawn now, in content y: the pointer passing
         // one moves it.
-        let top = self.content_top();
-        let middles = self
-            .top_level_bounds()
-            .into_iter()
-            .map(|(_, id, b)| (id, f32::from(b.center().y - top)))
-            .collect();
-        self.reorder.begin_drag(middles);
+        // Blocks out of a column don't slide the top level's aside.
+        if !drag.nested {
+            let top = self.content_top();
+            let middles = self
+                .top_level_bounds()
+                .into_iter()
+                .map(|(_, id, b)| (id, f32::from(b.center().y - top)))
+                .collect();
+            self.reorder.begin_drag(middles);
+        }
     }
 
     /// D22: pointer moved with the button down. Returns whether a block
@@ -2404,7 +2446,8 @@ impl BlockEditorState {
                 return false;
             }
             self.activate_block_drag(&mut drag, cx);
-        } // The pointer's speed, weighted toward the latest move, for the drop to start at.
+        }
+        // The pointer's speed, weighted toward the latest move, for the drop to start at.
         let now = std::time::Instant::now();
         let dt = now.duration_since(drag.moved).as_secs_f32();
         if dt > 0.0005 {
@@ -2417,7 +2460,13 @@ impl BlockEditorState {
         }
         drag.at = at;
         drag.moved = now;
-        drag.drop = self.reorder.drop_gap(&drag.dragged(self.content_top()));
+        let held = self.dragged_blocks(&drag);
+        drag.side = self.side_target_of(&drag, &held);
+        drag.drop = if drag.nested {
+            None
+        } else {
+            self.reorder.drop_gap(&drag.dragged(self.content_top()))
+        };
         self.block_drag = Some(drag);
         cx.notify();
         true
@@ -2581,11 +2630,23 @@ impl BlockEditorState {
             if drag.moved.elapsed().as_secs_f32() > 0.1 {
                 drag.velocity = 0.;
             }
-            // Scrolled since the last move: the gap is where the pointer is now.
-            let dragged = drag.dragged(self.content_top());
-            drag.drop = self.reorder.drop_gap(&dragged);
-            self.reorder.release(dragged);
-            if let Some(to) = drag.drop {
+            let held = self.dragged_blocks(&drag);
+            // Scrolled since the last move: the drop is where the pointer is now.
+            drag.side = self.side_target_of(&drag, &held);
+            if !drag.nested {
+                let dragged = drag.dragged(self.content_top());
+                drag.drop = self.reorder.drop_gap(&dragged);
+                self.reorder.release(dragged);
+            }
+            if let Some(target) = drag.side {
+                self.model.break_coalescing();
+                self.edit(
+                    EditOrigin::Command("drop_blocks"),
+                    |m| m.drop_run(&held, target.drop).map(|_| ()),
+                    cx,
+                );
+                self.model.break_coalescing();
+            } else if let Some(to) = drag.drop.filter(|_| !drag.nested) {
                 self.model.break_coalescing();
                 self.edit(
                     EditOrigin::Command("move_block_to"),

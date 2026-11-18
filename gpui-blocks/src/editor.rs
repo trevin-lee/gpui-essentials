@@ -490,6 +490,9 @@ pub struct Editor {
     open_on_next_change: bool,
     /// The top-level block the side menu is beside.
     pub(crate) hovered: Option<BlockId>,
+    /// The block under the pointer inside a hovered columns block, whose grip shows in the gap
+    /// left of its column.
+    hovered_inner: Option<BlockId>,
     /// Embeds' heights while one is being resized.
     embed_heights: docs::Heights,
     /// The embed being resized.
@@ -658,6 +661,7 @@ impl Editor {
             dismissed: None,
             open_on_next_change: false,
             hovered: None,
+            hovered_inner: None,
             ids,
             quotes: Vec::new(),
             headings,
@@ -1536,8 +1540,28 @@ impl Editor {
             .iter()
             .find(|(_, b)| y >= b.top() - px(6.) && y < b.bottom() + px(6.))
             .map(|(id, _)| *id);
-        if hovered != self.hovered {
+        // In columns: the block under the pointer in the column it's over.
+        let inner = hovered.and_then(|columns| {
+            let state = self.state.read(cx);
+            if state.model().document().block(columns)?.kind() != BlockKind::Columns {
+                return None;
+            }
+            let x = event.position.x;
+            let (column, _) = state.children_bounds(columns).into_iter().find(|(_, b)| {
+                x >= b.left() - px(30.)
+                    && x < b.right()
+                    && y >= b.top() - px(6.)
+                    && y < b.bottom() + px(6.)
+            })?;
+            state
+                .children_bounds(column)
+                .into_iter()
+                .find(|(_, b)| y >= b.top() - px(4.) && y < b.bottom() + px(4.))
+                .map(|(id, _)| id)
+        });
+        if hovered != self.hovered || inner != self.hovered_inner {
             self.hovered = hovered;
+            self.hovered_inner = inner;
             cx.notify();
         }
     }
@@ -1573,16 +1597,40 @@ impl Editor {
     }
 
     fn side_menu(&self, cx: &mut Context<Self>) -> Option<impl IntoElement + use<>> {
-        // Beside the block whose menu is open, else the block under the pointer.
-        let block = self.block_menu.or(self.hovered)?;
+        // Beside the block whose menu is open, else the block under the pointer: in columns,
+        // the one in the column it's over.
+        let block = self
+            .block_menu
+            .or(self.hovered.map(|h| self.hovered_inner.unwrap_or(h)))?;
         let state = self.state.read(cx);
         if state.is_readonly() {
             return None;
         }
         let blocks = state.top_level_blocks();
-        let (_, bounds) = blocks.iter().find(|(id, _)| *id == block)?;
-        // The column's left edge: where top-level text starts.
-        let left = blocks.iter().map(|(_, b)| b.left()).reduce(Pixels::min)?;
+        let (bounds, left, inner) = match blocks.iter().find(|(id, _)| *id == block) {
+            // The page's left edge: where top-level text starts.
+            Some((_, bounds)) => (
+                *bounds,
+                blocks.iter().map(|(_, b)| b.left()).reduce(Pixels::min)?,
+                false,
+            ),
+            // A block in a column: its grip in the gap left of its column.
+            None => {
+                let doc = state.model().document();
+                let column = doc.block(block)?.parent()?;
+                let columns = column.parent()?;
+                let (_, column_bounds) = state
+                    .children_bounds(columns.id())
+                    .into_iter()
+                    .find(|(id, _)| *id == column.id())?;
+                let (_, bounds) = state
+                    .children_bounds(column.id())
+                    .into_iter()
+                    .find(|(id, _)| *id == block)?;
+                (bounds, column_bounds.left(), true)
+            }
+        };
+        let bounds = &bounds;
         // Level with the block's first line: its height, for one line of the block's kind.
         let line = match state.model().document().block(block).map(|b| b.kind()) {
             Some(BlockKind::Heading { level: 1 }) => px(38.),
@@ -1611,6 +1659,7 @@ impl Editor {
         let this_drag = this.clone();
         let state = self.state.clone();
         let grip = button("blocks-side-grip", "⋮⋮")
+            .debug_selector(|| "blocks-side-grip".into())
             .role(Role::Button)
             .aria_label("Move block")
             .aria_description("Drag to move the block; click for its menu")
@@ -1634,6 +1683,16 @@ impl Editor {
             })
             .into_any_element();
         let grip = self.grip_with_menu(block, grip, cx);
+        if inner {
+            return Some(
+                deferred(
+                    anchored()
+                        .position(point(left - px(22.), top))
+                        .child(div().flex().child(grip)),
+                )
+                .with_priority(1),
+            );
+        }
         Some(
             deferred(
                 anchored().position(point(left - px(52.), top)).child(
@@ -2845,6 +2904,49 @@ mod tests {
         cx.simulate_keystrokes("secondary-z");
         draw(cx);
         assert_eq!(widths(&editor, cx), [0.5, 0.5], "one undo step");
+    }
+
+    /// A block in a column has its grip in the gap left of its column; dragging it out above
+    /// the page's first block moves it there, and the row left with one column unwraps.
+    #[gpui::test]
+    fn a_block_in_a_column_has_a_grip_that_drags_it_out(cx: &mut TestAppContext) {
+        let (editor, cx) = open(
+            cx,
+            "top\n\n<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->",
+        );
+        cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(800.)));
+        draw(cx);
+        draw(cx);
+        let (top, right_column, right) = editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            let blocks = state.top_level_blocks();
+            let columns = blocks[1].0;
+            let cols = state.children_bounds(columns);
+            let right = state.children_bounds(cols[1].0)[0].1;
+            (blocks[0].1, cols[1].1, right)
+        });
+        cx.simulate_mouse_move(right.center(), None, gpui::Modifiers::none());
+        draw(cx);
+        let grip = cx
+            .debug_bounds("blocks-side-grip")
+            .expect("the block's grip shows")
+            .center();
+        assert!(
+            grip.x < right_column.left() && grip.x > right_column.left() - gpui::px(24.),
+            "in the gap left of its column: {grip:?} {right_column:?}"
+        );
+        cx.simulate_mouse_down(grip, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+        let to = gpui::point(top.center().x, top.top() - gpui::px(2.));
+        cx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+        draw(cx);
+        assert!(
+            editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()),
+            "dragging"
+        );
+        cx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "right\n\ntop\n\nleft");
     }
 
     /// `compact_below(px(0.))` keeps the wide layout on a narrow editor, with the host's own

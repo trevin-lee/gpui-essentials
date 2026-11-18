@@ -67,6 +67,7 @@ mod projection;
 mod reorder;
 mod selection;
 mod serialize;
+mod side_drop;
 mod slice;
 mod state;
 mod step;
