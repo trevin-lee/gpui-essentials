@@ -125,6 +125,19 @@ made.
   of many nodes, a deletion with its edges, or whatever one update changed, is one step.
   Taking an edit back puts back only the fields it changed and is sent as an edit too; edits
   from elsewhere aren't in the history, and a step whose nodes have since gone is passed over.
+- **Copy, cut, paste and duplicate** (⌘C, ⌘X, ⌘V, ⌘D; `Flow::copy_selected`, `cut_selected`,
+  `paste`, `duplicate_selected`). A copy is the selected nodes as a document of their own
+  (`Flow::selection_document`): what's inside a selected frame or group, in a tree what's
+  under a selected node, and the edges between them; a node copied without its parent comes
+  out where it is in the flow. It goes on the clipboard as gpui-flow's JSON text, so it pastes
+  into another flow, or another app's. A paste or a duplicate gets new ids throughout (what
+  pointed at an old one points at its new one), lands 20 points along (each paste of the same
+  copy further on; a cut's first paste where it was; one that would land out of view in the
+  middle of the view), is selected, and is one edit, so one undo step. Ink keeps its stroke
+  with it. In a mind map a paste goes under the one selected node, and a duplicate is its
+  original's next sibling. ⌘D leaves the clipboard alone. Clipboard text that isn't a flow,
+  and a key with nothing selected, go on to the host. `Flow::insert_document` adds any
+  document the same way.
 - **With the mouse and keys.** Drag the pane to pan; scroll or pinch to zoom about the pointer;
   drag a node, or all that are selected; ⌘-click to add or take away; shift-drag for a
   rectangle; drag from a handle to another (either direction) to connect, or click (tap) one and
