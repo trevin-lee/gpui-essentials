@@ -36,6 +36,9 @@ pub enum Said {
     Over,
     /// It was dropped on it.
     Dropped,
+    /// The drag was cancelled (Escape) while over it: what's said in place of the provider's
+    /// "Cancelled. … is back where it was." ("Plans, put back").
+    Cancelled,
 }
 
 /// A drop target (react-dnd's `useDrop`): which items a [`dnd`](crate::dnd) element takes, and
@@ -156,7 +159,9 @@ impl DropTarget {
     /// in place of the provider's announcements ("Over {describe}.", "Dropped … on …"): for a
     /// target whose own sentence says it all, in its own words and formats ("Standup, Tuesday
     /// 9 to 9:30 AM, moving to Wednesday 10 AM"), read from its state. The drop's sentence is asked before
-    /// [`on_drop`](Self::on_drop) runs, while the target still has the drag.
+    /// [`on_drop`](Self::on_drop) runs, while the target still has the drag; the cancel's
+    /// ([`Said::Cancelled`]) before the drag lets go. An empty sentence leaves that moment to the
+    /// provider's announcement.
     pub fn say(
         mut self,
         f: impl Fn(&DragItem, &DropMonitor, Said, &App) -> SharedString + 'static,

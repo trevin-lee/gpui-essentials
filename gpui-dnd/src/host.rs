@@ -29,6 +29,11 @@ pub struct Press {
     pub size: Size<Pixels>,
     /// The item's name, for the keyboard's announcements.
     pub label: Option<SharedString>,
+    /// A touch drag begun with [`begin_at`] that follows the next finger by how far it moves,
+    /// not where it is: something lifted in place (a block sheet's Move), then carried by a
+    /// finger landing anywhere. The offset from that finger to the drag's pointer is taken as
+    /// it lands; a tap drops it where it is.
+    pub relative: bool,
 }
 
 impl Default for Press {
@@ -39,6 +44,7 @@ impl Default for Press {
             grab: Point::default(),
             size: Size::default(),
             label: None,
+            relative: false,
         }
     }
 }
@@ -123,7 +129,14 @@ pub fn begin_at<T: 'static>(
     if press.backend == Backend::Keyboard {
         return crate::keyboard::start(record, at, window, cx);
     }
-    state::begin(&record, at, press.backend, window, cx)
+    let began = state::begin(&record, at, press.backend, window, cx);
+    if began && press.relative && press.backend == Backend::Touch {
+        let shared = state::shared(cx);
+        if let Some(drag) = shared.borrow_mut().drag.as_mut() {
+            drag.relative = Some(None);
+        }
+    }
+    began
 }
 
 /// Ends the window's drag, or forgets its pending press, as Escape would: for a host whose own
