@@ -68,6 +68,40 @@ pub trait Docs: Send + Sync + 'static {
     /// The document with this id, or `None` when there isn't one (deleted, or not shared with
     /// this person). Called each time a link is drawn; keep it cheap, from a cache the app keeps.
     fn info(&self, id: &str, cx: &App) -> Option<DocInfo>;
+
+    /// The name of the view `view` of the document `doc`, for an embed's header: a database
+    /// view's own name ("Launch tasks" for `v-board`). `None` when the app can't name it; the
+    /// header then names only the built-in kinds of view (Board, Table…) and shows nothing for
+    /// any other. Called each time an embed is drawn; keep it cheap.
+    fn view_name(&self, doc: &str, view: &str, cx: &App) -> Option<SharedString> {
+        let _ = (doc, view, cx);
+        None
+    }
+}
+
+/// The name an embed's header shows for `view`: the app's, else a built-in kind's, else none
+/// (an id the app couldn't name is never shown).
+pub(crate) fn view_label(
+    docs: Option<&dyn Docs>,
+    doc: &str,
+    view: &str,
+    cx: &App,
+) -> Option<SharedString> {
+    docs.and_then(|d| d.view_name(doc, view, cx))
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| {
+            Some(
+                match view {
+                    "table" => "Table",
+                    "board" => "Board",
+                    "mindmap" => "Mind map",
+                    "calendar" => "Calendar",
+                    "page" => "Page",
+                    _ => return None,
+                }
+                .into(),
+            )
+        })
 }
 
 /// The id in a link destination, when it's a document link with a valid id.
@@ -596,6 +630,7 @@ impl EmbedPlugin {
             on_click: None,
         }
         .info(&doc_ref, cx);
+        let view = view_label(hooks.docs.as_deref(), &data.embed.doc, &data.embed.view, cx);
         let content = hooks.render.as_ref().and_then(|r| r(&shown, window, cx));
         let theme = cx.theme();
         let (muted, fg, border, accent) = (
@@ -637,11 +672,9 @@ impl EmbedPlugin {
                     .text_color(if found { fg } else { muted })
                     .child(title.clone()),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(muted)
-                    .child(data.embed.view.clone()),
+            .children(
+                view.clone()
+                    .map(|view| div().flex_none().text_color(muted).child(view)),
             )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, window, cx| {
@@ -659,7 +692,10 @@ impl EmbedPlugin {
                 .justify_center()
                 .text_size(px(13.))
                 .text_color(muted)
-                .child(format!("{title} ({}) isn't shown here", data.embed.view)),
+                .child(match &view {
+                    Some(view) => format!("{title} ({view}) isn't shown here"),
+                    None => format!("{title} isn't shown here"),
+                }),
         };
         let on_resize = hooks.on_resize.clone();
         let start = ResizeStart {
@@ -1037,6 +1073,36 @@ mod tests {
                 .contains("Between!")
         );
         assert_eq!(blocks(&drawn), first);
+    }
+
+    /// An embed's header names its view as the app does, else a built-in kind by its name, and
+    /// never shows a view id the app couldn't name.
+    #[gpui::test]
+    fn an_embeds_header_names_its_view(cx: &mut TestAppContext) {
+        struct Views;
+        impl Docs for Views {
+            fn info(&self, _: &str, _: &App) -> Option<DocInfo> {
+                None
+            }
+            fn view_name(&self, doc: &str, view: &str, _: &App) -> Option<SharedString> {
+                (doc == "db" && view == "v-board").then(|| "Launch tasks".into())
+            }
+        }
+        cx.update(|cx| {
+            let views: &dyn Docs = &Views;
+            let label = |docs, doc, view| view_label(docs, doc, view, cx).map(|v| v.to_string());
+            assert_eq!(
+                label(Some(views), "db", "v-board").as_deref(),
+                Some("Launch tasks")
+            );
+            assert_eq!(
+                label(Some(views), "db", "8b1f3c2e-0d4a-4e8f-9f7a-1c2d3e4f5a6b"),
+                None
+            );
+            assert_eq!(label(Some(views), "db", "board").as_deref(), Some("Board"));
+            assert_eq!(label(None, "db", "mindmap").as_deref(), Some("Mind map"));
+            assert_eq!(label(None, "db", "v-board"), None);
+        });
     }
 
     #[gpui::test]
