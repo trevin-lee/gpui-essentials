@@ -62,6 +62,23 @@ pub struct Variant {
     /// The demo file's text, shown beside the picture.
     pub code: &'static str,
     pub demo: Demo,
+    /// What the pointer does to the demo before its picture is taken.
+    pub act: Act,
+}
+
+/// What the pointer does before a picture is taken, in the middle of what the demo drew: how a
+/// picture shows a menu, a hover card or a tooltip open, which keep whether they're open to
+/// themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Act {
+    /// Nothing: the demo as it first draws.
+    None,
+    /// A press with the main button.
+    Click,
+    /// A press with the secondary button (a context menu).
+    RightClick,
+    /// The pointer rests there (a hover card, a tooltip).
+    Hover,
 }
 
 /// How a demo draws.
