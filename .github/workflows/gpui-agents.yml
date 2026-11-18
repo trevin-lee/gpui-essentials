@@ -40,24 +40,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Whether the crate itself changed, as opposed to only the files every crate shares. The slow
-  # jobs (the iOS build, the shots lint) run on main nightly, and on a pull request only then.
+  # What a pull request changed, for this crate (.github/scripts/changes.py). `own`: the crate's
+  # files or this workflow; the slow jobs (the iOS build, the shots lint) run on main nightly,
+  # and on a pull request only then. `run`: anything the crate builds from (`own`, the
+  # toolchain, the root Cargo.toml past its members line, or a Cargo.lock package in its
+  # dependency tree); the macOS job runs only then, so adding a crate to the workspace or
+  # bumping another crate's dependency doesn't run every crate's macOS job.
   changes:
     runs-on: ubuntu-latest
     outputs:
       own: ${{ steps.diff.outputs.own }}
+      run: ${{ steps.diff.outputs.run }}
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github/scripts
       - id: diff
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "${{ github.event_name }}" != pull_request ]; then echo own=true >> "$GITHUB_OUTPUT"; exit 0; fi
-          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename' > files
-          if grep -qE '^(gpui\-agents/|gpui\-core/|\.github/workflows/gpui\-agents\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" != pull_request ]; then printf 'own=true\nrun=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
+          python3 .github/scripts/changes.py '^(gpui\-agents/|\.github/workflows/gpui\-agents\.yml)' gpui-agents >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && needs.changes.outputs.run == 'true'
     # GPUI draws through Metal, so GitHub's macOS runners build and run its tests, the headless
     # ones included.
     runs-on: macos-latest
