@@ -20,9 +20,10 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   one to put a mention chip in the text.
 - **Side menu:** hover a block for its handles. "+" adds a line below with the menu open, and the
   grip drags the block. A click on the grip opens the block's menu: Turn into (the slash menu's
-  blocks), Color (a text or background colour over all its text), Duplicate (⌘D, Ctrl+D off
-  the Mac) and Delete. Shift-click grips to select several blocks
-  whole: Delete, ⌘D, ⌘⇧↑ or ↓ and a selected block's menu act on them all.
+  blocks), Color (a text or background colour over all its text), Copy link to block (when your
+  app makes links to blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips
+  to select several blocks whole: Delete, ⌘D, ⌘⇧↑ or ↓ and a selected block's menu act on them
+  all.
 - **Format bar:** select text with the pointer for a bar above it: Turn into (every block the
   text runs through), bold, italic, underline, strikethrough, code, link (the app's link field,
   as ⌘K) and Color: Notion's nine text colours (stored as `<span style="color:#…">`) and nine
@@ -139,6 +140,10 @@ cargo run --release --example editor -- notes.md   # a file of yours, saved as y
   while a thread is shown, following them as the text around them changes. `Options::comments()`
   adds Comment to the format bar, as Notion's: it sends `CommentRequested { block, quote }`, the
   selection's anchor, for your app to start a thread on.
+- **Links to blocks:** `Options::block_link(|id| ..)` adds Copy link to block to the block menu.
+  It gets the block's lasting id and returns the link to copy, such as your document's address
+  with `#id` after it. Opening one is up to you: open the document and call
+  `reveal_block(id)`.
 - **Layout:** the text column is 720 wide, with 64 each side (`Options::gutter`; the left one
   holds the side menu) and 72 above (`Options::top`). Narrower than 600 (`Options::compact_below`;
   `px(0.)` turns it off), the editor lays itself out for a phone: 16 each side and above, and no
