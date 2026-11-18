@@ -3550,6 +3550,66 @@ impl BlockEditorState {
     /// after an opening one in the same leaf turns the text between into
     /// code, italic, bold or strikethrough and drops the delimiters. One undo
     /// group of its own: undo restores the literal delimiters.
+    /// Typing shortcuts ([`super::InputRule::typography`]): what was just typed, at the caret,
+    /// becomes its character, as its own undo step.
+    fn apply_typography_rule(&mut self, cx: &mut Context<Self>) {
+        use super::kind::BlockKindData;
+        let Some(caret) = self.model.caret() else {
+            return;
+        };
+        let doc = &self.model.doc;
+        if !matches!(
+            doc.kind(caret.block),
+            Some(
+                BlockKindData::Paragraph | BlockKindData::Heading { .. } | BlockKindData::TableCell
+            )
+        ) {
+            return;
+        }
+        let Some(inline) = doc.inline(caret.block) else {
+            return;
+        };
+        let text = inline.text();
+        let Some(before) = text.get(..caret.offset) else {
+            return;
+        };
+        let (len, with) = if before.ends_with("->") {
+            (2, "→")
+        } else if before.ends_with("<-") {
+            (2, "←")
+        } else if before.ends_with("-- ") {
+            (3, "— ")
+        } else {
+            return;
+        };
+        let from = caret.offset - len;
+        // Never in inline code or a link, nor in a web address being typed.
+        let marked = inline.pieces().any(|(piece, marks, _)| {
+            piece.start < caret.offset && piece.end > from && (marks.code || marks.link.is_some())
+        });
+        let word = before[..from]
+            .rsplit(char::is_whitespace)
+            .next()
+            .unwrap_or_default();
+        if marked || word.contains("://") || word.starts_with("www.") {
+            return;
+        }
+        let block = caret.block;
+        let pos = |offset| BlockPosition::new(block, offset);
+        self.model.break_coalescing();
+        self.model.history.begin_transaction();
+        let _ = self.model.set_selection(BlockSelection::Text {
+            anchor: pos(from),
+            head: pos(caret.offset),
+        });
+        let _ = self
+            .model
+            .insert_text(with, EditOrigin::InputRule("typography"));
+        self.model.history.commit_transaction();
+        self.model.break_coalescing();
+        self.after_edit(EditOrigin::InputRule("typography"), cx);
+    }
+
     fn apply_mark_rule(&mut self, cx: &mut Context<Self>) {
         let Some(caret) = self.model.caret() else {
             return;
@@ -3787,6 +3847,9 @@ impl EntityInputHandler for BlockEditorState {
         };
         self.edit(origin, |m| m.insert_text(text, origin), cx);
         self.end_composition();
+        if text.ends_with(['>', '-', ' ']) && self.rule_on(RuleKind::Typography) {
+            self.apply_typography_rule(cx);
+        }
         if text == " " {
             self.apply_input_rule(cx);
         } else if text.ends_with(['`', '*', '~']) && self.rule_on(RuleKind::InlineMarks) {
