@@ -14,6 +14,7 @@ use gpui_core::{
     Press, Selectable as _,
 };
 
+use super::a11y::Control;
 use super::render::{icon, line};
 use super::table::{Popover, Reopen, TableView};
 use super::views::{VIEW_TYPES, ViewAction, ViewAnchor, ViewPage, view_icon};
@@ -403,14 +404,15 @@ impl TableView {
             .id("gpui-tables-view-bar")
             .debug_selector(|| "view-bar".into())
             .key_context(super::VIEW_BAR)
-            .role(Role::TabList)
-            .aria_label(SharedString::from(
-                if self.database.title.trim().is_empty() {
+            .control(
+                module_path!(),
+                Role::TabList,
+                SharedString::from(if self.database.title.trim().is_empty() {
                     "Views".to_owned()
                 } else {
                     format!("{} views", self.database.title)
-                },
-            ))
+                }),
+            )
             .on_action(
                 cx.listener(|this, _: &super::Left, window, cx| this.bar_step(-1, window, cx)),
             )
