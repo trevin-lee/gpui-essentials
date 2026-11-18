@@ -18,6 +18,7 @@ use crate::node::{
     Reach, Shared, TouchTarget, Zoomed, built_in, measure_node, touch_target, units,
 };
 use crate::paint::{self, FlowBackground, Icon};
+use crate::palette::FlowPaletteItem;
 use crate::theme::FlowColors;
 use crate::tree::{self, Layout, Tree};
 use crate::types::*;
@@ -513,6 +514,13 @@ pub enum FlowEvent {
     /// (pictures, say).
     FilesDropped {
         paths: Vec<std::path::PathBuf>,
+        position: XY,
+    },
+    /// An item from the host's palette was dropped on the canvas (see [`crate::palette`]): the
+    /// host adds its node at `position`, its top left corner in the flow, with
+    /// [`FlowPaletteItem::node_at`] and [`Flow::add_node`]. The flow adds nothing itself.
+    NodeDropped {
+        item: FlowPaletteItem,
         position: XY,
     },
     /// A node joined a frame (`parent`) or left one (none): dropped in or dragged out, taken
@@ -1555,6 +1563,12 @@ impl Flow {
     /// A point in the window as a flow point.
     pub fn screen_to_flow(&self, position: Point<Pixels>) -> XY {
         self.viewport.to_flow(self.shared.pane_point(position))
+    }
+
+    /// Where a palette item lands with the pointer at `at`, a point in the window: the corner
+    /// of its node, centred on the pointer and snapped to the grid when snapping is on.
+    pub fn palette_landing(&self, item: &FlowPaletteItem, at: Point<Pixels>) -> XY {
+        crate::palette::landing(item, self.screen_to_flow(at), |p| self.snapped(p))
     }
 
     /// A flow point as a point in the window.
@@ -6649,6 +6663,44 @@ impl Render for Flow {
             .size_full()
         };
 
+        // A palette item over the pane: where it would land, at the canvas's zoom.
+        let drop_id = crate::palette::drop_target_id(flow_id);
+        let ghost = {
+            let monitor = gpui_dnd::DragMonitor::of(cx);
+            let item = monitor.item().and_then(|i| i.get::<FlowPaletteItem>());
+            match (item, monitor.client_offset()) {
+                (Some(item), Some(at))
+                    if monitor.is_over(&drop_id, gpui_dnd::Over::Deep)
+                        && monitor.can_drop_on(&drop_id) =>
+                {
+                    let a = viewport.to_pane(self.palette_landing(item, at));
+                    let (w, h) = item.size();
+                    Some(
+                        div()
+                            .debug_selector(|| "flow-palette-ghost".into())
+                            .absolute()
+                            .left(px(a.x))
+                            .top(px(a.y))
+                            .w(px(w * zoom))
+                            .h(px(h * zoom))
+                            .rounded(px(3. * zoom))
+                            .border_1()
+                            .border_dashed()
+                            .border_color(colors.selected)
+                            .bg(colors.selection_fill)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .overflow_hidden()
+                            .text_size(px(12. * zoom))
+                            .text_color(colors.node_text)
+                            .child(item.name.clone()),
+                    )
+                }
+                _ => None,
+            }
+        };
+
         let panning = matches!(&self.drag, Some(Drag::Pan { moved: true, .. }));
         let panels: Vec<Div> = self
             .panels
@@ -6860,7 +6912,7 @@ impl Render for Flow {
         };
         gpui_core::audit("Flow", Role::Group, Some(&self.options.aria_label));
 
-        div()
+        let root = div()
             .id("flow")
             .role(Role::Group)
             .aria_label(self.options.aria_label.clone())
@@ -6901,10 +6953,43 @@ impl Render for Flow {
             .child(keys)
             .children(layers)
             .child(overlay)
+            .children(ghost)
             .when(self.minimap, |d| d.child(self.render_minimap(colors, cx)))
             .when(self.controls, |d| d.child(self.render_controls(colors, cx)))
             .children(self.render_node_toolbar(window, cx))
-            .children(panels)
+            .children(panels);
+
+        // The pane takes a host's palette items (gpui-dnd's drags): the ghost above follows
+        // them, and a drop is the host's to add.
+        let takes = self.options.pointer_mode != PointerMode::Off;
+        let (hover_flow, drop_flow) = (this.clone(), this);
+        let target = gpui_dnd::DropTarget::new()
+            .accept::<FlowPaletteItem>()
+            .can_drop(move |_, _, _| takes)
+            .on_hover(move |_, _, _, cx| {
+                hover_flow.update(cx, |_, cx| cx.notify()).ok();
+            })
+            .on_drop(move |item, monitor, _, cx| {
+                let (Some(item), Some(at)) =
+                    (item.get::<FlowPaletteItem>(), monitor.client_offset())
+                else {
+                    return gpui_dnd::DropOutcome::Pass;
+                };
+                let item = item.clone();
+                drop_flow
+                    .update(cx, |flow, cx| {
+                        let position = flow.palette_landing(&item, at);
+                        cx.emit(FlowEvent::NodeDropped { item, position });
+                        cx.notify();
+                    })
+                    .ok();
+                gpui_dnd::DropOutcome::Handled(None)
+            });
+        gpui_dnd::dnd(drop_id)
+            .size_full()
+            .drop_indicator(false)
+            .target(target)
+            .child(root)
     }
 }
 

@@ -370,6 +370,13 @@ made.
   point and the side it leaves or arrives on), as an `EdgePath` of lines and curves, with its
   label's place. The flow draws it in the edge's look, with arrowheads, label, dashes and
   animation, takes clicks along it and exports it. A kind without one is drawn as a bezier.
+- **Palette drops** (`FlowPaletteItem`, on gpui-dnd, as React Flow's drag-and-drop example): the
+  host's palette entries are gpui-dnd sources carrying a node template
+  (`dnd(id).source(item.source())`) and the pane takes them. While one is over the pane the flow
+  draws where it would land, at its zoom and on its grid; a drop sends `FlowEvent::NodeDropped`
+  with that corner in the flow, for the host to add (`item.node_at(id, position)`). Dropped
+  anywhere else, it slides back to the palette. The window needs a `gpui_dnd::DndProvider`; the
+  example has a palette beside its canvas.
 
 ## License
 
