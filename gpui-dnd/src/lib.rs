@@ -47,6 +47,7 @@ mod item;
 mod keyboard;
 mod monitor;
 mod provider;
+mod sortable;
 mod source;
 mod state;
 mod target;
@@ -59,6 +60,9 @@ pub use item::{DragItem, DropResult, ItemType};
 pub use keyboard::{Announcements, SayAt, announcement, item_name};
 pub use monitor::{DragLayerMonitor, DragMonitor, DropMonitor, Over};
 pub use provider::{DndProvider, PREVIEW_PRIORITY};
+pub use sortable::{
+    Placeholder, SLIDE_DURATION, Sortable, SortableDrag, SortableItem, SortableMove,
+};
 pub use source::{Backend, DragEnd, DragSource, Preview, TouchActivation};
 pub use state::RETURN_DURATION;
 pub use target::{DropOutcome, DropTarget};

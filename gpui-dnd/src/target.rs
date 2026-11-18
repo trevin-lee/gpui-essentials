@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use gpui::{App, Bounds, Pixels, Point, Window};
+use gpui::{App, Bounds, Pixels, Point, SharedString, Window};
 
 use crate::item::{DragItem, DropResult, ItemType};
 use crate::monitor::{DragMonitor, DropMonitor};
@@ -23,6 +23,8 @@ type CanDrop = Rc<dyn Fn(&DragItem, &DragMonitor, &App) -> bool>;
 type Hover = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App)>;
 type OnDrop = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropOutcome>;
 type Anchor = Rc<dyn Fn(Bounds<Pixels>) -> Point<Pixels>>;
+type Slots = Rc<dyn Fn(&DragItem, Bounds<Pixels>) -> Vec<Point<Pixels>>>;
+type Describe = Rc<dyn Fn(&DragItem, &DropMonitor) -> SharedString>;
 
 /// A drop target (react-dnd's `useDrop`): which items a [`dnd`](crate::dnd) element takes, and
 /// what it does with them.
@@ -33,6 +35,8 @@ pub struct DropTarget {
     pub(crate) on_hover: Option<Hover>,
     pub(crate) on_drop: Option<OnDrop>,
     anchor: Option<Anchor>,
+    slots: Option<Slots>,
+    describe: Option<Describe>,
 }
 
 impl DropTarget {
@@ -83,11 +87,46 @@ impl DropTarget {
         self
     }
 
-    pub(crate) fn anchor(&self, visible: Bounds<Pixels>) -> Point<Pixels> {
-        match &self.anchor {
-            Some(f) => f(visible),
-            None => visible.center(),
+    /// Several places in this target a keyboard drag can go, given the item and the target's
+    /// visible bounds: a list's gaps between its items, so the arrows move one place at a time.
+    /// Takes the place of [`keyboard_anchor`](Self::keyboard_anchor).
+    pub fn keyboard_slots(
+        mut self,
+        f: impl Fn(&DragItem, Bounds<Pixels>) -> Vec<Point<Pixels>> + 'static,
+    ) -> Self {
+        self.slots = Some(Rc::new(f));
+        self
+    }
+
+    /// What a keyboard drag says this target is, over it and dropped on it ("To do, position 2
+    /// of 4"), in place of its label.
+    pub fn describe(
+        mut self,
+        f: impl Fn(&DragItem, &DropMonitor) -> SharedString + 'static,
+    ) -> Self {
+        self.describe = Some(Rc::new(f));
+        self
+    }
+
+    /// Where a keyboard drag can put its pointer on this target.
+    pub(crate) fn keyboard_points(
+        &self,
+        item: &DragItem,
+        visible: Bounds<Pixels>,
+    ) -> Vec<Point<Pixels>> {
+        match (&self.slots, &self.anchor) {
+            (Some(slots), _) => slots(item, visible),
+            (None, Some(anchor)) => vec![anchor(visible)],
+            (None, None) => vec![visible.center()],
         }
+    }
+
+    pub(crate) fn description(
+        &self,
+        item: &DragItem,
+        monitor: &DropMonitor,
+    ) -> Option<SharedString> {
+        self.describe.as_ref().map(|f| f(item, monitor))
     }
 
     pub(crate) fn accepts(&self, item_type: ItemType) -> bool {

@@ -133,8 +133,8 @@ pub(crate) struct ActiveDrag {
     pub targets: Vec<Rc<TargetRecord>>,
     /// Set once it's ended without a drop and its preview is going back to the source.
     pub returning: Option<Returning>,
-    /// The target a keyboard drag last said it was over.
-    pub said_over: Option<Option<ElementId>>,
+    /// What a keyboard drag last said about where it is.
+    pub said_over: Option<SharedString>,
 }
 
 /// How long a preview takes to go back to its source after a cancel.
@@ -201,6 +201,8 @@ pub(crate) struct DndState {
     pub zones: HashMap<WindowId, Vec<crate::autoscroll::Zone>>,
     /// Auto-scroll under way.
     pub auto_run: Option<crate::autoscroll::Run>,
+    /// The sortable list a sortable item would land in, and where: set as lists are hovered.
+    pub sort_landing: Option<(ElementId, usize)>,
     pub collectors: Vec<Weak<dyn Collector>>,
     /// How many providers are being laid out around the element being laid out now.
     pub provider_depth: usize,
@@ -262,6 +264,13 @@ pub(crate) fn said(window: &Window, cx: &App) -> Option<SharedString> {
     let global = cx.try_global::<DndGlobal>()?;
     let state = global.0.borrow();
     state.said.get(&window_id(window)).cloned()
+}
+
+/// Where a sortable item would land now.
+pub(crate) fn sort_landing(cx: &App) -> Option<(ElementId, usize)> {
+    let global = cx.try_global::<DndGlobal>()?;
+    let state = global.0.borrow();
+    state.sort_landing.clone()
 }
 
 pub(crate) fn window_id(window: &Window) -> WindowId {
@@ -329,6 +338,7 @@ pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Wind
         let window_id = drag.window;
         let item = drag.snap.item.clone();
         let mut snap = (*drag.snap).clone();
+        state.sort_landing = None;
         let records = state.registry(window_id).targets_at(at, &item);
         snap.current = at;
         snap.modifiers = modifiers;
@@ -415,7 +425,7 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
         };
         if let Some(r) = handled {
             taken_by = Some(record.id.clone());
-            taken_label = record.label.clone();
+            taken_label = crate::keyboard::target_name(record, &snap.item, cx);
             if r.is_some() {
                 result = r;
             }
@@ -545,6 +555,7 @@ fn finish(end: EndInfo, window: &mut Window, cx: &mut App) {
     let Some(drag) = state.borrow_mut().drag.take() else {
         return;
     };
+    state.borrow_mut().sort_landing = None;
     publish(cx);
     if let Some(on_end) = &drag.spec.on_end {
         on_end(&drag.snap.item, &end, window, cx);

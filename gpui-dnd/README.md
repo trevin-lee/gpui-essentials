@@ -6,8 +6,8 @@ monitor of the drag, and a preview that follows the pointer, drawn in gpui-core'
 See [DESIGN.md](DESIGN.md) for the whole API and how it maps to react-dnd's.
 
 Being built in small steps: the mouse, the keyboard, touch, sources, targets, the monitor, the
-default preview, custom drag layers, the animated return and auto-scroll are in; sortable lists
-and kanban come next.
+default preview, custom drag layers, the animated return, auto-scroll and sortable lists (and
+kanban boards) are in; examples and pictures come next.
 
 ## Install
 
@@ -73,5 +73,10 @@ impl Render for Board {
   moves (for handles).
 - **Auto-scroll.** `.auto_scroll(&handle, AutoScroll::vertical())`, last on a scroll container,
   scrolls it while a drag is near its edge, on each frame, until the pointer leaves the edge.
+- **Sortable lists.** `Sortable::new(id, keys).item(…).on_move(…)` reorders by mouse, touch and
+  keyboard, sliding the items apart where the item would land; you apply the `SortableMove` to
+  your keys. Lists with the same `.group("board")` take each other's items: a kanban board is a
+  row of them. The list is one Tab stop: the arrows move the focus, Space picks up, the arrows
+  move it a place at a time (across to the next column too), Space drops.
 - Escape, or a drop where nothing takes it, sends the preview back to its source in 200 ms; the
   source hears `on_end` when it lands. Nothing runs while nothing moves.
