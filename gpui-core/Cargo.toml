@@ -84,6 +84,8 @@ name = "gallery"
 gpui = { workspace = true, features = ["test-support"] }
 # The gallery's window: GPUI's platform for this OS. Without font-kit, macOS draws no text.
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+# Reads design/tokens.json, the apps' reference look, which the theme is checked against.
+serde_json = "1"
 
 # The overflow test lays text out with Core Text, as on screen, and reads the drawn scene.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
