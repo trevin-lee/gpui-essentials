@@ -3339,6 +3339,54 @@ fn d19_normal_text_shortcut_through_the_key_path(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn notion_turn_into_keys_through_the_key_path(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "one\n\ntwo");
+    caret_at(&editor, cx, 0, 1);
+    for (key, want) in [
+        ("M-alt-1", "# one\n\ntwo"),
+        ("M-alt-2", "## one\n\ntwo"),
+        ("M-alt-3", "### one\n\ntwo"),
+        ("M-alt-0", "one\n\ntwo"),
+        ("M-alt-4", "- [ ] one\n\ntwo"),
+        // Again: the to-do's box comes off, as the slash menu's To-do list does.
+        ("M-alt-4", "- one\n\ntwo"),
+        ("M-alt-5", "one\n\ntwo"),
+        ("M-alt-5", "- one\n\ntwo"),
+        ("M-alt-5", "one\n\ntwo"),
+        ("M-alt-6", "1. one\n\ntwo"),
+        ("M-alt-6", "one\n\ntwo"),
+        ("M-alt-8", "```\none\n```\n\ntwo"),
+    ] {
+        keys(cx, key);
+        assert_eq!(source(&editor, cx), want, "after {key}");
+    }
+    // Each key is one undo step.
+    keys(cx, "M-z");
+    assert_eq!(source(&editor, cx), "one\n\ntwo");
+    // A toggle wraps the block: its summary.
+    caret_at(&editor, cx, 1, 1);
+    keys(cx, "M-alt-7");
+    assert!(
+        source(&editor, cx).contains("<summary>two</summary>"),
+        "{}",
+        source(&editor, cx)
+    );
+}
+
+#[gpui::test]
+fn notion_mark_keys_through_the_key_path(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "one two");
+    select_in(&editor, cx, (0, 0), (0, 3));
+    keys(cx, "M-u");
+    assert_eq!(source(&editor, cx), "<u>one</u> two");
+    keys(cx, "M-shift-s");
+    assert_eq!(source(&editor, cx), "<u>~~one~~</u> two");
+    keys(cx, "M-u");
+    keys(cx, "M-shift-s");
+    assert_eq!(source(&editor, cx), "one two");
+}
+
+#[gpui::test]
 fn d19_normal_text_command_matches_the_shortcut(cx: &mut TestAppContext) {
     let (editor, cx) = open(cx, "- ## in a list\n\n> ## quoted");
     select_in(&editor, cx, (0, 0), (1, 3));
