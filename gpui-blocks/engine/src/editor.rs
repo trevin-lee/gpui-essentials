@@ -85,7 +85,17 @@ impl BlockEditorModel {
     /// [`FindMatch`](crate::FindMatch)). Letters match whatever their case unless
     /// `case_sensitive`.
     pub fn find(&self, query: &str, case_sensitive: bool) -> Vec<crate::FindMatch> {
-        super::find::find(self.document(), query, case_sensitive)
+        super::find::find(self.document(), query, case_sensitive, false)
+    }
+
+    /// As [`Self::find`], and with `whole_word` only matches that aren't part of a longer word.
+    pub fn find_words(
+        &self,
+        query: &str,
+        case_sensitive: bool,
+        whole_word: bool,
+    ) -> Vec<crate::FindMatch> {
+        super::find::find(self.document(), query, case_sensitive, whole_word)
     }
 
     pub fn document(&self) -> DocumentRef<'_> {

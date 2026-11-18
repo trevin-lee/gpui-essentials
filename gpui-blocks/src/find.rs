@@ -21,6 +21,8 @@ pub(crate) struct FindBar {
     /// Whether the replace row shows.
     replacing: bool,
     case_sensitive: bool,
+    /// Only matches that aren't part of a longer word.
+    pub(crate) whole_word: bool,
     _subscriptions: [Subscription; 2],
 }
 
@@ -58,6 +60,7 @@ impl Editor {
                 replace,
                 replacing,
                 case_sensitive: false,
+                whole_word: false,
                 _subscriptions: [on_query, on_replace],
             });
         }
@@ -107,9 +110,14 @@ impl Editor {
         let Some(bar) = &self.find else {
             return;
         };
-        let (query, case_sensitive) = (bar.query.read(cx).value(), bar.case_sensitive);
-        self.state
-            .update(cx, |state, cx| state.find(&query, case_sensitive, cx));
+        let (query, case_sensitive, whole_word) = (
+            bar.query.read(cx).value(),
+            bar.case_sensitive,
+            bar.whole_word,
+        );
+        self.state.update(cx, |state, cx| {
+            state.find_words(&query, case_sensitive, whole_word, cx)
+        });
         cx.notify();
     }
 
@@ -215,6 +223,16 @@ impl Editor {
                     .on_click(act(|e, _, cx| {
                         if let Some(bar) = &mut e.find {
                             bar.case_sensitive = !bar.case_sensitive;
+                        }
+                        e.run_find(cx);
+                    })),
+            )
+            .child(
+                icon("find-word", IconName::WholeWord, "Match whole word")
+                    .selected(bar.whole_word)
+                    .on_click(act(|e, _, cx| {
+                        if let Some(bar) = &mut e.find {
+                            bar.whole_word = !bar.whole_word;
                         }
                         e.run_find(cx);
                     })),

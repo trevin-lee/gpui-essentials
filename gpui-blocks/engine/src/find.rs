@@ -16,8 +16,14 @@ pub struct FindMatch {
 
 /// Every place `query` occurs in `doc`'s text (paragraphs, headings, list items, table cells and
 /// code), in document order, without overlaps. A match never spans a mention or a picture.
-/// Letters match whatever their case unless `case_sensitive`. An empty query matches nothing.
-pub(crate) fn find(doc: DocumentRef<'_>, query: &str, case_sensitive: bool) -> Vec<FindMatch> {
+/// Letters match whatever their case unless `case_sensitive`; with `whole_word`, only where
+/// the match isn't part of a longer word. An empty query matches nothing.
+pub(crate) fn find(
+    doc: DocumentRef<'_>,
+    query: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> Vec<FindMatch> {
     if query.is_empty() {
         return Vec::new();
     }
@@ -29,6 +35,7 @@ pub(crate) fn find(doc: DocumentRef<'_>, query: &str, case_sensitive: bool) -> V
         out.extend(
             matches_in(text, query, case_sensitive)
                 .into_iter()
+                .filter(|range| !whole_word || is_whole_word(text, range))
                 .map(|range| FindMatch {
                     block: leaf.id(),
                     range,
@@ -36,6 +43,13 @@ pub(crate) fn find(doc: DocumentRef<'_>, query: &str, case_sensitive: bool) -> V
         );
     }
     out
+}
+
+/// Whether `range` of `text` is a whole word: no letter, digit or `_` right before or after it.
+fn is_whole_word(text: &str, range: &Range<usize>) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    !text[..range.start].chars().next_back().is_some_and(word)
+        && !text[range.end..].chars().next().is_some_and(word)
 }
 
 /// The byte ranges of `query` in `text`, left to right and apart.
