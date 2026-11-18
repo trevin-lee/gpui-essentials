@@ -15,6 +15,7 @@ use crate::draw::{Glyph, GlyphElement};
 use doc::{Doc, display, trim_blank_lines};
 
 type OnLink = Rc<dyn Fn(&str, &Modifiers, &mut Window, &mut App)>;
+type CopyLook = Rc<dyn Fn(bool, &mut Window, &mut App) -> AnyElement>;
 
 /// How long a code block's Copy button says "Copied".
 const COPIED_FOR: Duration = Duration::from_millis(1500);
@@ -74,6 +75,8 @@ pub struct StreamingMarkdown {
     copied: Option<(u64, usize)>,
     /// Takes `copied` away.
     copied_timer: Option<Task<()>>,
+    /// The host's own look for the Copy button ([`copy_button`](Self::copy_button)).
+    copy_look: Option<CopyLook>,
 }
 
 /// What a [`StreamingMarkdown`] has done, for tests and benchmarks.
@@ -110,6 +113,7 @@ impl StreamingMarkdown {
             touch: crate::theme::is_mobile(),
             copied: None,
             copied_timer: None,
+            copy_look: None,
         }
     }
 
@@ -117,6 +121,18 @@ impl StreamingMarkdown {
     /// buttons always show, rather than on hover, and take presses across 44 points.
     pub fn touch(mut self, touch: bool) -> StreamingMarkdown {
         self.touch = touch;
+        self
+    }
+
+    /// The code blocks' Copy button drawn the host's way, so it matches the host's own buttons:
+    /// `f` is given whether the block was just copied (to say "Copied") and returns the button's
+    /// look. The crate still places it in the block's corner, shows it on hover (always for a
+    /// finger), names it "Copy" for assistive tech and copies on a press.
+    pub fn copy_button(
+        mut self,
+        f: impl Fn(bool, &mut Window, &mut App) -> AnyElement + 'static,
+    ) -> StreamingMarkdown {
+        self.copy_look = Some(Rc::new(f));
         self
     }
 
@@ -311,6 +327,7 @@ impl Render for StreamingMarkdown {
             copied: self.copied,
             touch: self.touch,
             style: self.style.code_block.clone(),
+            look: self.copy_look.clone(),
         };
         view = view.code_block_overlay(move |code, window, cx| copy.over(code, window, cx));
         // While it's being written its height never goes down: the tallest it's been at this
@@ -356,6 +373,8 @@ struct CopyButton {
     touch: bool,
     /// The code blocks' box and text, for the button's colours.
     style: StyleRefinement,
+    /// The host's look, in place of the crate's.
+    look: Option<CopyLook>,
 }
 
 impl CopyButton {
@@ -371,28 +390,15 @@ impl CopyButton {
             Some(Fill::Color(bg)) => bg.as_solid().unwrap_or(theme.muted),
             _ => theme.muted,
         };
+        let radius = theme.radius_sm();
         let (this, source) = (self.this.clone(), code.code.clone());
-        let press = Press::new(ElementId::Name(format!("{name}/copy").into()))
-            .flex()
-            .items_center()
-            .line_height(relative(1.))
+        let id = ElementId::Name(format!("{name}/copy").into());
+        let sel = format!("{name}/copy");
+        let base = Press::new(id)
             .accessibility_label("Copy")
             .focus_on_press(false)
             .flex_none()
-            .h(rems(26. / 16.))
-            .px(rems(0.5))
-            .gap(rems(0.25))
-            .rounded(theme.radius_sm())
-            .bg(ground)
-            .border_1()
-            .border_color(Hsla { a: 0.14, ..text })
-            .hover(|s| s.bg(Hsla { a: 0.08, ..text }))
-            .text_color(text)
-            .text_size(rems(0.75))
-            .debug_selector({
-                let sel = format!("{name}/copy");
-                move || sel
-            })
+            .debug_selector(move || sel)
             // Hidden until the pointer is over the block, or while it says Copied, or has the
             // focus; always there for a finger.
             .when(!self.touch && !copied, |p| {
@@ -403,13 +409,30 @@ impl CopyButton {
             .when(self.touch, |p| p.min_hit(px(TOUCH_HIT)))
             .on_click(move |_, _, cx| {
                 this.update(cx, |this, cx| this.copy(at, &source, cx)).ok();
-            })
-            .child(GlyphElement::new(
-                if copied { Glyph::Check } else { Glyph::Copy },
-                rems(0.75),
-                text,
-            ))
-            .child(if copied { "Copied" } else { "Copy" });
+            });
+        let press = match &self.look {
+            Some(look) => base.child(look(copied, window, cx)),
+            None => base
+                .flex()
+                .items_center()
+                .line_height(relative(1.))
+                .h(rems(26. / 16.))
+                .px(rems(0.5))
+                .gap(rems(0.25))
+                .rounded(radius)
+                .bg(ground)
+                .border_1()
+                .border_color(Hsla { a: 0.14, ..text })
+                .hover(|s| s.bg(Hsla { a: 0.08, ..text }))
+                .text_color(text)
+                .text_size(rems(0.75))
+                .child(GlyphElement::new(
+                    if copied { Glyph::Check } else { Glyph::Copy },
+                    rems(0.75),
+                    text,
+                ))
+                .child(if copied { "Copied" } else { "Copy" }),
+        };
         div()
             .group(group)
             .size_full()
