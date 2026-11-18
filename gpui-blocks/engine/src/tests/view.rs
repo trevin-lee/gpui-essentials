@@ -4689,6 +4689,91 @@ fn a_host_handle_drags_any_top_level_block(cx: &mut TestAppContext) {
     assert_eq!(source(&editor, cx), src);
 }
 
+/// A press on a code block's edge handle that moves less than the drag's 4 points is the
+/// handle's: it doesn't start a text selection.
+#[gpui::test]
+fn a_small_move_from_an_edge_handle_selects_nothing(cx: &mut TestAppContext) {
+    let src = "first\n\n## second\n\n```\none\ntwo\n```\n\nfourth";
+    let (editor, cx) = open(cx, src);
+    let b = top_bounds(&editor, cx);
+    let start = gpui::point(b[2].left() - px(4.), b[2].center().y);
+    cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    let pressed = editor.read_with(cx, |e, _| e.selection().clone());
+    cx.simulate_mouse_move(
+        // Across the line between the code's two lines, still short of the drag's 4 points.
+        start + gpui::point(px(0.), px(3.)),
+        Some(MouseButton::Left),
+        Modifiers::none(),
+    );
+    draw(cx);
+    assert_eq!(editor.read_with(cx, |e, _| e.selection().clone()), pressed);
+    assert!(!editor.read_with(cx, |e, _| e.is_dragging_block()));
+    cx.simulate_mouse_up(start, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), src);
+}
+
+/// Escape during a block drag (gpui-dnd's) puts the blocks back and is the drag's alone: the
+/// editor's own Escape (select the block) doesn't also run, so the selection stays as it was,
+/// and the release after it drops nothing.
+#[gpui::test]
+fn escape_during_a_block_drag_puts_it_back_and_leaves_the_selection(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\n- third";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (list, list_bounds) = blocks[2];
+    let start = gpui::point(list_bounds.left() + px(2.), list_bounds.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(list, start));
+    let over = gpui::point(start.x, blocks[0].1.center().y - px(2.));
+    cx.simulate_mouse_move(over, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    assert!(editor.read_with(cx, |e, _| e.is_dragging_block()));
+    let selected = editor.read_with(cx, |e, _| e.selection().clone());
+    keys(cx, "escape");
+    draw(cx);
+    assert!(
+        !editor.read_with(cx, |e, _| e.is_dragging_block()),
+        "Escape put the block back"
+    );
+    assert_eq!(
+        editor.read_with(cx, |e, _| e.selection().clone()),
+        selected,
+        "and selected nothing else"
+    );
+    cx.simulate_mouse_up(over, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(
+        source(&editor, cx),
+        src,
+        "the release after it drops nothing"
+    );
+}
+
+/// A block let go outside the editor (over the window's edge, past its blocks) drops where the
+/// pointer is, as gpui-dnd's target catches its drag anywhere in the window.
+#[gpui::test]
+fn a_block_let_go_past_the_editor_still_drops(cx: &mut TestAppContext) {
+    let src = "first\n\nsecond\n\n- third";
+    let (editor, cx) = open(cx, src);
+    let blocks = editor.read_with(cx, |e, _| e.top_level_blocks());
+    let (list, list_bounds) = blocks[2];
+    let start = gpui::point(list_bounds.left() + px(2.), list_bounds.center().y);
+    editor.update(cx, |e, _| e.begin_block_drag(list, start));
+    // Above the first block, and above the window.
+    let above = gpui::point(start.x, px(-40.));
+    cx.simulate_mouse_move(
+        gpui::point(start.x, blocks[0].1.center().y - px(2.)),
+        Some(MouseButton::Left),
+        Modifiers::none(),
+    );
+    cx.simulate_mouse_move(above, Some(MouseButton::Left), Modifiers::none());
+    draw(cx);
+    cx.simulate_mouse_up(above, MouseButton::Left, Modifiers::none());
+    draw(cx);
+    assert_eq!(source(&editor, cx), "- third\n\nfirst\n\nsecond");
+}
+
 #[gpui::test]
 fn a_host_handle_drags_a_selected_run_together(cx: &mut TestAppContext) {
     let src = "first\n\nsecond\n\nthird\n\nfourth";

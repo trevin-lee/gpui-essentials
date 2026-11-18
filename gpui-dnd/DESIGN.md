@@ -982,12 +982,23 @@ Up/Down PRs merge, when the lead says.
    `tests/host.rs`. An empty `say` sentence leaves that moment to the provider's words, which
    is how gpui-calendar keeps gpui-dnd's own cancel sentence. Blocks keeps its own `reorder.rs`
    until step 2.
-2. gpui-blocks, reviewed by the blocks agent:
+2. **Built** (`gpui-blocks/engine/src/dnd.rs`), reviewed by the blocks agent:
    - grips, edge handles, touch lift and lift-in-place onto gpui-dnd;
-   - the content as target, and edge scrolling as `auto_scroll`;
+   - the content as target;
    - `reorder.rs` swapped for `SortableState<BlockId>`.
-   Its drag, touch and columns tests stay unchanged, plus one that Escape mid-drag leaves the
-   selection as it was, with frame times before and after, interleaved on the quiet Mac.
+   Its drag, touch and columns tests are unchanged, plus new ones: Escape mid-drag leaves the
+   selection as it was, a release past the editor still drops, and a tap sets a lifted block
+   down. Frame times before and after were taken interleaved on the quiet Mac.
+   It differs from the plan in three places:
+   - `begin_block_drag(block, at)` keeps its signature. The editor keeps its 4-point threshold,
+     and its mouse-move listener begins the drag with `begin_at`, at the pointer as it is then,
+     outside the editor's update.
+   - The target is registered from the editor element's prepaint (`register_target`, new). The
+     engine's own tests drag on the bare editor, and wrapping its root in a `dnd` div would move
+     its padding off its hitbox. The editor wraps itself in a `DndProvider`, which takes no
+     layout.
+   - Edge scrolling stays the editor's own. #397 made it ask for frames only while it scrolls,
+     and its test drives it with frames drawn, not a clock.
 3. Keyboard pick-up with blocks' sentences.
 
 ## Later: gpui-flow's canvas

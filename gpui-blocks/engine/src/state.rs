@@ -463,12 +463,12 @@ impl BlockDrag {
         }
     }
 
-    /// The block's motion as `Reorder` takes it, in content y, where `top`
+    /// The blocks' motion as gpui-dnd's `SortableState` takes it, in content y, where `top`
     /// is the content's top in window y now.
-    pub(crate) fn dragged(&self, top: Pixels) -> super::reorder::Dragged {
+    pub(crate) fn dragged(&self, top: Pixels) -> gpui_dnd::sortable_state::Dragged<BlockId> {
         let pointer = self.at.y - top;
-        super::reorder::Dragged {
-            block: self.block,
+        gpui_dnd::sortable_state::Dragged {
+            first: self.block,
             count: self.count,
             dy: f32::from(pointer - (self.start.y - self.start_top)),
             pointer: f32::from(pointer),
@@ -518,10 +518,11 @@ pub struct BlockEditorState {
     pub(crate) block_drag: Option<BlockDrag>,
     /// Whether the long press in progress began off the text, so moving lifts its block.
     touch_lifts: bool,
-    /// A block lifted in place follows the finger by this much from where the finger is.
-    lifted_follow: Option<Point<Pixels>>,
-    /// The motion of top-level blocks changing places (see `reorder`).
-    pub(crate) reorder: super::reorder::Reorder,
+    /// The editor's content as its block drags' target, registered each frame (see `dnd`).
+    pub(crate) dnd_target: RefCell<Option<gpui_dnd::TargetHold>>,
+    /// The motion of top-level blocks changing places: gpui-dnd's `SortableState`, which this
+    /// editor drives from its prepaint.
+    pub(crate) reorder: gpui_dnd::SortableState<BlockId>,
     readonly: bool,
     image_policy: super::ImagePolicy,
     image_source: Option<ImageSourceFn>,
@@ -600,7 +601,7 @@ impl BlockEditorState {
             block_drag: None,
             sweep: None,
             touch_lifts: false,
-            lifted_follow: None,
+            dnd_target: RefCell::new(None),
             reorder: Default::default(),
             readonly: false,
             image_policy: super::ImagePolicy::default(),
@@ -2592,7 +2593,7 @@ impl BlockEditorState {
     /// Starts `drag` for real: the pointer (or finger) has gone far enough, or a block was
     /// lifted in place ([`Self::lift_block`]). Its blocks are selected, and the others are
     /// measured for the slot the drag opens.
-    fn activate_block_drag(&mut self, drag: &mut BlockDrag, cx: &mut Context<Self>) {
+    pub(crate) fn activate_block_drag(&mut self, drag: &mut BlockDrag, cx: &mut Context<Self>) {
         drag.active = true;
         self.dragging = false;
         self.end_composition();
@@ -2697,17 +2698,18 @@ impl BlockEditorState {
         start: Point<Pixels>,
         at: Point<Pixels>,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> super::dnd::Moved {
+        use super::dnd::Moved;
+        // Lifted: gpui-dnd follows the finger.
         if self.block_drag.is_some_and(|d| d.by_touch) {
-            self.block_drag_to(at, cx);
-            return true;
+            return Moved::Taken;
         }
         if !self.touch_lifts {
-            return false;
+            return Moved::Selection;
         }
         let d = at - start;
         if f32::from(d.x).hypot(f32::from(d.y)) <= TOUCH_LIFT {
-            return true;
+            return Moved::Taken;
         }
         let Some(top) = self
             .top_level_bounds()
@@ -2715,17 +2717,21 @@ impl BlockEditorState {
             .find(|(_, _, b)| start.y >= b.top() && start.y < b.bottom())
             .map(|(_, id, _)| id)
         else {
-            return false;
+            return Moved::Selection;
         };
         // In columns: the block under the press in the column it's in.
         let block = self.block_in_columns_at(top, start).unwrap_or(top);
         self.begin_block_drag(block, start);
         let Some(drag) = self.block_drag.as_mut() else {
-            return false;
+            return Moved::Selection;
         };
         drag.by_touch = true;
-        self.block_drag_to(at, cx);
-        true
+        Moved::Begin(Box::new(self.dnd_begin(
+            at,
+            gpui_dnd::Backend::Touch,
+            false,
+            cx,
+        )))
     }
 
     /// The block at `at` in a column of the columns block `columns`, if `at` is in one.
@@ -2743,9 +2749,9 @@ impl BlockEditorState {
     }
 
     /// Lifts the top-level `block` where it is, as the block sheet's Move does: it's drawn
-    /// lifted, and the next finger drag anywhere moves it by as much as the finger moves; a tap
-    /// sets it down where it was.
-    pub fn lift_block(&mut self, block: BlockId, cx: &mut Context<Self>) {
+    /// lifted, and the next finger drag anywhere moves it by as much as the finger moves
+    /// (gpui-dnd's relative drag); a tap sets it down where it was.
+    pub fn lift_block(&mut self, block: BlockId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(at) = self
             .top_level_bounds()
             .into_iter()
@@ -2755,48 +2761,17 @@ impl BlockEditorState {
             return;
         };
         self.begin_block_drag(block, at);
-        let Some(mut drag) = self.block_drag else {
+        let Some(drag) = self.block_drag.as_mut() else {
             return;
         };
         drag.by_touch = true;
-        self.activate_block_drag(&mut drag, cx);
-        self.block_drag = Some(drag);
-        self.lifted_follow = None;
+        let begin = self.dnd_begin(at, gpui_dnd::Backend::Touch, true, cx);
+        let editor = cx.entity();
+        // gpui-dnd calls back into the editor as the drag begins: not from inside its update.
+        window.defer(cx, move |window, cx| {
+            super::dnd::start(&editor, begin, window, cx)
+        });
         cx.notify();
-    }
-
-    /// A finger drag while a block is lifted in place: it moves the block from where it is, by
-    /// as much as the finger moves. Returns whether the drag is the block's.
-    pub(crate) fn lifted_touch(
-        &mut self,
-        phase: gpui::TouchPhase,
-        start: Point<Pixels>,
-        at: Point<Pixels>,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(drag) = self.block_drag.filter(|d| d.active && d.by_touch) else {
-            return false;
-        };
-        match phase {
-            gpui::TouchPhase::Started => {
-                self.lifted_follow = Some(drag.at - start);
-                true
-            }
-            gpui::TouchPhase::Moved => {
-                let Some(offset) = self.lifted_follow else {
-                    return false;
-                };
-                self.block_drag_to(at + offset, cx);
-                true
-            }
-            gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => {
-                if self.lifted_follow.take().is_none() {
-                    return false;
-                }
-                self.touch_ended(phase == gpui::TouchPhase::Cancelled, cx);
-                true
-            }
-        }
     }
 
     /// The long-pressed finger let go (or the system took the touch): a lifted block drops where

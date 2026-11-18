@@ -153,7 +153,7 @@ impl Editor {
         if id == "move" {
             self.state.update(cx, |state, cx| {
                 state.focus(window, cx);
-                state.lift_block(block, cx);
+                state.lift_block(block, window, cx);
             });
             cx.notify();
             return;
