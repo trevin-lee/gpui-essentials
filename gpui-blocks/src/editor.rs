@@ -176,6 +176,7 @@ pub struct Options {
     html_clipboard: Option<HtmlClipboard>,
     comments: bool,
     block_link: Option<BlockLink>,
+    typography: bool,
     gutter: Pixels,
     top: Pixels,
     compact_below: Pixels,
@@ -193,6 +194,7 @@ impl Default for Options {
             embeds: None,
             mentions: None,
             html_clipboard: None,
+            typography: true,
             comments: false,
             block_link: None,
             gutter: px(GUTTER),
@@ -221,6 +223,7 @@ impl std::fmt::Debug for Options {
             .field("embeds", &self.embeds.is_some())
             .field("mentions", &self.mentions.is_some())
             .field("html_clipboard", &self.html_clipboard.is_some())
+            .field("typography", &self.typography)
             .field("comments", &self.comments)
             .field("block_link", &self.block_link.is_some())
             .field("gutter", &self.gutter)
@@ -329,6 +332,14 @@ impl Options {
     /// the id. Without it the menu has no Copy link to block.
     pub fn block_link(mut self, link: impl Fn(&str) -> String + 'static) -> Self {
         self.block_link = Some(Arc::new(link));
+        self
+    }
+
+    /// Typing shortcuts, as Notion's, on unless turned off here: `->` becomes →, `<-` becomes ←,
+    /// and `--` then a space becomes an em dash. Never in code, inline code or a web address,
+    /// and one undo right after puts back what was typed.
+    pub fn typing_shortcuts(mut self, on: bool) -> Self {
+        self.typography = on;
         self
     }
 
@@ -544,6 +555,7 @@ impl Editor {
             })),
         };
         let images = options.images.clone();
+        let typography = options.typography;
         let highlighter = options.highlighter.clone();
         let embed_heights: docs::Heights = Arc::default();
         let this = cx.entity().downgrade();
@@ -593,6 +605,11 @@ impl Editor {
         let state = cx.new(|cx| {
             let mut state = BlockEditorState::new(window, cx)
                 .with_markdown_extensions(extensions_with(&widgets, hooks, toc, embeds, chips))
+                .with_input_rules(
+                    markdown_editor::InputRule::markdown_defaults()
+                        .into_iter()
+                        .chain(typography.then(markdown_editor::InputRule::typography)),
+                )
                 .with_source(body);
             // Pictures load only through the app's loader.
             state = match images {
@@ -2575,6 +2592,77 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// Typing shortcuts: arrows and an em dash, one undo putting back what was typed, never in
+    /// code, inline code or a web address, and off with `Options::typing_shortcuts(false)`.
+    #[gpui::test]
+    fn typing_shortcuts_make_arrows_and_dashes(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("a -> b <- c -- d");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "a → b ← c — d");
+        // Undo right after one puts back the characters typed.
+        cx.simulate_input(" e ->");
+        draw(cx);
+        assert!(markdown(&editor, cx).ends_with("e →"));
+        cx.simulate_keystrokes("secondary-z");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).ends_with("e -\\>"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        // Not in a web address, inline code or a code block; `---` still makes a divider.
+        let (editor, cx) = open(cx, "`x` ");
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_input("see https://a.b/c->d and ");
+        draw(cx);
+        assert!(
+            !markdown(&editor, cx).contains('→'),
+            "{}",
+            markdown(&editor, cx)
+        );
+        let (editor, cx) = open(cx, "```\ncode\n```");
+        caret_at_end(&editor, cx, 0);
+        cx.simulate_input(" x->y");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).contains("x->y"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        let (editor, cx) = open(cx, "");
+        cx.simulate_input("---");
+        cx.simulate_keystrokes("enter");
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).starts_with("---"),
+            "{}",
+            markdown(&editor, cx)
+        );
+    }
+
+    /// `Options::typing_shortcuts(false)` leaves what's typed as it is.
+    #[gpui::test]
+    fn typing_shortcuts_turn_off(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_options(
+                "",
+                super::Options::default().typing_shortcuts(false),
+                window,
+                cx,
+            )
+        });
+        cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
+        draw(cx);
+        cx.simulate_input("a -> b");
+        draw(cx);
+        assert_eq!(markdown(&editor, cx), "a -\\> b");
     }
 
     /// A comment's quote, tinted from its anchor, follows its words as the text around them is
