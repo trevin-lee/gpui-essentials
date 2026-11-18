@@ -43,6 +43,8 @@ impl Render for TableView {
             self.render_board(window, cx)
         } else if self.shown.list.is_some() {
             self.render_list(window, cx)
+        } else if self.shown.gallery.is_some() {
+            self.render_gallery(window, cx)
         } else {
             self.render_table(window, cx)
         };

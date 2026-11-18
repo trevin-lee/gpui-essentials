@@ -43,6 +43,7 @@ mod board_render;
 mod calc;
 mod filter_rules;
 pub mod format;
+mod gallery;
 mod host;
 mod list;
 mod list_render;

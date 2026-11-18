@@ -635,7 +635,7 @@ fn shown_properties(
     columns: &[ColumnLayout],
 ) -> Vec<Property> {
     let shown: Vec<&Property> = match view.kind {
-        ViewType::Board | ViewType::List => ops::card_properties(fields, view)
+        ViewType::Board | ViewType::List | ViewType::Gallery => ops::card_properties(fields, view)
             .iter()
             .filter_map(|id| fields.property(id))
             .collect(),
