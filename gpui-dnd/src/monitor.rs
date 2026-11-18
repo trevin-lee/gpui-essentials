@@ -14,6 +14,8 @@ use crate::state;
 pub(crate) struct TargetSnap {
     pub id: ElementId,
     pub can_drop: bool,
+    /// A target that [catches](crate::DropTarget::catch_outside) the drag outside its bounds.
+    pub outside: bool,
 }
 
 /// The drag's state at one moment. A new one is made on every change, so a monitor holds no
@@ -126,20 +128,27 @@ impl DragMonitor {
     pub fn target_ids(&self) -> Vec<ElementId> {
         self.snap
             .as_ref()
-            .map(|s| s.targets.iter().map(|t| t.id.clone()).collect())
+            .map(|s| {
+                s.targets
+                    .iter()
+                    .filter(|t| !t.outside)
+                    .map(|t| t.id.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
     pub fn is_over(&self, target: &ElementId, depth: Over) -> bool {
         let Some(s) = &self.snap else { return false };
+        let mut under = s.targets.iter().filter(|t| !t.outside);
         match depth {
-            Over::Shallow => s.targets.last().is_some_and(|t| &t.id == target),
-            Over::Deep => s.targets.iter().any(|t| &t.id == target),
+            Over::Shallow => under.next_back().is_some_and(|t| &t.id == target),
+            Over::Deep => under.any(|t| &t.id == target),
         }
     }
 
-    /// Whether this target, under the pointer, can take the item. False for a target the
-    /// pointer isn't over.
+    /// Whether this target, under the pointer (or [catching](crate::DropTarget::catch_outside)
+    /// it outside), can take the item. False for any other target.
     pub fn can_drop_on(&self, target: &ElementId) -> bool {
         self.snap
             .as_ref()

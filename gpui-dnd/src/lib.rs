@@ -11,6 +11,11 @@
 //!   pointer. [`CollectExt::collect_dnd`] keeps a value worked out from it in a view's state,
 //!   and notifies the view only when that value changes (react-dnd's `collect`).
 //!
+//! - **[`press_at`]** and **[`begin_at`]** start a drag from a press the host recognised itself,
+//!   on something that isn't a `dnd` element (an event drawn on a canvas); a target that
+//!   [catches](DropTarget::catch_outside) its drag outside its bounds and
+//!   [`auto_scroll_zone`] serve such a canvas too.
+//!
 //! An item's type is its Rust type: a target `accept::<Card>()`s and reads the card back with
 //! `item.get::<Card>()`. A source can drag several items of one type together
 //! ([`DragSource::many`]).
@@ -43,6 +48,7 @@
 mod autoscroll;
 mod collect;
 mod element;
+mod host;
 mod item;
 mod keyboard;
 mod monitor;
@@ -54,9 +60,10 @@ mod target;
 mod touch;
 mod virtual_list;
 
-pub use autoscroll::{AutoScroll, AutoScrollArea, AutoScrollExt, Scrollable};
+pub use autoscroll::{AutoScroll, AutoScrollArea, AutoScrollExt, Scrollable, auto_scroll_zone};
 pub use collect::{CollectExt, Collected};
 pub use element::{Dnd, PICK_UP_HINT, dnd};
+pub use host::{Press, begin_at, cancel, drag_cursor, press_at};
 pub use item::{DragItem, DropResult, ItemType};
 pub use keyboard::{Announcements, SayAt, announcement, item_name};
 pub use monitor::{DragLayerMonitor, DragMonitor, DropMonitor, Over};

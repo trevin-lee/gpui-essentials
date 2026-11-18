@@ -4,7 +4,7 @@ use std::any::Any;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use gpui::{AnyElement, App, ElementId, Rems, SharedString, Window};
+use gpui::{AnyElement, App, CursorStyle, ElementId, Rems, SharedString, Window};
 
 use crate::item::{DragItem, DropResult};
 use crate::monitor::DragMonitor;
@@ -15,12 +15,14 @@ type OnBegin = Rc<dyn Fn(&DragMonitor, &mut Window, &mut App)>;
 type OnEnd<T> = Rc<dyn Fn(&DragEnd<T>, &mut Window, &mut App)>;
 type IsDragging<T> = Rc<dyn Fn(&[T]) -> bool>;
 type BuildTyped<T> = Rc<dyn Fn(&[T], &mut Window, &mut App) -> AnyElement>;
+type Cursor<T> = Rc<dyn Fn(&T, &DragMonitor) -> CursorStyle>;
 /// Makes the item as a drag begins, from the element's key (none for an element's own source)
 /// and its label.
 pub(crate) type MakeItem =
     Rc<dyn Fn(Option<&dyn Any>, Option<SharedString>, &mut App) -> Option<DragItem>>;
 pub(crate) type OnEndErased = Rc<dyn Fn(&DragItem, &EndInfo, &mut Window, &mut App)>;
 pub(crate) type IsDraggingErased = Rc<dyn Fn(&DragItem) -> bool>;
+pub(crate) type CursorErased = Rc<dyn Fn(&DragItem, &DragMonitor) -> Option<CursorStyle>>;
 
 /// What started a drag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +109,7 @@ pub struct DragSource<T: 'static, K: 'static = ()> {
     threshold: Option<Rems>,
     keyboard: bool,
     touch: TouchActivation,
+    cursor: Option<Cursor<T>>,
 }
 
 impl<T: 'static> DragSource<T> {
@@ -149,6 +152,7 @@ impl<T: 'static, K: 'static> DragSource<T, K> {
             threshold: None,
             keyboard: true,
             touch: TouchActivation::LongPress,
+            cursor: None,
         }
     }
 
@@ -203,6 +207,14 @@ impl<T: 'static, K: 'static> DragSource<T, K> {
         self
     }
 
+    /// The cursor while the item is dragged, by what's dragged (the first item, for several):
+    /// a resize's up-down arrows, a create's arrow. A closed hand unless given. The cursor
+    /// before a drag stays the host's.
+    pub fn cursor(mut self, f: impl Fn(&T, &DragMonitor) -> CursorStyle + 'static) -> Self {
+        self.cursor = Some(Rc::new(f));
+        self
+    }
+
     /// Erases its types once, for every element that takes it (by key) to share.
     pub fn shared(self) -> SharedSource<K> {
         SharedSource {
@@ -248,6 +260,13 @@ impl<T: 'static, K: 'static> DragSource<T, K> {
             Preview::Layer => PreviewSpec::Layer,
             Preview::None => PreviewSpec::None,
         };
+        let cursor = self.cursor.map(|f| {
+            Rc::new(move |item: &DragItem, monitor: &DragMonitor| {
+                item.all::<T>()
+                    .and_then(|items| items.first())
+                    .map(|first| f(first, monitor))
+            }) as CursorErased
+        });
         SourceSpec {
             make: Rc::new(move |key, label, cx| {
                 let key = key.and_then(|k| k.downcast_ref::<K>()).or_else(|| {
@@ -265,6 +284,7 @@ impl<T: 'static, K: 'static> DragSource<T, K> {
             threshold: self.threshold,
             keyboard: self.keyboard,
             touch: self.touch,
+            cursor,
         }
     }
 }
@@ -317,4 +337,5 @@ pub(crate) struct SourceSpec {
     pub threshold: Option<Rems>,
     pub keyboard: bool,
     pub touch: TouchActivation,
+    pub cursor: Option<CursorErased>,
 }

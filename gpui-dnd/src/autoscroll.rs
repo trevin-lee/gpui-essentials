@@ -10,6 +10,7 @@ use gpui::{
     LayoutId, Pixels, Point, Rems, ScrollHandle, UniformListScrollHandle, Window, point, px, rems,
 };
 
+use crate::item::DragItem;
 use crate::source::Backend;
 use crate::state;
 
@@ -51,8 +52,10 @@ impl Scrollable for UniformListScrollHandle {
     }
 }
 
+type ItemFilter = Rc<dyn Fn(&DragItem) -> bool>;
+
 /// How a container scrolls while a drag is near its edge.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone)]
 pub struct AutoScroll {
     /// How near its edge the pointer has to be.
     pub edge: Rems,
@@ -61,6 +64,21 @@ pub struct AutoScroll {
     pub speed: f32,
     pub vertical: bool,
     pub horizontal: bool,
+    beyond_edges: bool,
+    items: Option<ItemFilter>,
+}
+
+impl std::fmt::Debug for AutoScroll {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AutoScroll")
+            .field("edge", &self.edge)
+            .field("speed", &self.speed)
+            .field("vertical", &self.vertical)
+            .field("horizontal", &self.horizontal)
+            .field("beyond_edges", &self.beyond_edges)
+            .field("for_items", &self.items.is_some())
+            .finish()
+    }
 }
 
 impl Default for AutoScroll {
@@ -70,6 +88,8 @@ impl Default for AutoScroll {
             speed: 75.,
             vertical: true,
             horizontal: true,
+            beyond_edges: false,
+            items: None,
         }
     }
 }
@@ -87,6 +107,21 @@ impl AutoScroll {
             vertical: false,
             ..Self::default()
         }
+    }
+
+    /// Scrolls only for the drags whose item `f` takes: a calendar's grid for a move or a
+    /// resize in its hours, not one in its all-day row.
+    pub fn for_items(mut self, f: impl Fn(&DragItem) -> bool + 'static) -> Self {
+        self.items = Some(Rc::new(f));
+        self
+    }
+
+    /// Goes on scrolling, at full speed, while the pointer is past its edge, anywhere in the
+    /// window: for a drag its target [catches outside](crate::DropTarget::catch_outside) (a
+    /// moved event held over a calendar's header scrolls its hours up).
+    pub fn beyond_edges(mut self, on: bool) -> Self {
+        self.beyond_edges = on;
+        self
     }
 }
 
@@ -174,24 +209,13 @@ impl Element for AutoScrollArea {
         cx: &mut App,
     ) {
         let shared = state::shared(cx);
-        {
-            let mut state = shared.borrow_mut();
-            // Gathered afresh each frame: a zone keeps its frame's stamp, and the active
-            // provider drops the older ones as it paints.
-            let window_id = state::window_id(window);
-            if state::has_provider(&state, window_id) {
-                let seq = state.next_seq();
-                let zone = Zone {
-                    visible: bounds.intersect(&window.content_mask().bounds),
-                    scroller: self.scroller.clone(),
-                    options: self.options,
-                    rem: window.rem_size(),
-                    seq,
-                    stamp: state.zone_stamp,
-                };
-                state.zones.entry(window_id).or_default().push(zone);
-            }
-        }
+        add_zone(
+            &mut shared.borrow_mut(),
+            bounds,
+            self.scroller.clone(),
+            self.options.clone(),
+            window,
+        );
         child.prepaint(window, cx);
     }
 
@@ -209,6 +233,47 @@ impl Element for AutoScrollArea {
     }
 }
 
+/// Scrolls `scroller` while a drag's pointer is near the edges of `bounds` (in window
+/// coordinates), as [`auto_scroll`](AutoScrollExt::auto_scroll) does for an element: for a
+/// band of a canvas that scrolls by something other than an element's handle (a calendar's
+/// hours, in minutes). Call it in each prepaint or paint of the canvas, as an element would
+/// register itself: a zone lasts a frame.
+pub fn auto_scroll_zone(
+    window: &mut Window,
+    cx: &mut App,
+    bounds: Bounds<Pixels>,
+    scroller: Rc<dyn Scrollable>,
+    options: AutoScroll,
+) {
+    let shared = state::shared(cx);
+    add_zone(&mut shared.borrow_mut(), bounds, scroller, options, window);
+}
+
+fn add_zone(
+    state: &mut state::DndState,
+    bounds: Bounds<Pixels>,
+    scroller: Rc<dyn Scrollable>,
+    options: AutoScroll,
+    window: &Window,
+) {
+    // Gathered afresh each frame: a zone keeps its frame's stamp, and the active provider drops
+    // the older ones as it paints.
+    let window_id = state::window_id(window);
+    if !state::has_provider(state, window_id) {
+        return;
+    }
+    let seq = state.next_seq();
+    let zone = Zone {
+        visible: bounds.intersect(&window.content_mask().bounds),
+        scroller,
+        options,
+        rem: window.rem_size(),
+        seq,
+        stamp: state.zone_stamp,
+    };
+    state.zones.entry(window_id).or_default().push(zone);
+}
+
 /// A run of auto-scrolling: when its last step was.
 pub(crate) struct Run {
     last: Instant,
@@ -220,7 +285,7 @@ const MAX_STEP: Duration = Duration::from_millis(50);
 /// Starts scrolling if the drag's pointer is at an edge that can scroll.
 pub(crate) fn kick(window: &mut Window, cx: &mut App) {
     let now = cx.background_executor().now();
-    let Some(at) = pointer(window, cx) else {
+    let Some((at, item)) = pointer(window, cx) else {
         return;
     };
     let shared = state::shared(cx);
@@ -230,7 +295,7 @@ pub(crate) fn kick(window: &mut Window, cx: &mut App) {
             return;
         }
         let zones = state.zones.get(&state::window_id(window));
-        if zones.is_none_or(|z| velocities(z, at).is_empty()) {
+        if zones.is_none_or(|z| velocities(z, at, &item).is_empty()) {
             return;
         }
         state.auto_run = Some(Run { last: now });
@@ -238,13 +303,13 @@ pub(crate) fn kick(window: &mut Window, cx: &mut App) {
     window.on_next_frame(tick);
 }
 
-/// The drag's pointer, if it's a drag that auto-scrolls in this window.
-fn pointer(window: &Window, cx: &App) -> Option<Point<Pixels>> {
+/// The drag's pointer and item, if it's a drag that auto-scrolls in this window.
+fn pointer(window: &Window, cx: &App) -> Option<(Point<Pixels>, DragItem)> {
     if state::drag_in(window, cx) != Some(false) {
         return None;
     }
     let snap = state::snapshot(cx)?;
-    (snap.backend != Backend::Keyboard).then_some(snap.current)
+    (snap.backend != Backend::Keyboard).then(|| (snap.current, snap.item.clone()))
 }
 
 fn tick(window: &mut Window, cx: &mut App) {
@@ -253,7 +318,7 @@ fn tick(window: &mut Window, cx: &mut App) {
     let Some(run) = shared.borrow_mut().auto_run.take() else {
         return;
     };
-    let Some(at) = pointer(window, cx) else {
+    let Some((at, item)) = pointer(window, cx) else {
         return;
     };
     let dt = now
@@ -263,7 +328,7 @@ fn tick(window: &mut Window, cx: &mut App) {
     let steps = {
         let state = shared.borrow();
         match state.zones.get(&state::window_id(window)) {
-            Some(zones) => velocities(zones, at),
+            Some(zones) => velocities(zones, at, &item),
             None => Vec::new(),
         }
     };
@@ -286,10 +351,19 @@ fn tick(window: &mut Window, cx: &mut App) {
 }
 
 /// For each axis, the innermost zone under `at` near whose edge it is and that can still scroll
-/// that way, with its velocity in pixels per second (positive: towards the content's end).
-fn velocities(zones: &[Zone], at: Point<Pixels>) -> Vec<(Rc<dyn Scrollable>, Point<Pixels>)> {
-    let mut under: Vec<&Zone> = zones.iter().filter(|z| z.visible.contains(&at)).collect();
-    under.sort_by_key(|z| std::cmp::Reverse(z.seq));
+/// that way, with its velocity in pixels per second (positive: towards the content's end). The
+/// zones that scroll beyond their edges come after those under the pointer.
+fn velocities(
+    zones: &[Zone],
+    at: Point<Pixels>,
+    item: &DragItem,
+) -> Vec<(Rc<dyn Scrollable>, Point<Pixels>)> {
+    let mut under: Vec<&Zone> = zones
+        .iter()
+        .filter(|z| z.visible.contains(&at) || z.options.beyond_edges)
+        .filter(|z| z.options.items.as_ref().is_none_or(|f| f(item)))
+        .collect();
+    under.sort_by_key(|z| (!z.visible.contains(&at), std::cmp::Reverse(z.seq)));
     let mut found: Vec<(Rc<dyn Scrollable>, Point<Pixels>)> = Vec::new();
     let (mut x_done, mut y_done) = (false, false);
     for zone in under {

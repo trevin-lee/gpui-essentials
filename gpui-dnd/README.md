@@ -120,6 +120,22 @@ row of tag chips](docs/sortable-drag.png)
   container, scrolls it while a drag is near its edges, faster the nearer, until the pointer
   leaves the edge. `Scrollable` covers your own scrollers.
 
+## Drags the host starts
+
+A view that draws its items on one canvas (a calendar's events) recognises its own presses and
+hands them over:
+
+- `press_at(window, cx, id, at, source, Press { backend, threshold, grab, size, label })` from
+  the press's handler becomes a drag once the pointer moves past the threshold. A press that
+  doesn't move that far stays the host's click.
+- `begin_at` starts one at once, from a long press or a key; with `Backend::Keyboard`, the
+  target's `keyboard_step` and `describe` drive it.
+- `cancel(window, cx)` ends it, and `DragSource::cursor` picks the cursor by what's dragged.
+- `DropTarget::catch_outside(true)` keeps hearing the drag anywhere in the window and takes its
+  drop there, for a canvas that clamps to itself.
+- `auto_scroll_zone(window, cx, bounds, scroller, options)` scrolls a band of the canvas, with
+  `AutoScroll::for_items` and `beyond_edges`.
+
 ## Previews
 
 The default preview is a card of the source's size, lifted, with the grab point kept under the
