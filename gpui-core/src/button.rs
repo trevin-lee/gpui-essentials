@@ -401,7 +401,7 @@ impl RenderOnce for Button {
             .text_size(m.text)
             .font_weight(FontWeight::MEDIUM)
             .whitespace_nowrap()
-            .overflow_hidden()
+            // No clip here: its focus ring is drawn just outside it. The label clips itself.
             .map(|b| match joined {
                 Joined::Alone => b.rounded(radius),
                 Joined::First => b.rounded_l(radius),
@@ -537,16 +537,16 @@ impl RenderOnce for ButtonGroup {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let n = self.buttons.len();
         let on_click = self.on_click;
-        // It never runs out of its space: its buttons give way first, and what can't fit even
-        // then (their padding) is clipped at its edge.
-        let mut row = div()
+        // It never runs out of its space: its buttons give way first (their labels end in an
+        // ellipsis). It doesn't clip, so a button's focus ring shows outside it.
+        let row = div()
             .id(self.id)
             .flex()
             .flex_shrink_1()
             .items_center()
             .min_w_0()
-            .max_w_full()
-            .overflow_hidden();
+            .max_w_full();
+        let mut row = row;
         row.style().refine(&self.style);
         row.children(self.buttons.into_iter().enumerate().map(|(i, mut b)| {
             if let Some(v) = self.variant {

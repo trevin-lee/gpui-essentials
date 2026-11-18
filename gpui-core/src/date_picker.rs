@@ -399,7 +399,13 @@ impl RenderOnce for DatePicker {
             .when_some(c.text, |d, text| d.text_color(text))
             .text_size(theme.text.sm)
             .when(self.disabled, |d| d.opacity(0.5))
-            .focus_visible(move |st| st.border_color(ring_border).shadow(vec![ring]))
+            .focus_visible(move |st| st.border_color(ring_border))
+            // The ring drawn just outside the field, not under its see-through fill.
+            .relative()
+            .when(crate::base::focus_visible(&focus, window), |p| {
+                let radius = theme.radius_md().to_pixels(window.rem_size());
+                p.child(crate::base::ring_outside(ring, radius, gpui::px(1.)))
+            })
             .child(Icon::new(IconName::Calendar).color(muted))
             .child(
                 div()
@@ -649,7 +655,7 @@ impl RenderOnce for MonthGrid {
             .aria_label(title)
             .p(css(4.))
             .rounded(theme.radius_md())
-            .focus_visible(move |st| st.shadow(vec![ring]))
+            .focus_visible(move |st| st.shadow(vec![crate::base::ring_inside(ring)]))
             .on_action(
                 window.listener_for(&s, |st: &mut DatePickerState, _: &PrevDay, _, cx| {
                     st.move_cursor(-1, cx)

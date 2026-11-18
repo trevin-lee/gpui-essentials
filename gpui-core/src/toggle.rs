@@ -305,7 +305,7 @@ impl RenderOnce for Toggle {
             .text_size(theme.text.sm)
             .font_weight(FontWeight::MEDIUM)
             .whitespace_nowrap()
-            .overflow_hidden()
+            // No clip here: its focus ring is drawn just outside it. The label clips itself.
             .line_height(relative(1.))
             .map(|p| match joined {
                 Joined::Alone => p.rounded(radius),

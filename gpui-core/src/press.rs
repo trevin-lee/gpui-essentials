@@ -29,6 +29,58 @@ pub fn focus_ring(cx: &App) -> BoxShadow {
     }
 }
 
+/// A ring just outside its parent's edge, drawn as an element of its own: `ring`'s colour, as
+/// wide as its spread, round a parent whose corners are `radius` and whose border is `border`
+/// wide (a child is placed from inside the border). Add it as the parent's child while the
+/// ring shows (the parent is then `relative`, and doesn't clip its children).
+///
+/// GPUI draws an outer shadow under its element as well as round it, so a ring drawn as the
+/// element's own shadow shows through a see-through fill (an outline or ghost button turns
+/// grey). This is an inset shadow on a box that much bigger than the parent all round: a ring
+/// outside the parent, with nothing of it under the parent.
+pub fn ring_outside(ring: BoxShadow, radius: Pixels, border: Pixels) -> Div {
+    let w = ring.spread_radius;
+    let out = -(w + border);
+    div()
+        .absolute()
+        .top(out)
+        .left(out)
+        .right(out)
+        .bottom(out)
+        .rounded(radius + w)
+        .shadow(vec![BoxShadow {
+            inset: true,
+            offset: point(px(0.), px(0.)),
+            ..ring
+        }])
+}
+
+/// `ring` drawn inside its element's edge instead of outside: for a container that clips what's
+/// in it (a scroll area, a table's body), where a ring outside would be cut off. An inset
+/// shadow is never drawn under the element.
+pub fn ring_inside(ring: BoxShadow) -> BoxShadow {
+    BoxShadow {
+        inset: true,
+        offset: point(px(0.), px(0.)),
+        ..ring
+    }
+}
+
+/// Whether `focus` has the focus and the keyboard put it there (the web's `:focus-visible`).
+/// GPUI draws the window again when either changes, so what's drawn from this stays right.
+pub fn focus_visible(focus: &FocusHandle, window: &Window) -> bool {
+    focus.is_focused(window) && window.last_input_was_keyboard()
+}
+
+/// Makes `el` the containing block for an absolutely placed child (a [`ring_outside`]), unless
+/// it already is one.
+pub(crate) fn hold_ring<E: Styled>(mut el: E) -> E {
+    if el.style().position.is_none() {
+        el = el.relative();
+    }
+    el
+}
+
 /// Something to press. Style it like a `div` (it is one), give it children, and handle
 /// [`on_click`](Press::on_click). When [`disabled`](Disableable::disabled) it takes no focus
 /// and ignores presses; how it looks then is the host's to say.
@@ -196,6 +248,21 @@ impl RenderOnce for Press {
         );
         let disabled = self.disabled;
         let mut el = self.base;
+        // The ring, drawn outside the corners the host gave it while it's focused from the
+        // keyboard.
+        let show_ring = self.ring && !disabled && focus_visible(&focus, window);
+        let radius = el
+            .style()
+            .corner_radii
+            .top_left
+            .map(|r| r.to_pixels(window.rem_size()))
+            .unwrap_or_default();
+        let border = el
+            .style()
+            .border_widths
+            .top
+            .map(|b| b.to_pixels(window.rem_size()))
+            .unwrap_or_default();
         // The host's cursor, if it chose one; otherwise a pointing hand while it can be pressed.
         let host_cursor = el.style().mouse_cursor.is_some();
         el = el.role(self.role);
@@ -284,8 +351,8 @@ impl RenderOnce for Press {
                 })
                 .when(!hit.is_empty(), |el| el.relative().children(hit))
                 .when(!host_cursor, |el| el.cursor_pointer())
-                .when(self.ring, |el| {
-                    el.focus_visible(move |s| s.shadow(vec![ring]))
+                .when(show_ring, |el| {
+                    hold_ring(el).child(ring_outside(ring, radius, border))
                 })
                 .when_some(self.on_click, |el, f| {
                     el.on_click(move |event, window, cx| {

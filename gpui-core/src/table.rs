@@ -520,7 +520,7 @@ impl RenderOnce for Table {
                 .when(selectable, |d| {
                     d.track_focus(&focus.clone().tab_stop(true))
                         .key_context(CONTEXT)
-                        .focus_visible(move |s| s.shadow(vec![ring]))
+                        .focus_visible(move |s| s.shadow(vec![crate::base::ring_inside(ring)]))
                         .on_action(move |_: &SelectPrevious, w, cx| previous(w, cx))
                         .on_action(move |_: &SelectNext, w, cx| next(w, cx))
                         .on_action(move |_: &SelectFirst, w, cx| first(w, cx))

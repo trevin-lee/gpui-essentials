@@ -162,9 +162,12 @@ fn group_shadows(h: &Entity<Host>, vcx: &mut VisualTestContext) -> usize {
             .shadows
             .iter()
             .filter(|s| {
+                // The ring: an inset shadow on a box three points outside the group.
                 let b = s.element_bounds;
-                (b.origin.x.as_f32() / scale - group.left().as_f32()).abs() < 1.
-                    && (b.size.width.as_f32() / scale - group.size.width.as_f32()).abs() < 1.
+                s.inset != 0
+                    && (b.origin.x.as_f32() / scale - (group.left().as_f32() - 3.)).abs() < 1.
+                    && (b.size.width.as_f32() / scale - (group.size.width.as_f32() + 6.)).abs()
+                        < 1.
             })
             .count()
     })

@@ -221,9 +221,16 @@ impl RenderOnce for InputGroup {
             .border_1()
             .border_color(border)
             .when(dark, |d| d.bg(theme.input.opacity(0.3)))
-            .shadow(shadows)
+            // The ring (or an invalid field's red one) drawn just outside it, not under it, so
+            // the group doesn't clip: its text addons and its input clip themselves.
+            .relative()
+            .children({
+                let radius = theme.radius_md().to_pixels(window.rem_size());
+                shadows
+                    .into_iter()
+                    .map(move |s| crate::base::ring_outside(s, radius, gpui::px(1.)))
+            })
             .text_size(theme.text.sm)
-            .overflow_hidden()
             .cursor_text()
             // A press on an addon's icon or text (or the padding) puts the keyboard in the text;
             // a button's own press stops before it gets here.
