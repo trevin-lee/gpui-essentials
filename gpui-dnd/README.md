@@ -135,6 +135,14 @@ hands them over:
   drop there, for a canvas that clamps to itself.
 - `auto_scroll_zone(window, cx, bounds, scroller, options)` scrolls a band of the canvas, with
   `AutoScroll::for_items` and `beyond_edges`.
+- `Press { relative: true, .. }` with `begin_at(Touch)` lifts something in place: the next
+  finger, landing anywhere, carries it by how far it moves.
+- `DropTarget::say(|item, monitor, said, cx| …)` speaks a keyboard drag in the host's own words
+  over the target (`Said::Over`), on the drop (`Said::Dropped`) and on Escape
+  (`Said::Cancelled`). An empty sentence leaves that moment to the provider.
+- `SortableState<K>` is the motion of a list whose items the host lays out and draws itself: it
+  takes each frame's slots and the drag, and hands back the gap to drop into and each item's
+  offset, on springs that carry a release's speed. gpui-blocks' editor drives it.
 
 ## Previews
 

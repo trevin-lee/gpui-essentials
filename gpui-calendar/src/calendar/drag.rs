@@ -432,6 +432,8 @@ impl Calendar {
                     if all_day { "on " } else { "at " }
                 )
             }
+            // Escape: gpui-dnd's own "Cancelled. … is back where it was.".
+            (Said::Cancelled, _) => String::new(),
         };
         text.into()
     }

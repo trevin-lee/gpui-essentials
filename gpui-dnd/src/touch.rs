@@ -83,13 +83,20 @@ pub(crate) fn offer(
 /// Follows the touches of a drag in this window.
 pub(crate) fn listen(window: &mut Window) {
     window.on_mouse_event(|event: &LongPressEvent, phase, window, cx| {
-        if phase != DispatchPhase::Capture || !touch_drag_on(window, cx) {
+        // A relative drag follows its finger's touch drag only, by how far it moves.
+        if phase != DispatchPhase::Capture || !touch_drag_on(window, cx) || relative(cx).is_some() {
             return;
         }
         follow(event.phase, event.position, window, cx);
     });
     window.on_mouse_event(|event: &TouchDragEvent, phase, window, cx| {
         if phase != DispatchPhase::Capture {
+            return;
+        }
+        if touch_drag_on(window, cx)
+            && let Some(offset) = relative(cx)
+        {
+            follow_relative(event, offset, window, cx);
             return;
         }
         if event.phase == TouchPhase::Started {
@@ -127,6 +134,43 @@ pub(crate) fn listen(window: &mut Window) {
             state::move_to(event.position, window.modifiers(), window, cx);
         }
     });
+}
+
+/// A relative drag's offset from its finger to its pointer: `Some(None)` before the finger
+/// lands.
+fn relative(cx: &App) -> Option<Option<Point<Pixels>>> {
+    state::relative(cx)
+}
+
+/// A finger carrying a relative drag ([`Press::relative`](crate::Press::relative)): claimed as
+/// it lands, the drag's pointer then moves as far as it does, and its lift drops the drag where
+/// that leaves it (where it is, for a tap).
+fn follow_relative(
+    event: &TouchDragEvent,
+    offset: Option<Point<Pixels>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    match (event.phase, offset) {
+        (TouchPhase::Started, _) => {
+            let Some(at) = state::snapshot(cx).map(|s| s.current) else {
+                return;
+            };
+            state::set_relative(Some(at - event.position), cx);
+            window.prevent_default();
+            cx.stop_propagation();
+        }
+        (TouchPhase::Moved, Some(offset)) => {
+            state::move_to(event.position + offset, window.modifiers(), window, cx);
+            cx.stop_propagation();
+        }
+        (TouchPhase::Ended, Some(offset)) => {
+            state::release(event.position + offset, window, cx);
+            cx.stop_propagation();
+        }
+        (TouchPhase::Cancelled, Some(_)) => state::cancel(window, cx),
+        _ => {}
+    }
 }
 
 fn follow(phase: TouchPhase, at: Point<Pixels>, window: &mut Window, cx: &mut App) {

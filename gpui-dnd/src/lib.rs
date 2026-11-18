@@ -54,6 +54,7 @@ mod keyboard;
 mod monitor;
 mod provider;
 mod sortable;
+pub mod sortable_state;
 mod source;
 mod state;
 mod target;
@@ -71,6 +72,7 @@ pub use provider::{DndProvider, PREVIEW_PRIORITY};
 pub use sortable::{
     Placeholder, SLIDE_DURATION, Sortable, SortableDrag, SortableItem, SortableMove,
 };
+pub use sortable_state::SortableState;
 pub use source::{Backend, DragEnd, DragSource, Preview, SharedSource, TouchActivation};
 pub use state::RETURN_DURATION;
 pub use target::{DropOutcome, DropTarget, Said};
