@@ -340,14 +340,24 @@ fn tabs_and_sections_switch_with_motion_that_ends(cx: &mut TestAppContext) {
         cx.debug_bounds("field:t:r.c0.s1.0.table").is_some(),
         "the chosen tab's content is"
     );
+    // As react-ui's: the newest section open until someone presses one, then one at a time.
     assert!(!drawn(cx, "open:What is due?"));
+    assert!(drawn(cx, "open:What is next?"));
     click(cx, "section:What is due?");
     assert!(drawn(cx, "open:What is due?"));
+    assert!(
+        !drawn(cx, "open:What is next?"),
+        "opening one closed the other"
+    );
     // The chevron turns and the content fades in over real frames, then it all stops.
     let frames = run_frames(cx);
     assert!(frames >= 3, "it moved over {frames} frames");
     click(cx, "section:What is due?");
     assert!(!drawn(cx, "open:What is due?"));
+    assert!(
+        !drawn(cx, "open:What is next?"),
+        "pressing the open one closes it"
+    );
     run_frames(cx);
     assert_eq!(run_frames(cx), 0);
 }

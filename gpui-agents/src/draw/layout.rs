@@ -253,10 +253,13 @@ impl Draw<'_, '_> {
     }
 
     /// Sections that open and close, each with a chevron that turns as it does; opening fades
-    /// the content in.
+    /// the content in. One is open at a time, as react-ui's (`type="single" collapsible`):
+    /// opening one closes the other, and pressing the open one closes it. Until someone
+    /// presses one, the newest section is open, as react-ui opens each that arrives.
     pub fn accordion(&mut self, sections: &[Section], path: &str) -> AnyElement {
         let t = self.t;
         let open = self.v.ui.accordion.get(path);
+        let newest = sections.len().checked_sub(1);
         let mut list = div()
             .w_full()
             .min_w_0()
@@ -268,7 +271,10 @@ impl Draw<'_, '_> {
             .px(self.px(t.space.m + 2.));
         let n = sections.len();
         for (i, s) in sections.iter().enumerate() {
-            let is_open = open.is_some_and(|o| o.contains(&i));
+            let is_open = match open {
+                Some(o) => o.contains(&i),
+                None => newest == Some(i),
+            };
             let item_key = format!("{path}.s{i}");
             let moves = self.v.ui.toggles.get(&item_key).copied().unwrap_or(0);
             let key = path.to_string();
@@ -308,11 +314,20 @@ impl Draw<'_, '_> {
                 )
                 .child(chevron)
                 .on_click(self.cx.listener(move |this, _, _, cx| {
-                    let set = this.ui.accordion.entry(key.clone()).or_default();
-                    if !set.remove(&i) {
+                    let set = this
+                        .ui
+                        .accordion
+                        .entry(key.clone())
+                        .or_insert_with(|| newest.into_iter().collect());
+                    let was_open = set.contains(&i);
+                    // Whatever was open closes (its chevron turns back too).
+                    let closing: Vec<usize> = set.drain().filter(|&j| j != i).collect();
+                    if !was_open {
                         set.insert(i);
                     }
-                    *this.ui.toggles.entry(format!("{key}.s{i}")).or_default() += 1;
+                    for j in closing.into_iter().chain([i]) {
+                        *this.ui.toggles.entry(format!("{key}.s{j}")).or_default() += 1;
+                    }
                     cx.notify();
                 }));
             let mut item = div().w_full().min_w_0().flex().flex_col().child(trigger);
