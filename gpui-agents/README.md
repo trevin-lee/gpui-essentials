@@ -390,11 +390,12 @@ chat 900 pixels tall that follows the reply's end (medians of three runs):
 | 10,000 characters | 0.73 ms | 1.44 ms |
 
 What's left of the growth is the open block (at 10,000 characters it's a long list, at 1,000 a
-short paragraph) and placing the settled blocks' paragraphs, which the TextView does once a
-frame with their layouts kept. gpui-core paints only the paragraphs inside the window's view:
-a block scrolled out of the chat (the start of a long reply, once the chat has followed its
-end) keeps its layout and its place, and costs no painting, and nothing about it changes when
-it comes back into view or the draft ends.
+short paragraph). The settled blocks cost a frame next to nothing: gpui-core's TextView keeps
+each one put together, places it at its offset without going through its paragraphs, and
+visits only the paragraphs inside the window's view for links and painting (gpui-core #434,
+after these numbers were measured). A block scrolled out of the chat (the start of a long
+reply, once the chat has followed its end) keeps its layout and its place, and costs no
+painting, and nothing about it changes when it comes back into view or the draft ends.
 
 `tests/stream_performance.rs` measures it, and fails if a delta at 10,000 characters costs more
 than three times one at 1,000 (plus half a millisecond), or more than 4 ms, in a release build.
