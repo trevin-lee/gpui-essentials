@@ -785,3 +785,124 @@ impl TableView {
         )
     }
 }
+
+impl TableView {
+    /// The row the keyboard is on: a board's or a gallery's focused card, or a list's or a
+    /// table's focused line.
+    pub(crate) fn keyboard_row(&self) -> Option<String> {
+        if self.shown.board.is_some() {
+            let Some(super::board::BoardSpot::Card { column, index }) = self.board_spot() else {
+                return None;
+            };
+            let row = *self.shown.board.as_ref()?.get(column)?.rows.get(index)?;
+            return Some(self.rows[row].id.clone());
+        }
+        if self.shown.gallery.is_some() {
+            let rows = self.gallery_rows();
+            let row = *rows.get(self.gallery_focus?)?;
+            return Some(self.rows[row].id.clone());
+        }
+        self.focused_row()
+    }
+
+    /// ⌘⇧ and an arrow on a board, a list or a gallery: moves the focused card (or line) a place
+    /// up or down in its column or group (`down`), or on a board to the next column left or
+    /// right (`across`), keeping its place there, as a drag would. In a gallery, `across` is a
+    /// place back or on and `down` a line. The keyboard stays on it.
+    pub(crate) fn move_focused_card(
+        &mut self,
+        across: isize,
+        down: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_editing() || self.popover.is_some() {
+            return;
+        }
+        self.ensure();
+        let Some(id) = self.keyboard_row() else {
+            return;
+        };
+        if self.shown.gallery.is_some() {
+            let n = self.gallery_rows().len();
+            let Some(at) = self.gallery_focus else { return };
+            let per = self.gallery_grid.get().per_line.max(1) as isize;
+            let to = (at as isize + across + down * per).clamp(0, n as isize - 1) as usize;
+            if to == at || !self.can_move_all(&self.moving_rows(&[(&id, 0)]), 0) {
+                return;
+            }
+            self.move_rows(&[(&id, 0)], 0, to, window, cx);
+            self.gallery_focus = Some(to);
+            let per = per as usize;
+            self.list
+                .scroll_to_item(to / per, gpui::ScrollStrategy::Nearest);
+            cx.notify();
+            return;
+        }
+        if let Some(super::board::BoardSpot::Card { column, index }) = self.board_spot() {
+            if across == 0 {
+                self.move_rows_by(&[&id], down, window, cx);
+                return;
+            }
+            let Some(cols) = self.shown.board.as_ref() else {
+                return;
+            };
+            let mut to = column as isize + across;
+            while to >= 0 && (to as usize) < cols.len() && cols[to as usize].folded {
+                to += across;
+            }
+            if to < 0 || to as usize >= cols.len() {
+                return;
+            }
+            self.move_card(&id, column, to as usize, index, window, cx);
+            return;
+        }
+        if across == 0 && self.shown.list.is_some() {
+            let rows = self.acted_rows();
+            let ids: Vec<&str> = rows.iter().map(String::as_str).collect();
+            self.move_rows_by(&ids, down, window, cx);
+        }
+    }
+
+    /// The keys a board's, a list's and a gallery's cards and lines take besides moving the
+    /// focus: ⌘⌫ deletes the focused one (a list's selected lines, after asking for several),
+    /// ⌘D duplicates it, and ⌘⇧ with an arrow moves it ([`TableView::move_focused_card`]).
+    pub(crate) fn card_keys<E: InteractiveElement>(&self, el: E, cx: &mut Context<Self>) -> E {
+        let rows = |this: &TableView| -> Vec<String> {
+            if this.shown.list.is_some() {
+                this.acted_rows()
+            } else {
+                this.keyboard_row().into_iter().collect()
+            }
+        };
+        el.on_action(cx.listener(move |this, _: &super::DeleteRows, window, cx| {
+            if this.popover.is_none() && !this.is_editing() {
+                this.ensure();
+                let ids = rows(this);
+                this.ask_delete(ids, window, cx)
+            }
+        }))
+        .on_action(
+            cx.listener(move |this, _: &super::DuplicateRows, window, cx| {
+                if this.popover.is_none() && !this.is_editing() {
+                    this.ensure();
+                    let ids = rows(this);
+                    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+                    this.duplicate_rows(&ids, window, cx)
+                }
+            }),
+        )
+        .on_action(cx.listener(|this, _: &super::MoveRowsUp, window, cx| {
+            this.move_focused_card(0, -1, window, cx)
+        }))
+        .on_action(cx.listener(|this, _: &super::MoveRowsDown, window, cx| {
+            this.move_focused_card(0, 1, window, cx)
+        }))
+        .on_action(cx.listener(|this, _: &super::MoveCardLeft, window, cx| {
+            this.move_focused_card(-1, 0, window, cx)
+        }))
+        .on_action(cx.listener(|this, _: &super::MoveCardRight, window, cx| {
+            this.move_focused_card(1, 0, window, cx)
+        }))
+    }
+}
