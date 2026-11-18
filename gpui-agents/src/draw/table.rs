@@ -1,5 +1,6 @@
 //! Tables: a bordered box of one-line cells that scrolls sideways when it's wider than the
-//! card, every other row tinted; and the editable table, whose cells become inputs.
+//! card, every other row tinted, ten rows to a page as react-ui's are; and the editable table,
+//! whose cells become inputs.
 
 use std::rc::Rc;
 
@@ -13,6 +14,9 @@ use crate::openui::{Cell, ColumnKind, Component, EditableTable, Table};
 /// A column's width in CSS pixels, from the longest text it holds: each column is as wide as
 /// its widest cell up to a cap (past which the cell ends in an ellipsis), and the room left
 /// over is shared out.
+/// Rows on a table's page: react-ui's `DEFAULT_PAGE_SIZE`.
+pub const TABLE_PAGE: usize = 10;
+
 fn width_for(chars: usize, font: f32, pad: f32) -> f32 {
     (chars as f32 * font * 0.56 + pad * 2.).clamp(64., 320.)
 }
@@ -38,6 +42,18 @@ impl Draw<'_, '_> {
         let pad = t.space.cell;
         let limit = self.v.limits.table_rows;
         let rows = &table.rows[..table.rows.len().min(limit)];
+        // The page shown, of the rows within the limit: its widths are the whole table's, so
+        // the columns stay put from page to page.
+        let pages = rows.len().div_ceil(TABLE_PAGE);
+        let page = self
+            .v
+            .ui
+            .carousel
+            .get(path)
+            .map_or(0, |s| s.index)
+            .min(pages.saturating_sub(1));
+        let first = page * TABLE_PAGE;
+        let shown = &rows[first..rows.len().min(first + TABLE_PAGE)];
         let widths: Vec<f32> = table
             .columns
             .iter()
@@ -79,7 +95,7 @@ impl Draw<'_, '_> {
             .min_w(self.px(total))
             .flex()
             .flex_row()
-            .when(!rows.is_empty(), |d| {
+            .when(!shown.is_empty(), |d| {
                 d.border_b_1().border_color(t.colors.line)
             });
         for (c, col) in table.columns.iter().enumerate() {
@@ -97,14 +113,17 @@ impl Draw<'_, '_> {
             .flex()
             .flex_col()
             .child(head);
-        for (r, row) in rows.iter().enumerate() {
+        for (i, row) in shown.iter().enumerate() {
+            let r = first + i;
+            let sel = self.selector(&format!("{path}:row{r}"));
             let mut line = div()
+                .debug_selector(move || sel)
                 .w_full()
                 .min_w(self.px(total))
                 .flex()
                 .flex_row()
-                .when(r % 2 == 1, |d| d.bg(t.colors.highlight))
-                .when(r + 1 < rows.len(), |d| {
+                .when(i % 2 == 1, |d| d.bg(t.colors.highlight))
+                .when(i + 1 < shown.len(), |d| {
                     d.border_b_1().border_color(t.colors.line)
                 });
             for c in 0..table.columns.len() {
@@ -146,6 +165,7 @@ impl Draw<'_, '_> {
             .child(scroller);
         let boxed = self.keep_sideways(boxed, handle);
         let more = table.rows.len().saturating_sub(rows.len());
+        let pager = (pages > 1).then(|| self.pager(path, page, pages, true));
         div()
             .w_full()
             .min_w_0()
@@ -153,6 +173,7 @@ impl Draw<'_, '_> {
             .flex_col()
             .gap(self.px(6.))
             .child(boxed)
+            .children(pager)
             .when(more > 0, |d| {
                 d.child(self.text(
                     format!("Showing {} of {} rows.", rows.len(), table.rows.len()),

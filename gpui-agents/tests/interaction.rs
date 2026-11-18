@@ -367,6 +367,57 @@ fn a_carousel_slides_one_way_and_back(cx: &mut TestAppContext) {
     assert!(drawn(cx, "r.c2:slide1"));
 }
 
+/// A table pages its rows ten at a time, as react-ui's does: Previous and Next at its right
+/// with "1 / 3" between, the columns as wide on every page.
+#[gpui::test]
+fn a_table_shows_ten_rows_to_a_page(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    let rows: Vec<String> = (0..25).map(|i| format!("\"row {i}\"")).collect();
+    let src = format!(
+        "root = Stack([Table([Col(\"Name\", [{}])])])",
+        rows.join(", ")
+    );
+    let (_, cx) = open(cx, &src, &host, Some(400.));
+    let shown = |cx: &mut VisualTestContext| -> Vec<usize> {
+        (0..25)
+            .filter(|r| drawn(cx, &format!("r.c0:row{r}")))
+            .collect()
+    };
+    assert_eq!(shown(cx), (0..10).collect::<Vec<_>>());
+    let row = cx.debug_bounds("t:r.c0:row0").unwrap();
+    let width = row.size.width;
+    click(cx, "r.c0:next");
+    assert_eq!(shown(cx), (10..20).collect::<Vec<_>>());
+    assert_eq!(cx.debug_bounds("t:r.c0:row10").unwrap().size.width, width);
+    click(cx, "r.c0:next");
+    assert_eq!(shown(cx), (20..25).collect::<Vec<_>>());
+    // The last page: Next does nothing.
+    click(cx, "r.c0:next");
+    assert_eq!(shown(cx), (20..25).collect::<Vec<_>>());
+    click(cx, "r.c0:previous");
+    assert_eq!(shown(cx), (10..20).collect::<Vec<_>>());
+    // At the table's right (its rows' right, inside its border).
+    let next = cx.debug_bounds("t:r.c0:next").unwrap();
+    assert!(
+        (row.right() - next.right()).abs() < px(3.),
+        "{row:?} {next:?}"
+    );
+}
+
+/// Ten rows or fewer: one page, no pager.
+#[gpui::test]
+fn a_short_table_has_no_pages(cx: &mut TestAppContext) {
+    let host = TestHost::new(Images::Refuse);
+    let rows: Vec<String> = (0..10).map(|i| format!("\"row {i}\"")).collect();
+    let src = format!(
+        "root = Stack([Table([Col(\"Name\", [{}])])])",
+        rows.join(", ")
+    );
+    let (_, cx) = open(cx, &src, &host, Some(400.));
+    assert!(drawn(cx, "r.c0:row9"));
+    assert!(!drawn(cx, "r.c0:next"));
+}
+
 #[gpui::test]
 fn a_modal_opens_checks_and_closes_through_its_variable(cx: &mut TestAppContext) {
     let host = TestHost::new(Images::Refuse);

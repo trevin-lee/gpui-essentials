@@ -30,7 +30,7 @@ impl Draw<'_, '_> {
                     &format!("{path}.clip"),
                 )
                 .child(moving);
-            let pager = self.pager(path, index, shown);
+            let pager = self.pager(path, index, shown, false);
             return div()
                 .w_full()
                 .min_w_0()

@@ -31,6 +31,8 @@ scatter), Form with its controls (Input, TextArea, Select, DatePicker, Slider, C
 RadioGroup, SwitchGroup, Chips, OptionCards), Label, Button, Buttons and IconButton, TagBlock and
 Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconText, ImageText and
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
+A table shows ten rows to a page, with Previous and Next at its right and "1 / 3" between them,
+as react-ui's does.
 
 Text fields and text areas are gpui-core's `Input` (in this workspace), with the platform's
 input methods (on iOS, a tap raises the keyboard); the slider, an icon button's tooltip and the
@@ -504,9 +506,9 @@ treats it as hostile.
   columns per table, 1,000 points and 24 series per chart, 20,000 characters per text and a million
   in all, and two million steps of work. Past these a card fails with a `CardError`, or a list is
   cut short. A test checks that the deepest cards fit a 512 KB stack.
-- **Limits on drawing** (`Limits`, changeable with `CardView::with_limits`): 200 table rows, 100
-  editable rows, 400 points and 12 series per chart, 24 gallery images, 100 items in a list or tag
-  block, 20,000 characters of code. Past these a note says what was left out.
+- **Limits on drawing** (`Limits`, changeable with `CardView::with_limits`): 200 table rows (20
+  pages), 100 editable rows, 400 points and 12 series per chart, 24 gallery images, 100 items in a
+  list or tag block, 20,000 characters of code. Past these a note says what was left out.
 - **Never a panic:** the parser's tests and `tests/hostile.rs` feed random, cut-off and spliced
   programs, draw them at three widths and press them at random.
 
