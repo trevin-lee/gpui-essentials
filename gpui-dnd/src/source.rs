@@ -25,6 +25,17 @@ pub enum Backend {
     Keyboard,
 }
 
+/// How a touch picks a source up.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TouchActivation {
+    /// After a long press (half a second without moving): a touch that moves at once still
+    /// scrolls the list the source is in.
+    #[default]
+    LongPress,
+    /// As soon as the finger moves: for a handle, or a source in nothing that scrolls.
+    Immediate,
+}
+
 /// How a drag ended, as the source hears it in [`DragSource::on_end`].
 #[derive(Debug)]
 pub struct DragEnd<'a, T> {
@@ -85,6 +96,7 @@ pub struct DragSource<T: 'static> {
     preview: Preview<T>,
     threshold: Option<Rems>,
     keyboard: bool,
+    touch: TouchActivation,
 }
 
 impl<T: 'static> DragSource<T> {
@@ -105,6 +117,7 @@ impl<T: 'static> DragSource<T> {
             preview: Preview::default(),
             threshold: None,
             keyboard: true,
+            touch: TouchActivation::LongPress,
         }
     }
 
@@ -161,6 +174,12 @@ impl<T: 'static> DragSource<T> {
         self
     }
 
+    /// How a touch picks it up: after a long press unless given.
+    pub fn touch_activation(mut self, activation: TouchActivation) -> Self {
+        self.touch = activation;
+        self
+    }
+
     pub(crate) fn erase(self, label: Option<SharedString>) -> SourceSpec {
         let make = self.make;
         let make_label = label.clone();
@@ -211,6 +230,7 @@ impl<T: 'static> DragSource<T> {
             preview,
             threshold: self.threshold,
             keyboard: self.keyboard,
+            touch: self.touch,
         }
     }
 }
@@ -246,4 +266,5 @@ pub(crate) struct SourceSpec {
     pub preview: PreviewSpec,
     pub threshold: Option<Rems>,
     pub keyboard: bool,
+    pub touch: TouchActivation,
 }

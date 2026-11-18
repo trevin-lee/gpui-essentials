@@ -49,6 +49,7 @@ mod provider;
 mod source;
 mod state;
 mod target;
+mod touch;
 
 pub use collect::{CollectExt, Collected};
 pub use element::{Dnd, PICK_UP_HINT, dnd};
@@ -56,6 +57,6 @@ pub use item::{DragItem, DropResult, ItemType};
 pub use keyboard::{Announcements, SayAt, announcement, item_name};
 pub use monitor::{DragLayerMonitor, DragMonitor, DropMonitor, Over};
 pub use provider::{DndProvider, PREVIEW_PRIORITY};
-pub use source::{Backend, DragEnd, DragSource, Preview};
+pub use source::{Backend, DragEnd, DragSource, Preview, TouchActivation};
 pub use state::RETURN_DURATION;
 pub use target::{DropOutcome, DropTarget};

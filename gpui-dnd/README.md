@@ -5,8 +5,8 @@ Drag and drop for [GPUI](https://www.gpui.rs) apps on macOS and iOS, in the mann
 monitor of the drag, and a preview that follows the pointer, drawn in gpui-core's theme.
 See [DESIGN.md](DESIGN.md) for the whole API and how it maps to react-dnd's.
 
-Being built in small steps: the mouse, the keyboard, sources, targets, the monitor, the default
-preview, custom drag layers and the animated return are in; touch, sortable lists, auto-scroll
+Being built in small steps: the mouse, the keyboard, touch, sources, targets, the monitor, the
+default preview, custom drag layers and the animated return are in; sortable lists, auto-scroll
 and kanban come next.
 
 ## Install
@@ -68,5 +68,8 @@ impl Render for Board {
   nearest target in their direction that can take it, Space or Enter drops, Escape cancels. Each
   step is said to VoiceOver from the targets' and sources' `label`s; `DndProvider::announcements`
   rewords it.
+- **Touch.** A long press picks a source up, so a touch that moves at once still scrolls;
+  `DragSource::touch_activation(TouchActivation::Immediate)` picks up as soon as the finger
+  moves (for handles).
 - Escape, or a drop where nothing takes it, sends the preview back to its source in 200 ms; the
   source hears `on_end` when it lands. Nothing runs while nothing moves.

@@ -7,9 +7,9 @@ use gpui::Refineable as _;
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, DispatchPhase, Div, Element, ElementId, FocusHandle,
     GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, Interactivity,
-    IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, RenderOnce,
-    SharedString, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, quad,
-    rems, transparent_black,
+    IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent, ParentElement, Pixels,
+    RenderOnce, SharedString, Stateful, StatefulInteractiveElement, StyleRefinement, Styled,
+    TouchDragEvent, TouchPhase, Window, div, quad, rems, transparent_black,
 };
 use gpui_core::ActiveTheme as _;
 
@@ -327,6 +327,29 @@ impl Element for Registrar {
             ));
         }
         if let (Some(hitbox), Some(source)) = (hitbox.clone(), source.clone()) {
+            // Touch: the innermost source under the finger hears it first, and claims it.
+            let (h, s) = (hitbox.clone(), source.clone());
+            window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble
+                    && event.phase == TouchPhase::Started
+                    && h.is_hovered_at(event.start_position, window)
+                    && crate::touch::long_press(&s, event, window, cx)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            });
+            let (h, s) = (hitbox.clone(), source.clone());
+            window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble
+                    && event.phase == TouchPhase::Started
+                    && h.is_hovered_at(event.start_position, window)
+                    && crate::touch::offer(&s, event, window, cx)
+                {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            });
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble
                     || event.button != MouseButton::Left
