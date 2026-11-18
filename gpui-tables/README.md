@@ -852,8 +852,13 @@ How each type behaves:
   card starts with a 16:9 band showing its row's `cover`: the image (`{"style": "image",
   "assetId": ..}`, which the host gives through `TableHost::image`, as the crate fetches
   nothing) or the colour (`{"style": "solid", "color": "#rrggbbaa"}`). A row with neither, or
-  whose image the host doesn't have yet, gets an empty band, so the cards line up. Grouping isn't
-  drawn in a gallery yet (its settings have no Group by).
+  whose image the host doesn't have yet, gets an empty band, so the cards line up. Grouped by
+  `groupBy` (its settings' Group by, as a table's and a list's), each group is a header (its value
+  and its count, pressed to fold it, in `collapsedGroups`) over its own grid of cards and a New
+  that makes a row with its value. A card dragged into another group takes that group's value,
+  as a board's card dragged to another column does; the arrows go on from one group's cards to
+  the next's, and ⌘⇧↑ and ⌘⇧↓ past a group's first or last line move the card to the end of the
+  group before or the start of the one after.
 
   ![The Pipeline view as a gallery: the people as cards in a grid, three to a line, each with its company, last contact and owner](docs/gallery.png)
 
@@ -1249,7 +1254,7 @@ tests fail on any control without them.
 - **Templates.** A template is a page with content, which belongs to the docs app and its editor;
   the crate would only pass a template id through `rowCreated`. Prefilled values for a new row in a
   view are in v1.
-- **Also later:** a gallery's groups and card sizes, files, a status type, unique ids, and linked views of a
+- **Also later:** a gallery's card sizes, files, a status type, unique ids, and linked views of a
   database on another page.
 
 ## Tests

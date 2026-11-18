@@ -628,7 +628,13 @@ impl TableView {
                     return;
                 }
                 window.focus(&this.focus, cx);
-                this.set_board_spot(BoardSpot::Card { column, index: ix }, cx);
+                // A gallery's card keeps the keyboard by its place in its group.
+                let in_gallery = (this.gallery_lanes().get(column))
+                    .and_then(|l| l.rows.iter().position(|&r| r == row));
+                match in_gallery {
+                    Some(at) => this.focus_gallery_card(column, at),
+                    None => this.set_board_spot(BoardSpot::Card { column, index: ix }, cx),
+                }
                 this.open_row(row, window, cx);
             }));
         // The card is a gpui-dnd drag source: the mouse past a few pixels or a finger's long

@@ -798,8 +798,7 @@ impl TableView {
             return Some(self.rows[row].id.clone());
         }
         if self.shown.gallery.is_some() {
-            let rows = self.gallery_rows();
-            let row = *rows.get(self.gallery_focus?)?;
+            let row = self.gallery_focused_row()?;
             return Some(self.rows[row].id.clone());
         }
         self.focused_row()
@@ -824,18 +823,43 @@ impl TableView {
             return;
         };
         if self.shown.gallery.is_some() {
-            let n = self.gallery_rows().len();
-            let Some(at) = self.gallery_focus else { return };
+            let Some((lane, at)) = self.gallery_spot() else {
+                return;
+            };
+            let lanes = self.gallery_lanes();
+            let n = lanes[lane].rows.len();
             let per = self.gallery_grid.get().per_line.max(1) as isize;
-            let to = (at as isize + across + down * per).clamp(0, n as isize - 1) as usize;
-            if to == at || !self.can_move_all(&self.moving_rows(&[(&id, 0)]), 0) {
+            let to = at as isize + across + down * per;
+            // Past the group's first or last line, a line up or down is the end of the group
+            // before or the start of the one after (those that aren't folded).
+            let (to_lane, to) = if down != 0 && (to < 0 || to >= n as isize) {
+                let step = down.signum();
+                let mut l = lane as isize + step;
+                while l >= 0 && (l as usize) < lanes.len() && lanes[l as usize].folded {
+                    l += step;
+                }
+                if l < 0 || l as usize >= lanes.len() {
+                    (lane, to.clamp(0, n as isize - 1) as usize)
+                } else if step < 0 {
+                    (l as usize, lanes[l as usize].rows.len())
+                } else {
+                    (l as usize, 0)
+                }
+            } else {
+                (lane, to.clamp(0, n as isize - 1) as usize)
+            };
+            if (to_lane, to) == (lane, at)
+                || !self.can_move_all(&self.moving_rows(&[(&id, lane)]), to_lane)
+            {
                 return;
             }
-            self.move_rows(&[(&id, 0)], 0, to, window, cx);
-            self.gallery_focus = Some(to);
-            let per = per as usize;
-            self.list
-                .scroll_to_item(to / per, gpui::ScrollStrategy::Nearest);
+            self.move_rows(&[(&id, lane)], to_lane, to, window, cx);
+            self.gallery_focus = self
+                .gallery_lanes()
+                .get(to_lane)
+                .map(|l| (id.clone(), l.key_string()));
+            self.ensure();
+            self.reveal_gallery_focus();
             cx.notify();
             return;
         }

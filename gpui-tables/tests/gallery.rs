@@ -12,8 +12,12 @@ use common::*;
 use gpui::*;
 use gpui_tables::view::TableView;
 use gpui_tables::*;
+use gpui_tables::{Edit, Value};
 // The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
+
+const JONAH_ID: &str = "842e7fc2-2954-4a6e-b12a-a1f6d42fddbb";
+const SAMI_ID: &str = "bfeaa155-1a28-47b3-a4e4-e25a15fc899e";
 
 /// People's All people view as a gallery in the manual order, its cards showing Company and Role.
 fn open_gallery<'a>(
@@ -86,13 +90,13 @@ fn the_rows_are_cards_in_a_grid_that_open_their_rows(cx: &mut TestAppContext) {
         host.events.borrow().last(),
         Some(TableEvent::OpenRow { row_id }) if *row_id == ids[2]
     ));
-    // The arrows move between cards (the first arrow comes to the first card) and Enter opens
-    // one: right from the first is the second.
+    // The card pressed has the keyboard: the arrows move between cards and Enter opens one,
+    // right from the third the fourth.
     activate(cx);
-    keys(cx, "right right enter");
+    keys(cx, "right enter");
     assert!(matches!(
         host.events.borrow().last(),
-        Some(TableEvent::OpenRow { row_id }) if *row_id == ids[1]
+        Some(TableEvent::OpenRow { row_id }) if *row_id == ids[3]
     ));
     // New makes a row.
     host.clear();
@@ -275,5 +279,179 @@ fn the_settings_set_the_card_preview(cx: &mut TestAppContext) {
     assert_eq!(
         written,
         [serde_json::json!("cover"), serde_json::json!("none")]
+    );
+}
+
+fn opt(key: &str) -> String {
+    format!("option:{key}")
+}
+
+fn in_group(row: &str, key: &str) -> String {
+    format!("card:{row}:{key}")
+}
+
+/// People's All people view as a gallery grouped by Stage, in the manual order.
+fn open_grouped<'a>(
+    cx: &'a mut TestAppContext,
+    host: &std::rc::Rc<TestHost>,
+) -> (Entity<TableView>, &'a mut VisualTestContext) {
+    let (mut db, rows) = load("people");
+    let v = db
+        .database
+        .as_mut()
+        .unwrap()
+        .views
+        .iter_mut()
+        .find(|v| v.id == ALL_PEOPLE)
+        .unwrap();
+    v.kind = ViewType::Gallery;
+    v.sort.clear();
+    v.group_by = Some(STAGE.into());
+    v.card_properties = vec![COMPANY.into(), ROLE.into()];
+    open_with(
+        cx,
+        host,
+        db,
+        rows,
+        Some(ALL_PEOPLE),
+        size(px(1400.), px(900.)),
+    )
+}
+
+/// A group's rows by id.
+fn lane(table: &Entity<TableView>, cx: &mut VisualTestContext, key: &str) -> Vec<String> {
+    table.update(cx, |t, _| {
+        let g = t
+            .row_lanes()
+            .iter()
+            .find(|g| g.key_string() == key)
+            .unwrap_or_else(|| panic!("no group {key}"))
+            .clone();
+        g.rows.iter().map(|&r| t.rows()[r].id.clone()).collect()
+    })
+}
+
+/// Grouped by the view's `groupBy`: each group a header over its own cards and New; a header
+/// folds its group, and a group's New makes a row with its value.
+#[gpui::test]
+fn grouped_each_group_is_a_header_over_its_cards_and_new(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_grouped(cx, &host);
+    let keys: Vec<String> = table.update(cx, |t, _| {
+        t.row_lanes().iter().map(|g| g.key_string()).collect()
+    });
+    assert_eq!(
+        keys,
+        [
+            "empty".to_owned(),
+            opt(LEAD),
+            opt(WARM),
+            opt(ACTIVE),
+            opt(DORMANT)
+        ]
+    );
+    for k in &keys {
+        assert!(drawn(cx, format!("group:{k}")), "{k}");
+        assert!(drawn(cx, format!("gallery-new:{k}")), "{k}");
+    }
+    let (warm, active) = (opt(WARM), opt(ACTIVE));
+    assert_eq!(lane(&table, cx, &warm), [IMANI, SAMI_ID]);
+    // A group's cards are under its header and above the next group's, a line of them.
+    let (warm_header, active_header) = (
+        rect(cx, format!("group:{warm}")),
+        rect(cx, format!("group:{active}")),
+    );
+    let (imani, sami) = (
+        rect(cx, in_group(IMANI, &warm)),
+        rect(cx, in_group(SAMI_ID, &warm)),
+    );
+    assert!(imani.top() >= warm_header.bottom() && imani.bottom() < active_header.top());
+    assert_eq!(imani.top(), sami.top());
+    assert!(sami.left() > imani.right());
+    // Pressing a header folds its group: its cards and New go, its header stays.
+    click(cx, format!("group:{active}"));
+    assert_eq!(host.last_view().collapsed_groups, vec![active.clone()]);
+    assert!(!drawn(cx, in_group(ROWAN, &active)));
+    assert!(!drawn(cx, format!("gallery-new:{active}")));
+    assert!(drawn(cx, format!("group:{active}")));
+    click(cx, format!("group:{active}"));
+    assert!(host.last_view().collapsed_groups.is_empty());
+    assert!(drawn(cx, in_group(ROWAN, &active)));
+    // A group's New makes a row with its value.
+    click(cx, format!("gallery-new:{warm}"));
+    assert!(
+        matches!(host.last_edit(), Edit::RowCreated { values, .. } if values.get(STAGE) == Some(&Value::text(WARM))),
+        "{:?}",
+        host.last_edit()
+    );
+}
+
+/// A card dragged into another group takes its value and its place there, in one batch.
+#[gpui::test]
+fn a_card_dragged_into_another_group_takes_its_value(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_grouped(cx, &host);
+    let (lead, warm) = (opt(LEAD), opt(WARM));
+    // Jonah from Lead to past the middle of Imani's card, the first in Warm: after it.
+    let from = rect(cx, in_group(JONAH_ID, &lead)).center();
+    let imani = rect(cx, in_group(IMANI, &warm));
+    let to = point(imani.left() + imani.size.width * 0.75, imani.center().y);
+    drag(cx, from, to);
+    let e = edits(&host);
+    let moved = e.iter().find_map(|e| match e {
+        Edit::RowsMoved { row_ids, .. } => Some(row_ids.clone()),
+        _ => None,
+    });
+    assert_eq!(moved, Some(vec![JONAH_ID.to_owned()]), "{e:?}");
+    assert!(
+        e.iter().any(
+            |e| matches!(e, Edit::RowValueChanged { row_id, property_id, value }
+            if row_id == JONAH_ID && property_id == STAGE && *value == Some(Value::text(WARM)))
+        ),
+        "{e:?}"
+    );
+    assert_eq!(lane(&table, cx, &warm), [IMANI, JONAH_ID, SAMI_ID]);
+    assert!(!drawn(cx, "gallery-landing"));
+}
+
+/// The arrows go on from one group's cards to the next's, and ⌘⇧↓ on a group's last line
+/// moves the card to the start of the next group.
+#[gpui::test]
+fn the_keyboard_crosses_groups(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_grouped(cx, &host);
+    let (lead, warm) = (opt(LEAD), opt(WARM));
+    assert_eq!(lane(&table, cx, &lead), [THEO, JONAH_ID]);
+    // Theo's card pressed has the keyboard; down is the next line, Warm's, at the same place.
+    click(cx, in_group(THEO, &lead));
+    keys(cx, "down enter");
+    assert!(matches!(
+        host.events.borrow().last(),
+        Some(TableEvent::OpenRow { row_id }) if row_id == IMANI
+    ));
+    // Back from Warm's first card is Lead's last.
+    keys(cx, "left enter");
+    assert!(matches!(
+        host.events.borrow().last(),
+        Some(TableEvent::OpenRow { row_id }) if row_id == JONAH_ID
+    ));
+    // ⌘⇧↓ on Lead's only line: to the start of Warm, its value with it.
+    host.clear();
+    keys(cx, "secondary-shift-down");
+    assert!(
+        host.edits()
+            .iter()
+            .any(|e| matches!(e, Edit::RowValueChanged { row_id, value, .. }
+            if row_id == JONAH_ID && *value == Some(Value::text(WARM)))),
+        "{:?}",
+        host.edits()
+    );
+    assert_eq!(lane(&table, cx, &warm), [JONAH_ID, IMANI, SAMI_ID]);
+    // The keyboard went with it.
+    keys(cx, "secondary-backspace");
+    assert!(
+        matches!(host.last_edit(), Edit::RowsDeleted { row_ids } if row_ids == [JONAH_ID]),
+        "{:?}",
+        host.last_edit()
     );
 }

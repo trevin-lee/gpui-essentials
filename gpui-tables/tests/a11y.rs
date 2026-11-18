@@ -32,7 +32,7 @@ fn open_as<'a>(
         .find(|v| v.id == ALL_PEOPLE)
         .unwrap();
     if kind != ViewType::Table {
-        v.group_by = (kind != ViewType::Gallery).then(|| STAGE.into());
+        v.group_by = Some(STAGE.into());
         v.kind = kind;
         v.card_properties = vec![COMPANY.into(), ROLE.into()];
     }
@@ -141,7 +141,14 @@ fn every_control_of_a_gallery_has_a_role_and_a_label(cx: &mut TestAppContext) {
     let host = TestHost::new();
     let (_, cx) = open_as(cx, &host, ViewType::Gallery);
     let labels = audited(cx, |_| {});
-    has(&labels, &["New"]);
+    // Grouped by Stage: each group's header and New, and the cards.
+    has(&labels, &["New in Lead"]);
+    assert!(
+        labels
+            .iter()
+            .any(|l| l.starts_with("Lead, ") && l.ends_with(" rows, expanded")),
+        "Lead's header: {labels:#?}"
+    );
     assert!(
         labels.iter().any(|l| l.starts_with("Imani Castell")),
         "her card: {labels:#?}"
