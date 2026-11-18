@@ -6,9 +6,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::{
-    App, AppContext as _, Autocapitalize, Bounds, Context, Entity, FocusHandle, Focusable, Pixels,
-    ScrollStrategy, Subscription, TextInputAction, TextInputConfiguration, UniformListScrollHandle,
-    Window, point, px, size,
+    App, AppContext as _, Autocapitalize, Bounds, Context, Entity, FocusHandle, Focusable,
+    ListAlignment, ListState, Pixels, ScrollStrategy, Subscription, TextInputAction,
+    TextInputConfiguration, UniformListScrollHandle, Window, point, px, size,
 };
 use gpui_core::{DatePickerEvent, DatePickerState, InputEvent, InputState};
 
@@ -330,8 +330,8 @@ pub(crate) struct Shown {
     /// A table's groups (or its one group of every row, when it doesn't group), when the view
     /// is a table: what a dragged row moves between, as a list's groups.
     pub table: Option<Vec<super::board::BoardColumn>>,
-    /// A gallery's one group of every row (it doesn't draw groups yet), when the view is a
-    /// gallery: what a dragged card moves within.
+    /// A gallery's groups (or its one group of every row, when it doesn't group), when the
+    /// view is a gallery: what a dragged card moves between, as a list's groups.
     pub gallery: Option<Vec<super::board::BoardColumn>>,
     /// The properties a board's cards and a list's lines show beside the title (places in
     /// `properties`).
@@ -429,9 +429,13 @@ pub struct TableView {
     /// While a property the view hides as a column is edited from the peek: its index, the
     /// property the open picker or month sets in place of its cell's (the row's title cell).
     pub(crate) peek_property: Option<usize>,
-    /// The gallery's card with the keyboard, by place, and its grid as last drawn.
-    pub(crate) gallery_focus: Option<usize>,
+    /// The gallery's card with the keyboard (by its row's id and its group's key, so it stays
+    /// on the card as rows come and go), and its grid as last drawn.
+    pub(crate) gallery_focus: Option<(String, String)>,
     pub(crate) gallery_grid: StdCell<super::gallery::GalleryGrid>,
+    /// The gallery's list of lines (headers, lines of cards, New), and the lines it was given.
+    pub(crate) gallery_list: ListState,
+    pub(crate) gallery_lines: super::gallery::GalleryLines,
     /// The one drag source every row's handle, card and line shares, built on first use:
     /// each gives only its row and group.
     pub(crate) card_drag: std::cell::OnceCell<gpui_dnd::SharedSource<super::board::DraggedCard>>,
@@ -502,6 +506,8 @@ impl TableView {
             peek_property: None,
             gallery_focus: None,
             gallery_grid: StdCell::new(Default::default()),
+            gallery_list: ListState::new(0, ListAlignment::Top, px(200.)),
+            gallery_lines: Default::default(),
             card_drag: std::cell::OnceCell::new(),
             search: Default::default(),
             row_text: engine::RowText::new(),
@@ -820,7 +826,7 @@ impl TableView {
         let list = (view.kind == ViewType::List)
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let gallery = (view.kind == ViewType::Gallery)
-            .then(|| super::board::lanes_of(&view, &[], &result.rows));
+            .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let table = (board.is_none() && list.is_none() && gallery.is_none())
             .then(|| super::board::lanes_of(&view, &groups, &result.rows));
         let mut card_properties: Vec<usize> = Vec::new();
@@ -834,8 +840,7 @@ impl TableView {
         }
         // A table's footers, under each New row.
         let footed = table.is_some();
-        let grouped =
-            view.group_by.is_some() && !groups.is_empty() && view.kind != ViewType::Gallery;
+        let grouped = view.group_by.is_some() && !groups.is_empty();
         if grouped {
             for (gi, g) in groups.iter().enumerate() {
                 let folded = view.collapsed_groups.contains(&g.key.to_string());

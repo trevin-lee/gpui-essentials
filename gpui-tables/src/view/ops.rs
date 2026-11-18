@@ -749,7 +749,7 @@ pub fn move_view(db: &DatabaseFields, view_id: &str, to: usize) -> Vec<View> {
 }
 
 /// The view of a new type: a board keeps a `groupBy` that can group, else takes `group_by`
-/// (see [`board_group`]); a table or a list keeps its grouping.
+/// (see [`board_group`]); a table, a list or a gallery keeps its grouping.
 pub fn retype_view(view: &View, kind: crate::model::ViewType, group_by: Option<String>) -> View {
     let mut view = view.clone();
     if kind == crate::model::ViewType::Board && group_by.is_some() {
