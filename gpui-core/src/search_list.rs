@@ -245,6 +245,7 @@ fn css(v: f32) -> gpui::Rems {
 
 impl RenderOnce for SearchList {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        crate::base::a11y_audit("SearchList", Role::ListBox, self.label.as_ref());
         crate::base::init_soon(cx);
         let placeholder = self.placeholder.clone();
         let autofocus = self.autofocus;

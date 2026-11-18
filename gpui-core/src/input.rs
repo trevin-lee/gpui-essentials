@@ -1902,6 +1902,15 @@ impl RenderOnce for Input {
             },
             None => focus_ring(cx),
         };
+        crate::a11y::audit(
+            "Input",
+            if multiline {
+                Role::MultilineTextInput
+            } else {
+                Role::TextInput
+            },
+            self.label.as_ref(),
+        );
         let mut el = div()
             .id(ElementId::Integer(s.entity_id().as_u64()))
             .key_context(if code { CODE_CONTEXT } else { CONTEXT })

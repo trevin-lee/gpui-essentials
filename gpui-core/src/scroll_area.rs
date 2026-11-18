@@ -647,6 +647,10 @@ impl RenderOnce for ScrollArea {
         .absolute()
         .size_0();
 
+        // In the Tab order, it's something to reach and so needs a name.
+        if self.tab_stop {
+            crate::base::a11y_audit("ScrollArea", Role::ScrollView, self.label.as_ref());
+        }
         let mut outer = div()
             .id(self.id)
             .role(Role::ScrollView)

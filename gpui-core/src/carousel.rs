@@ -496,6 +496,7 @@ impl RenderOnce for Carousel {
         });
 
         let ring = focus_ring(cx);
+        crate::base::a11y_audit("Carousel", Role::Region, self.label.as_ref());
         let mut outer = div()
             .id(self.id)
             .role(Role::Region)

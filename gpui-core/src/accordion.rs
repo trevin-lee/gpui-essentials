@@ -310,6 +310,8 @@ impl RenderOnce for Accordion {
                 item.id.clone(),
             ))
             .track_focus(&handles[i])
+            // Its title is its name: the text alone isn't announced as one.
+            .accessibility_label(item.title.clone())
             .debug_selector(move || format!("accordion-header-{item_id}"))
             .flex()
             .items_start()

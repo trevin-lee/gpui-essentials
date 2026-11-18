@@ -199,6 +199,7 @@ impl RenderOnce for Press {
         // The host's cursor, if it chose one; otherwise a pointing hand while it can be pressed.
         let host_cursor = el.style().mouse_cursor.is_some();
         el = el.role(self.role);
+        crate::a11y::audit("Press", self.role, self.label.as_ref());
         if let Some(label) = self.label {
             el = el.aria_label(label);
         }
