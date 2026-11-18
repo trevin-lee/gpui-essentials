@@ -318,7 +318,7 @@ impl RenderOnce for BlockEditor {
                 let (offsets, moving) = state.reorder.frame(
                     slots,
                     dragged.map(|d| d.dragged(top)),
-                    std::time::Instant::now(),
+                    crate::clock::Instant::now(),
                     reduce_motion,
                 );
                 let held = dragged
