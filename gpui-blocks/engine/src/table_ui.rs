@@ -261,6 +261,7 @@ pub(crate) fn shortcut(edit: TableEdit) -> Option<String> {
 /// The open grip menu as a deferred, window-anchored popover.
 pub(crate) fn render_menu(
     state: &gpui::Entity<BlockEditorState>,
+    touch: bool,
     cx: &gpui::App,
 ) -> Option<gpui::AnyElement> {
     use gpui::prelude::FluentBuilder as _;
@@ -286,6 +287,8 @@ pub(crate) fn render_menu(
         div()
             .id(id)
             .control(module_path!(), gpui::Role::MenuItem, label)
+            // A finger's target by touch.
+            .when(touch, |d| d.min_h(px(44.)).justify_center())
             .flex()
             .flex_col()
             .px_2()
@@ -346,6 +349,7 @@ pub(crate) fn render_menu(
                     gpui::Role::RadioButton,
                     format!("Align {}", label.to_lowercase()),
                 )
+                .when(touch, |d| d.min_h(px(44.)).flex().items_center())
                 .aria_toggled(if on {
                     gpui::accesskit::Toggled::True
                 } else {

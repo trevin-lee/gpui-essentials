@@ -2035,8 +2035,8 @@ impl BlockEditorState {
     pub(crate) fn hover_at(&mut self, at: Point<Pixels>, secondary: bool, cx: &mut Context<Self>) {
         self.hover_table(at, cx);
         let url = self.link_at(at).map(|(_, _, url)| url);
-        let hand = self.task_checkbox_at(at).is_some()
-            || self.toggle_chevron_at(at).is_some()
+        let hand = self.task_checkbox_at(at, false).is_some()
+            || self.toggle_chevron_at(at, false).is_some()
             || (secondary && url.is_some());
         if hand != self.pointer_hand {
             self.pointer_hand = hand;
@@ -2153,8 +2153,13 @@ impl BlockEditorState {
     /// `at`: the item's text leaf and whether it is checked.
     /// Mouse-down on a task checkbox: toggle it, leaving the caret and
     /// selection alone. Returns whether it was one.
-    pub(crate) fn click_checkbox(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
-        match self.task_checkbox_at(at) {
+    pub(crate) fn click_checkbox(
+        &mut self,
+        at: Point<Pixels>,
+        touch: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.task_checkbox_at(at, touch) {
             Some((leaf, checked)) if !self.readonly => {
                 self.end_composition();
                 self.dragging = false;
@@ -2167,8 +2172,13 @@ impl BlockEditorState {
 
     /// A click in a toggle's chevron gutter opens or closes it, without
     /// moving the caret. Returns whether there was one.
-    pub(crate) fn click_toggle(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
-        let Some((toggle, open)) = self.toggle_chevron_at(at) else {
+    pub(crate) fn click_toggle(
+        &mut self,
+        at: Point<Pixels>,
+        touch: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((toggle, open)) = self.toggle_chevron_at(at, touch) else {
             return false;
         };
         self.end_composition();
@@ -2186,19 +2196,20 @@ impl BlockEditorState {
     }
 
     /// The toggle whose chevron gutter (left of its summary's first line) is
-    /// under `at`, and whether it's open.
-    pub(crate) fn toggle_chevron_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
+    /// under `at`, and whether it's open. By `touch`, a finger's target: 44 points each way
+    /// around the chevron, reaching out into the margin, never into the text.
+    pub(crate) fn toggle_chevron_at(
+        &self,
+        at: Point<Pixels>,
+        touch: bool,
+    ) -> Option<(BlockId, bool)> {
         use super::kind::BlockKindData;
         let frame = self.frame.borrow();
         // As wide as the gutter `surfaces::toggle_container` draws.
         let gutter = frame.rem_size * super::surfaces::TOGGLE_GUTTER_REMS;
         frame.leaves.iter().find_map(|leaf| {
             let b = leaf.bounds();
-            if !(at.y >= b.top()
-                && at.y < b.top() + leaf.line_height()
-                && at.x < b.left()
-                && at.x >= b.left() - gutter)
-            {
+            if !beside_first_line(at, b, leaf.line_height(), gutter, touch) {
                 return None;
             }
             let (toggle, index) = self.model.doc.index_in_parent(leaf.info.block)?;
@@ -2334,18 +2345,18 @@ impl BlockEditorState {
         Some(drag)
     }
 
-    pub(crate) fn task_checkbox_at(&self, at: Point<Pixels>) -> Option<(BlockId, bool)> {
+    pub(crate) fn task_checkbox_at(
+        &self,
+        at: Point<Pixels>,
+        touch: bool,
+    ) -> Option<(BlockId, bool)> {
         use super::kind::BlockKindData;
         use gpui::px;
         let frame = self.frame.borrow();
         frame.leaves.iter().find_map(|leaf| {
             let b = leaf.bounds();
             let line = px(28.).min(b.size.height);
-            if !(at.y >= b.top()
-                && at.y < b.top() + line
-                && at.x < b.left()
-                && at.x >= b.left() - px(28.))
-            {
+            if !beside_first_line(at, b, line, px(28.), touch) {
                 return None;
             }
             let block = leaf.info.block;
@@ -4310,4 +4321,28 @@ struct Find {
     whole_word: bool,
     matches: Vec<super::FindMatch>,
     current: Option<usize>,
+}
+
+/// Whether `at` is in the room left of a line's first row (`line` tall, `width` wide), where a
+/// to-do's box or a toggle's chevron is drawn. By touch it's a finger's target, 44 points each
+/// way: wider into the margin and taller about the row, never into the text.
+fn beside_first_line(
+    at: Point<Pixels>,
+    text: gpui::Bounds<Pixels>,
+    line: Pixels,
+    width: Pixels,
+    touch: bool,
+) -> bool {
+    let (width, top, bottom) = if touch {
+        let finger = gpui::px(44.);
+        let middle = text.top() + line / 2.;
+        (
+            width.max(finger),
+            middle - finger / 2.,
+            middle + finger / 2.,
+        )
+    } else {
+        (width, text.top(), text.top() + line)
+    };
+    at.y >= top && at.y < bottom && at.x < text.left() && at.x >= text.left() - width
 }

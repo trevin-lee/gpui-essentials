@@ -605,7 +605,11 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .on_action(window.listener_for(s, BlockEditorState::on_duplicate))
             .on_action(window.listener_for(s, BlockEditorState::on_select_block))
-            .children(super::table_ui::render_menu(&self.state, cx))
+            .children(super::table_ui::render_menu(
+                &self.state,
+                window.last_input_was_touch(),
+                cx,
+            ))
             .child(EditorRoot {
                 state: self.state.clone(),
                 child: Some(
@@ -1042,8 +1046,9 @@ impl Element for EditorRoot {
             // caret or starting a drag; nothing else handles this mouse-down.
             if !event.modifiers.shift
                 && entity.update(cx, |state, cx| {
-                    state.click_checkbox(event.position, cx)
-                        || state.click_toggle(event.position, cx)
+                    let touch = window.last_input_was_touch();
+                    state.click_checkbox(event.position, touch, cx)
+                        || state.click_toggle(event.position, touch, cx)
                 })
             {
                 cx.stop_propagation();

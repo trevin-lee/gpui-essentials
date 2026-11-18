@@ -4627,7 +4627,7 @@ fn a_click_on_the_chevron_opens_and_closes_a_toggle(cx: &mut TestAppContext) {
     // The summary sits past the gutter, which holds the chevron.
     assert!(summary.left() > px(12.));
     let chevron = gpui::point(summary.left() - px(10.), summary.top() + px(4.));
-    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(chevron).is_some()));
+    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(chevron, false).is_some()));
     cx.simulate_mouse_down(chevron, MouseButton::Left, Modifiers::none());
     cx.simulate_mouse_up(chevron, MouseButton::Left, Modifiers::none());
     draw(cx);
@@ -5067,8 +5067,43 @@ fn the_chevron_takes_clicks_only_in_the_gutter_it_draws(cx: &mut TestAppContext)
     let y = summary.top() + px(4.);
     let inside = gpui::point(summary.left() - gutter + px(2.), y);
     let outside = gpui::point(summary.left() - gutter - px(2.), y);
-    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(inside).is_some()));
-    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(outside).is_none()));
+    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(inside, false).is_some()));
+    assert!(editor.read_with(cx, |e, _| e.toggle_chevron_at(outside, false).is_none()));
+    // By touch, a finger's target: further out into the margin and above and below the line,
+    // never into the text.
+    let line = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.frame.borrow().leaf(id).unwrap().line_height()
+    });
+    let middle = summary.top() + line / 2.;
+    for (x, y, touched) in [
+        (summary.left() - px(40.), middle, true),
+        (summary.left() - px(4.), middle + px(20.), true),
+        (summary.left() - px(4.), middle - px(20.), true),
+        (summary.left() - px(46.), middle, false),
+        (summary.left() + px(2.), middle, false),
+    ] {
+        let at = gpui::point(x, y);
+        assert_eq!(
+            editor.read_with(cx, |e, _| e.toggle_chevron_at(at, true).is_some()),
+            touched,
+            "{at:?}"
+        );
+    }
+}
+
+#[gpui::test]
+fn a_to_dos_box_is_a_fingers_target_by_touch(cx: &mut TestAppContext) {
+    let (editor, cx) = open(cx, "- [ ] Buy milk");
+    let text = editor.read_with(cx, |e, _| {
+        let id = e.model().document().leaves().next().unwrap().id();
+        e.frame.borrow().leaf(id).unwrap().bounds()
+    });
+    let wide = gpui::point(text.left() - px(40.), text.top() + px(14.));
+    assert!(editor.read_with(cx, |e, _| e.task_checkbox_at(wide, false).is_none()));
+    assert!(editor.read_with(cx, |e, _| e.task_checkbox_at(wide, true).is_some()));
+    let inside = gpui::point(text.left() + px(2.), text.top() + px(14.));
+    assert!(editor.read_with(cx, |e, _| e.task_checkbox_at(inside, true).is_none()));
 }
 
 #[gpui::test]
