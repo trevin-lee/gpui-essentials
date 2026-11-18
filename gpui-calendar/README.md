@@ -61,6 +61,11 @@ their look.
   each with a mark (a page for a doc, a ring for an agent) and its label. A smaller chip shows
   the one link's mark by its title, or a chain and a count for several. A click on a link asks
   your app to open it; a drag that starts on one moves the event.
+- **Invitations:** an event whose attendees include the user (`Attendee::me`), who didn't
+  send it, is drawn by their answer, as in Google Calendar: hollow, with a border in its
+  colour, until they answer; hollow, faded and struck through once declined; as any event
+  once they say yes or maybe. The month's dot becomes a ring, and the agenda's bar an outline.
+  VoiceOver adds ", not answered" or ", declined". `Event::my_answer()` gives the answer.
 - **Clicks:** a click selects, and a double-click opens an event or makes one in empty time.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event; ← and → cross into the next or previous day (and period) in the day,
