@@ -271,6 +271,9 @@ pub(crate) struct Shared {
     pub window: Cell<(f32, f32)>,
     /// How many nodes out of view have yet to be drawn for the first time.
     pub unmeasured: Cell<usize>,
+    /// The handle a click began a connection from, which a click on another finishes
+    /// ([`crate::FlowOptions::connect_on_click`]): drawn in the selection's colour.
+    pub click_connect: RefCell<Option<crate::HandleRef>>,
 }
 
 /// An ink node's stroke as read, and what it was read from: the points by their text's length
@@ -608,8 +611,17 @@ impl RenderOnce for Handle {
         } = self;
         let out = units(-HANDLE_SIZE / 2. + inset);
         let along = units(-HANDLE_SIZE / 2.);
+        // The handle a click began a connection from stands out until it's finished.
+        let pending = ctx
+            .shared
+            .click_connect
+            .borrow()
+            .as_ref()
+            .is_some_and(|h| h.node == ctx.id && h.kind == kind && h.handle == id);
         let (fill, rim) = if hidden {
             (gpui::transparent_black(), gpui::transparent_black())
+        } else if pending {
+            (ctx.colors.selected, ctx.colors.selected)
         } else {
             (color.unwrap_or(ctx.colors.handle), ctx.colors.handle_border)
         };
