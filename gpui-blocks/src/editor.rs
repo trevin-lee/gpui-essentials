@@ -2840,8 +2840,20 @@ impl Editor {
         } else {
             first.left()
         };
-        let at = point(x, first.top() - px(18.));
         let readonly = state.is_readonly();
+        // Above the selection, as iOS's; below it when there's no room above (the selection near
+        // the top of the page, or under the status bar), unless that's behind the keyboard.
+        let height = if readonly { px(46.) } else { px(92.) };
+        let visible = window.fully_visible_bounds();
+        let above = point(x, first.top() - px(18.));
+        let below = point(x, last.bottom() + px(11. + 18.));
+        let flip = above.y - height < visible.top() + px(8.)
+            && below.y + height <= visible.bottom() - px(8.);
+        let (at, corner) = if flip {
+            (below, Anchor::TopCenter)
+        } else {
+            (above, Anchor::BottomCenter)
+        };
         // The format bar's marks and Link, as a second row.
         let format_row = (!readonly).then(|| {
             let mut row = self.format_buttons(px(44.), cx);
@@ -2931,7 +2943,7 @@ impl Editor {
             deferred(
                 anchored()
                     .position(at)
-                    .anchor(Anchor::BottomCenter)
+                    .anchor(corner)
                     .snap_to_window_with_margin(px(8.))
                     .child(
                         div()
@@ -5117,6 +5129,46 @@ mod tests {
             .center();
         touch(cx, gpui::TouchPhase::Started, at);
         touch(cx, gpui::TouchPhase::Ended, at);
+    }
+
+    /// The touch menu goes above the selection, as iOS's, and below it when the selection is
+    /// at the top of the page with no room above.
+    #[gpui::test]
+    fn the_touch_menu_goes_below_a_selection_at_the_top(cx: &mut TestAppContext) {
+        let source = (1..=12)
+            .map(|n| format!("Line number {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (editor, cx) = open(cx, &source);
+        cx.simulate_resize(gpui::size(gpui::px(402.), gpui::px(874.)));
+        draw(cx);
+        draw(cx);
+        let at = |editor: &Entity<Editor>, cx: &mut VisualTestContext, leaf: usize| {
+            editor.update(cx, |e, cx| {
+                let state = e.state().read(cx);
+                let id = state.model().document().leaves().nth(leaf).unwrap().id();
+                state.position_bounds(BlockPosition::new(id, 2)).unwrap()
+            })
+        };
+        // The first line, at the top of a phone's page: no room above.
+        let first = at(&editor, cx, 0);
+        long_press(cx, first.center());
+        draw(cx);
+        let menu = cx.debug_bounds("blocks-edit-menu").expect("the menu");
+        assert!(
+            menu.top() >= first.bottom(),
+            "below: {menu:?} under {first:?}"
+        );
+        // A line well down the page: above it, as iOS's.
+        let lower = at(&editor, cx, 6);
+        assert!(lower.top() > gpui::px(200.), "{lower:?}");
+        long_press(cx, lower.center());
+        draw(cx);
+        let menu = cx.debug_bounds("blocks-edit-menu").expect("the menu");
+        assert!(
+            menu.bottom() <= lower.top(),
+            "above: {menu:?} over {lower:?}"
+        );
     }
 
     #[gpui::test]
