@@ -1963,6 +1963,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "web-time",
 ]
 
 [[package]]
