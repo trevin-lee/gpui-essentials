@@ -5,6 +5,8 @@
 use gpui::{App, Hsla, rgb};
 use gpui_core::Theme;
 
+use crate::model::Response;
+
 /// Every colour the calendar draws with, other than events'.
 #[derive(Clone, Copy, Debug)]
 pub struct CalendarColors {
@@ -74,7 +76,7 @@ pub fn palette_color(calendar: &str) -> u32 {
 }
 
 /// The colours an event chip is drawn with, from its calendar's colour.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChipColors {
     /// The calendar's colour itself: the bar at the chip's edge and a month row's dot.
     pub accent: Hsla,
@@ -83,6 +85,10 @@ pub struct ChipColors {
     pub fill: Hsla,
     pub text: Hsla,
     pub muted_text: Hsla,
+    /// A border in the event's colour: an invitation not answered yet, or declined.
+    pub outline: Option<Hsla>,
+    /// The title struck through: a declined invitation.
+    pub struck: bool,
 }
 
 /// `top` over `bottom` at `alpha`, as one opaque colour.
@@ -109,6 +115,8 @@ impl ChipColors {
                 fill: accent,
                 text,
                 muted_text: text.opacity(0.72),
+                outline: None,
+                struck: false,
             };
         }
         let strength = if past { 0.13 } else { 0.24 };
@@ -124,6 +132,34 @@ impl ChipColors {
             fill,
             text,
             muted_text,
+            outline: None,
+            struck: false,
+        }
+    }
+
+    /// As Google Calendar draws an invitation by the user's answer: one not answered yet is
+    /// hollow (the background inside a border in its colour), and a declined one is hollow,
+    /// faded, with its title struck through. Accepted and maybe look as any event; so does the
+    /// selected one, which stands out solid whatever the answer.
+    pub fn answered(self, answer: Option<Response>, colors: &CalendarColors) -> Self {
+        if self.fill == self.accent {
+            return self;
+        }
+        match answer {
+            Some(Response::NeedsAction) => Self {
+                fill: colors.background,
+                outline: Some(self.accent),
+                ..self
+            },
+            Some(Response::Declined) => Self {
+                fill: colors.background,
+                outline: Some(self.accent.opacity(0.5)),
+                text: self.text.opacity(0.6),
+                muted_text: self.muted_text.opacity(0.6),
+                struck: true,
+                ..self
+            },
+            _ => self,
         }
     }
 }
@@ -131,6 +167,36 @@ impl ChipColors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn an_invitation_is_drawn_by_the_answer(cx: &mut gpui::TestAppContext) {
+        let colors = cx.update(|cx| {
+            gpui_core::init(cx);
+            CalendarColors::from_theme(cx)
+        });
+        let plain = ChipColors::new(0x5b8def, &colors, false, false);
+        // Not answered: hollow, a border in its colour, the title as usual.
+        let new = plain.answered(Some(Response::NeedsAction), &colors);
+        assert_eq!(new.fill, colors.background);
+        assert_eq!(new.outline, Some(plain.accent));
+        assert!(!new.struck);
+        assert_eq!(new.text, plain.text);
+        // Declined: hollow, faded and struck through.
+        let no = plain.answered(Some(Response::Declined), &colors);
+        assert_eq!(no.fill, colors.background);
+        assert!(no.outline.is_some() && no.struck);
+        assert!(no.text.a < plain.text.a);
+        // Going, maybe, or not an invitation: as any event.
+        for answer in [Some(Response::Accepted), Some(Response::Tentative), None] {
+            assert_eq!(plain.answered(answer, &colors), plain);
+        }
+        // Selected, it stands out solid whatever the answer.
+        let selected = ChipColors::new(0x5b8def, &colors, true, false);
+        assert_eq!(
+            selected.answered(Some(Response::Declined), &colors),
+            selected
+        );
+    }
 
     #[test]
     fn palette_colors_are_stable() {

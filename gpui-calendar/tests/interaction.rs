@@ -1662,6 +1662,41 @@ fn every_event_is_described_for_a_screen_reader(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_invitation_says_whether_it_was_answered(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    let invited = |id: &str, me: Attendee| {
+        let mut e = Event::timed(id, "Review", at(day(2), 13, 0), at(day(2), 14, 0));
+        e.attendees = vec![Attendee::new("Sam", Response::Accepted).organizer(true), me];
+        e
+    };
+    c.update(cx, |c, cx| {
+        c.set_events(
+            vec![
+                invited("new", Attendee::new("Alex", Response::NeedsAction).me(true)),
+                invited("no", Attendee::new("Alex", Response::Declined).me(true)),
+                invited("yes", Attendee::new("Alex", Response::Accepted).me(true)),
+                // Sent by the user: there's nothing for them to answer.
+                invited(
+                    "mine",
+                    Attendee::new("Alex", Response::NeedsAction)
+                        .me(true)
+                        .organizer(true),
+                ),
+            ],
+            cx,
+        )
+    });
+    draw(cx);
+    c.read_with(cx, |c, _| {
+        let said = |id: &str| c.describe_event(id).unwrap();
+        assert_eq!(said("new"), "Review, Wednesday 1 to 2 PM, not answered");
+        assert_eq!(said("no"), "Review, Wednesday 1 to 2 PM, declined");
+        assert_eq!(said("yes"), "Review, Wednesday 1 to 2 PM");
+        assert_eq!(said("mine"), "Review, Wednesday 1 to 2 PM");
+    });
+}
+
+#[gpui::test]
 fn what_a_screen_reader_is_told_is_what_was_drawn(cx: &mut TestAppContext) {
     let (c, seen, cx) = open(cx);
     let items = c.read_with(cx, |c, _| c.accessibility_items());

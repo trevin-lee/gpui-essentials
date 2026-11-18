@@ -262,6 +262,9 @@ pub(crate) struct Chip {
     pub end: DateTime<Utc>,
     /// Whether the find query (if any) finds it.
     pub found: bool,
+    /// The user's answer to it, where it's an invitation they didn't send (an attendee marked
+    /// `me` who isn't its organizer).
+    pub answer: Option<Response>,
 }
 
 /// A timed event's piece on one day of the grid.
@@ -1203,6 +1206,7 @@ impl Calendar {
             all_day: e.time.is_all_day(),
             found: self.is_found(e),
             end,
+            answer: e.my_answer(),
         }
     }
 

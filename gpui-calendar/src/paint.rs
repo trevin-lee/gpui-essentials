@@ -767,6 +767,7 @@ fn draw(
             family: scene.family.clone(),
             mark: None,
             dry,
+            strike: false,
         };
         // Days are drawn right of the gutter only, and the gutter after them, still.
         let days_area =
@@ -780,6 +781,7 @@ fn draw(
                     family: ink.family.clone(),
                     mark: ink.mark.clone(),
                     dry: ink.dry,
+                    strike: false,
                 };
                 // The period a swipe brings in, beside this one. Drawn first: what
                 // it leaves in the shared hit lists is replaced by this period's
@@ -878,6 +880,8 @@ struct Ink<'a> {
     /// Lays the frame out without drawing it: where things go (the hit lists) without any
     /// paint, for assistive technology, which needs them before the frame is painted.
     dry: bool,
+    /// While set, text is struck through (a declined invitation's title).
+    strike: bool,
 }
 
 impl Ink<'_> {
@@ -928,7 +932,7 @@ impl Ink<'_> {
     fn outlined(
         &mut self,
         b: Bounds<Pixels>,
-        radius: Pixels,
+        radius: impl Into<Corners<Pixels>>,
         fill: Hsla,
         width: Pixels,
         border: Hsla,
@@ -991,7 +995,10 @@ impl Ink<'_> {
             color,
             background_color: None,
             underline: None,
-            strikethrough: None,
+            strikethrough: self.strike.then(|| StrikethroughStyle {
+                thickness: self.u(1.),
+                color: Some(color),
+            }),
         }
     }
 
@@ -1302,8 +1309,15 @@ fn paint_timed_chip(
     let mut out = Vec::new();
     let alpha = if faded { 0.35 } else { 1. };
     let r = ink.u(4.);
-    // A hairline of the background round each chip keeps overlapping ones apart.
-    ink.outlined(rect, r, cc.fill.opacity(alpha), px(1.), background);
+    // A hairline of the background round each chip keeps overlapping ones apart; an
+    // invitation not answered (or declined) has a border in its colour instead.
+    ink.outlined(
+        rect,
+        r,
+        cc.fill.opacity(alpha),
+        px(1.),
+        cc.outline.unwrap_or(background).opacity(alpha),
+    );
     let bar = Bounds::new(
         point(rect.left() + px(1.), rect.top() + px(1.)),
         size(ink.u(3.), (rect.size.height - px(2.)).max(px(0.))),
@@ -1334,6 +1348,7 @@ fn paint_timed_chip(
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
                 dry: ink.dry,
+                strike: false,
             };
             let pad = ink.u(3.);
             let links = text.links;
@@ -1360,6 +1375,7 @@ fn paint_timed_chip(
                         .clamp(1, 3)
                 };
                 let top = rect.top() + pad;
+                ink.strike = cc.struck;
                 let used = ink.wrapped(
                     text.title,
                     TITLE,
@@ -1370,6 +1386,7 @@ fn paint_timed_chip(
                     w - badge,
                     lines,
                 );
+                ink.strike = false;
                 if badge > px(0.) {
                     let mid = top + ink.u(TITLE_LEADING) / 2.;
                     let at = paint_badge(&mut ink, links, x + w, mid, muted);
@@ -1431,6 +1448,7 @@ fn paint_timed_chip(
                 } else {
                     badge_width(&mut ink, links) + ink.u(6.)
                 };
+                ink.strike = cc.struck;
                 let used = ink.text(
                     text.title,
                     TITLE,
@@ -1440,6 +1458,7 @@ fn paint_timed_chip(
                     point(x, y),
                     Some(w - badge),
                 );
+                ink.strike = false;
                 let gap = ink.u(6.);
                 let left = w - badge - used - gap;
                 if left > ink.u(28.) {
@@ -1494,7 +1513,16 @@ fn paint_span_chip(
         top_right: if open_right { px(0.) } else { r },
         bottom_right: if open_right { px(0.) } else { r },
     };
-    ink.rounded(rect, corners, cc.fill.opacity(alpha));
+    match cc.outline {
+        Some(border) => ink.outlined(
+            rect,
+            corners,
+            cc.fill.opacity(alpha),
+            px(1.),
+            border.opacity(alpha),
+        ),
+        None => ink.rounded(rect, corners, cc.fill.opacity(alpha)),
+    }
     if !open_left {
         let bar = Bounds::new(rect.origin, size(ink.u(3.), rect.size.height));
         ink.rounded(
@@ -1550,6 +1578,7 @@ fn paint_span_chip(
     } else {
         badge_width(ink, links) + ink.u(6.)
     };
+    ink.strike = cc.struck;
     ink.text(
         title,
         TITLE,
@@ -1559,6 +1588,7 @@ fn paint_span_chip(
         point(x, y),
         Some(w - badge),
     );
+    ink.strike = false;
     if badge > px(0.) {
         let at = paint_badge(ink, links, x + w, mid, cc.muted_text.opacity(alpha));
         if links.len() == 1 {
@@ -1589,6 +1619,8 @@ fn ghost_colors(color: u32, colors: &CalendarColors) -> (ChipColors, Hsla) {
             fill: mix(colors.background, accent, 0.42),
             text: colors.text,
             muted_text: mix(colors.text, accent, 0.3),
+            outline: None,
+            struck: false,
         },
         accent,
     )
@@ -1629,6 +1661,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
                 dry: ink.dry,
+                strike: false,
             };
             // The hours the clocks skip or repeat.
             for (col, change) in &scene.laid.dst {
@@ -1708,6 +1741,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
                 dry: ink.dry,
+                strike: false,
             };
             let mut hits = shared.hits.borrow_mut();
             // No column narrower than a readable minimum: a group needing more shows those
@@ -1749,7 +1783,8 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 );
                 let selected = scene.selected(&chip.id);
                 let faded = scene.moving(&chip.id) || scene.dimmed(chip);
-                let cc = ChipColors::new(chip.color, c, selected, scene.past(chip));
+                let cc = ChipColors::new(chip.color, c, selected, scene.past(chip))
+                    .answered(chip.answer, c);
                 let text = ChipText {
                     title: &chip.title,
                     time: &chip.time,
@@ -2203,6 +2238,7 @@ fn paint_gutter(ink: &mut Ink, scene: &Scene, geo: &Geo) {
                 family: ink.family.clone(),
                 mark: ink.mark.clone(),
                 dry: ink.dry,
+                strike: false,
             };
             // The time now's pill, kept whole inside the grid like the hours.
             let pill_h = ink.u(16.);
@@ -2301,7 +2337,7 @@ fn paint_span(
     let selected = scene.selected(&chip.id);
     let faded = scene.moving(&chip.id) || scene.dimmed(chip);
     let past = scene.past(chip);
-    let cc = ChipColors::new(chip.color, c, selected, past);
+    let cc = ChipColors::new(chip.color, c, selected, past).answered(chip.answer, c);
     let ring = scene.find.is_some() && chip.found && !span.dot;
     for (a, z) in layout::visible_runs(span.first, span.last, span.lane, fits) {
         let open_left = a == span.first && span.cont_left;
@@ -2375,14 +2411,21 @@ fn paint_dot_row(
     }
     let mid = rect.top() + rect.size.height / 2.;
     let dot = ink.u(6.);
-    ink.rounded(
-        Bounds::new(
-            point(rect.left() + ink.u(5.), mid - dot / 2.),
-            size(dot, dot),
-        ),
-        dot / 2.,
-        cc.accent.opacity(alpha),
+    let dot_rect = Bounds::new(
+        point(rect.left() + ink.u(5.), mid - dot / 2.),
+        size(dot, dot),
     );
+    match cc.outline {
+        // An invitation not answered, or declined: a ring rather than a dot.
+        Some(border) => ink.outlined(
+            dot_rect,
+            dot / 2.,
+            cc.fill.opacity(alpha),
+            ink.u(1.5),
+            border.opacity(alpha),
+        ),
+        None => ink.rounded(dot_rect, dot / 2., cc.accent.opacity(alpha)),
+    }
     let x = rect.left() + ink.u(15.);
     let y = mid - ink.u(TITLE_LEADING) / 2.;
     let w = rect.right() - x - ink.u(3.);
@@ -2413,6 +2456,7 @@ fn paint_dot_row(
         )
     };
     let gap = if tw > px(0.) { ink.u(5.) } else { px(0.) };
+    ink.strike = cc.struck;
     ink.text(
         &chip.title,
         TITLE,
@@ -2422,6 +2466,7 @@ fn paint_dot_row(
         point(x + tw + gap, y),
         Some(w - tw - gap),
     );
+    ink.strike = false;
     out
 }
 
@@ -2871,6 +2916,7 @@ fn paint_agenda(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     family: ink.family.clone(),
                     mark: ink.mark.clone(),
                     dry: ink.dry,
+                    strike: false,
                 };
                 ink.mark = scene.mark(&scene.laid.chips[row.chip]);
                 paint_agenda_row(&mut ink, scene, shared, &cols, row, place, top, rows_area);
@@ -2977,6 +3023,7 @@ fn paint_agenda_now(
                 family: ink.family.clone(),
                 mark: None,
                 dry: ink.dry,
+                strike: false,
             };
             let thick = ink.u(2.);
             ink.fill(
@@ -3005,7 +3052,7 @@ fn paint_agenda_row(
     let c = &scene.colors;
     let chip = &scene.laid.chips[row.chip];
     let selected = scene.selected(&chip.id);
-    let cc = ChipColors::new(chip.color, c, false, scene.past(chip));
+    let cc = ChipColors::new(chip.color, c, false, scene.past(chip)).answered(chip.answer, c);
     let pad = cols.bar_x - cols.time_w - ink.u(8.);
     let rect = Bounds::new(
         point(b.left() + pad / 2., top),
@@ -3044,9 +3091,13 @@ fn paint_agenda_row(
             px(place.height) - ink.u(AGENDA_ROW_PAD * 2. + 2.),
         ),
     );
-    ink.rounded(bar, ink.u(1.5), cc.accent);
+    match cc.outline {
+        Some(border) => ink.outlined(bar, ink.u(1.5), cc.fill, ink.u(1.), border),
+        None => ink.rounded(bar, ink.u(1.5), cc.accent),
+    }
     // The title, the place and the links.
     let x = b.left() + cols.text_x;
+    ink.strike = cc.struck;
     let used = ink.wrapped(
         &chip.title,
         TITLE,
@@ -3057,6 +3108,7 @@ fn paint_agenda_row(
         cols.text_w,
         place.title_lines,
     );
+    ink.strike = false;
     let mut ly = y + ink.u(TITLE_LEADING) * used.max(1) as f32;
     if let Some(location) = &chip.location {
         ink.text(
