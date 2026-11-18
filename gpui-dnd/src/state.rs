@@ -176,6 +176,10 @@ impl ActiveDrag {
     }
 }
 
+/// What a provider keeps in its element state, the window's claim on it when it's active.
+#[derive(Debug, Default)]
+pub(crate) struct ProviderToken;
+
 pub(crate) trait Collector {
     /// Works the value out again; the view to notify if it changed.
     fn update(&self, monitor: &DragMonitor) -> Option<EntityId>;
@@ -197,15 +201,20 @@ pub(crate) struct DndState {
     pub pending: Option<Pending>,
     /// A touch on an at-once source that hasn't moved past the slop yet.
     pub touch_pending: Option<Pending>,
-    /// Each window's scroll containers that auto-scroll, as the provider last drew them.
+    /// Each window's scroll containers that auto-scroll, each stamped with the frame it was
+    /// drawn in: those of frames before the active provider's last paint are dropped then.
     pub zones: HashMap<WindowId, Vec<crate::autoscroll::Zone>>,
+    /// The frame zones drawn now are stamped with: moved on as the active provider paints.
+    pub zone_stamp: u64,
+    /// Each window's active provider: the one that follows the drag, listens for its input and
+    /// draws its preview. It holds the `Rc` in its element state, so it stays active while it's
+    /// drawn (from cache too), and another claims the window once it isn't.
+    pub active: HashMap<WindowId, Weak<ProviderToken>>,
     /// Auto-scroll under way.
     pub auto_run: Option<crate::autoscroll::Run>,
     /// The sortable list a sortable item would land in, and where: set as lists are hovered.
     pub sort_landing: Option<(ElementId, usize)>,
     pub collectors: Vec<Weak<dyn Collector>>,
-    /// How many providers are being laid out around the element being laid out now.
-    pub provider_depth: usize,
     /// The targets being laid out around the element being laid out now.
     pub target_stack: Vec<Rc<TargetRecord>>,
     pub seq: u64,
@@ -271,6 +280,14 @@ pub(crate) fn sort_landing(cx: &App) -> Option<(ElementId, usize)> {
     let global = cx.try_global::<DndGlobal>()?;
     let state = global.0.borrow();
     state.sort_landing.clone()
+}
+
+/// Whether this window has an active provider (one drawn in this frame or the last).
+pub(crate) fn has_provider(state: &DndState, window: WindowId) -> bool {
+    state
+        .active
+        .get(&window)
+        .is_some_and(|t| t.strong_count() > 0)
 }
 
 pub(crate) fn window_id(window: &Window) -> WindowId {
