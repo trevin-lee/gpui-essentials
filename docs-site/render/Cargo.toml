@@ -1,0 +1,42 @@
+# Renders the documentation site: a picture of every component's variants, light and dark,
+# and the HTML pages that show them beside their code. See ../README.md.
+[package]
+name = "docs-site-render"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.100"
+license = "Apache-2.0"
+publish = false
+
+# Its own workspace, with its own Cargo.lock, so the site's build never touches the crates'
+# workspace (../../Cargo.toml). The crates it shows come in by path; their `workspace = true`
+# settings still resolve in their own workspace.
+[workspace]
+
+[[bin]]
+name = "render"
+path = "src/main.rs"
+
+[dependencies]
+# The components shown, with `shots`: GPUI's offscreen rendering of a hidden window.
+gpui-core = { path = "../../gpui-core", features = ["shots"] }
+# GPUI, at the version the crates pin in their workspace, under the name their macros use.
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+# GPUI's platform for macOS. Without font-kit, macOS draws no text.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
+anyhow = "1"
+# The rendered picture (GPUI's image type), cropped and scaled.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Pictures saved with a palette of 256 colours: NeuQuant (color_quant, MIT) picks the palette,
+# png (MIT or Apache-2.0) writes it indexed.
+color_quant = "1.1"
+png = "0.18"
+# gpui-core's components.toml, for each page's Installation section (MIT or Apache-2.0).
+toml = "0.9"
+
+# Quantising and encoding the pictures is slow unoptimised; the rest builds as usual.
+[profile.dev.package.color_quant]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
