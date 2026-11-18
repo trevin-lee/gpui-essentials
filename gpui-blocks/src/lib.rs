@@ -90,7 +90,10 @@ pub mod actions {
             /// Selects the previous match (⇧⌘G, or ⇧Enter in the query).
             FindPrevious,
             /// Closes the find bar (Esc in it).
-            FindClose
+            FindClose,
+            /// Gives the selection the background colour last picked in the format bar's Color
+            /// menu, yellow at first, or takes it off when the selection has it already (⌘⇧H).
+            HighlightAgain
         ]
     );
 }

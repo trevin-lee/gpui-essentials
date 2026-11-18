@@ -154,6 +154,39 @@ fn mark_state_and_active_marks() {
 }
 
 #[test]
+fn selection_highlight_is_the_colour_all_of_it_has() {
+    let blue = crate::BACKGROUNDS[5];
+    let mut m = model("a <mark color=\"#e7f3f8\">bc</mark> <mark>d</mark>");
+    select(&mut m, 0, 2..4);
+    let color = m.selection_highlight().expect("all of it is blue");
+    assert_eq!(crate::background_of(color), Some(&blue));
+    // Partly highlighted, or in two colours: none.
+    select(&mut m, 0, 0..4);
+    assert_eq!(m.selection_highlight(), None);
+    select(&mut m, 0, 2..6);
+    assert_eq!(m.selection_highlight(), None);
+    // A palette colour is drawn with its dark twin in a dark theme; others stay as they are.
+    assert_eq!(
+        crate::marks::drawn_highlight(color, false),
+        blue.fill(false)
+    );
+    assert_eq!(crate::marks::drawn_highlight(color, true), blue.fill(true));
+    let yellow: gpui::Hsla = gpui::rgb(0xfef08a).into();
+    assert_eq!(crate::marks::drawn_highlight(yellow, true), yellow);
+    // Giving it a colour writes the light one.
+    select(&mut m, 0, 0..1);
+    m.run(EditorCommand::ApplyMark(
+        crate::MarkChange::new().with_highlight(crate::BACKGROUNDS[0].color()),
+    ))
+    .unwrap();
+    assert!(
+        m.source().starts_with("<mark color=\"#f1f1ef\">a</mark>"),
+        "{}",
+        m.source()
+    );
+}
+
+#[test]
 fn link_does_not_extend_at_trailing_edge() {
     let mut m = model("[ab](https://x.dev)");
     caret_at_end(&mut m, 0);
