@@ -61,6 +61,10 @@ actions!(
         Undo,
         /// Makes the last edit taken back again.
         Redo,
+        /// Moves the keyboard to the node or edge before (Tab moves it to the next).
+        FocusPrevious,
+        /// Selects the node or edge the keyboard is on.
+        SelectFocused,
     ]
 );
 
@@ -98,6 +102,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-down", MoveDownFar, c),
         KeyBinding::new("cmd-z", Undo, c),
         KeyBinding::new("cmd-shift-z", Redo, c),
+        KeyBinding::new("shift-tab", FocusPrevious, c),
+        KeyBinding::new("space", SelectFocused, c),
     ]);
 }
 
@@ -394,6 +400,13 @@ pub struct HandleRef {
     pub kind: HandleKind,
 }
 
+/// What the keyboard is on inside the canvas, which Tab and shift-Tab move: a node or an edge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FlowItem {
+    Node(NodeId),
+    Edge(EdgeId),
+}
+
 /// What a flow tells its subscribers.
 ///
 /// The events say what someone did with the mouse and the keyboard. Changes made by calling
@@ -687,6 +700,9 @@ pub struct Flow {
     shared: Rc<Shared>,
     focus: FocusHandle,
     drag: Option<Drag>,
+    /// The node or edge the keyboard is on, with a focus ring round it; none while the
+    /// canvas itself has the keyboard, or the mouse was used last.
+    keyboard_on: Option<FlowItem>,
     /// Where the pointer of the drag under way last was, in the pane, and when the viewport
     /// last moved for it being near the pane's edge (see [`FlowOptions::auto_pan_on_node_drag`]).
     drag_pane: Option<XY>,
@@ -915,6 +931,7 @@ impl Flow {
             shared: Rc::default(),
             focus: cx.focus_handle(),
             drag: None,
+            keyboard_on: None,
             drag_pane: None,
             auto_panned: None,
             drag_button: MouseButton::Left,
@@ -2648,6 +2665,175 @@ impl Flow {
         }
     }
 
+    /// The node or edge the keyboard is on, if any.
+    pub fn keyboard_on(&self) -> Option<&FlowItem> {
+        self.keyboard_on.as_ref()
+    }
+
+    /// Puts the keyboard on a node or an edge (none: on the canvas itself), as Tab does.
+    pub fn set_keyboard_on(&mut self, item: Option<FlowItem>, cx: &mut Context<Self>) {
+        self.keyboard_on = item;
+        self.reveal_keyboard();
+        cx.notify();
+    }
+
+    /// The order Tab takes: the nodes shown, as they read (top to bottom, then left to right),
+    /// then the edges shown, in their order.
+    fn keyboard_order(&self) -> Vec<FlowItem> {
+        let mut nodes: Vec<(XY, NodeId)> = self
+            .nodes
+            .iter()
+            .filter(|n| self.shown(n))
+            .filter_map(|n| Some((self.absolute_position(&n.id)?, n.id.clone())))
+            .collect();
+        nodes.sort_by(|(a, ai), (b, bi)| {
+            a.y.round()
+                .total_cmp(&b.y.round())
+                .then(a.x.total_cmp(&b.x))
+                .then(ai.cmp(bi))
+        });
+        let edges = self.edges.iter().filter(|e| {
+            !e.hidden
+                && self.node(&e.source).is_some_and(|n| self.shown(n))
+                && self.node(&e.target).is_some_and(|n| self.shown(n))
+        });
+        nodes
+            .into_iter()
+            .map(|(_, id)| FlowItem::Node(id))
+            .chain(edges.map(|e| FlowItem::Edge(e.id.clone())))
+            .collect()
+    }
+
+    /// Tab (or shift-Tab): the keyboard to the next (or previous) node or edge. From the last
+    /// (or first) it leaves them, and says so (false), for the focus to go on out of the canvas.
+    fn move_keyboard(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        let order = self.keyboard_order();
+        let at = self
+            .keyboard_on
+            .as_ref()
+            .and_then(|on| order.iter().position(|i| i == on));
+        let next = match (at, forward) {
+            (None, true) => Some(0),
+            (None, false) => order.len().checked_sub(1),
+            (Some(i), true) => Some(i + 1).filter(|n| *n < order.len()),
+            (Some(i), false) => i.checked_sub(1),
+        };
+        let Some(next) = next else {
+            self.keyboard_on = None;
+            cx.notify();
+            return false;
+        };
+        self.set_keyboard_on(Some(order[next].clone()), cx);
+        true
+    }
+
+    /// Brings the node the keyboard is on into view, if it's out of it.
+    fn reveal_keyboard(&mut self) {
+        let Some(FlowItem::Node(id)) = &self.keyboard_on else {
+            return;
+        };
+        let (Some(rect), (w, h)) = (self.node_rect(id), self.pane_size()) else {
+            return;
+        };
+        let v = self.viewport;
+        let (a, b) = (
+            v.to_pane(xy(rect.x, rect.y)),
+            v.to_pane(xy(rect.x + rect.w, rect.y + rect.h)),
+        );
+        if a.x >= 0. && a.y >= 0. && b.x <= w && b.y <= h {
+            return;
+        }
+        let center = xy(rect.x + rect.w / 2., rect.y + rect.h / 2.);
+        self.viewport = Viewport::new(
+            w / 2. - center.x * v.zoom,
+            h / 2. - center.y * v.zoom,
+            v.zoom,
+        );
+    }
+
+    /// Enter or space: selects the node or edge the keyboard is on.
+    fn select_focused(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(on) = self.keyboard_on.clone() else {
+            return false;
+        };
+        let all = self.options.elements_selectable;
+        match &on {
+            FlowItem::Node(id) => {
+                if !self.node(id).is_some_and(|n| self.selectable(n)) {
+                    return false;
+                }
+                self.nodes.iter_mut().for_each(|n| n.selected = &n.id == id);
+                self.edges.iter_mut().for_each(|e| e.selected = false);
+            }
+            FlowItem::Edge(id) => {
+                if !self.edge(id).is_some_and(|e| e.selectable.unwrap_or(all)) {
+                    return false;
+                }
+                self.nodes.iter_mut().for_each(|n| n.selected = false);
+                self.edges.iter_mut().for_each(|e| e.selected = &e.id == id);
+            }
+        }
+        self.selection_changed(cx);
+        cx.notify();
+        true
+    }
+
+    /// Delete with nothing selected: removes the node or edge the keyboard is on, and the
+    /// keyboard goes back to the canvas.
+    fn delete_focused(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.keyboard_on.is_none() || !self.select_focused(cx) {
+            return false;
+        }
+        self.keyboard_on = None;
+        self.delete_selected(cx)
+    }
+
+    /// The ring round the node or edge the keyboard is on, which is also what assistive
+    /// technology is told the keyboard is on (an active descendant of the focused canvas).
+    fn focus_ring(&self, colors: &FlowColors) -> Option<AnyElement> {
+        let on = self.keyboard_on.as_ref()?;
+        let v = self.viewport;
+        let (rect, name) = match on {
+            FlowItem::Node(id) => {
+                let r = self.node_rect(id)?;
+                let (a, b) = (v.to_pane(xy(r.x, r.y)), v.to_pane(xy(r.x + r.w, r.y + r.h)));
+                (
+                    Rect::new(a.x, a.y, b.x - a.x, b.y - a.y),
+                    self.node(id)?.accessible_name(),
+                )
+            }
+            FlowItem::Edge(id) => {
+                let lines = self.shared.edges.borrow();
+                let line = lines.iter().find(|l| &l.id == id)?;
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for p in &line.points {
+                    (x0, y0, x1, y1) = (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y));
+                }
+                (
+                    Rect::new(x0, y0, x1 - x0, y1 - y0),
+                    self.edge_name(self.edge(id)?),
+                )
+            }
+        };
+        const GAP: f32 = 4.;
+        Some(
+            div()
+                .id("flow-keyboard-on")
+                .absolute()
+                .left(px(rect.x - GAP))
+                .top(px(rect.y - GAP))
+                .w(px(rect.w + GAP * 2.))
+                .h(px(rect.h + GAP * 2.))
+                .rounded(px(6.))
+                .border_2()
+                .border_color(colors.focus)
+                .role(Role::Group)
+                .aria_label(name)
+                .aria_active_descendant()
+                .into_any_element(),
+        )
+    }
+
     /// What assistive technology calls an edge: its `ariaLabel` (see [`Edge::aria_label`]),
     /// else "Edge from … to …" with its nodes' names, after its label when it has one.
     pub fn edge_name(&self, edge: &Edge) -> SharedString {
@@ -3120,6 +3306,7 @@ impl Flow {
             return took;
         }
         self.let_go_of_click_connect(cx);
+        self.keyboard_on = None;
         // Inside a frame, the press is the pane's.
         let at = self.screen_to_flow(event.position);
         if self.node(id).is_some_and(|n| !self.takes_press(n, at)) {
@@ -4139,6 +4326,7 @@ impl Flow {
             return;
         }
         self.let_go_of_click_connect(cx);
+        self.keyboard_on = None;
         let pane = self.shared.pane_point(event.position);
         if mode == PointerMode::Edit
             && event.button == MouseButton::Left
@@ -4819,6 +5007,17 @@ impl Flow {
             .filter(|n| n.selected && self.draggable(n) && !self.carried(n, None))
             .map(|n| n.id.clone())
             .collect();
+        // With nothing selected, the node the keyboard is on.
+        let moving = if moving.is_empty() {
+            match &self.keyboard_on {
+                Some(FlowItem::Node(id)) if self.node(id).is_some_and(|n| self.draggable(n)) => {
+                    vec![id.clone()]
+                }
+                _ => moving,
+            }
+        } else {
+            moving
+        };
         if moving.is_empty() {
             return false;
         }
@@ -4852,6 +5051,12 @@ impl Flow {
             return true;
         }
         if self.nodes.iter().all(|n| !n.selected) && self.edges.iter().all(|e| !e.selected) {
+            // Then the keyboard leaves the node or edge it was on, for the canvas; with
+            // neither, escape goes on to the host.
+            if self.keyboard_on.take().is_some() {
+                cx.notify();
+                return true;
+            }
             return false;
         }
         self.deselect_all(cx);
@@ -5849,6 +6054,15 @@ impl Render for Flow {
             .window
             .set((f32::from(window_size.width), f32::from(window_size.height)));
         self.enforce_extents();
+        // The keyboard can't stay on something gone or hidden.
+        let gone = match &self.keyboard_on {
+            Some(FlowItem::Node(id)) => !self.node(id).is_some_and(|n| self.shown(n)),
+            Some(FlowItem::Edge(id)) => !self.edge(id).is_some_and(|e| !e.hidden),
+            None => false,
+        };
+        if gone {
+            self.keyboard_on = None;
+        }
         self.frame_time = now(cx);
         self.ask_for_cards(cx);
         self.lay_out_tree(self.frame_time, window);
@@ -6228,7 +6442,19 @@ impl Render for Flow {
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|flow, _: &DeleteSelected, _, cx| {
-                if !(flow.options.deletable && flow.delete_selected(cx)) {
+                if !(flow.options.deletable
+                    && (flow.delete_selected(cx) || flow.delete_focused(cx)))
+                {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &FocusPrevious, _, cx| {
+                if !flow.move_keyboard(false, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|flow, _: &SelectFocused, _, cx| {
+                if !flow.select_focused(cx) {
                     cx.propagate();
                 }
             }))
@@ -6279,13 +6505,15 @@ impl Render for Flow {
                     cx.propagate();
                 }
             }))
+            // Tab adds a child in a tree with a node selected; otherwise it moves the keyboard
+            // to the next node or edge, and past the last one out of the canvas.
             .on_action(cx.listener(|flow, _: &AddChild, _, cx| {
-                if !flow.add_child(cx) {
+                if !flow.add_child(cx) && !flow.move_keyboard(true, cx) {
                     cx.propagate();
                 }
             }))
             .on_action(cx.listener(|flow, _: &AddSibling, _, cx| {
-                if !flow.add_sibling(cx) {
+                if !flow.add_sibling(cx) && !flow.select_focused(cx) {
                     cx.propagate();
                 }
             }))
@@ -6297,7 +6525,8 @@ impl Render for Flow {
             .on_action(cx.listener(|f, _: &MoveRightFar, _, cx| f.nudge_or_pass(1., 0., true, cx)))
             .on_action(cx.listener(|f, _: &MoveUpFar, _, cx| f.nudge_or_pass(0., -1., true, cx)))
             .on_action(cx.listener(|f, _: &MoveDownFar, _, cx| f.nudge_or_pass(0., 1., true, cx)))
-            .child(pane);
+            .child(pane)
+            .children(self.focus_ring(&colors));
 
         // Each edge drawn, as assistive technology gets it: a group named for it, where its line
         // was last painted. Edges are painted, not elements, so they're nodes of the canvas's own.

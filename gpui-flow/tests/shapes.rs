@@ -137,6 +137,7 @@ fn dark_colors() -> FlowColors {
         muted_text: gray(0.55),
         group: gray(0.12),
         selected: gray(0.6),
+        focus: gray(0.62),
         edge: gray(0.55),
         edge_label: gray(0.93),
         edge_label_background: gray(0.06),

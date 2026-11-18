@@ -19,6 +19,8 @@ pub struct FlowColors {
     pub group: Hsla,
     /// The border of what's selected, the selected edges, and a connection about to be made.
     pub selected: Hsla,
+    /// The ring round the node or edge the keyboard is on.
+    pub focus: Hsla,
     pub edge: Hsla,
     pub edge_label: Hsla,
     pub edge_label_background: Hsla,
@@ -129,6 +131,7 @@ impl FlowColors {
             muted_text: c.muted_foreground,
             group: c.muted_foreground.opacity(0.08),
             selected,
+            focus: c.ring,
             edge: c.muted_foreground,
             edge_label: c.foreground,
             edge_label_background: c.background,
