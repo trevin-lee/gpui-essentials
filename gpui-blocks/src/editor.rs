@@ -940,6 +940,11 @@ impl Editor {
             if state.is_readonly() || !state.focus_handle(cx).is_focused(window) {
                 return false;
             }
+            // A web address over selected words links them: the editor's own paste does that.
+            let text = cx.read_from_clipboard().and_then(|item| item.text());
+            if text.is_some_and(|text| state.pastes_as_link(&text)) {
+                return false;
+            }
         }
         let Some(markdown) = read(cx)
             .filter(|html| html.len() <= MAX_PASTED_HTML)
