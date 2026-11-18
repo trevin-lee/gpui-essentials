@@ -196,6 +196,10 @@ pub(crate) struct Geo {
     pub touch: bool,
     /// The week's first day, which the year view's months start their rows on.
     pub week_start: Weekday,
+    /// Whether Saturday and Sunday get columns. Without them their columns are drawn no wide,
+    /// so the days' numbering (and the layout) stays a run of dates, and only where a column
+    /// is on screen changes: `col_x`, `col_at` and `shown` are the one place that knows.
+    pub weekends: bool,
 }
 
 /// The year view's twelve months: each a name, a row of weekday letters and six rows of
@@ -263,12 +267,54 @@ impl Geo {
         f32::from(self.grid_bottom - self.grid_top) / f32::from(self.hour_h) * 60.
     }
 
-    fn col_at(&self, x: Pixels) -> i32 {
-        (f32::from(x - self.left) / f32::from(self.col_w)).floor() as i32
+    /// Whether a column is drawn: every day's is, but Saturday's and Sunday's when weekends
+    /// are hidden.
+    pub(crate) fn shown(&self, col: i32) -> bool {
+        day_shown(self.weekends, self.first + Duration::days(col as i64))
     }
 
+    /// How many drawn columns are left of `col` (counting back from the first for one before
+    /// it).
+    fn shown_before(&self, col: i32) -> i32 {
+        if self.weekends {
+            col
+        } else if col >= 0 {
+            (0..col).filter(|&c| self.shown(c)).count() as i32
+        } else {
+            -((col..0).filter(|&c| self.shown(c)).count() as i32)
+        }
+    }
+
+    /// The drawn column under `x`.
+    fn col_at(&self, x: Pixels) -> i32 {
+        let k = (f32::from(x - self.left) / f32::from(self.col_w)).floor() as i32;
+        if self.weekends {
+            return k;
+        }
+        let (mut col, step) = if k >= 0 { (0, 1) } else { (-1, -1) };
+        loop {
+            if self.shown(col) && self.shown_before(col) == k {
+                return col;
+            }
+            col += step;
+        }
+    }
+
+    /// `col` kept to the drawn columns from 0 to `last`: past either end, the nearest drawn one.
+    fn clamp_col(&self, col: i32, last: i32) -> i32 {
+        let mut col = col.clamp(0, last);
+        while !self.shown(col) && col > 0 {
+            col -= 1;
+        }
+        while !self.shown(col) && col < last {
+            col += 1;
+        }
+        col
+    }
+
+    /// Where a column starts. A hidden one starts (and ends) where the next drawn one starts.
     pub(crate) fn col_x(&self, col: i32) -> Pixels {
-        self.left + self.col_w * col as f32
+        self.left + self.col_w * self.shown_before(col) as f32
     }
 
     pub(crate) fn date(&self, col: i32) -> NaiveDate {
@@ -283,7 +329,7 @@ impl Geo {
     pub fn pos(&self, p: Point<Pixels>, area: Area) -> (NaiveDate, f32) {
         match area {
             Area::Grid | Area::AllDay => {
-                let col = self.col_at(p.x).clamp(0, self.days as i32 - 1);
+                let col = self.clamp_col(self.col_at(p.x), self.days as i32 - 1);
                 let minute = if area == Area::Grid {
                     self.minute_at(p.y).clamp(0., time::DAY_MINUTES)
                 } else {
@@ -292,7 +338,7 @@ impl Geo {
                 (self.date(col), minute)
             }
             Area::Month => {
-                let col = self.col_at(p.x).clamp(0, 6);
+                let col = self.clamp_col(self.col_at(p.x), 6);
                 let row =
                     (f32::from(p.y - self.head_bottom) / f32::from(self.row_h)).floor() as i32;
                 let row = row.clamp(0, self.rows as i32 - 1);
@@ -399,7 +445,7 @@ impl Geo {
 
     pub fn point_at(&self, date: NaiveDate, minute: f32) -> Option<Point<Pixels>> {
         let i = (date - self.first).num_days() as i32;
-        if i < 0 || i >= self.days as i32 {
+        if i < 0 || i >= self.days as i32 || !self.shown(i) {
             return None;
         }
         match self.kind {
@@ -480,6 +526,8 @@ pub(crate) struct Scene {
     /// The time grid's scroll bar: hidden (None), shown after a scroll (Some(false)), or
     /// shown wider while the pointer is on it or drags it (Some(true)).
     pub scrollbar: Option<bool>,
+    /// Whether Saturday and Sunday get columns (see [`Geo::weekends`]).
+    pub weekends: bool,
 }
 
 impl Scene {
@@ -531,9 +579,10 @@ impl Scene {
         self.options.dim_past && chip.end <= self.now
     }
 
+    /// Today's column, if it's on screen: not when it's a hidden weekend day.
     fn today_col(&self) -> Option<i32> {
         let i = (self.today - self.first).num_days();
-        (i >= 0 && i < self.days as i64).then_some(i as i32)
+        (i >= 0 && i < self.days as i64 && day_shown(self.weekends, self.today)).then_some(i as i32)
     }
 }
 
@@ -569,7 +618,10 @@ fn geometry(
                 .max(1);
             let all_day_bottom = head_bottom + u(LANE * lanes as f32 + 8.);
             let hour_h = u(scene.options.hour_height.max(8.));
-            let col_w = (bounds.size.width - gutter) / scene.days.max(1) as f32;
+            let shown = (0..scene.days as i64)
+                .filter(|&i| day_shown(scene.weekends, scene.first + Duration::days(i)))
+                .count();
+            let col_w = (bounds.size.width - gutter) / shown.max(1) as f32;
             let mut geo = Geo {
                 kind: Kind::Grid,
                 bounds,
@@ -590,6 +642,7 @@ fn geometry(
                 row_h: px(0.),
                 touch: scene.options.touch,
                 week_start: scene.options.week_start,
+                weekends: scene.weekends,
             };
             let shown = geo.visible_minutes();
             let max = (time::DAY_MINUTES - shown).max(0.);
@@ -608,6 +661,7 @@ fn geometry(
         Kind::Month => {
             let head_bottom = bounds.top() + u(MONTH_HEAD);
             let rows = (scene.days / 7).max(1);
+            let shown = if scene.weekends { 7. } else { 5. };
             Geo {
                 kind: Kind::Month,
                 bounds,
@@ -617,7 +671,7 @@ fn geometry(
                 left: bounds.left(),
                 gutter: bounds.left(),
                 second: px(0.),
-                col_w: bounds.size.width / 7.,
+                col_w: bounds.size.width / shown,
                 head_bottom,
                 all_day_bottom: head_bottom,
                 grid_top: head_bottom,
@@ -628,6 +682,7 @@ fn geometry(
                 row_h: (bounds.bottom() - head_bottom) / rows as f32,
                 touch: scene.options.touch,
                 week_start: scene.options.week_start,
+                weekends: scene.weekends,
             }
         }
         Kind::Agenda | Kind::Year => Geo {
@@ -650,6 +705,7 @@ fn geometry(
             row_h: px(0.),
             touch: scene.options.touch,
             week_start: scene.options.week_start,
+            weekends: true,
         },
     }
 }
@@ -1358,6 +1414,21 @@ impl Ink<'_> {
     }
 }
 
+/// Whether a day gets a column: every day does, but Saturday and Sunday only with `weekends`.
+pub(crate) fn day_shown(weekends: bool, d: NaiveDate) -> bool {
+    weekends || !is_weekend(d)
+}
+
+/// `date` moved `days` days, and on past any hidden weekend day the same way: where the arrow
+/// keys take a selection, or a keyboard drag, so they never land on a day with no column.
+pub(crate) fn step_days(weekends: bool, date: NaiveDate, days: i64) -> NaiveDate {
+    let mut d = date + Duration::days(days);
+    while days != 0 && !day_shown(weekends, d) {
+        d += Duration::days(days.signum());
+    }
+    d
+}
+
 fn is_weekend(d: NaiveDate) -> bool {
     matches!(d.weekday(), Weekday::Sat | Weekday::Sun)
 }
@@ -1812,7 +1883,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
 
     // Weekends, under everything.
     for i in 0..days {
-        if is_weekend(geo.date(i)) {
+        if is_weekend(geo.date(i)) && geo.shown(i) {
             let x = geo.col_x(i);
             ink.fill(
                 Bounds::from_corners(point(x, geo.head_bottom), point(x + geo.col_w, b.bottom())),
@@ -1850,6 +1921,9 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                         ),
                     ),
                 };
+                if !geo.shown(*col as i32) {
+                    continue;
+                }
                 let x = geo.col_x(*col as i32);
                 let band = Bounds::from_corners(
                     point(x + px(1.), geo.y_of(from as f32)),
@@ -1888,7 +1962,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
             // The selected slot.
             if let Some(Selection::Slot { date, minute }) = &scene.selection {
                 let i = (*date - scene.first).num_days() as i32;
-                if (0..days).contains(&i) {
+                if (0..days).contains(&i) && geo.shown(i) {
                     let slot = scene.options.slot_minutes.max(1) as f32;
                     let x = geo.col_x(i);
                     let rect = Bounds::from_corners(
@@ -1936,6 +2010,9 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 let top = geo.y_of(piece.top);
                 let bottom = geo.y_of(piece.bottom.max(piece.top + min));
                 if bottom < geo.grid_top || top > b.bottom() {
+                    continue;
+                }
+                if !geo.shown(piece.col as i32) {
                     continue;
                 }
                 let chip = &scene.laid.chips[piece.chip];
@@ -2014,7 +2091,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 let mut d = d0;
                 while d <= d1 {
                     let i = (d - scene.first).num_days() as i32;
-                    if (0..days).contains(&i) {
+                    if (0..days).contains(&i) && geo.shown(i) {
                         let top = time::wall_minutes(start, d, tz);
                         let bottom = time::wall_minutes(end, d, tz).max(top + min);
                         let x0 = geo.col_x(i);
@@ -2061,11 +2138,16 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
 
     // Lines between days, through the all-day row and the grid.
     for i in 0..days {
-        ink.vline(geo.col_x(i), geo.head_bottom, b.bottom(), c.line);
+        if geo.shown(i) {
+            ink.vline(geo.col_x(i), geo.head_bottom, b.bottom(), c.line);
+        }
     }
 
     // The head: each day's name and date.
     for i in 0..days {
+        if !geo.shown(i) {
+            continue;
+        }
         let date = geo.date(i);
         let x = geo.col_x(i) + ink.u(10.);
         let mid = b.top() + ink.u(HEAD) / 2.;
@@ -2164,7 +2246,7 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         );
     }
     for (i, f) in fits.iter().enumerate() {
-        if f.hidden > 0 {
+        if f.hidden > 0 && geo.shown(i as i32) {
             let x = geo.col_x(i as i32);
             let y = row_top(f.shown_rows);
             let label = more_label(ink, f.hidden, geo.col_w - ink.u(10.));
@@ -2560,6 +2642,10 @@ fn paint_span(
         let open_right = z == span.last && span.cont_right;
         let x0 = geo.col_x(a) + if open_left { px(0.) } else { ink.u(3.) };
         let x1 = geo.col_x(z + 1) - if open_right { px(0.) } else { ink.u(4.) };
+        // Only on hidden weekend days: nothing to draw.
+        if geo.col_x(z + 1) <= geo.col_x(a) {
+            continue;
+        }
         let rect = Bounds::from_corners(point(x0, top), point(x1, top + lane_h - ink.u(2.)));
         ink.mark = scene.mark(chip);
         let links = if span.dot {
@@ -2758,7 +2844,7 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
     ink.fill(b, c.background);
 
     // The weekday names.
-    for col in 0..7 {
+    for col in (0..7).filter(|&c| geo.shown(c)) {
         let date = geo.date(col);
         ink.text(
             time::weekday_name(date.weekday(), true),
@@ -2781,7 +2867,7 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         .map(|g| time::event_days(&g.time, scene.options.time_zone));
     for row in 0..geo.rows {
         let top = geo.row_top(row);
-        for col in 0..7 {
+        for col in (0..7).filter(|&c| geo.shown(c)) {
             let i = row as i32 * 7 + col;
             let date = geo.date(i);
             let x = geo.col_x(col);
@@ -2848,7 +2934,7 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
     for row in 0..geo.rows {
         ink.hline(b.left(), b.right(), geo.row_top(row), c.line);
     }
-    for col in 1..7 {
+    for col in (1..7).filter(|&c| geo.shown(c) && geo.col_x(c) > b.left()) {
         ink.vline(geo.col_x(col), geo.head_bottom, b.bottom(), c.line);
     }
 
@@ -2873,7 +2959,7 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
             paint_span(ink, scene, geo, shared, &moved, &fits, top, Area::Month);
         }
         for (col, f) in fits.iter().enumerate() {
-            if f.hidden > 0 {
+            if f.hidden > 0 && geo.shown(col as i32) {
                 let x = geo.col_x(col as i32);
                 let y = content_top + lane_h * f.shown_rows as f32;
                 let label = more_label(ink, f.hidden, geo.col_w - ink.u(10.));
