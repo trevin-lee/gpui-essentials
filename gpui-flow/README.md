@@ -376,8 +376,11 @@ made.
   draws where it would land, at its zoom and on its grid; a drop sends `FlowEvent::NodeDropped`
   with that corner in the flow, for the host to add (`item.node_at(id, position)`). Held near
   the pane's edges it pans the canvas (gpui-dnd's `auto_scroll_zone`). Dropped
-  anywhere else, it slides back to the palette. The window needs a `gpui_dnd::DndProvider`; the
-  example has a palette beside its canvas.
+  anywhere else, it slides back to the palette. By keyboard, Tab reaches a palette entry and
+  Space picks it up; the arrows bring it onto the pane, then move it a grid step at a time (past
+  the pane's edge they pan it), each step said in the flow's words ("Note. Position, x: 290,
+  y: 280"); Space drops it and Escape puts it back. The window needs a `gpui_dnd::DndProvider`;
+  the example has a palette beside its canvas.
 
 ## License
 

@@ -1575,6 +1575,53 @@ impl Flow {
         crate::palette::landing(item, self.screen_to_flow(at), |p| self.snapped(p))
     }
 
+    /// A keyboard step of a palette item over the pane: a grid step in `direction`, at the
+    /// zoom, from `at`. A step that would leave the pane pans it instead.
+    fn palette_step(
+        &mut self,
+        at: Point<Pixels>,
+        direction: Point<f32>,
+        pane: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> Point<Pixels> {
+        let v = self.viewport;
+        let grid = |g: f32| if g.is_finite() && g > 0. { g } else { 15. };
+        let (gx, gy) = self.options.snap_grid;
+        let by = point(
+            px(grid(gx) * v.zoom * direction.x),
+            px(grid(gy) * v.zoom * direction.y),
+        );
+        let next = at + by;
+        if pane.contains(&next) {
+            return next;
+        }
+        self.set_viewport(
+            Viewport::new(v.x - f32::from(by.x), v.y - f32::from(by.y), v.zoom),
+            cx,
+        );
+        at
+    }
+
+    /// What a keyboard drag of a palette item says over the pane, and as it's dropped, in the
+    /// words of the flow's moves ("Moved Start. New position, x: 105, y: 100").
+    fn palette_sentence(
+        &self,
+        item: &FlowPaletteItem,
+        at: Point<Pixels>,
+        when: gpui_dnd::Said,
+    ) -> SharedString {
+        let p = self.palette_landing(item, at);
+        let (x, y) = (p.x.round(), p.y.round());
+        match when {
+            gpui_dnd::Said::Over => format!("{}. Position, x: {x}, y: {y}", item.name).into(),
+            gpui_dnd::Said::Dropped => {
+                format!("Dropped {}. Position, x: {x}, y: {y}", item.name).into()
+            }
+            // The provider's own: put back.
+            gpui_dnd::Said::Cancelled => SharedString::default(),
+        }
+    }
+
     /// A flow point as a point in the window.
     pub fn flow_to_screen(&self, position: XY) -> Point<Pixels> {
         let p = self.viewport.to_pane(position);
@@ -6976,10 +7023,30 @@ impl Render for Flow {
         // The pane takes a host's palette items (gpui-dnd's drags): the ghost above follows
         // them, and a drop is the host's to add.
         let takes = self.options.pointer_mode != PointerMode::Off;
-        let (hover_flow, drop_flow) = (this.clone(), this);
+        let (hover_flow, drop_flow) = (this.clone(), this.clone());
+        let (step_flow, say_flow) = (this.clone(), this);
         let target = gpui_dnd::DropTarget::new()
             .accept::<FlowPaletteItem>()
             .can_drop(move |_, _, _| takes)
+            // By keyboard, the arrows move the drop a grid step, and each step is said in the
+            // flow's words.
+            .keyboard_step(move |_, monitor, direction, _, cx| {
+                let at = monitor.client_offset()?;
+                let bounds = monitor.bounds();
+                step_flow
+                    .update(cx, |flow, cx| flow.palette_step(at, direction, bounds, cx))
+                    .ok()
+            })
+            .say(move |item, monitor, when, cx| {
+                let (Some(flow), Some(item), Some(at)) = (
+                    say_flow.upgrade(),
+                    item.get::<FlowPaletteItem>(),
+                    monitor.client_offset(),
+                ) else {
+                    return SharedString::default();
+                };
+                flow.read(cx).palette_sentence(item, at, when)
+            })
             .on_hover(move |_, _, _, cx| {
                 hover_flow.update(cx, |_, cx| cx.notify()).ok();
             })

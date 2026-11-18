@@ -1,7 +1,9 @@
 //! Palette drops on gpui-dnd: a host's palette item dragged onto the pane lands where the
 //! pointer is in the flow, whatever the zoom, and on the grid when snapping is on; the flow
-//! draws where it would land as it's dragged; one held near the pane's edge pans it; and one
-//! dropped off the pane springs back, adding nothing.
+//! draws where it would land as it's dragged; one held near the pane's edge pans it; one
+//! dropped off the pane springs back, adding nothing; and by keyboard, Tab and Space pick an
+//! item up, the arrows move it onto the pane and a grid step at a time, each step said in the
+//! flow's words, and Space drops it.
 
 mod common;
 
@@ -80,6 +82,49 @@ fn open(
     draw(vcx);
     draw(vcx);
     (flow, dropped, vcx)
+}
+
+/// As `open`, inside gpui-core's `Root`, which moves the focus with Tab, as in an app.
+fn open_in_root(
+    cx: &mut TestAppContext,
+    build: impl FnOnce(Flow) -> Flow + 'static,
+) -> (Entity<Flow>, Dropped, &mut VisualTestContext) {
+    cx.update(|cx| {
+        gpui_core::init(cx);
+        gpui_flow::init(cx);
+    });
+    let made = Rc::new(RefCell::new(None));
+    let m = made.clone();
+    let (_, vcx) = cx.add_window_view(move |window, cx| {
+        let flow = cx.new(|cx| build(Flow::new(cx)));
+        *m.borrow_mut() = Some(flow.clone());
+        gpui_core::Root::new(cx.new(|_| Host { flow }), window, cx)
+    });
+    vcx.simulate_resize(size(px(800.), px(600.)));
+    vcx.update(|window, _| window.activate_window());
+    let flow = made.borrow().clone().expect("made");
+    let dropped: Dropped = Rc::default();
+    vcx.update(|_, cx| {
+        let seen = dropped.clone();
+        cx.subscribe(&flow, move |_, event: &FlowEvent, _| {
+            if let FlowEvent::NodeDropped { item, position } = event {
+                seen.borrow_mut().push((item.clone(), *position));
+            }
+        })
+        .detach();
+    });
+    draw(vcx);
+    draw(vcx);
+    (flow, dropped, vcx)
+}
+
+fn keys(cx: &mut VisualTestContext, keys: &str) {
+    cx.simulate_keystrokes(keys);
+    draw(cx);
+}
+
+fn said(cx: &mut VisualTestContext) -> Option<String> {
+    cx.update(|window, cx| gpui_dnd::announcement(window, cx).map(|s| s.to_string()))
 }
 
 /// Presses on the palette's note and drags it to `to`, without letting go.
@@ -242,4 +287,78 @@ fn held_near_the_panes_edge_it_pans_the_canvas(cx: &mut TestAppContext) {
         close(position.x, landing.x) && close(position.y, landing.y),
         "under the pointer in the panned flow: {position:?}, {landing:?}"
     );
+}
+
+#[gpui::test]
+fn by_keyboard_the_arrows_step_it_over_the_pane_and_say_where(cx: &mut TestAppContext) {
+    let (_, dropped, cx) = open_in_root(cx, |f| f.with_viewport(Viewport::new(0., 0., 1.)));
+    keys(cx, "tab space");
+    assert_eq!(
+        said(cx).as_deref(),
+        Some("Picked up Note. Arrow keys move it, Space drops it, Escape cancels.")
+    );
+    let pane = cx.debug_bounds("flow-palette-ghost");
+    assert!(pane.is_none(), "not over the pane yet");
+
+    // Onto the pane, at its middle: (460, 300) in the window, (340, 300) in the flow.
+    keys(cx, "right");
+    assert_eq!(said(cx).as_deref(), Some("Note. Position, x: 290, y: 280"));
+    assert!(
+        cx.debug_bounds("flow-palette-ghost").is_some(),
+        "drawn there"
+    );
+
+    // A grid step (15) at a time.
+    keys(cx, "right");
+    assert_eq!(said(cx).as_deref(), Some("Note. Position, x: 305, y: 280"));
+    keys(cx, "down");
+    assert_eq!(said(cx).as_deref(), Some("Note. Position, x: 305, y: 295"));
+    keys(cx, "space");
+    assert_eq!(
+        said(cx).as_deref(),
+        Some("Dropped Note. Position, x: 305, y: 295")
+    );
+    assert_eq!(dropped.borrow()[0].1, xy(305., 295.));
+}
+
+#[gpui::test]
+fn zoomed_in_a_keyboard_step_is_still_a_grid_step_of_the_flow(cx: &mut TestAppContext) {
+    let (_, dropped, cx) = open_in_root(cx, |f| f.with_viewport(Viewport::new(0., 0., 2.)));
+    // The pane's middle is (170, 150) in the flow.
+    keys(cx, "tab space right");
+    assert_eq!(said(cx).as_deref(), Some("Note. Position, x: 120, y: 130"));
+    keys(cx, "left up space");
+    assert_eq!(dropped.borrow()[0].1, xy(105., 115.));
+}
+
+#[gpui::test]
+fn a_keyboard_step_past_the_panes_edge_pans_it(cx: &mut TestAppContext) {
+    let (flow, dropped, cx) = open_in_root(cx, |f| f.with_viewport(Viewport::new(0., 0., 1.)));
+    keys(cx, "tab space right");
+    // 300 px to the pane's bottom: twenty steps reach it, and the rest pan.
+    for _ in 0..25 {
+        keys(cx, "down");
+    }
+    let v = flow.read_with(cx, |f, _| f.viewport());
+    assert!(v.y < 0., "panned up to show what's below: {v:?}");
+    keys(cx, "space");
+    let (_, position) = dropped.borrow()[0].clone();
+    assert_eq!(position, xy(290., 280. + 25. * 15.));
+}
+
+#[gpui::test]
+fn escape_puts_it_back_and_adds_nothing(cx: &mut TestAppContext) {
+    let (_, dropped, cx) = open_in_root(cx, |f| f);
+    keys(cx, "tab space right escape");
+    // Said once the card has slid back.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(250));
+    draw(cx);
+    assert!(dropped.borrow().is_empty());
+    assert_eq!(
+        said(cx).as_deref(),
+        Some("Cancelled. Note is back where it was."),
+        "the provider's own sentence"
+    );
+    assert!(cx.debug_bounds("flow-palette-ghost").is_none());
 }
