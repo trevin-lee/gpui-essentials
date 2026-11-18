@@ -43,6 +43,7 @@
 
 // Resolve existing GPUI paths and macro expansions through the Kit facade.
 
+mod callout;
 mod columns;
 mod command;
 mod cull;
@@ -84,6 +85,9 @@ mod tests;
 
 pub mod surfaces;
 
+pub use callout::{
+    CALLOUT_COLORS, callout_color_ok, callout_icon_ok, callout_look_comment, read_callout_look,
+};
 pub use columns::{columns_markdown, width_text, written_widths};
 pub use command::{CommandError, EditorCommand};
 pub use document::{BlockRef, DocumentRef};

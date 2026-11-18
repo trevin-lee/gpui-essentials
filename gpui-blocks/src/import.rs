@@ -19,7 +19,7 @@
 //!   ([`Targets::file`]), or are left as their description.
 //! - **Callouts:** Obsidian's (`> [!tip] Title`, with any of its names) become GitHub's five,
 //!   with the title in bold; a foldable one (`[!note]-`) becomes a toggle. Notion's `<aside>`
-//!   becomes a note callout.
+//!   becomes a note callout, with the emoji it opens with as its icon.
 //! - **Highlights:** Obsidian's `==text==` becomes `<mark>text</mark>`.
 //! - Code is left as it is, and a byte order mark and Windows line endings are dropped.
 //!
@@ -186,7 +186,7 @@ fn fenced(lines: &[&str]) -> Vec<bool> {
         .collect()
 }
 
-/// Notion's `<aside>` callouts as note callouts.
+/// Notion's `<aside>` callouts as note callouts, the emoji that opens one as its icon.
 fn asides(body: &str) -> String {
     let lines: Vec<&str> = body.split('\n').collect();
     let code = fenced(&lines);
@@ -198,8 +198,26 @@ fn asides(body: &str) -> String {
             if let Some(end) = end {
                 let inner: Vec<&str> = lines[ix + 1..end].to_vec();
                 let inner = trim_blank(&inner);
-                out.push("> [!NOTE]".into());
-                out.extend(inner.iter().map(|l| quote_line(l)));
+                // Notion writes the icon first: `💡 Remember this`. A letter isn't one.
+                let icon = inner.first().and_then(|first| {
+                    let (icon, rest) = first.split_once(' ')?;
+                    (!icon.is_ascii() && markdown_editor::callout_icon_ok(icon))
+                        .then_some((icon, rest))
+                });
+                match icon {
+                    Some((icon, rest)) => {
+                        out.push(format!(
+                            "> [!NOTE]{}",
+                            markdown_editor::callout_look_comment(Some(icon), None)
+                        ));
+                        out.push(quote_line(rest));
+                        out.extend(inner[1..].iter().map(|l| quote_line(l)));
+                    }
+                    None => {
+                        out.push("> [!NOTE]".into());
+                        out.extend(inner.iter().map(|l| quote_line(l)));
+                    }
+                }
                 ix = end + 1;
                 continue;
             }
@@ -286,11 +304,16 @@ fn callouts(body: &str) -> String {
                 out.push("</details>".into());
             }
             None => {
-                // A quote callout is a plain quote.
+                // A quote callout is a plain quote. A callout's look (as gpui-blocks writes
+                // it) stays its look, not a title.
+                let look = alert(kind).and(markdown_editor::read_callout_look(title));
                 if let Some(name) = alert(kind) {
-                    out.push(format!("> [!{name}]"));
+                    let comment = look.as_ref().map_or(String::new(), |(icon, color)| {
+                        markdown_editor::callout_look_comment(icon.as_deref(), color.as_deref())
+                    });
+                    out.push(format!("> [!{name}]{comment}"));
                 }
-                if !title.is_empty() {
+                if look.is_none() && !title.is_empty() {
                     out.push(format!("> **{title}**"));
                     // Its own paragraph, not the start of the first line's.
                     if body.iter().any(|l| !l.trim().is_empty()) {
@@ -771,7 +794,7 @@ mod tests {
         assert_eq!(note.title, "Weekly review");
         assert_eq!(
             note.document.to_markdown(),
-            "See [the roadmap](doc:road) and [plan](doc:plan).\n\n![Chart](https://files.example/pic.png)\n\nGone\n\nOutside [Web](https://example.com)\n\n> [!NOTE]\n> 💡 Remember this"
+            "See [the roadmap](doc:road) and [plan](doc:plan).\n\n![Chart](https://files.example/pic.png)\n\nGone\n\nOutside [Web](https://example.com)\n\n> [!NOTE] <!-- icon:💡 -->\n> Remember this"
         );
         assert_eq!(note.document.links(), ["road", "plan"]);
     }
@@ -794,6 +817,15 @@ mod tests {
             "{md}"
         );
         assert!(md.contains("> [!TIP]\n> **Do this**\n>\n> First"), "{md}");
+        // A look gpui-blocks wrote stays a look; an invalid one is a title.
+        assert_eq!(
+            callouts("> [!tip] <!-- icon:💡 color:yellow -->\n> First"),
+            "> [!TIP] <!-- icon:💡 color:yellow -->\n> First"
+        );
+        assert_eq!(
+            callouts("> [!tip] <!-- color:teal -->\n> First"),
+            "> [!TIP]\n> **<!-- color:teal -->**\n>\n> First"
+        );
         assert!(
             md.contains("<details>\n<summary>Folded</summary>\n\nHidden body\n\n</details>"),
             "{md}"

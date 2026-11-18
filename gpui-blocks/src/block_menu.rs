@@ -1,10 +1,13 @@
 //! The block menu: a click on a block's ⋮⋮ grip (a press that doesn't drag) opens it beside the
-//! grip, to turn the block into another kind, colour all its text, duplicate it or delete it. On touch, where there's
-//! no grip, the long press's edit menu has Block…, which opens the same entries in a sheet.
+//! grip, to turn the block into another kind, colour all its text, duplicate it or delete it,
+//! and for a callout to set its icon and colour. On touch, where there's no grip, the long
+//! press's edit menu has Block…, which opens the same entries in a sheet.
 
 use gpui::*;
 use gpui_core::{ActiveTheme as _, IconName, Popover, PopupMenu, PopupMenuItem, Sheet};
-use markdown_editor::{BlockId, BlockPosition, BlockSelection, EditorCommand};
+use markdown_editor::{
+    BACKGROUNDS, BlockId, BlockPosition, BlockSelection, CALLOUT_COLORS, EditorCommand,
+};
 
 use crate::Editor;
 use crate::format_bar::{Paint, color_entries};
@@ -131,6 +134,39 @@ impl Editor {
             cx.notify();
             return;
         }
+        // A callout's icon or colour: only the menu's own, valid values.
+        if let Some(look) = id.strip_prefix("callout-") {
+            let (icon, color) = self.callout_look(block, cx).unwrap_or_default();
+            let look = match look.split_once('-') {
+                Some(("icon", "none")) => Some((None, color)),
+                Some(("icon", ix)) => ix
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|ix| CALLOUT_ICONS.get(ix))
+                    .map(|(icon, _)| (Some(SharedString::from(*icon)), color)),
+                Some(("color", "none")) => Some((icon, None)),
+                Some(("color", name)) => CALLOUT_COLORS
+                    .iter()
+                    .find(|c| **c == name)
+                    .map(|c| (icon, Some(SharedString::from(*c)))),
+                _ => None,
+            };
+            self.state.update(cx, |state, cx| {
+                if let Some((icon, color)) = look {
+                    let _ = state.run(
+                        EditorCommand::SetCalloutLook {
+                            callout: block,
+                            icon,
+                            color,
+                        },
+                        cx,
+                    );
+                }
+                state.focus(window, cx);
+            });
+            cx.notify();
+            return;
+        }
         let (first, last) = self.menu_blocks(block, cx);
         // Color: the blocks' text, all of it, as Notion colours a block.
         if let Some((paint, on)) = Paint::of_menu_item(id) {
@@ -168,6 +204,22 @@ impl Editor {
             });
         }
         cx.notify();
+    }
+
+    /// `block`'s icon and colour when it's a callout.
+    fn callout_look(
+        &self,
+        block: BlockId,
+        cx: &App,
+    ) -> Option<(Option<SharedString>, Option<SharedString>)> {
+        let state = self.state.read(cx);
+        let doc = state.model().document();
+        let b = doc.block(block)?;
+        b.callout_name()?;
+        Some((
+            b.callout_icon().map(SharedString::from),
+            b.callout_color().map(SharedString::from),
+        ))
     }
 
     /// The blocks `block`'s menu acts on, first and last: the selected blocks when `block` is
@@ -286,6 +338,23 @@ impl Editor {
                         None,
                     )),
             )
+            .items(self.callout_look(block, cx).map(|(icon, _)| {
+                PopupMenuItem::new("callout-icon", "Icon")
+                    .icon(IconName::FaceSlightlySmiling)
+                    .submenu(icon_entries(
+                        PopupMenu::new("block-menu-icon"),
+                        icon.as_deref(),
+                    ))
+            }))
+            .items(self.callout_look(block, cx).map(|(_, color)| {
+                PopupMenuItem::new("callout-color", "Callout color")
+                    .icon(IconName::PaintBucket)
+                    .submenu(callout_color_entries(
+                        PopupMenu::new("block-menu-callout-color"),
+                        cx.theme(),
+                        color.as_deref(),
+                    ))
+            }))
             .items(self.copy_link_item())
             .item(
                 PopupMenuItem::new("duplicate", "Duplicate")
@@ -349,6 +418,15 @@ impl Editor {
                 .item(PopupMenuItem::new("delete", "Delete").icon(IconName::Trash));
             // Its colours last, listed in it as Turn into's are (a sheet has no room for a
             // submenu), so the long list doesn't push Duplicate and Delete out of reach.
+            let menu = match self.callout_look(block, cx) {
+                Some((icon, color)) => callout_color_entries(
+                    icon_entries(menu.separator().heading("Icon"), icon.as_deref())
+                        .heading("Callout color"),
+                    &theme,
+                    color.as_deref(),
+                ),
+                None => menu,
+            };
             let menu = if has_text {
                 color_entries(menu.separator(), &theme, None)
             } else {
@@ -392,4 +470,85 @@ fn turn_into_items() -> Vec<EditorCommand> {
         .into_iter()
         .map(|(_, command)| command)
         .collect()
+}
+
+/// The icons the block menu offers a callout, with their names: Notion's usual ones, each a
+/// valid callout icon (one emoji).
+pub(crate) const CALLOUT_ICONS: [(&str, &str); 16] = [
+    ("💡", "Idea"),
+    ("📌", "Pin"),
+    ("ℹ️", "Information"),
+    ("⚠️", "Warning"),
+    ("❗", "Important"),
+    ("✅", "Done"),
+    ("❌", "No"),
+    ("❓", "Question"),
+    ("📝", "Note"),
+    ("🔥", "Fire"),
+    ("⭐", "Star"),
+    ("🚀", "Launch"),
+    ("📣", "Announcement"),
+    ("🔒", "Private"),
+    ("🐛", "Bug"),
+    ("🎯", "Goal"),
+];
+
+/// The callout icons as menu entries, `current` checked; "No icon" first.
+fn icon_entries(menu: PopupMenu, current: Option<&str>) -> PopupMenu {
+    let chip = |icon: &'static str| div().w(px(20.)).flex().justify_center().child(icon);
+    menu.item(PopupMenuItem::new("callout-icon-none", "No icon").checked(current.is_none()))
+        .items(CALLOUT_ICONS.iter().enumerate().map(|(ix, (icon, name))| {
+            PopupMenuItem::new(format!("callout-icon-{ix}"), *name)
+                .chip(chip(icon))
+                .checked(current == Some(*icon))
+        }))
+}
+
+/// The callout colours as menu entries with their swatches, `current` checked; "Default"
+/// (its kind's own) first.
+fn callout_color_entries(
+    menu: PopupMenu,
+    theme: &gpui_core::Theme,
+    current: Option<&str>,
+) -> PopupMenu {
+    let dark = theme.mode.is_dark();
+    let swatch = |fill: Hsla| {
+        div()
+            .size(px(20.))
+            .rounded(px(4.))
+            .border_1()
+            .border_color(theme.border)
+            .bg(fill)
+    };
+    menu.item(
+        PopupMenuItem::new("callout-color-none", "Default")
+            .chip(swatch(transparent_black()))
+            .checked(current.is_none()),
+    )
+    .items(
+        CALLOUT_COLORS
+            .iter()
+            .zip(BACKGROUNDS.iter())
+            .map(|(name, color)| {
+                PopupMenuItem::new(format!("callout-color-{name}"), color.name)
+                    .chip(swatch(color.fill(dark)))
+                    .checked(current == Some(*name))
+            }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::prelude::rust_2024::test;
+
+    #[test]
+    fn the_menu_offers_only_valid_looks() {
+        for (icon, _) in CALLOUT_ICONS {
+            assert!(markdown_editor::callout_icon_ok(icon), "{icon}");
+        }
+        for (name, color) in CALLOUT_COLORS.iter().zip(BACKGROUNDS.iter()) {
+            assert!(color.name.eq_ignore_ascii_case(name), "{name}");
+        }
+    }
 }

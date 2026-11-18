@@ -177,9 +177,15 @@ pub enum Kind {
     },
     /// Children: any blocks.
     Quote,
-    /// Children: any blocks. `name` is GitHub's alert name in lowercase, such as `note`.
+    /// Children: any blocks. `name` is GitHub's alert name in lowercase, such as `note`;
+    /// `icon` (one emoji) and `color` (one of [`markdown_editor::CALLOUT_COLORS`]) are its own
+    /// look over that kind's. An invalid icon or colour is read as none.
     Callout {
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
     },
     /// Children: the summary (a paragraph), then the body.
     Toggle {
@@ -629,6 +635,8 @@ fn block(b: BlockRef<'_>, ids: &mut Ids) -> Block {
         BlockKind::Callout => (
             Kind::Callout {
                 name: b.callout_name().unwrap_or("note").to_string(),
+                icon: b.callout_icon().map(str::to_string),
+                color: b.callout_color().map(str::to_string),
             },
             children(),
         ),
@@ -831,9 +839,13 @@ fn markdown(b: &Block) -> String {
                 .collect::<Vec<_>>(),
         ),
         Kind::Column { .. } => join(&b.children),
-        Kind::Callout { name } => {
+        Kind::Callout { name, icon, color } => {
             let name: String = name.chars().filter(char::is_ascii_alphanumeric).collect();
-            let marker = format!("> [!{}]", name.to_ascii_uppercase());
+            let marker = format!(
+                "> [!{}]{}",
+                name.to_ascii_uppercase(),
+                markdown_editor::callout_look_comment(icon.as_deref(), color.as_deref())
+            );
             let body = join(&b.children);
             if body.is_empty() {
                 marker
@@ -1165,6 +1177,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn callouts_keep_their_icon_and_colour() {
+        let source = "> [!TIP] <!-- icon:💡 color:yellow -->\n> Try it.";
+        round_trips(source);
+        let doc = Document::from_markdown(source, &[]);
+        assert_eq!(
+            doc.blocks[0].kind,
+            Kind::Callout {
+                name: "tip".into(),
+                icon: Some("💡".into()),
+                color: Some("yellow".into()),
+            }
+        );
+        round_trips("> [!NOTE] <!-- color:blue -->");
+        // From elsewhere: an invalid icon or colour is read as none.
+        let json = r#"{"format":"gpui-blocks","version":1,"blocks":[
+            {"id":"c","type":"callout","name":"note","icon":"two words","color":"teal",
+             "children":[{"id":"p","type":"paragraph","text":"a"}]}]}"#;
+        let doc = Document::from_json(json).unwrap();
+        assert_eq!(doc.to_markdown(), "> [!NOTE]\n> a");
+    }
+
     /// Every kind's `type` is one this version reads.
     #[test]
     fn every_kind_is_a_known_type() {
@@ -1179,6 +1213,8 @@ mod tests {
             Kind::Quote,
             Kind::Callout {
                 name: "note".into(),
+                icon: None,
+                color: None,
             },
             Kind::Toggle { open: true },
             Kind::List {
