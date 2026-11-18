@@ -789,8 +789,8 @@ touch while it's on, how it ends, the cursor, and timed scrolling.
 
 ## Proposal: gpui-blocks' block drags on gpui-dnd
 
-Not built; for the gpui-blocks agent's review, as #362 was for gpui-calendar. Building waits for
-that OK and for a quiet period in blocks' drag code. From a read of `engine/src/reorder.rs`,
+Not built. Reviewed by the gpui-blocks agent (#393), as #362 was by gpui-calendar's; building
+waits for a quiet period in blocks' drag code. From a read of `engine/src/reorder.rs`,
 `engine/src/side_drop.rs`, the block-drag half of `engine/src/state.rs` (`BlockDrag`,
 `begin_block_drag` to `finish_block_drag`, `touch_pressed`, `touch_moved`, `lift_block`,
 `lifted_touch`, `touch_ended`), the touch listeners in `engine/src/element.rs`, and the page
@@ -816,8 +816,9 @@ editor's grips, `scroll_near_edge` and `MoveBlockUp`/`Down` in `src/editor.rs`.
   - Reduced motion jumps, and nothing asks for frames once settled. The motion is springs, not
     timed curves, so a block caught mid-flight carries on.
 - **Side drops** (`side_drop.rs`).
-  - Moving at least 24 points sideways (or any drag out of a column), the pointer over a
-    block's left or right edge makes a row of two columns.
+  - Once the pointer has gone sideways (or for any drag out of a column), the pointer within
+    the side-drop reach `side_drop.rs` computes from a block's left or right edge makes a row of
+    two columns.
   - Over a row's edge or the gap between its columns, it adds a column, up to `MAX_COLUMNS`.
   - Inside a column, it drops among the column's blocks. Out of a column, it drops into the
     top level.
@@ -837,7 +838,9 @@ editor's grips, `scroll_near_edge` and `MoveBlockUp`/`Down` in `src/editor.rs`.
     down.
 - **Edge scrolling.** While blocks are dragged, the page editor requests a frame every frame
   and scrolls a step toward an edge the pointer is near (`scroll_near_edge`), then continues
-  the drag at the same pointer (`continue_block_drag`).
+  the drag at the same pointer (`continue_block_drag`). Blocks is making it stop asking for
+  frames when nothing scrolls, and moving `reorder.rs` to GPUI's clock (`web_time` on wasm),
+  itself, before any of this.
 - **Keys.** `MoveBlockUp` and `MoveBlockDown` move the caret's block, or the selected blocks,
   one place, instantly.
 - **Readonly** documents don't drag.
@@ -877,9 +880,9 @@ The engine keeps the document and the drawing; gpui-dnd takes the drag's life, a
   `can_drop` that takes only its own editor's blocks.
   - `on_hover` does what `block_drag_to` does now: velocity, `side_target_of`, `drop_gap`.
   - `on_drop` does what `finish_block_drag` does, and returns `Handled`.
-  - The columns aren't separate targets: the engine's side-drop geometry (edge reach, the
-    sideways rule, `MAX_COLUMNS`) is finer than nested targets would be, and it stays in
-    `side_drop.rs`.
+  - The columns aren't separate targets: the engine's side-drop geometry (the reach
+    `side_drop.rs` computes, the sideways rule, `MAX_COLUMNS`) is finer than nested targets
+    would be, and it stays in `side_drop.rs`.
 - **`SortableState` the engine drives.**
   - `reorder.rs` moves into gpui-dnd as `SortableState<K: Copy + Eq + Hash>`, generic over the
     key with its tests, as it already nearly is (only `BlockId` ties it to blocks).
@@ -907,43 +910,49 @@ The engine keeps the document and the drawing; gpui-dnd takes the drag's life, a
   and a tap calls `cancel`.
 - **Edge scrolling** becomes `.auto_scroll(&scroll, AutoScroll::vertical().for_items(..))` on
   the page's scroll container.
-  - That replaces the canvas that requests a frame every frame while a block is dragged, even
-    held still in the middle of the page, along with `block_drag_pointer` and
+  - That replaces blocks' own edge-scroll canvas, with `block_drag_pointer` and
     `continue_block_drag`.
   - gpui-dnd's tick hovers again after each step, so the gap follows the content scrolled
     under a still pointer, as `continue_block_drag` does now.
 - **An edit mid-drag** (the revision changed) calls `gpui_dnd::cancel`, deferred, and the
-  blocks spring back as now.
+  blocks spring back as now. Blocks defers edits it makes itself, such as applying an unfurl
+  answer, until no block drag is on, so this cancel is only for edits from outside.
 
 ### Keyboard block moves
 
 `MoveBlockUp` and `MoveBlockDown` stay as they are: one place, instantly, like a menu's Alt-↑↓.
-New is a pick-up, for moving a block or a run further or into columns, with the steps said:
+New is a pick-up, for moving a block or a run further or into columns, with each step said in
+blocks' words. Blocks' tests assert these strings.
 
 - **Picking up.**
-  - A key the blocks agent picks (or the block menu's Move, opened by keyboard) calls
-    `begin_at(.., Backend::Keyboard)` with the caret's block, or the selected run, as
-    `Press::label`.
-  - gpui-dnd says "Picked up {label}. Arrow keys move it, Space drops it, Escape cancels.".
-    The label is blocks' own: "Heading, Plans", "3 blocks".
+  - Space while blocks are selected (no new chord: ⌘⇧M is Notion's comment key). The desktop
+    block menu also gets a Move item.
+  - Either calls `begin_at(.., Backend::Keyboard)` with the selected run, and the label as
+    `Press::label`. The label is the kind plus up to 6 words ("Heading Plans for Q3"), or
+    "3 blocks".
+  - gpui-dnd says "Picked up {label}. Arrow keys move it, Space drops it, Escape cancels.",
+    which is its own sentence with blocks' label.
 - **Stepping.** The content target's `keyboard_step`:
   - ↑ and ↓ move to the previous or next gap between top-level blocks;
-  - → into the block's row, then a new column;
-  - ← back out.
+  - → into the neighbouring block's row, as a new column;
+  - ← back out of the columns.
   Each step is a `drop_gap` or side-drop target the engine works out. The page scrolls it into
   view, and the step returns the point where the drop line is.
-- **Saying it.** `DropTarget::say` (#385) gives blocks' sentences, word for word, built from the
-  drag and the document:
-  - "Plans, moving below Budget, 4 of 12";
-  - "3 blocks, moving into a new column beside Budget";
-  - "Plans, moved below Budget" on the drop.
-  The blocks agent owns the words, and its tests assert them.
+- **Saying it.** `DropTarget::say` (#385) gives blocks' sentences, word for word:
+  - a step: "{label}, below {neighbour}, {n} of {m}";
+  - into columns: "{label}, in a new column beside {neighbour}";
+  - out of columns: "{label}, out of the columns, below {neighbour}";
+  - the drop: "{label}, moved below {neighbour}", or "{label}, moved to the top" at index 0;
+  - a cancel: "{label}, put back". This needs `Said::Cancelled`, below.
 - **Dropping.** Space or Enter drops through the same `on_drop` as the pointer, as one undo
   step. Escape cancels, and the blocks spring back.
 
 ### What blocks gains
 
-- Escape during a pointer or touch drag, with the blocks springing back.
+- Escape during a pointer, touch or keyboard drag, with the blocks springing back. The editor
+  binds Escape to `SelectBlock`. During a drag, gpui-dnd takes Escape first (its keystroke
+  interceptor stops it), so it cancels the drag and doesn't also select the block. A test
+  checks that Escape mid-drag leaves the selection as it was.
 - A release outside the window drops where the pointer last was.
 - Edge scrolling that asks for no frames while nothing scrolls.
 - The cursor while dragging.
@@ -955,20 +964,27 @@ New is a pick-up, for moving a block or a run further or into columns, with the 
 
 1. `SortableState<K>`, from `reorder.rs`, with its tests.
 2. `Press::relative`, for a lifted-in-place block, with a test of a finger landing elsewhere.
+3. `Said::Cancelled`: on a keyboard drag's cancel, the target it was last over (here the
+   editor, which catches the drag outside) is asked for its own sentence ("{label}, put back"),
+   said in place of the provider's "Cancelled. … is back where it was.".
 
 Nothing else: the rest is `press_at`, `begin_at`, `cancel`, `catch_outside`, `auto_scroll`,
 `keyboard_step` and `say`, as calendar uses them.
 
 ### Order, once agreed and once blocks' drag code is quiet
 
-1. gpui-dnd: `SortableState` and `Press::relative`, with tests. Blocks keeps its own
-   `reorder.rs` until step 2.
+Agreed with the gpui-blocks agent (#393). Building starts after blocks' bookmarks and Page
+Up/Down PRs merge, when the lead says.
+
+
+1. gpui-dnd: `SortableState`, `Press::relative` and `Said::Cancelled`, with tests. Blocks keeps
+   its own `reorder.rs` until step 2.
 2. gpui-blocks, reviewed by the blocks agent:
    - grips, edge handles, touch lift and lift-in-place onto gpui-dnd;
    - the content as target, and edge scrolling as `auto_scroll`;
    - `reorder.rs` swapped for `SortableState<BlockId>`.
-   Its drag, touch and columns tests stay unchanged, with frame times before and after,
-   interleaved on the quiet Mac.
+   Its drag, touch and columns tests stay unchanged, plus one that Escape mid-drag leaves the
+   selection as it was, with frame times before and after, interleaved on the quiet Mac.
 3. Keyboard pick-up with blocks' sentences.
 
 ## Later: gpui-flow's canvas
