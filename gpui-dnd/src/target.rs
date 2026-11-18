@@ -25,8 +25,18 @@ type OnDrop = Rc<dyn Fn(&DragItem, &DropMonitor, &mut Window, &mut App) -> DropO
 type Anchor = Rc<dyn Fn(Bounds<Pixels>) -> Point<Pixels>>;
 type Slots = Rc<dyn Fn(&DragItem, Bounds<Pixels>) -> Vec<Point<Pixels>>>;
 type Describe = Rc<dyn Fn(&DragItem, &DropMonitor) -> SharedString>;
+type Say = Rc<dyn Fn(&DragItem, &DropMonitor, Said, &App) -> SharedString>;
 type Step =
     Rc<dyn Fn(&DragItem, &DropMonitor, Point<f32>, &mut Window, &mut App) -> Option<Point<Pixels>>>;
+
+/// When a keyboard drag says a target's own sentence ([`DropTarget::say`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Said {
+    /// The drag moved over it, or within it.
+    Over,
+    /// It was dropped on it.
+    Dropped,
+}
 
 /// A drop target (react-dnd's `useDrop`): which items a [`dnd`](crate::dnd) element takes, and
 /// what it does with them.
@@ -39,6 +49,7 @@ pub struct DropTarget {
     anchor: Option<Anchor>,
     slots: Option<Slots>,
     describe: Option<Describe>,
+    say: Option<Say>,
     pub(crate) step: Option<Step>,
     pub(crate) catch_outside: bool,
 }
@@ -139,6 +150,29 @@ impl DropTarget {
     ) -> Self {
         self.describe = Some(Rc::new(f));
         self
+    }
+
+    /// What a keyboard drag says over this target and when it's dropped on it, word for word,
+    /// in place of the provider's announcements ("Over {describe}.", "Dropped … on …"): for a
+    /// target whose own sentence says it all, in its own words and formats ("Standup, Tuesday
+    /// 9 to 9:30 AM, moving to Wednesday 10 AM"), read from its state. The drop's sentence is asked before
+    /// [`on_drop`](Self::on_drop) runs, while the target still has the drag.
+    pub fn say(
+        mut self,
+        f: impl Fn(&DragItem, &DropMonitor, Said, &App) -> SharedString + 'static,
+    ) -> Self {
+        self.say = Some(Rc::new(f));
+        self
+    }
+
+    pub(crate) fn sentence(
+        &self,
+        item: &DragItem,
+        monitor: &DropMonitor,
+        when: Said,
+        cx: &App,
+    ) -> Option<SharedString> {
+        self.say.as_ref().map(|f| f(item, monitor, when, cx))
     }
 
     /// Where a keyboard drag can put its pointer on this target.

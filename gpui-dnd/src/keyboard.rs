@@ -245,9 +245,17 @@ fn announce_over(window: &mut Window, cx: &mut App) {
         let over: Option<Rc<TargetRecord>> = drag.targets.last().cloned();
         (drag.snap.item.clone(), over)
     };
-    let name = over.as_ref().and_then(|t| target_name(t, &item, cx));
-    let said = announcements(window, cx).over.clone();
-    let text = said(&item, name.as_ref());
+    let own = over
+        .as_ref()
+        .and_then(|t| target_sentence(t, &item, crate::target::Said::Over, cx));
+    let text = match own {
+        Some(text) => text,
+        None => {
+            let name = over.as_ref().and_then(|t| target_name(t, &item, cx));
+            let said = announcements(window, cx).over.clone();
+            said(&item, name.as_ref())
+        }
+    };
     {
         let mut state = shared.borrow_mut();
         let Some(drag) = state.drag.as_mut() else {
@@ -276,6 +284,21 @@ pub(crate) fn target_name(
         .spec
         .description(item, &monitor)
         .or_else(|| target.label.clone())
+}
+
+/// The target's own sentence, if it [says](crate::DropTarget::say) one.
+pub(crate) fn target_sentence(
+    target: &TargetRecord,
+    item: &DragItem,
+    when: crate::target::Said,
+    cx: &App,
+) -> Option<SharedString> {
+    let monitor = DropMonitor {
+        monitor: DragMonitor::of(cx),
+        target: target.id.clone(),
+        bounds: target.bounds,
+    };
+    target.spec.sentence(item, &monitor, when, cx)
 }
 
 pub(crate) fn announcements(window: &Window, cx: &mut App) -> Announcements {

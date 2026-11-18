@@ -73,5 +73,5 @@ pub use sortable::{
 };
 pub use source::{Backend, DragEnd, DragSource, Preview, SharedSource, TouchActivation};
 pub use state::RETURN_DURATION;
-pub use target::{DropOutcome, DropTarget};
+pub use target::{DropOutcome, DropTarget, Said};
 pub use virtual_list::VirtualSortable;

@@ -313,6 +313,8 @@ pub(crate) struct EndInfo {
     pub target: Option<ElementId>,
     /// The target's label, for the announcement.
     pub target_label: Option<SharedString>,
+    /// The target's own sentence for the drop ([`DropTarget::say`](crate::DropTarget::say)).
+    pub said: Option<SharedString>,
     pub result: Option<DropResult>,
     pub cancelled: bool,
     pub backend: Backend,
