@@ -27,8 +27,13 @@ use super::properties::FieldFor;
 use super::table::{Action, Entry, Popover, Reopen, TableView, type_icon};
 use crate::model::{DateBucket, Edit, PropertyType, View, ViewType, new_id, truncate_chars};
 
-/// The types a view can be made as or changed to (galleries aren't drawn in v1).
-pub(crate) const VIEW_TYPES: &[ViewType] = &[ViewType::Table, ViewType::Board, ViewType::List];
+/// The types a view can be made as or changed to.
+pub(crate) const VIEW_TYPES: &[ViewType] = &[
+    ViewType::Table,
+    ViewType::Board,
+    ViewType::List,
+    ViewType::Gallery,
+];
 
 /// A view's menu: its own, a step of it, or one of its submenus opened on its own
 /// ([`ViewMenu`]).
@@ -302,8 +307,9 @@ impl TableView {
     }
 
     fn is_table_like(&self, view_id: &str) -> bool {
-        self.view_by_id(view_id)
-            .is_some_and(|v| !matches!(v.kind, ViewType::Board | ViewType::List))
+        self.view_by_id(view_id).is_some_and(|v| {
+            !matches!(v.kind, ViewType::Board | ViewType::List | ViewType::Gallery)
+        })
     }
 
     /// Notes which of the bar's controls has the keyboard, so a menu opened from it gives it
@@ -654,12 +660,16 @@ impl TableView {
                     .hint(ops::view_type_label(&v.kind)),
             );
         }
-        out.push(
-            Entry::sub("Group by", self.group_entries(v))
-                .icon(I::Group)
-                .hint(group.map_or("None", |p| p.name.as_str())),
-        );
-        if group.is_some_and(|p| p.kind.is_date()) {
+        // A gallery doesn't draw groups yet.
+        let groups = v.kind != ViewType::Gallery;
+        if groups {
+            out.push(
+                Entry::sub("Group by", self.group_entries(v))
+                    .icon(I::Group)
+                    .hint(group.map_or("None", |p| p.name.as_str())),
+            );
+        }
+        if groups && group.is_some_and(|p| p.kind.is_date()) {
             out.push(
                 Entry::sub(DATE_GROUPING, self.group_date_entries(v))
                     .icon(I::CalendarDays)
@@ -669,9 +679,9 @@ impl TableView {
             );
         }
         match v.kind {
-            ViewType::Board | ViewType::List => {
+            ViewType::Board | ViewType::List | ViewType::Gallery => {
                 let n = ops::card_properties(fields, v).len();
-                let label = if v.kind == ViewType::Board {
+                let label = if matches!(v.kind, ViewType::Board | ViewType::Gallery) {
                     "Card properties"
                 } else {
                     "Properties"

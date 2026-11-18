@@ -17,7 +17,7 @@ string_enum! {
         Board = "board",
         /// One line per row: the title and a few properties.
         List = "list",
-        /// Cards in a grid. Not drawn in v1.
+        /// Cards in a grid.
         Gallery = "gallery",
     }
 }

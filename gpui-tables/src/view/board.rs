@@ -609,6 +609,7 @@ impl TableView {
             .as_ref()
             .or(self.shown.list.as_ref())
             .or(self.shown.table.as_ref())
+            .or(self.shown.gallery.as_ref())
     }
 
     /// The groups rows move between, in order: a board's columns, a list's groups or a table's
@@ -962,6 +963,10 @@ impl TableView {
     pub(crate) fn drag_card_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         // The rows may have changed during the drag: their places are worked out again first.
         self.ensure();
+        if self.shown.gallery.is_some() {
+            self.drag_card_in_gallery(at, cx);
+            return;
+        }
         if self.shown.board.is_none() {
             self.drag_row_to(at, cx);
             return;
