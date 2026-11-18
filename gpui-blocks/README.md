@@ -61,7 +61,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
 - **Find and replace:** ⌘F (Ctrl+F) finds on the page, the selected word to start with, and
   highlights every match: Enter and ⇧Enter (or ⌘G and ⇧⌘G) step through them, and Esc closes the
   bar. ⌘⌥F (Ctrl+H) adds a replace row: Enter or Replace replaces the selected match, All
-  replaces every one as one undo step. Matching ignores case unless the bar's Aa is on.
+  replaces every one as one undo step. Matching ignores case unless the bar's Aa is on, and
+  finds parts of words too unless its whole-word button is on.
 - **Touch:** on an iPhone or iPad, a tap puts the caret there and brings up the keyboard, a long
   press selects a word, handles at the selection's ends move them, and a menu over the
   selection cuts, copies, pastes and selects all. A long press on the text that then moves

@@ -1162,3 +1162,23 @@ fn duplicate_copies_selected_blocks_together() {
     assert_eq!(m.source(), "one\n\ntwo\n\none\n\ntwo\n\nthree");
     assert_invariants(&m);
 }
+
+#[test]
+fn find_can_match_whole_words_only() {
+    let m = model("plan, plans and the plan_b; Plan");
+    let all: Vec<_> = m.find("plan", false).into_iter().map(|f| f.range).collect();
+    assert_eq!(all.len(), 4);
+    let words: Vec<_> = m
+        .find_words("plan", false, true)
+        .into_iter()
+        .map(|f| f.range)
+        .collect();
+    assert_eq!(words, [0..4, 28..32]);
+    let cased: Vec<_> = m
+        .find_words("plan", true, true)
+        .into_iter()
+        .map(|f| f.range)
+        .collect();
+    assert_eq!(cased.len(), 1);
+    assert_eq!(cased[0], 0..4);
+}
