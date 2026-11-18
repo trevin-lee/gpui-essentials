@@ -789,3 +789,40 @@ fn the_focus_stays_on_its_row_when_the_rows_are_reordered(cx: &mut TestAppContex
     draw(cx);
     assert_eq!(focused(&table, cx).as_deref(), Some(IMANI));
 }
+
+/// A line from the keyboard: ⌘⇧↓ and ⌘⇧↑ move it in its group, ⌘D duplicates it and ⌘⌫ deletes
+/// it, as a table's row.
+#[gpui::test]
+fn the_keyboard_moves_duplicates_and_deletes_a_line(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_list(cx, &host, people_with(|v| v.sort.clear()), BY_STAGE, wide());
+    keys(cx, "down down down down");
+    assert_eq!(focused(&table, cx).as_deref(), Some(THEO));
+    keys(cx, "secondary-shift-down");
+    assert!(
+        matches!(host.last_edit(), Edit::RowsMoved { row_ids, .. } if row_ids == [THEO]),
+        "{:?}",
+        host.last_edit()
+    );
+    assert_eq!(
+        focused(&table, cx).as_deref(),
+        Some(THEO),
+        "the keyboard stays on it"
+    );
+    let before = host.edits().len();
+    keys(cx, "secondary-d");
+    assert!(
+        host.edits()[before..]
+            .iter()
+            .any(|e| matches!(e, Edit::RowCreated { .. })),
+        "a copy: {:?}",
+        &host.edits()[before..]
+    );
+    let line = focused(&table, cx).expect("a line");
+    keys(cx, "secondary-backspace");
+    assert!(
+        matches!(host.last_edit(), Edit::RowsDeleted { row_ids } if row_ids == [line.clone()]),
+        "{:?}",
+        host.last_edit()
+    );
+}

@@ -106,6 +106,7 @@ impl TableView {
             .on_action(
                 cx.listener(|this, _: &super::Cancel, window, cx| this.board_cancel(window, cx)),
             )
+            .map(|el| self.card_keys(el, cx))
             .relative()
             .size_full()
             .flex()

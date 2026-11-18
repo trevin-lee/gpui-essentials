@@ -130,3 +130,35 @@ fn a_card_dragged_to_another_place_moves_its_row(cx: &mut TestAppContext) {
         "the landing line goes with the drag"
     );
 }
+
+/// A card from the keyboard: ⌘⇧→ and ⌘⇧← move it a place on and back in the manual order,
+/// ⌘⇧↓ a line, the keyboard staying on it; ⌘⌫ deletes it.
+#[gpui::test]
+fn the_keyboard_moves_and_deletes_a_card(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_gallery(cx, &host);
+    let before = order(&table, cx);
+    let first = before[0].clone();
+    // The first arrow lands on the first card.
+    keys(cx, "right");
+    keys(cx, "secondary-shift-right");
+    let mut want = before.clone();
+    want.swap(0, 1);
+    assert_eq!(order(&table, cx), want, "a place on");
+    keys(cx, "secondary-shift-left");
+    assert_eq!(order(&table, cx), before, "and back");
+    // A line down: past the cards of the first line.
+    keys(cx, "secondary-shift-down");
+    let at = order(&table, cx)
+        .iter()
+        .position(|id| *id == first)
+        .unwrap();
+    assert!(at >= 2, "a line down is more than a place: {at}");
+    // The keyboard is still on it.
+    keys(cx, "secondary-backspace");
+    assert!(
+        matches!(host.last_edit(), Edit::RowsDeleted { row_ids } if row_ids == [first.clone()]),
+        "{:?}",
+        host.last_edit()
+    );
+}

@@ -842,3 +842,78 @@ fn a_card_pressed_after_the_rows_changed_opens_no_other_row(cx: &mut TestAppCont
         "{opened:?}"
     );
 }
+
+/// The focused card from the keyboard: ⌘⇧↓ and ⌘⇧↑ move it in its column, ⌘⇧→ and ⌘⇧← to the
+/// next column (its stage changing, the keyboard following it), ⌘D duplicates it and ⌘⌫
+/// deletes it: what a drag or its menu would do, with no mouse.
+#[gpui::test]
+fn the_keyboard_moves_duplicates_and_deletes_a_card(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (db, rows) = pipeline(false);
+    let (table, cx) = open_board(cx, &host, db, rows, wide());
+    let focused = |table: &Entity<TableView>, cx: &mut VisualTestContext| {
+        table.update(cx, |t, _| {
+            let Some(BoardSpot::Card { column, index }) = t.focused_card() else {
+                return None;
+            };
+            let r = t.board_columns()[column].rows[index];
+            Some((column, t.rows()[r].id.clone()))
+        })
+    };
+    // The first card of the first column with cards.
+    keys(cx, "down right");
+    let (start, id) = focused(&table, cx).expect("a card");
+    let key = table.update(cx, |t, _| t.board_columns()[start].key_string());
+    let titles = column(&table, cx, &key);
+    assert!(titles.len() > 1, "{titles:?}");
+    keys(cx, "secondary-shift-down");
+    assert!(
+        matches!(host.last_edit(), Edit::RowsMoved { row_ids, .. } if row_ids == [id.clone()]),
+        "{:?}",
+        host.last_edit()
+    );
+    let after = column(&table, cx, &key);
+    assert_eq!(after[1], titles[0], "it went down a place");
+    assert_eq!(focused(&table, cx).map(|f| f.1), Some(id.clone()));
+    keys(cx, "secondary-shift-up");
+    assert_eq!(column(&table, cx, &key), titles, "and back up");
+
+    // To the next column: its stage changes, and the keyboard goes with it.
+    let next = table.update(cx, |t, _| t.board_columns()[start + 1].key_string());
+    keys(cx, "secondary-shift-right");
+    let stage = next.strip_prefix("option:").unwrap().to_owned();
+    assert!(
+        host.edits().iter().any(
+            |e| matches!(e, Edit::RowValueChanged { row_id, property_id, value }
+            if *row_id == id && property_id == STAGE && *value == Some(Value::text(&stage)))
+        ),
+        "{:?}",
+        host.edits()
+    );
+    assert_eq!(focused(&table, cx), Some((start + 1, id.clone())));
+    keys(cx, "secondary-shift-left");
+    assert_eq!(focused(&table, cx), Some((start, id.clone())));
+
+    // ⌘D and ⌘⌫.
+    let before = host.edits().len();
+    keys(cx, "secondary-d");
+    assert!(
+        host.edits()[before..]
+            .iter()
+            .any(|e| matches!(e, Edit::RowCreated { .. })),
+        "a copy"
+    );
+    let focused_id = match focused(&table, cx) {
+        Some((_, id)) => id,
+        None => {
+            keys(cx, "down right");
+            focused(&table, cx).expect("a card").1
+        }
+    };
+    keys(cx, "secondary-backspace");
+    assert!(
+        matches!(host.last_edit(), Edit::RowsDeleted { row_ids } if row_ids == [focused_id.clone()]),
+        "{:?}",
+        host.last_edit()
+    );
+}
