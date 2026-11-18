@@ -48,6 +48,9 @@ pub(crate) struct CachedHighlights {
     pub(crate) styles: Rc<[(Range<usize>, gpui::HighlightStyle)]>,
 }
 
+/// How far, in points, a long-pressed finger moves before it lifts the block under it.
+pub(crate) const TOUCH_LIFT: f32 = 8.;
+
 /// Side of the whole-table corner handle, in px.
 pub(crate) const TABLE_HANDLE_SIZE: f32 = 14.;
 /// How far the handle sits up and left of the table frame's corner; the
@@ -422,6 +425,8 @@ pub(crate) struct BlockDrag {
     /// The document revision at the press. An edit that lands mid-drag
     /// makes the measured blocks stale, and cancels the drag.
     pub(crate) revision: u64,
+    /// Lifted by a finger: a long press, then a move (see [`BlockEditorState::touch_moved`]).
+    pub(crate) by_touch: bool,
 }
 
 impl BlockDrag {
@@ -442,6 +447,7 @@ impl BlockDrag {
             velocity: 0.,
             start_top: top,
             revision,
+            by_touch: false,
         }
     }
 
@@ -493,6 +499,10 @@ pub struct BlockEditorState {
     pub(crate) dragging: bool,
     /// A press on a block handle, and the drag to reorder it (D22).
     pub(crate) block_drag: Option<BlockDrag>,
+    /// Whether the long press in progress began off the text, so moving lifts its block.
+    touch_lifts: bool,
+    /// A block lifted in place follows the finger by this much from where the finger is.
+    lifted_follow: Option<Point<Pixels>>,
     /// The motion of top-level blocks changing places (see `reorder`).
     pub(crate) reorder: super::reorder::Reorder,
     readonly: bool,
@@ -570,6 +580,8 @@ impl BlockEditorState {
             goal_x: None,
             dragging: false,
             block_drag: None,
+            touch_lifts: false,
+            lifted_follow: None,
             reorder: Default::default(),
             readonly: false,
             image_policy: super::ImagePolicy::default(),
@@ -2314,6 +2326,40 @@ impl BlockEditorState {
             .map(|block| BlockDrag::new(self.drag_run(block), at, top, revision));
     }
 
+    /// Starts `drag` for real: the pointer (or finger) has gone far enough, or a block was
+    /// lifted in place ([`Self::lift_block`]). Its blocks are selected, and the others are
+    /// measured for the slot the drag opens.
+    fn activate_block_drag(&mut self, drag: &mut BlockDrag, cx: &mut Context<Self>) {
+        drag.active = true;
+        self.dragging = false;
+        self.end_composition();
+        // The dragged blocks are selected; a selection of exactly them stays as it is.
+        let held = self.dragged_blocks(drag);
+        let doc = &self.model.doc;
+        let kept = self
+            .model
+            .selected_blocks()
+            .is_some_and(|(parent, range)| doc.children(parent).get(range) == Some(&held[..]));
+        if let (Some(first), Some(last)) = (held.first(), held.last())
+            && !kept
+        {
+            let _ = self.model.set_selection(BlockSelection::Blocks {
+                anchor: *first,
+                head: *last,
+            });
+        }
+        self.selection_changed(cx);
+        // The middles of the blocks' text as drawn now, in content y: the pointer passing
+        // one moves it.
+        let top = self.content_top();
+        let middles = self
+            .top_level_bounds()
+            .into_iter()
+            .map(|(_, id, b)| (id, f32::from(b.center().y - top)))
+            .collect();
+        self.reorder.begin_drag(middles);
+    }
+
     /// D22: pointer moved with the button down. Returns whether a block
     /// drag owns the move (no text selection then).
     pub(crate) fn block_drag_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
@@ -2326,36 +2372,8 @@ impl BlockEditorState {
             if d.x.abs().max(d.y.abs()) < px(4.) {
                 return false;
             }
-            drag.active = true;
-            self.dragging = false;
-            self.end_composition();
-            // The dragged blocks are selected; a selection of exactly them stays as it is.
-            let held = self.dragged_blocks(&drag);
-            let doc = &self.model.doc;
-            let kept = self
-                .model
-                .selected_blocks()
-                .is_some_and(|(parent, range)| doc.children(parent).get(range) == Some(&held[..]));
-            if let (Some(first), Some(last)) = (held.first(), held.last())
-                && !kept
-            {
-                let _ = self.model.set_selection(BlockSelection::Blocks {
-                    anchor: *first,
-                    head: *last,
-                });
-            }
-            self.selection_changed(cx);
-            // The middles of the blocks' text as drawn now, in content y: the pointer passing
-            // one moves it.
-            let top = self.content_top();
-            let middles = self
-                .top_level_bounds()
-                .into_iter()
-                .map(|(_, id, b)| (id, f32::from(b.center().y - top)))
-                .collect();
-            self.reorder.begin_drag(middles);
-        }
-        // The pointer's speed, weighted toward the latest move, for the drop to start at.
+            self.activate_block_drag(&mut drag, cx);
+        } // The pointer's speed, weighted toward the latest move, for the drop to start at.
         let now = std::time::Instant::now();
         let dt = now.duration_since(drag.moved).as_secs_f32();
         if dt > 0.0005 {
@@ -2372,6 +2390,153 @@ impl BlockEditorState {
         self.block_drag = Some(drag);
         cx.notify();
         true
+    }
+
+    /// Whether `at` is on a line's text: in a text block's lines, not past the end of a short
+    /// one. Left of the text (the gutter, a list's bullet), past a line's end, or on a block
+    /// without text (a picture, a divider, a widget), it isn't.
+    pub(crate) fn on_text(&self, at: Point<Pixels>) -> bool {
+        let frame = self.frame.borrow();
+        let Some(leaf) = frame.leaves.iter().find(|l| l.bounds().contains(&at)) else {
+            return false;
+        };
+        let pos = BlockPosition::new(leaf.info.block, leaf.offset_at(at));
+        let end = frame
+            .line_edge(pos, true)
+            .and_then(|end| Some(frame.leaf(end.block)?.caret_point(end.offset)));
+        end.is_none_or(|end| at.x <= end.x + gpui::px(4.))
+    }
+
+    /// A long press began at `at`: off the text (see [`Self::on_text`]), a move then lifts the
+    /// block under it ([`Self::touch_moved`]); on the text, a move extends the word selection,
+    /// as iOS does.
+    pub(crate) fn touch_pressed(&mut self, at: Point<Pixels>) {
+        self.touch_lifts = !self.readonly && !self.on_text(at);
+    }
+
+    /// A long-pressed finger moved from `start` to `at`. When the press was off the text, past
+    /// [`TOUCH_LIFT`] from it the top-level block under the press lifts and follows the finger,
+    /// as a block dragged by its handle does, and drops where the finger lets go
+    /// ([`Self::touch_ended`]). Returns whether the move is the block's; else it's the
+    /// selection's, as before.
+    pub(crate) fn touch_moved(
+        &mut self,
+        start: Point<Pixels>,
+        at: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.block_drag.is_some_and(|d| d.by_touch) {
+            self.block_drag_to(at, cx);
+            return true;
+        }
+        if !self.touch_lifts {
+            return false;
+        }
+        let d = at - start;
+        if f32::from(d.x).hypot(f32::from(d.y)) <= TOUCH_LIFT {
+            return true;
+        }
+        let Some(block) = self
+            .top_level_bounds()
+            .into_iter()
+            .find(|(_, _, b)| start.y >= b.top() && start.y < b.bottom())
+            .map(|(_, id, _)| id)
+        else {
+            return false;
+        };
+        self.begin_block_drag(block, start);
+        let Some(drag) = self.block_drag.as_mut() else {
+            return false;
+        };
+        drag.by_touch = true;
+        self.block_drag_to(at, cx);
+        true
+    }
+
+    /// Lifts the top-level `block` where it is, as the block sheet's Move does: it's drawn
+    /// lifted, and the next finger drag anywhere moves it (see [`Self::lifted_touch`]); a tap
+    /// sets it down where it was.
+    pub fn lift_block(&mut self, block: BlockId, cx: &mut Context<Self>) {
+        let Some(at) = self
+            .top_level_bounds()
+            .into_iter()
+            .find(|(_, id, _)| *id == block)
+            .map(|(_, _, b)| b.center())
+        else {
+            return;
+        };
+        self.begin_block_drag(block, at);
+        let Some(mut drag) = self.block_drag else {
+            return;
+        };
+        drag.by_touch = true;
+        self.activate_block_drag(&mut drag, cx);
+        self.block_drag = Some(drag);
+        self.lifted_follow = None;
+        cx.notify();
+    }
+
+    /// A finger drag while a block is lifted in place: it moves the block from where it is, by
+    /// as much as the finger moves. Returns whether the drag is the block's.
+    pub(crate) fn lifted_touch(
+        &mut self,
+        phase: gpui::TouchPhase,
+        start: Point<Pixels>,
+        at: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(drag) = self.block_drag.filter(|d| d.active && d.by_touch) else {
+            return false;
+        };
+        match phase {
+            gpui::TouchPhase::Started => {
+                self.lifted_follow = Some(drag.at - start);
+                true
+            }
+            gpui::TouchPhase::Moved => {
+                let Some(offset) = self.lifted_follow else {
+                    return false;
+                };
+                self.block_drag_to(at + offset, cx);
+                true
+            }
+            gpui::TouchPhase::Ended | gpui::TouchPhase::Cancelled => {
+                if self.lifted_follow.take().is_none() {
+                    return false;
+                }
+                self.touch_ended(phase == gpui::TouchPhase::Cancelled, cx);
+                true
+            }
+        }
+    }
+
+    /// The long-pressed finger let go (or the system took the touch): a lifted block drops where
+    /// it is, or, cancelled, goes back.
+    pub(crate) fn touch_ended(&mut self, cancelled: bool, cx: &mut Context<Self>) {
+        if !self.block_drag.is_some_and(|d| d.by_touch) {
+            return;
+        }
+        if cancelled {
+            self.block_drag = None;
+            self.reorder.cancel_drag();
+            cx.notify();
+        } else {
+            self.finish_block_drag(cx);
+        }
+    }
+
+    /// Where the pointer (or finger) dragging blocks is, while blocks are dragged: for a host
+    /// that scrolls the page when it nears an edge.
+    pub fn block_drag_pointer(&self) -> Option<Point<Pixels>> {
+        self.block_drag.filter(|d| d.active).map(|d| d.at)
+    }
+
+    /// Goes on with a block drag at `at`, as a pointer move does: for a host that scrolled the
+    /// page under a still pointer, so the drop follows.
+    pub fn continue_block_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.is_dragging_block() {
+            self.block_drag_to(at, cx);
+        }
     }
 
     /// D22: button released. Drops an active drag (one undo step).

@@ -44,6 +44,9 @@ const TOP: f32 = 72.;
 const COMPACT_BELOW: f32 = 600.;
 /// The compact layout's room each side of the column and above it.
 const COMPACT_INSET: f32 = 16.;
+/// The compact layout's room each side of the column: wide enough, by touch, for a long press
+/// left of the text to lift its block.
+const COMPACT_SIDE: f32 = 24.;
 
 /// Binds the slash menu's keys and the keys that move blocks. They match only inside this view
 /// (key context `BlocksEditor`, or `BlocksSlashMenu` while the menu is open), and are bound
@@ -354,8 +357,8 @@ impl Options {
         self
     }
 
-    /// Below this width (600 by default) the editor lays itself out for a phone: 16 each side
-    /// of the column and above it, in place of [`Options::gutter`] and [`Options::top`], and no
+    /// Below this width (600 by default) the editor lays itself out for a phone: 24 each side
+    /// of the column and 16 above it, in place of [`Options::gutter`] and [`Options::top`], and no
     /// side menu, which has no room there. `px(0.)` keeps the wide layout at any width.
     pub fn compact_below(mut self, width: Pixels) -> Self {
         self.compact_below = width;
@@ -418,6 +421,11 @@ pub(crate) fn split_front_matter(markdown: &str) -> (String, &str) {
     }
     (String::new(), markdown)
 }
+
+/// How near the page's top or bottom edge, in points, dragged blocks scroll it.
+const EDGE_SCROLL_REACH: f32 = 56.;
+/// The most the page scrolls a frame then, at the very edge.
+const EDGE_SCROLL_SPEED: f32 = 14.;
 
 /// An open slash menu.
 #[derive(Clone, Debug, PartialEq)]
@@ -1480,6 +1488,34 @@ impl Editor {
         !self.compact(window) && !window.last_input_was_touch()
     }
 
+    /// Scrolls the page a step toward the edge the dragged blocks' pointer is near, faster
+    /// the nearer it is, and lets the drag follow. Returns whether it scrolled.
+    pub(crate) fn scroll_near_edge(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(at) = self.state.read(cx).block_drag_pointer() else {
+            return false;
+        };
+        let view = self.scroll.bounds();
+        let reach = px(EDGE_SCROLL_REACH);
+        let step = if at.y < view.top() + reach {
+            (view.top() + reach - at.y).min(reach) / reach * EDGE_SCROLL_SPEED
+        } else if at.y > view.bottom() - reach {
+            -((at.y - (view.bottom() - reach)).min(reach) / reach * EDGE_SCROLL_SPEED)
+        } else {
+            return false;
+        };
+        let offset = self.scroll.offset();
+        let max = self.scroll.max_offset();
+        let y = (offset.y + px(step)).clamp(-max.y, px(0.));
+        if y == offset.y {
+            return false;
+        }
+        self.scroll.set_offset(point(offset.x, y));
+        self.state
+            .update(cx, |state, cx| state.continue_block_drag(at, cx));
+        cx.notify();
+        true
+    }
+
     /// The pointer moved: the side menu goes beside the top-level block level with it.
     fn hover(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
         if event.pressed_button.is_some() || self.state.read(cx).is_readonly() {
@@ -2292,7 +2328,7 @@ impl Render for Editor {
             None
         };
         let (gutter, top) = if compact {
-            (px(COMPACT_INSET), px(COMPACT_INSET))
+            (px(COMPACT_SIDE), px(COMPACT_INSET))
         } else {
             (self.gutter, self.top)
         };
@@ -2330,6 +2366,23 @@ impl Render for Editor {
         let color_sheet = self.color_sheet(cx);
         let find_bar = self.find_bar(compact, cx);
         // While a grip is pressed: its release, seen before the editor ends the drag.
+        // While blocks are dragged, the page scrolls when the pointer (or finger) nears its top
+        // or bottom edge, a frame at a time.
+        let edge_scroll = self.state.read(cx).block_drag_pointer().map(|_| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, cx| {
+                    let this = this.clone();
+                    // Frames while blocks are dragged, each a step when near an edge.
+                    window.request_animation_frame();
+                    window.defer(cx, move |_, cx| {
+                        let _ = this.update(cx, |this, cx| this.scroll_near_edge(cx));
+                    });
+                },
+            )
+            .size_0()
+        });
         let grip_watch = self.grip_down.is_some().then(|| {
             let this = cx.entity().downgrade();
             canvas(
@@ -2399,6 +2452,7 @@ impl Render for Editor {
             .child(block_sheet)
             .child(color_sheet)
             .children(grip_watch)
+            .children(edge_scroll)
             .child(self.long_press_watch(cx));
         // The find bar stays at the top while the page scrolls under it.
         div()
@@ -2430,7 +2484,7 @@ impl Render for Editor {
 
 #[cfg(test)]
 mod tests {
-    use super::{COMPACT_INSET, Editor, GUTTER, Options, TOP};
+    use super::{COMPACT_INSET, COMPACT_SIDE, Editor, GUTTER, Options, TOP};
     use gpui::{Entity, TestAppContext, VisualTestContext};
     use markdown_editor::{BlockId, BlockKind, BlockPosition, BlockSelection};
     use std::prelude::rust_2024::test;
@@ -2687,7 +2741,7 @@ mod tests {
         cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(800.)));
         let (left, top, hovered) = layout(&editor, cx);
         assert!(editor.update_in(cx, |e, window, _| e.compact(window)));
-        assert_eq!(left, gpui::px(COMPACT_INSET), "compact: 16 in");
+        assert_eq!(left, gpui::px(COMPACT_SIDE), "compact: 24 in");
         assert!(top < gpui::px(COMPACT_INSET * 2.), "compact: {top:?} down");
         assert!(!hovered, "compact: no side menu");
     }
@@ -3659,6 +3713,128 @@ mod tests {
             !editor.read_with(cx, |e, _| e.color_sheet),
             "picking closes it"
         );
+    }
+
+    /// On touch, a long press on the text then a move extends the word selection, as iOS does;
+    /// one begun off the text, in the gutter left of it, lifts the block under the finger and
+    /// drags it instead, and letting go drops it, as one undo step. A long press let go without
+    /// moving still selects the word and shows the edit menu.
+    #[gpui::test]
+    fn a_long_press_in_the_gutter_and_a_move_drag_a_block_by_touch(cx: &mut TestAppContext) {
+        use gpui::TouchPhase::*;
+        let (editor, cx) = open(cx, "first words\n\nsecond\n\nthird");
+        let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks());
+        let long_press_then =
+            |cx: &mut VisualTestContext, at, moves: &[gpui::Point<gpui::Pixels>]| {
+                touch(cx, Started, at);
+                cx.executor()
+                    .advance_clock(std::time::Duration::from_secs(1));
+                draw(cx);
+                for to in moves {
+                    touch(cx, Moved, *to);
+                }
+            };
+        // On the text: the word, and moving extends the selection.
+        let word = point_at(&editor, cx, 8);
+        let back = point_at(&editor, cx, 2);
+        long_press_then(cx, word, &[back]);
+        assert!(!editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
+        let selection = editor.update(cx, |e, cx| e.state().read(cx).model().selection().clone());
+        assert!(
+            matches!(selection, BlockSelection::Text { anchor, head } if anchor.offset == 6 && head.offset == 2),
+            "extended: {selection:?}"
+        );
+        touch(cx, Ended, back);
+        // The caret down again, and the selection's handles gone.
+        caret_at_end(&editor, cx, 2);
+        assert!(cx.debug_bounds("blocks-handle-start").is_none());
+        // In the gutter: within reach of the press nothing lifts; past it the block does.
+        let gutter = gpui::point(blocks[0].1.left() - gpui::px(12.), blocks[0].1.center().y);
+        long_press_then(
+            cx,
+            gutter,
+            &[gpui::point(gutter.x, gutter.y + gpui::px(4.))],
+        );
+        assert!(!editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
+        let to = gpui::point(gutter.x, blocks[2].1.center().y + gpui::px(4.));
+        touch(cx, Moved, to);
+        assert!(
+            editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()),
+            "lifted"
+        );
+        assert!(
+            cx.debug_bounds("blocks-edit-menu").is_none(),
+            "no edit menu while dragging"
+        );
+        touch(cx, Ended, to);
+        assert!(!editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
+        assert_eq!(markdown(&editor, cx), "second\n\nthird\n\nfirst words");
+        cx.simulate_keystrokes("secondary-z");
+        draw(cx);
+        assert_eq!(
+            markdown(&editor, cx),
+            "first words\n\nsecond\n\nthird",
+            "one undo step"
+        );
+        // A long press let go where it was: the word and the edit menu, as before.
+        let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks());
+        long_press(cx, blocks[1].1.center());
+        assert!(cx.debug_bounds("blocks-edit-menu").is_some());
+    }
+
+    /// The block sheet's Move lifts the block where it is, and the next finger drag moves it.
+    #[gpui::test]
+    fn the_block_sheets_move_lifts_the_block_for_the_next_drag(cx: &mut TestAppContext) {
+        use gpui::TouchPhase::*;
+        let (editor, cx) = open(cx, "first\n\nsecond\n\nthird");
+        let blocks = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks());
+        long_press(cx, blocks[0].1.center());
+        tap(cx, "blocks-menu-Block");
+        draw(cx);
+        let move_item = cx
+            .debug_bounds("menu-item-move")
+            .expect("the sheet has Move")
+            .center();
+        cx.simulate_click(move_item, gpui::Modifiers::none());
+        draw(cx);
+        assert!(
+            editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()),
+            "lifted in place"
+        );
+        // A finger drag anywhere moves it by as much as the finger moves.
+        let from = gpui::point(blocks[1].1.center().x, blocks[1].1.center().y);
+        let by = blocks[2].1.center().y - blocks[0].1.center().y + gpui::px(4.);
+        touch(cx, Started, from);
+        touch(cx, Moved, gpui::point(from.x, from.y + by / 2.));
+        touch(cx, Moved, gpui::point(from.x, from.y + by));
+        touch(cx, Ended, gpui::point(from.x, from.y + by));
+        assert!(!editor.update(cx, |e, cx| e.state().read(cx).is_dragging_block()));
+        assert_eq!(markdown(&editor, cx), "second\n\nthird\n\nfirst");
+    }
+
+    /// While blocks are dragged near the page's bottom edge, the page scrolls.
+    #[gpui::test]
+    fn dragging_a_block_near_the_edge_scrolls_the_page(cx: &mut TestAppContext) {
+        let text: Vec<String> = (0..60).map(|i| format!("line {i}")).collect();
+        let (editor, cx) = open(cx, &text.join("\n\n"));
+        cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(400.)));
+        draw(cx);
+        draw(cx);
+        let (block, b) = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks()[1]);
+        let view = editor.read_with(cx, |e, _| e.scroll.bounds());
+        let from = gpui::point(b.left() - gpui::px(20.), b.center().y);
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, _| s.begin_block_drag(block, from))
+        });
+        let near = gpui::point(from.x, view.bottom() - gpui::px(10.));
+        cx.simulate_mouse_move(near, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+        for _ in 0..10 {
+            draw(cx);
+        }
+        let offset = editor.read_with(cx, |e, _| e.scroll.offset().y);
+        assert!(offset < gpui::px(0.), "scrolled down: {offset:?}");
+        cx.simulate_mouse_up(near, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
     }
 
     /// No bar in a read-only document; on touch the marks are the edit menu's second row.
