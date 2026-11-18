@@ -30,6 +30,12 @@ chrono-tz = "0.10"
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+# In a browser: GPUI's clock there (web-time's Instant, the version GPUI's own clock uses), and
+# the current time from JavaScript's Date (chrono's wasmbind), since wasm32 has neither from std.
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1.1.0"
+chrono = { version = "0.4.45", default-features = false, features = ["wasmbind"] }
+
 [features]
 # Pictures of the example's window rendered offscreen (`--shot`).
 shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
