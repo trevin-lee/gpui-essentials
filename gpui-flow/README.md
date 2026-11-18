@@ -370,8 +370,27 @@ made.
   which is also what assistive technology is told is focused; past the last, Tab goes on out of
   the canvas. Enter or space selects it, the arrows move it (shift for four steps) when
   nothing is selected, delete removes it, and escape leaves it for the canvas. A click takes
-  the keyboard off. In a tree, Tab and enter add nodes as before, once one is selected.
-  `Flow::keyboard_on` and `set_keyboard_on` read and set it.
+  the keyboard off. In a tree, Tab and enter add nodes as before, once one is selected. R
+  resizes the node and C connects it to another (both below). `Flow::keyboard_on` and
+  `set_keyboard_on` read and set it.
+- **The canvas's keys,** all of them, while the canvas itself has the focus (`bind_keys`; a key
+  with nothing to do goes on to the host):
+
+  | Key | What it does |
+  | --- | --- |
+  | Tab, ⇧Tab | The keyboard to the next or previous node or edge (in a tree, Tab adds a child) |
+  | Space, Enter | Selects what the keyboard is on (in a tree, Enter adds a sibling) |
+  | ←↑→↓, ⇧ for four steps | Moves the selection (in a tree, the selection to the nearest node that way) |
+  | Delete, ⌫ | Deletes the selection |
+  | Escape | Puts back a drag, resize or pan, else lets the selection or the keyboard go |
+  | ⌘A | Selects everything |
+  | ⌘C, ⌘X, ⌘V, ⌘D | Copy, cut, paste, duplicate |
+  | ⌘Z, ⇧⌘Z | Undo, redo |
+  | R | Resizes the node: the arrows, Enter keeps it, Escape puts it back |
+  | C | Connects the node: Tab to another, Enter connects, Escape stops |
+  | ⌘G, ⇧⌘G | Frames the selection, takes the selected frames away |
+  | ⌘↩ | Opens the selected node's link |
+  | ⌘=, ⌘−, ⌘0, ⇧1 | Zoom in, out, to 100%, to fit |
 - **Connecting by keyboard:** C on the node the keyboard is on (or the one selected) begins a
   connection from its first handle that connections leave from, as clicking that handle does
   (it's drawn in the selection's colour); Tab moves the keyboard to another node, and Enter
