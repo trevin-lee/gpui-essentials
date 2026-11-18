@@ -442,33 +442,37 @@ settle into the gap first.
 ### Auto-scroll
 
 ```rust
-pub trait AutoScrollExt: StatefulInteractiveElement {
+pub trait AutoScrollExt: IntoElement {
     /// While a drag is on and the pointer is within `edge` of this scroll container's sides,
     /// scroll it, faster the closer (to `speed` at the edge itself), until the pointer leaves
-    /// the edge, the end is reached, or the drag ends.
-    fn auto_scroll(self, handle: &ScrollHandle, options: AutoScroll) -> Self;
+    /// the edge, the end is reached, or the drag ends. Called last on the container.
+    fn auto_scroll(self, scroller: &(impl Scrollable + Clone), options: AutoScroll)
+        -> AutoScrollArea;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AutoScroll {
-    pub edge: Rems,     // 3 rem
-    pub speed: f32,     // 1200 px per second at the edge, scaled by the rem
-    pub axis: AxisSet,  // Vertical, Horizontal, Both
+    pub edge: Rems,      // 3 rem
+    pub speed: f32,      // 75 rem per second at the edge, eased in quadratically
+    pub vertical: bool,
+    pub horizontal: bool,
 }
 
-/// For something that isn't a ScrollHandle (a uniform_list's handle, a canvas that pans).
+/// GPUI's `ScrollHandle` and `UniformListScrollHandle`, or your own (a canvas that pans).
 pub trait Scrollable: 'static {
     fn offset(&self) -> Point<Pixels>;
-    fn max_offset(&self) -> Size<Pixels>;
+    fn max_offset(&self) -> Point<Pixels>;
     fn set_offset(&self, offset: Point<Pixels>, window: &mut Window, cx: &mut App);
 }
 ```
 
-It runs on animation frames, so it keeps scrolling while the pointer holds still at the edge,
-and stops asking for frames the moment it can't scroll. After each step it hit-tests again, so
-targets that scrolled under the pointer get `on_hover`. Nested containers (a board's
-horizontal scroll and each column's vertical one) each scroll on their own axis; the innermost
-that can scroll goes first.
+It runs on animation frames (`window.on_next_frame`), so it keeps scrolling while the pointer
+holds still at the edge, and stops asking for frames the moment nothing under the pointer can
+scroll that way. After each step it hit-tests again, so targets that scrolled under the pointer
+get `on_hover`. Nested containers each scroll on their own axis; the innermost that can still
+scroll goes first. Keyboard drags don't auto-scroll (their pointer jumps to targets). The scroll
+containers are gathered each frame the provider's view draws, so one inside another view drawn
+from cache isn't seen.
 
 ### Sortable lists and kanban
 

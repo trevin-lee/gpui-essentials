@@ -197,6 +197,10 @@ pub(crate) struct DndState {
     pub pending: Option<Pending>,
     /// A touch on an at-once source that hasn't moved past the slop yet.
     pub touch_pending: Option<Pending>,
+    /// Each window's scroll containers that auto-scroll, as the provider last drew them.
+    pub zones: HashMap<WindowId, Vec<crate::autoscroll::Zone>>,
+    /// Auto-scroll under way.
+    pub auto_run: Option<crate::autoscroll::Run>,
     pub collectors: Vec<Weak<dyn Collector>>,
     /// How many providers are being laid out around the element being laid out now.
     pub provider_depth: usize,
@@ -363,6 +367,7 @@ pub(crate) fn move_to(at: Point<Pixels>, modifiers: Modifiers, window: &mut Wind
     }
     publish(cx);
     redraw(window, cx);
+    crate::autoscroll::kick(window, cx);
 }
 
 fn drop_monitor(monitor: &DragMonitor, record: &TargetRecord) -> DropMonitor {

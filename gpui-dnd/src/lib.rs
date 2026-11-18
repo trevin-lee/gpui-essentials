@@ -40,6 +40,7 @@
 //! gpui-dnd keeps its own drag state beside GPUI's `on_drag`/`on_drop` (see `DESIGN.md` for
 //! why). Nothing runs while no drag is moving: no timers and no frames.
 
+mod autoscroll;
 mod collect;
 mod element;
 mod item;
@@ -51,6 +52,7 @@ mod state;
 mod target;
 mod touch;
 
+pub use autoscroll::{AutoScroll, AutoScrollArea, AutoScrollExt, Scrollable};
 pub use collect::{CollectExt, Collected};
 pub use element::{Dnd, PICK_UP_HINT, dnd};
 pub use item::{DragItem, DropResult, ItemType};

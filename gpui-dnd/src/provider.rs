@@ -146,6 +146,7 @@ impl Element for DndProvider {
             let outermost = state.provider_depth == 1;
             if outermost {
                 let window_id = state::window_id(window);
+                state.zones.remove(&window_id);
                 state
                     .provider_views
                     .insert(window_id, window.current_view());
