@@ -1,0 +1,5 @@
+# Build output, if built without CARGO_TARGET_DIR.
+/render/target/
+# A rendered site, if rendered here: render it outside the repository (see README.md).
+/site/
+/out/

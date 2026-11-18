@@ -1,0 +1,43 @@
+name: pages
+
+# The documentation site (docs-site/): its renderer linted, every component drawn light and
+# dark, and the site uploaded as an artifact to look at. Publishing to GitHub Pages comes later.
+on:
+  pull_request:
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only the newest commit's site matters.
+  cancel-in-progress: true
+
+jobs:
+  render:
+    # The pictures are GPUI's offscreen rendering, which needs macOS (Metal).
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # rust-toolchain.toml pins the version; rustup installs it on first use. The renderer is
+      # its own workspace, so its build is cached apart from the crates'. Only main saves.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: docs-site
+          workspaces: docs-site/render
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo fmt --manifest-path docs-site/render/Cargo.toml --check
+      # The demos that are views are whole items, so rustfmt checks them too (the others are
+      # bare expressions, which it can't parse).
+      - run: rustfmt --edition 2024 --check $(grep -l 'pub struct Example' docs-site/demos/*/*.rs)
+      - run: cargo clippy --manifest-path docs-site/render/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo run --manifest-path docs-site/render/Cargo.toml --locked -- --out "$RUNNER_TEMP/site"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site
+          path: ${{ runner.temp }}/site
+          retention-days: 7
