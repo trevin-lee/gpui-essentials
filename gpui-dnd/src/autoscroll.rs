@@ -130,6 +130,7 @@ pub(crate) struct Zone {
     options: AutoScroll,
     rem: Pixels,
     seq: u64,
+    pub(crate) stamp: u64,
 }
 
 impl IntoElement for AutoScrollArea {
@@ -175,8 +176,10 @@ impl Element for AutoScrollArea {
         let shared = state::shared(cx);
         {
             let mut state = shared.borrow_mut();
-            // Zones are gathered afresh each frame the provider draws.
-            if state.provider_depth > 0 {
+            // Gathered afresh each frame: a zone keeps its frame's stamp, and the active
+            // provider drops the older ones as it paints.
+            let window_id = state::window_id(window);
+            if state::has_provider(&state, window_id) {
                 let seq = state.next_seq();
                 let zone = Zone {
                     visible: bounds.intersect(&window.content_mask().bounds),
@@ -184,12 +187,9 @@ impl Element for AutoScrollArea {
                     options: self.options,
                     rem: window.rem_size(),
                     seq,
+                    stamp: state.zone_stamp,
                 };
-                state
-                    .zones
-                    .entry(state::window_id(window))
-                    .or_default()
-                    .push(zone);
+                state.zones.entry(window_id).or_default().push(zone);
             }
         }
         child.prepaint(window, cx);

@@ -95,9 +95,13 @@ window.
 ```rust
 /// Wraps the window's content (or a subtree): listens for the drag's moves, draws the drag
 /// layer above everything, and holds the live region that announces keyboard drags.
-/// react-dnd's <DndProvider backend>. The outermost one in a window does the work; a nested
-/// one only draws its child, so a crate can wrap its own view and still work in a host that
-/// wraps the whole window.
+/// react-dnd's <DndProvider backend>. One provider per window is active: the first drawn when
+/// none is, staying active while it's drawn (a token in its element state, so a cached view
+/// keeps it). It does the work; every other one, nested or beside it, only draws its child. So
+/// a crate can wrap its own view, several such views can sit side by side, and a host can wrap
+/// the whole window. Drags redraw the active provider's view, so its preview is never replayed
+/// stale from a cache, and auto-scroll's containers are stamped by frame and sealed as it
+/// paints, so a sibling drawn before it still counts.
 pub struct DndProvider { /* … */ }
 
 impl DndProvider {

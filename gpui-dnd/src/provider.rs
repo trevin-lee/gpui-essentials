@@ -9,13 +9,13 @@ use gpui::{
 };
 use gpui_core::ActiveTheme as _;
 
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::item::DragItem;
 use crate::keyboard::{self, Announcements};
 use crate::monitor::{DragLayerMonitor, DragMonitor};
 use crate::source::{Backend, PreviewSpec};
-use crate::state;
+use crate::state::{self, ProviderToken};
 
 type Layer = Rc<dyn Fn(&DragLayerMonitor, &mut Window, &mut App) -> Option<AnyElement>>;
 
@@ -35,9 +35,12 @@ pub const PREVIEW_PRIORITY: usize = 100;
 /// // Root::new(cx.new(|_| Board::new()), window, cx)
 /// ```
 ///
-/// Only the outermost provider in a window does anything; one inside it just draws its child.
-/// So a crate can wrap its own view in one and still work in a host that wraps the whole
-/// window. Without a provider, sources take presses but no drag ever begins.
+/// One provider in a window is active: the first drawn when none is, staying so while it's
+/// drawn (from a cached view too). It follows the drag, listens for its input and draws its
+/// preview; any other, inside it or beside it, just draws its child. So a crate can wrap its own
+/// view in one, several such views can sit side by side, and a host can wrap the whole window,
+/// and a drag still has one preview and is followed once. Without a provider, sources take
+/// presses but no drag ever begins.
 pub struct DndProvider {
     child: Option<AnyElement>,
     mouse: bool,
@@ -109,11 +112,12 @@ impl IntoElement for DndProvider {
 
 impl Element for DndProvider {
     type RequestLayoutState = AnyElement;
-    /// Whether it's the outermost provider, the one that works.
+    /// Whether it's the window's active provider, the one that works.
     type PrepaintState = bool;
 
     fn id(&self) -> Option<ElementId> {
-        None
+        // For its element state: the token that keeps it the window's active provider.
+        Some("gpui-dnd-provider".into())
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
@@ -133,7 +137,7 @@ impl Element for DndProvider {
 
     fn prepaint(
         &mut self,
-        _: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         child: &mut AnyElement,
@@ -141,13 +145,25 @@ impl Element for DndProvider {
         cx: &mut App,
     ) -> bool {
         let shared = state::shared(cx);
-        let outermost = {
+        let window_id = state::window_id(window);
+        let token: Rc<ProviderToken> = match global_id {
+            Some(id) => window.with_element_state(id, |held: Option<Rc<ProviderToken>>, _| {
+                let token = held.unwrap_or_default();
+                (token.clone(), token)
+            }),
+            None => Rc::default(),
+        };
+        let active = {
             let mut state = shared.borrow_mut();
-            state.provider_depth += 1;
-            let outermost = state.provider_depth == 1;
-            if outermost {
-                let window_id = state::window_id(window);
-                state.zones.remove(&window_id);
+            let claimed = state.active.get(&window_id).and_then(Weak::upgrade);
+            let active = match claimed {
+                Some(holder) => Rc::ptr_eq(&holder, &token),
+                None => {
+                    state.active.insert(window_id, Rc::downgrade(&token));
+                    true
+                }
+            };
+            if active {
                 state
                     .provider_views
                     .insert(window_id, window.current_view());
@@ -158,15 +174,14 @@ impl Element for DndProvider {
                     None => state.announcements.remove(&window_id),
                 };
             }
-            outermost
+            active
         };
         child.prepaint(window, cx);
-        shared.borrow_mut().provider_depth -= 1;
-        if outermost {
+        if active {
             draw_preview(self.layer.as_ref(), window, cx);
             draw_live_region(window, cx);
         }
-        outermost
+        active
     }
 
     fn paint(
@@ -175,15 +190,25 @@ impl Element for DndProvider {
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
         child: &mut AnyElement,
-        outermost: &mut bool,
+        active: &mut bool,
         window: &mut Window,
         cx: &mut App,
     ) {
         child.paint(window, cx);
-        if !*outermost {
+        if !*active {
             return;
         }
         let window_id = state::window_id(window);
+        // Every prepaint of this frame is done: the zones it drew are the window's now.
+        {
+            let shared = state::shared(cx);
+            let mut state = shared.borrow_mut();
+            let stamp = state.zone_stamp;
+            if let Some(zones) = state.zones.get_mut(&window_id) {
+                zones.retain(|z| z.stamp >= stamp);
+            }
+            state.zone_stamp += 1;
+        }
         if state::drag_in(window, cx) == Some(false) {
             window.set_window_cursor_style(gpui::CursorStyle::ClosedHand);
         }
