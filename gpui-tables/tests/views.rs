@@ -521,20 +521,33 @@ fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext
     click(cx, item("Tags"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert_eq!(v.card_properties, [COMPANY, LAST_CONTACTED, OWNER, TAGS]);
-    // A shown one's submenu moves and hides it; moved, the list is in its new order, the
-    // submenu still open beside it.
-    click(cx, item("Company"));
-    click(cx, item("Move down"));
-    let v = changed(&last_batch(&host)[0]).clone();
-    assert_eq!(v.card_properties, [LAST_CONTACTED, COMPANY, OWNER, TAGS]);
-    assert!(drawn(cx, "menu-submenu-Company"));
-    click(cx, item("Company"));
-    click(cx, item("Move up"));
+    // Shown ones are put in order in place: Alt-Down and Alt-Up on the highlighted one, or a
+    // drag, each a viewChanged with the new order.
+    keys(cx, "home alt-down");
+    assert_eq!(
+        changed(&last_batch(&host)[0]).card_properties,
+        [LAST_CONTACTED, COMPANY, OWNER, TAGS]
+    );
+    keys(cx, "alt-up");
     assert_eq!(
         changed(&last_batch(&host)[0]).card_properties,
         [COMPANY, LAST_CONTACTED, OWNER, TAGS]
     );
+    let from = rect(cx, item("Company")).center();
+    let next = rect(cx, item("Last contacted"));
+    drag(
+        cx,
+        from,
+        point(next.center().x, next.top() + next.size.height * 0.75),
+    );
+    assert_eq!(
+        changed(&last_batch(&host)[0]).card_properties,
+        [LAST_CONTACTED, COMPANY, OWNER, TAGS]
+    );
+    // A click still opens its submenu, which hides it (no Move entries any more).
     click(cx, item("Company"));
+    assert!(drawn(cx, "menu-submenu-Company"));
+    assert!(!drawn(cx, item("Move down")) && !drawn(cx, item("Move up")));
     click(cx, item("Hide"));
     assert_eq!(
         changed(&last_batch(&host)[0]).card_properties,
@@ -573,6 +586,40 @@ fn card_and_line_properties_are_shown_hidden_and_ordered(cx: &mut TestAppContext
     click(cx, item("Role"));
     let v = changed(&last_batch(&host)[0]).clone();
     assert!(v.columns.iter().any(|c| c.property_id == ROLE && c.hidden));
+}
+
+#[gpui::test]
+fn card_properties_are_ordered_by_a_long_press_on_touch(cx: &mut TestAppContext) {
+    let host = TestHost::touch();
+    let (_, cx) = open_people_bar(cx, &host);
+    for what in [
+        tab("Pipeline"),
+        "view-settings".into(),
+        item("Card properties"),
+    ] {
+        let at = rect(cx, what).center();
+        tap(cx, at);
+    }
+    // A long press lifts Company, and the finger carries it low onto Last contacted's row.
+    host.clear();
+    let from = rect(cx, item("Company")).center();
+    let next = rect(cx, item("Last contacted"));
+    long_press(
+        cx,
+        from,
+        point(next.center().x, next.top() + next.size.height * 0.75),
+    );
+    assert_eq!(batches(&host), 1);
+    assert_eq!(
+        changed(&last_batch(&host)[0]).card_properties,
+        [LAST_CONTACTED, COMPANY, OWNER]
+    );
+    assert!(!drawn(cx, "menu-submenu-Company"), "lifting isn't a tap");
+    // A tap still opens an entry's submenu.
+    let at = rect(cx, item("Owner")).center();
+    tap(cx, at);
+    assert!(drawn(cx, "menu-submenu-Owner"));
+    assert_eq!(batches(&host), 1);
 }
 
 #[gpui::test]

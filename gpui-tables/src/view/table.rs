@@ -90,6 +90,9 @@ pub(crate) struct Entry {
     pub highlight: bool,
     /// The entries it opens beside it (gpui-core's submenu), rather than being picked.
     pub submenu: Option<Vec<Entry>>,
+    /// The reorder group it's in (gpui-core's): dragged, or moved with Alt-Up and Alt-Down,
+    /// among its neighbours of the same group ([`TableView::reorder_entry`]).
+    pub reorder: Option<&'static str>,
 }
 
 impl Entry {
@@ -104,6 +107,7 @@ impl Entry {
             disabled: false,
             highlight: false,
             submenu: None,
+            reorder: None,
         }
     }
 
@@ -149,6 +153,11 @@ impl Entry {
 
     pub(crate) fn highlighted(mut self, on: bool) -> Self {
         self.highlight = on;
+        self
+    }
+
+    pub(crate) fn reorder(mut self, group: &'static str) -> Self {
+        self.reorder = Some(group);
         self
     }
 }
