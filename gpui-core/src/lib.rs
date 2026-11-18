@@ -139,7 +139,7 @@ pub use popover::claim_count;
 pub use popover::{
     DismissReason, Popover, PopoverAlign, PopoverAnchor, PopoverColors, PopoverSide,
 };
-pub use press::{Press, focus_ring};
+pub use press::{Press, focus_ring, focus_visible, ring_inside, ring_outside};
 pub use progress::Progress;
 pub use radio_group::RadioGroup;
 pub use root::{FocusNext, FocusPrev, Root};

@@ -308,7 +308,11 @@ impl RenderOnce for RadioGroup {
                 .border_color(border)
                 .when(checked, |d| d.bg(theme.primary))
                 .when(!checked && dark, |d| d.bg(theme.input.opacity(0.3)))
-                .shadow(shadows)
+                // The ring drawn just outside the circle, not under it.
+                .relative()
+                .children(shadows.into_iter().map(|s| {
+                    crate::base::ring_outside(s, css(8.).to_pixels(window.rem_size()), gpui::px(1.))
+                }))
                 .when(checked, |d| {
                     d.child(
                         div()

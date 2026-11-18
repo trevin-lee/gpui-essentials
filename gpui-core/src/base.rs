@@ -34,7 +34,7 @@ pub use crate::popover::{
     PRIORITY as OVERLAY_PRIORITY, Popover, PopoverAlign, PopoverColors, PopoverSide,
     layer as overlay_layer, overlay_focus,
 };
-pub use crate::press::{Press, focus_ring};
+pub use crate::press::{Press, focus_ring, focus_visible, ring_inside, ring_outside};
 pub use crate::root::Root;
 pub use crate::size::{ControlSize, Disableable, Selectable, Sizable};
 pub use crate::theme::{ActiveTheme, Theme};

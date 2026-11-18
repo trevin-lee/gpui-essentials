@@ -660,7 +660,7 @@ impl RenderOnce for ScrollArea {
             .flex_col()
             .overflow_hidden()
             .track_focus(&focus.clone().tab_stop(self.tab_stop))
-            .focus_visible(move |s| s.shadow(vec![ring]))
+            .focus_visible(move |s| s.shadow(vec![crate::base::ring_inside(ring)]))
             // Hover shows the bars; there's none on a touch screen (a tap would leave it on).
             .when(!cfg!(target_os = "ios"), |d| {
                 let state = state.clone();

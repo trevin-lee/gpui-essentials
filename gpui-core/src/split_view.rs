@@ -529,9 +529,9 @@ impl RenderOnce for SplitView {
                 .left_0()
                 .w(LINE)
                 .when(dragging, |d| d.bg(theme.ring))
-                .focus_visible({
-                    let ring = ring.clone();
-                    move |s| s.shadow(vec![ring])
+                // Drawn just outside the line, not under it.
+                .when(crate::base::focus_visible(&focus[i], window), |d| {
+                    d.child(crate::base::ring_outside(ring.clone(), px(0.), px(0.)))
                 })
                 .child(
                     div()
