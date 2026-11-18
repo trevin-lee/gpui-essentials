@@ -11,11 +11,14 @@ on:
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".github/workflows/gpui-agents.yml"
-  # A gpui-core change alone doesn't run this on a pull request: gpui-core's own workflow
-  # lints every crate and builds its tests then, and main's nightly run tests them all.
+  # A gpui-core change alone doesn't run the macOS job (changes.py's --not gpui-core):
+  # gpui-core's own workflow lints every crate and builds its tests then, and main's nightly run
+  # tests them all. Another crate this one depends on by path (gpui-dnd, say) does run it.
   pull_request:
     paths:
       - "gpui-agents/**"
+      # The crates it depends on by path change it too (.github/scripts/changes.py decides).
+      - "gpui-*/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -42,10 +45,10 @@ concurrency:
 jobs:
   # What a pull request changed, for this crate (.github/scripts/changes.py). `own`: the crate's
   # files or this workflow; the slow jobs (the iOS build, the shots lint) run on main nightly,
-  # and on a pull request only then. `run`: anything the crate builds from (`own`, the
-  # toolchain, the root Cargo.toml past its members line, or a Cargo.lock package in its
-  # dependency tree); the macOS job runs only then, so adding a crate to the workspace or
-  # bumping another crate's dependency doesn't run every crate's macOS job.
+  # and on a pull request only then. `run`: anything the crate builds from (`own`, the toolchain, a
+  # workspace crate it depends on by path, the root Cargo.toml past its members line, or a
+  # Cargo.lock package in its dependency tree); the macOS job runs only then, so adding a crate to
+  # the workspace or bumping another crate's dependency doesn't run every crate's macOS job.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -61,7 +64,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then printf 'own=true\nrun=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
-          python3 .github/scripts/changes.py '^(gpui\-agents/|\.github/workflows/gpui\-agents\.yml)' gpui-agents >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/changes.py '^(gpui\-agents/|\.github/workflows/gpui\-agents\.yml)' gpui-agents --not gpui-core >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
