@@ -122,7 +122,7 @@ impl Editor {
     }
 
     /// The chrome over the code block it's for, if any.
-    pub(crate) fn code_chrome(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn code_chrome(&self, touch: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
         let block = self.chrome_block(cx)?;
         let state = self.state.read(cx);
         let readonly = state.is_readonly();
@@ -142,7 +142,8 @@ impl Editor {
             div()
                 .id(id)
                 .debug_selector(move || id.into())
-                .h(px(22.))
+                .h(px(if touch { 44. } else { 22. }))
+                .when(touch, |d| d.min_w(px(44.)).justify_center())
                 .px(px(6.))
                 .flex()
                 .items_center()
