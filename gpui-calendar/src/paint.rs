@@ -145,6 +145,9 @@ pub(crate) struct Shared {
     pub crowds: RefCell<Vec<(Bounds<Pixels>, Vec<EventId>)>>,
     /// Where the drag's ghost was drawn in the last frame.
     pub ghost: Cell<Option<Bounds<Pixels>>>,
+    /// Whether the drag on now scrolls the hours near (or past) the grid's edges: creating,
+    /// moving over the hours, or resizing in them.
+    pub drag_scrolls: Cell<bool>,
     /// How far the agenda is scrolled, in pixels; none until a frame places it (at today).
     pub agenda_scroll: Cell<Option<f32>>,
     /// The farthest the agenda scrolls, from the last frame.
@@ -703,13 +706,12 @@ pub(crate) fn body(
         move |bounds, (scene, geo, hitbox), window, cx| {
             window.set_cursor_style(scene.cursor, &hitbox);
             draw(window, cx, &scene, &geo, bounds, &shared, false);
+            crate::calendar::drag::auto_scroll(&geo, &shared, this.clone(), window, cx);
             // Touch: a long press, and a drag claimed as the finger lands.
             let (on_long, on_drag) = (this.clone(), this.clone());
             window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble
-                    && on_long
-                        .update(cx, |c, cx| c.long_press(event, cx))
-                        .unwrap_or(false)
+                    && crate::calendar::drag::long_press(&on_long, event, window, cx)
                 {
                     window.prevent_default();
                     cx.stop_propagation();
@@ -718,7 +720,7 @@ pub(crate) fn body(
             window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
                 if phase == DispatchPhase::Bubble
                     && on_drag
-                        .update(cx, |c, cx| c.touch_drag(event, cx))
+                        .update(cx, |c, cx| c.touch_drag(event, window, cx))
                         .unwrap_or(false)
                 {
                     window.prevent_default();

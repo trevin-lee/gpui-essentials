@@ -19,6 +19,8 @@ name = "gpui_calendar"
 # the theme the calendar takes its colours and font from and the header's buttons.
 gpui = { workspace = true }
 gpui-core = { path = "../gpui-core" }
+# The drags: gpui-dnd runs a drag's life, the calendar works out what it proposes.
+gpui-dnd = { path = "../gpui-dnd" }
 # Dates and times. chrono-tz carries the IANA database, so the display zone and its DST days
 # don't depend on the machine's.
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }

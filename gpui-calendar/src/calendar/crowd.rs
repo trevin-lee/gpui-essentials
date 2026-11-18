@@ -128,7 +128,13 @@ impl Calendar {
 
     /// A press on a row: the event is selected, and if the press then moves it's a drag of the
     /// event, held by its start, as if its chip had been pressed there.
-    fn press_crowd_row(&mut self, id: EventId, at: Point<Pixels>, cx: &mut Context<Self>) {
+    fn press_crowd_row(
+        &mut self,
+        id: EventId,
+        at: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(e) = self.event(&id) else { return };
         // A month day's list only selects: its rows are opened, not dragged.
         if self.crowd.as_ref().is_some_and(|c| c.day.is_some()) {
@@ -156,6 +162,10 @@ impl Calendar {
             },
             held: Some(held),
         });
+        // A tap reaches a row as a mouse press (GPUI makes one when the finger lifts), so it's
+        // the mouse's either way; on touch it takes a finger's 8 points to start a drag.
+        let slop = if self.options.touch { 8. } else { 4. };
+        self.hand_over(at, gpui_dnd::Backend::Mouse, slop, window, cx);
         cx.notify();
     }
 
@@ -219,10 +229,10 @@ impl Calendar {
                     .text_size(rems(13. / 15.))
                     .hover(|d| d.bg(c.accent))
                     .debug_selector(move || format!("crowd-row-{i}"))
-                    .on_mouse_down(MouseButton::Left, move |e, _, cx| {
+                    .on_mouse_down(MouseButton::Left, move |e, window, cx| {
                         press
                             .update(cx, |c, cx| {
-                                c.press_crowd_row(id_press.clone(), e.position, cx)
+                                c.press_crowd_row(id_press.clone(), e.position, window, cx)
                             })
                             .ok();
                     })

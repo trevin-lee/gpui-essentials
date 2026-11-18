@@ -1880,6 +1880,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "gpui-core",
+ "gpui-dnd",
  "gpui-pre",
  "gpui-pre-apple",
  "gpui-pre-macos",
