@@ -54,8 +54,9 @@ use gpui::{
     ElementId, Entity, FocusHandle, GlobalElementId, HitboxBehavior, Hsla, InspectorElementId,
     InteractiveElement as _, IntoElement, KeyBinding, LayoutId, LongPressEvent, Modifiers,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
-    Rems, RenderOnce, Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
-    TouchPhase, Window, actions, canvas, div, point, prelude::FluentBuilder as _, px, rems,
+    Rems, RenderOnce, Role, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _,
+    Styled as _, TouchPhase, Window, actions, canvas, div, point, prelude::FluentBuilder as _, px,
+    rems,
 };
 
 use crate::icon::{Icon, IconName};
@@ -378,6 +379,8 @@ pub struct PopupMenu {
     nested: Option<CloseFn>,
     /// Opened by the pointer: nothing highlighted until the keys or the pointer move.
     start_blank: bool,
+    /// The scrolling container it's in, which keeps its highlighted entry in view.
+    keep_in_view: Option<ScrollHandle>,
 }
 
 type CloseFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -398,6 +401,7 @@ impl PopupMenu {
             move_highlight: None,
             nested: None,
             start_blank: false,
+            keep_in_view: None,
         }
     }
 
@@ -527,6 +531,16 @@ impl PopupMenu {
         self
     }
 
+    /// Keeps the highlighted entry in view in the scrolling container `scroll` tracks (a
+    /// [`Popover`](crate::base::Popover)'s, with its
+    /// [`track_scroll`](crate::base::Popover::track_scroll)). Before anything's highlighted,
+    /// it's the checked entry: a long list opens scrolled to the chosen option, and follows the
+    /// keys from there. It scrolls only when that entry changes, so it never fights the wheel.
+    pub fn keep_highlight_in_view(mut self, scroll: &ScrollHandle) -> Self {
+        self.keep_in_view = Some(scroll.clone());
+        self
+    }
+
     /// Entries 44 points tall, for touch.
     pub fn touch(mut self, touch: bool) -> Self {
         self.row.touch = touch;
@@ -575,6 +589,8 @@ struct MenuState {
     dropped: bool,
     /// Where each entry was drawn last, for working out where a drag would drop.
     bounds: Rc<RefCell<Vec<Bounds<Pixels>>>>,
+    /// The entry last scrolled into view (`keep_highlight_in_view`).
+    kept: Option<usize>,
 }
 
 /// A press on a reorderable entry: a drag once it's moved [`REORDER_THRESHOLD`] (by touch, from
@@ -616,6 +632,36 @@ fn reorder_runs(entries: &[Entry]) -> Vec<Option<(usize, usize)>> {
         i = end;
     }
     out
+}
+
+/// Scrolls `scroll`'s container so entry `target`'s row (of `rows`, as just laid out) is in
+/// view, once for each entry it's given: the next frame draws it there.
+fn keep_in_view(
+    scroll: &ScrollHandle,
+    target: Option<usize>,
+    state: &Entity<MenuState>,
+    rows: &[Bounds<Pixels>],
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let view = scroll.bounds();
+    let Some((i, row)) = target.and_then(|i| Some((i, *rows.get(i)?))) else {
+        return;
+    };
+    if state.read(cx).kept == Some(i) || view.size.height <= px(0.) {
+        return;
+    }
+    state.update(cx, |s, _| s.kept = Some(i));
+    let mut offset = scroll.offset();
+    if row.top() < view.top() {
+        offset.y += view.top() - row.top();
+    } else if row.bottom() > view.bottom() {
+        offset.y -= row.bottom() - view.bottom();
+    } else {
+        return;
+    }
+    scroll.set_offset(offset);
+    window.defer(cx, |window, _| window.refresh());
 }
 
 /// Where a drag of entry `at` (in run `start..end`) would land with the pointer at `pos`, as an
@@ -698,6 +744,7 @@ impl RenderOnce for PopupMenu {
             swallow_click: false,
             dropped: false,
             bounds: Rc::default(),
+            kept: None,
         });
         let (focus, focused_once) = {
             let s = state.read(cx);
@@ -1067,6 +1114,15 @@ impl RenderOnce for PopupMenu {
         });
         let live = row_reorder.as_ref().is_some_and(|r| r.lifted.is_some());
         let bounds = state.read(cx).bounds.clone();
+        // The entry to keep in view: the highlighted one, else the checked one.
+        let keep = self.keep_in_view.clone().map(|scroll| {
+            let target = highlighted.or_else(|| {
+                self.entries
+                    .iter()
+                    .position(|e| matches!(e, Entry::Item(i) if i.checked == Some(true)))
+            });
+            (scroll, target, state.clone())
+        });
 
         let rows = rows_with(
             &self.id,
@@ -1084,10 +1140,18 @@ impl RenderOnce for PopupMenu {
 
         let nested = self.nested;
         let cancel_close = reorderer.clone();
+        let track_bounds = reorderer.is_some();
         div()
-            .when(reorderer.is_some(), |d| {
-                d.relative()
-                    .on_children_prepainted(move |b, _, _| *bounds.borrow_mut() = b)
+            .when(track_bounds, |d| d.relative())
+            .when(track_bounds || keep.is_some(), |d| {
+                d.on_children_prepainted(move |b, window, cx| {
+                    if let Some((scroll, target, state)) = &keep {
+                        keep_in_view(scroll, *target, state, &b, window, cx);
+                    }
+                    if track_bounds {
+                        *bounds.borrow_mut() = b;
+                    }
+                })
             })
             .id(self.id)
             .role(Role::Menu)
