@@ -1,6 +1,6 @@
 //! The format bar: a text selection made with the pointer shows, above it, Turn into (the slash
-//! menu's blocks, for the block the selection starts in), bold, italic, strikethrough, code and
-//! link, as Notion's does. A mark's button is pressed while the whole selection has it, and a
+//! menu's blocks, for the block the selection starts in), bold, italic, underline,
+//! strikethrough, code and link, as Notion's does. A mark's button is pressed while the whole selection has it, and a
 //! press toggles it over the selection; Link asks the app for the link, as ⌘K does
 //! ([`EditorEvent::EditLinkRequested`](crate::EditorEvent::EditLinkRequested)).
 //!
@@ -18,9 +18,10 @@ use crate::Editor;
 use crate::block_menu::turn_into_titles;
 
 /// The marks the bar toggles, with their labels.
-const MARKS: [(MarkKind, &str); 4] = [
+const MARKS: [(MarkKind, &str); 5] = [
     (MarkKind::Bold, "Bold"),
     (MarkKind::Italic, "Italic"),
+    (MarkKind::Underline, "Underline"),
     (MarkKind::Strikethrough, "Strikethrough"),
     (MarkKind::Code, "Code"),
 ];
@@ -102,6 +103,7 @@ impl Editor {
                         .child("B")
                         .into_any_element(),
                     MarkKind::Italic => icon(IconName::Italic, on),
+                    MarkKind::Underline => icon(IconName::Underline, on),
                     MarkKind::Strikethrough => icon(IconName::Strikethrough, on),
                     _ => icon(IconName::Code, on),
                 };
