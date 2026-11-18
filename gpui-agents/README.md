@@ -1,4 +1,4 @@
-# gpui-chatwidgets
+# gpui-agents
 
 Draws AI agents' OpenUI cards natively in [GPUI](https://www.gpui.rs) apps, with
 [gpui-core](../gpui-core)'s components.
@@ -14,7 +14,7 @@ Reads OpenUI Lang (openui.com, MIT, by Thesys). An independent port, not affilia
 
 ## What's in it
 
-- **`gpui_chatwidgets::openui`**, the parser and the card model. It reads programs the way
+- **`gpui_agents::openui`**, the parser and the card model. It reads programs the way
   OpenUI's own parser (`@openuidev/lang-core` 1.1.0) does, and 43 golden files written by that
   parser check it (`tests/openui`, made by `tests/openui/golden.mjs`). It turns a program into a
   typed tree of components with their props defaulted, runs presses against the card's state
@@ -51,7 +51,7 @@ It needs Rust 1.100 or newer, as the workspace does.
 [dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui-core = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<the same commit>" }
-gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
+gpui-agents = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>" }
 # The app's window. Without `font-kit`, GPUI draws no text on macOS.
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit"] }
 ```
@@ -74,11 +74,11 @@ A crate that reads cards but doesn't draw them (a server, or the part of an app 
 turns the renderer off and gets no GPUI at all:
 
 ```toml
-gpui-chatwidgets = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>", default-features = false }
+gpui-agents = { git = "https://github.com/trevin-lee/gpui-essentials", rev = "<a commit>", default-features = false }
 ```
 
 ```rust
-use gpui_chatwidgets::openui;
+use gpui_agents::openui;
 
 let program = openui::parse(r#"root = Stack([Button("Approve")])"#).unwrap();
 let mut store = program.store();
@@ -98,9 +98,9 @@ message id), so several cards in one window don't collide.
 ```rust,no_run
 use std::rc::Rc;
 
-use gpui_chatwidgets::openui::{ImageSrc, Link};
+use gpui_agents::openui::{ImageSrc, Link};
 use gpui::*;
-use gpui_chatwidgets::{CardHost, CardTheme, CardView, ImageLoad, ImageReply};
+use gpui_agents::{CardHost, CardTheme, CardView, ImageLoad, ImageReply};
 use gpui_core::Theme;
 
 struct Host;
@@ -466,7 +466,7 @@ The 44-point targets and the sideways-only scrolling come from the theme, which 
 platform:
 
 ```rust
-use gpui_chatwidgets::CardTheme;
+use gpui_agents::CardTheme;
 
 // On iOS and Android: min_hit 44 and touch on. Elsewhere: 0 and off.
 let theme = CardTheme::dark();

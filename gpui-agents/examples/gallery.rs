@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_chatwidgets::openui::{ImageSrc, Link};
-use gpui_chatwidgets::*;
+use gpui_agents::openui::{ImageSrc, Link};
+use gpui_agents::*;
 use gpui_core::Theme;
 
 /// A few programs of the gallery's own, after the golden ones: charts split so each fits a

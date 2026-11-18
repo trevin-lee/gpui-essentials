@@ -1053,7 +1053,7 @@ The host is the app around the views. It:
   related database for the relation picker. The engine's `Lookup` trait is the part sorting and
   grouping need.
 - **Gives the theme.** Colours (text, lines, fills, the ten option colours, the accent), fonts,
-  sizes and row heights, scaled by the window's rem, as gpui-chatwidgets' `CardTheme` does.
+  sizes and row heights, scaled by the window's rem, as gpui-agents' `CardTheme` does.
 - **Writes both sides of relations** in one batch, with `relation::back_edits`, and both
   databases' properties for a two-way relation made or unmade from a table.
 - **May remember the view each person had open**, from `TableHost::view_shown`, and show it
@@ -1143,7 +1143,7 @@ nothing draws while nothing changes.
   The test fails past 50, 12 and 12 ms in a release build.
 - **No text overflows its cell** at any width: cells, headers, group headers, menus and cards
   end in an ellipsis, and a list's values drop off. A headless Core Text test, as
-  gpui-chatwidgets has, checks every cell type (and a board's cards and a list's lines, with
+  gpui-agents has, checks every cell type (and a board's cards and a list's lines, with
   every property on them, and the bar of views' tabs and menus) with the worst text at 360, 700
   and 1400 wide.
 

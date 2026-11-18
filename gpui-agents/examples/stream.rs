@@ -20,8 +20,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::*;
-use gpui_chatwidgets::openui::{ImageSrc, Link};
-use gpui_chatwidgets::*;
+use gpui_agents::openui::{ImageSrc, Link};
+use gpui_agents::*;
 use gpui_core::Theme;
 use gpui_core::text::TextViewStyle;
 

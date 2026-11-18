@@ -1,11 +1,11 @@
-GPUI crates: gpui-blocks (with gpui-blocks-engine), gpui-calendar, gpui-chatwidgets,
+GPUI crates: gpui-agents, gpui-blocks (with gpui-blocks-engine), gpui-calendar,
 gpui-core, gpui-flow and gpui-tables
 Copyright 2026 Trevin Lee
 
 Every crate draws through gpui-core. gpui-blocks-engine derives from GPUI Kit,
 as below.
 
-The examples of gpui-calendar and gpui-chatwidgets include Inter
+The examples of gpui-agents and gpui-calendar include Inter
 (https://github.com/rsms/inter), Copyright 2016 The Inter Project Authors,
 licensed under the SIL Open Font License, Version 1.1. See
 examples/fonts/OFL.txt in each.
@@ -35,13 +35,13 @@ licensed under the ISC License, some derived from Feather
 (https://feathericons.com), Copyright 2013-2026 Cole Bemis, licensed under the
 MIT License. See gpui-core/assets/lucide/LICENSE.
 
-gpui-chatwidgets
-----------------
+gpui-agents
+-----------
 
 This product reads OpenUI Lang (https://openui.com), the language of OpenUI by
 Thesys. It is an independent port, not affiliated with Thesys. Its parser
-follows @openuidev/lang-core, and gpui-chatwidgets/src/openui/library.json and the golden files
-in gpui-chatwidgets/tests/openui are generated from @openuidev/lang-core and
+follows @openuidev/lang-core, and gpui-agents/src/openui/library.json and the golden files
+in gpui-agents/tests/openui are generated from @openuidev/lang-core and
 @openuidev/react-ui, Copyright (c) 2011-2024 Thesys Inc., licensed under the
 MIT License:
 

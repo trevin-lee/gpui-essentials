@@ -1,25 +1,25 @@
-name: gpui-chatwidgets
+name: gpui-agents
 
-# Runs when gpui-chatwidgets, gpui-core (its presses), or something every crate shares, changes.
+# Runs when gpui-agents, gpui-core (its presses), or something every crate shares, changes.
 on:
   push:
     branches: [main]
     paths:
-      - "gpui-chatwidgets/**"
+      - "gpui-agents/**"
       - "gpui-core/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
-      - ".github/workflows/gpui-chatwidgets.yml"
+      - ".github/workflows/gpui-agents.yml"
   # A gpui-core change alone doesn't run this on a pull request: gpui-core's own workflow
   # lints every crate and builds its tests then, and main's nightly run tests them all.
   pull_request:
     paths:
-      - "gpui-chatwidgets/**"
+      - "gpui-agents/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
-      - ".github/workflows/gpui-chatwidgets.yml"
+      - ".github/workflows/gpui-agents.yml"
 
   # Every change was built and tested on its pull request, so a push to main runs only the
   # Linux jobs: GitHub runs 5 macOS jobs at once, and each push to main queued macOS and iOS
@@ -53,7 +53,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" != pull_request ]; then echo own=true >> "$GITHUB_OUTPUT"; exit 0; fi
           gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --paginate --jq '.[].filename' > files
-          if grep -qE '^(gpui\-chatwidgets/|gpui\-core/|\.github/workflows/gpui\-chatwidgets\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
+          if grep -qE '^(gpui\-agents/|gpui\-core/|\.github/workflows/gpui\-agents\.yml)' files; then echo own=true; else echo own=false; fi >> "$GITHUB_OUTPUT"
 
   macos:
     needs: changes
@@ -68,17 +68,17 @@ jobs:
       # saves, so pull requests don't push main's caches out of the 10 GB.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: gpui-chatwidgets
+          key: gpui-agents
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo fmt -p gpui-chatwidgets --check
-      - run: cargo clippy -p gpui-chatwidgets --locked --all-targets -- -D warnings
+      - run: cargo fmt -p gpui-agents --check
+      - run: cargo clippy -p gpui-agents --locked --all-targets -- -D warnings
       - if: needs.changes.outputs.own == 'true'
-        run: cargo clippy -p gpui-chatwidgets --locked --all-targets --features shots -- -D warnings
+        run: cargo clippy -p gpui-agents --locked --all-targets --features shots -- -D warnings
       # Unit, interaction and headless tests, and the README's examples compiled.
-      - run: cargo test -p gpui-chatwidgets --locked
+      - run: cargo test -p gpui-agents --locked
       # The streaming performance bounds, as the README measures them.
-      - run: cargo test -p gpui-chatwidgets --locked --release --test stream_performance
-      - run: cargo doc -p gpui-chatwidgets --locked --no-deps
+      - run: cargo test -p gpui-agents --locked --release --test stream_performance
+      - run: cargo doc -p gpui-agents --locked --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -95,13 +95,13 @@ jobs:
       # saves, so pull requests don't push main's caches out of the 10 GB.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: gpui-chatwidgets-ios
+          key: gpui-agents-ios
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Into the toolchain rust-toolchain.toml pins, which rustup installs here first.
       - run: rustup target add aarch64-apple-ios-sim
-      - run: cargo build -p gpui-chatwidgets --locked --target aarch64-apple-ios-sim
-      - run: cargo build -p gpui-chatwidgets --locked --target aarch64-apple-ios-sim --no-default-features
-      - run: cargo clippy -p gpui-chatwidgets --locked --target aarch64-apple-ios-sim --all-targets -- -D warnings
+      - run: cargo build -p gpui-agents --locked --target aarch64-apple-ios-sim
+      - run: cargo build -p gpui-agents --locked --target aarch64-apple-ios-sim --no-default-features
+      - run: cargo clippy -p gpui-agents --locked --target aarch64-apple-ios-sim --all-targets -- -D warnings
 
   parser:
     # The parser and model alone (default-features = false) must build and pass on Linux with no
@@ -113,9 +113,9 @@ jobs:
       # saves, so pull requests don't push main's caches out of the 10 GB.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: gpui-chatwidgets-parser
+          key: gpui-agents-parser
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo clippy -p gpui-chatwidgets --locked --no-default-features --all-targets -- -D warnings
-      - run: cargo test -p gpui-chatwidgets --locked --no-default-features
+      - run: cargo clippy -p gpui-agents --locked --no-default-features --all-targets -- -D warnings
+      - run: cargo test -p gpui-agents --locked --no-default-features
       # Nothing of GPUI, GPUI Kit or gpui-core may be in the parser-only build.
-      - run: "! cargo tree -p gpui-chatwidgets --no-default-features -e normal --locked | grep -E 'gpui-(kit|pre|core)'"
+      - run: "! cargo tree -p gpui-agents --no-default-features -e normal --locked | grep -E 'gpui-(kit|pre|core)'"

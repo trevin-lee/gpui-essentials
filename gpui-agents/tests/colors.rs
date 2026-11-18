@@ -12,7 +12,7 @@ use std::sync::Arc;
 use ::gpui::TestDispatcher;
 use common::*;
 use gpui::*;
-use gpui_chatwidgets::CardTheme;
+use gpui_agents::CardTheme;
 // The built-in #[test], not GPUI's, which gpui::* brings in.
 use std::prelude::v1::test;
 
