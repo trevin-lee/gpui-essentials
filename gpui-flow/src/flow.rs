@@ -731,6 +731,8 @@ pub struct Flow {
     shared: Rc<Shared>,
     focus: FocusHandle,
     drag: Option<Drag>,
+    /// The press under way is on a node's drag handle.
+    by_drag_handle: bool,
     /// The node or edge the keyboard is on, with a focus ring round it; none while the
     /// canvas itself has the keyboard, or the mouse was used last.
     keyboard_on: Option<FlowItem>,
@@ -966,6 +968,7 @@ impl Flow {
             shared: Rc::default(),
             focus: cx.focus_handle(),
             drag: None,
+            by_drag_handle: false,
             keyboard_on: None,
             announcement: SharedString::default(),
             drag_pane: None,
@@ -3476,8 +3479,13 @@ impl Flow {
         let Some(node) = self.node(id) else {
             return true;
         };
-        let (selectable, draggable, was_selected) =
-            (self.selectable(node), self.draggable(node), node.selected);
+        // A node with a drag handle moves only by it; a press elsewhere on it only selects.
+        let by_handle = !node.has_drag_handle() || self.by_drag_handle;
+        let (selectable, draggable, was_selected) = (
+            self.selectable(node),
+            self.draggable(node) && by_handle,
+            node.selected,
+        );
         let pane = self.shared.pane_point(event.position);
         let above = self.edge_at(pane, Some(self.node_z(node)));
         window.focus(&self.focus, cx);
@@ -3530,6 +3538,21 @@ impl Flow {
         });
         cx.notify();
         true
+    }
+
+    /// A press on a node's drag handle ([`NodeContext::drag_handle`]): as on a node without
+    /// one, it selects the node and drags it.
+    pub(crate) fn drag_handle_mouse_down(
+        &mut self,
+        id: &NodeId,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.by_drag_handle = true;
+        let took = self.node_mouse_down(id, event, window, cx);
+        self.by_drag_handle = false;
+        took
     }
 
     /// Starts dragging a connection out of a handle. Says whether the press was the flow's.
@@ -5606,7 +5629,10 @@ impl Flow {
             .when_some(node.height, |d, h| d.h(units(h)))
             .when(!self.ready, |d| d.opacity(0.))
             .when(
-                editing && self.tool == Tool::Select && self.draggable(node),
+                editing
+                    && self.tool == Tool::Select
+                    && self.draggable(node)
+                    && !node.has_drag_handle(),
                 |d| {
                     d.cursor(if dragging {
                         CursorStyle::ClosedHand

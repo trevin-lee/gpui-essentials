@@ -374,6 +374,27 @@ pub struct NodeContext {
 pub type ImageLoader = Rc<dyn Fn(&str, &mut Window, &mut App) -> Option<ImageSource>>;
 
 impl NodeContext {
+    /// What a node with a drag handle ([`crate::Node::drag_handle`]) is dragged by: `child`,
+    /// with a grab cursor, a press on which drags the node as a press anywhere on a node
+    /// without one does. On a node without a handle it acts as the rest of the node does.
+    pub fn drag_handle(&self, child: impl IntoElement) -> AnyElement {
+        let (flow, node) = (self.flow.clone(), self.id.clone());
+        div()
+            .cursor(CursorStyle::OpenHand)
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                let took = flow
+                    .update(cx, |flow, cx| {
+                        flow.drag_handle_mouse_down(&node, event, window, cx)
+                    })
+                    .unwrap_or(false);
+                if took {
+                    cx.stop_propagation();
+                }
+            })
+            .child(child)
+            .into_any_element()
+    }
+
     /// The flow this node is in, for event handlers to update later. While the node is being
     /// drawn the flow is busy: reading or updating it then panics. Read the `&Flow` the
     /// renderer is given instead.
