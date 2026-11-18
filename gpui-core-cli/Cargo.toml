@@ -8,6 +8,7 @@ repository.workspace = true
 description = "`gpui-core add`: copies gpui-core's components into your crate, shadcn's way."
 keywords = ["gpui", "ui", "components", "cli"]
 categories = ["command-line-utilities", "gui"]
+readme = "README.md"
 
 [[bin]]
 name = "gpui-core"
