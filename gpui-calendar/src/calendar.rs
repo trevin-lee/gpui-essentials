@@ -29,6 +29,7 @@ use crate::model::*;
 
 mod crowd;
 pub(crate) mod drag;
+mod menu;
 mod mini;
 mod panel;
 use crate::paint::{self, Area, Geo, Ghost, Shared, Target};
@@ -70,6 +71,9 @@ actions!(
         /// With the event panel open, asks the host to edit its event ([`CalendarEvent::Edit`]),
         /// as the panel's Edit does. Nothing for a read-only event.
         EditPanelEvent,
+        /// Opens the menu of what's selected (an event's Open, Edit and Delete, or a slot's New
+        /// event), as a right-click does.
+        ShowMenu,
     ]
 );
 
@@ -99,6 +103,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("escape", Cancel, c),
         KeyBinding::new("g", GoToDate, c),
         KeyBinding::new("e", EditPanelEvent, c),
+        KeyBinding::new("shift-f10", ShowMenu, c),
         KeyBinding::new(
             if cfg!(any(target_os = "macos", target_os = "ios")) {
                 "cmd-f"
@@ -448,6 +453,8 @@ pub struct Calendar {
     panel: Option<Panel>,
     /// The list of side-by-side events that didn't fit, open from their "+N".
     crowd: Option<crowd::Crowd>,
+    /// The menu a right-click or Shift-F10 opened.
+    menu: Option<menu::Menu>,
     /// Where the pointer or finger last was in a drag.
     last_point: Point<Pixels>,
     /// What the events are filtered by, if anything.
@@ -542,6 +549,7 @@ impl Calendar {
             asking: None,
             panel: None,
             crowd: None,
+            menu: None,
             last_point: Point::default(),
             query: None,
             mini: None,
@@ -2121,7 +2129,9 @@ impl Calendar {
     // The keyboard.
 
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.mini_open {
+        if self.menu.is_some() {
+            self.close_menu(cx);
+        } else if self.mini_open {
             self.mini_open = false;
             cx.notify();
         } else if self.asking.is_some() {
@@ -3138,6 +3148,7 @@ impl Render for Calendar {
         let query = self.render_query(colors, cx);
         let panel = self.render_panel(window, cx);
         let crowd = self.render_crowd(window, cx);
+        let menu = self.render_menu(cx);
         let (aside, mini) = self.render_mini(window, cx);
         let ring = self.focus.is_focused(window) && window.last_input_was_keyboard();
         let root = div()
@@ -3193,6 +3204,14 @@ impl Render for Calendar {
             .on_action(cx.listener(|_, _: &Find, _, cx| cx.emit(CalendarEvent::Find)))
             .on_action(cx.listener(|c, _: &GoToDate, window, cx| c.toggle_mini_month(window, cx)))
             .on_action(cx.listener(|c, _: &EditPanelEvent, _, cx| c.edit_panel_event(cx)))
+            .on_action(cx.listener(|c, _: &ShowMenu, _, cx| c.show_menu(cx)))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|c, e: &MouseDownEvent, window, cx| {
+                    c.focus.focus(window, cx);
+                    c.right_click(e.position, cx);
+                }),
+            )
             .children(aside)
             .child(
                 div()
@@ -3237,6 +3256,7 @@ impl Render for Calendar {
             )
             .children(panel)
             .children(crowd)
+            .children(menu)
             .children(mini)
             .children(question);
         // The calendar's drags run on gpui-dnd: its own provider (the window's first drawn

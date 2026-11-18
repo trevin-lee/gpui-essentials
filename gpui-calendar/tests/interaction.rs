@@ -2190,3 +2190,87 @@ fn a_repeating_event_dragged_between_the_rows_is_asked_about(cx: &mut TestAppCon
         }
     ));
 }
+
+fn selected_id(c: &Entity<Calendar>, cx: &VisualTestContext) -> Option<EventId> {
+    c.read_with(cx, |c, _| c.selected_event().cloned())
+}
+
+fn right_click(cx: &mut VisualTestContext, p: Point<Pixels>) {
+    cx.simulate_mouse_move(p, None, Modifiers::none());
+    cx.simulate_mouse_down(p, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(p, MouseButton::Right, Modifiers::none());
+    draw(cx);
+}
+
+#[gpui::test]
+fn a_right_click_on_an_event_opens_its_menu(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    let p = spot(&c, cx, day(2), 11, 30);
+    right_click(cx, p);
+    // It selects the event, as Google Calendar does, and offers what its keys do.
+    assert_eq!(selected_id(&c, cx), Some("a".into()));
+    assert_eq!(
+        c.read_with(cx, |c, _| c.menu_items()),
+        Some(vec!["open", "edit", "delete"])
+    );
+    // Edit asks the host to edit it; the menu closes.
+    c.update(cx, |c, cx| c.pick_menu_item("edit", cx));
+    assert!(has(&seen, &CalendarEvent::Edit(reference("a"))));
+    assert_eq!(c.read_with(cx, |c, _| c.menu_items()), None);
+    // Delete asks the host to delete it.
+    right_click(cx, p);
+    c.update(cx, |c, cx| c.pick_menu_item("delete", cx));
+    assert!(has(
+        &seen,
+        &CalendarEvent::Delete {
+            event: reference("a"),
+            scope: EditScope::This
+        }
+    ));
+    // Escape closes it, and leaves the event selected.
+    right_click(cx, p);
+    cx.simulate_keystrokes("escape");
+    assert_eq!(c.read_with(cx, |c, _| c.menu_items()), None);
+    assert_eq!(selected_id(&c, cx), Some("a".into()));
+}
+
+#[gpui::test]
+fn a_read_only_event_s_menu_only_opens_it(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    right_click(cx, spot(&c, cx, day(3), 9, 30));
+    assert_eq!(c.read_with(cx, |c, _| c.menu_items()), Some(vec!["open"]));
+    c.update(cx, |c, cx| c.pick_menu_item("open", cx));
+    assert!(has(&seen, &CalendarEvent::Open("ro".into())));
+}
+
+#[gpui::test]
+fn empty_time_s_menu_makes_an_event_there(cx: &mut TestAppContext) {
+    let (c, seen, cx) = open(cx);
+    right_click(cx, spot(&c, cx, day(2), 15, 10));
+    assert_eq!(c.read_with(cx, |c, _| c.menu_items()), Some(vec!["new"]));
+    c.update(cx, |c, cx| c.pick_menu_item("new", cx));
+    // At the slot it was opened on (15:00, snapped), the usual hour long.
+    assert!(seen.borrow().iter().any(|e| matches!(
+        e,
+        CalendarEvent::Create { time, .. }
+            if *time == EventTime::timed(at(day(2), 15, 0), at(day(2), 16, 0))
+    )));
+}
+
+#[gpui::test]
+fn shift_f10_opens_the_selected_event_s_menu(cx: &mut TestAppContext) {
+    let (c, _, cx) = open(cx);
+    c.update(cx, |c, cx| {
+        c.select(Some(Selection::Event("gym@1".into())), cx)
+    });
+    draw(cx);
+    cx.simulate_keystrokes("shift-f10");
+    draw(cx);
+    assert_eq!(
+        c.read_with(cx, |c, _| c.menu_items()),
+        Some(vec!["open", "edit", "delete"])
+    );
+    // A repeating event's Delete still asks which occurrences first.
+    c.update(cx, |c, cx| c.pick_menu_item("delete", cx));
+    assert!(c.read_with(cx, |c, _| c.is_asking()));
+}
