@@ -164,7 +164,17 @@ pub fn visible_days(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -
             let weeks = (last - start).num_days() / 7 + 1;
             (start, weeks as u32 * 7)
         }
+        CalendarView::Year => {
+            let first = year_start(anchor);
+            let next = first + Months::new(12);
+            (first, (next - first).num_days() as u32)
+        }
     }
+}
+
+/// The first day of `date`'s year.
+pub fn year_start(date: NaiveDate) -> NaiveDate {
+    NaiveDate::from_ymd_opt(date.year(), 1, 1).expect("every year has a first")
 }
 
 /// The instants a view covers, from the first day's start to the day after the last's: what
@@ -190,8 +200,9 @@ pub fn step(view: CalendarView, anchor: NaiveDate, dir: i32) -> NaiveDate {
         CalendarView::Week => days(7),
         CalendarView::Days(n) => days(n.clamp(1, 31).into()),
         CalendarView::Agenda(n) => days(n.clamp(1, 366).into()),
-        CalendarView::Month => {
-            let m = Months::new(dir.unsigned_abs());
+        CalendarView::Month | CalendarView::Year => {
+            let per = if view == CalendarView::Year { 12 } else { 1 };
+            let m = Months::new(dir.unsigned_abs() * per);
             if dir >= 0 { anchor + m } else { anchor - m }
         }
     }
@@ -440,6 +451,7 @@ pub fn short_title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) ->
             short(anchor)
         ),
         CalendarView::Month => format!("{} {}", month_short(anchor.month()), anchor.year()),
+        CalendarView::Year => anchor.year().to_string(),
         CalendarView::Agenda(_) if first == last => short(first),
         CalendarView::Agenda(_) if first.month() == last.month() => {
             format!("{} – {}", short(first), last.day())
@@ -471,6 +483,7 @@ pub fn short_title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) ->
 pub fn title(view: CalendarView, anchor: NaiveDate, first_day: Weekday) -> String {
     match view {
         CalendarView::Month => format!("{} {}", month_name(anchor.month()), anchor.year()),
+        CalendarView::Year => anchor.year().to_string(),
         CalendarView::Day => format!(
             "{}, {} {}, {}",
             weekday_name(anchor.weekday(), false),

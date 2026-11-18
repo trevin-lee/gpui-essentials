@@ -53,12 +53,17 @@ const LABEL: f32 = 13.125;
 const LINK_ROW: f32 = 17.;
 /// A link's mark: a page for a doc, a ring for an agent, a chain for several links.
 const GLYPH: f32 = 11.;
+/// The year view: a month's name, its weekday letters, and the most a day's square grows to.
+const YEAR_TITLE: f32 = 24.;
+const YEAR_WEEKDAYS: f32 = 18.;
+const YEAR_CELL_MAX: f32 = 40.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     Grid,
     Month,
     Agenda,
+    Year,
 }
 
 /// Which part of the calendar a drag is in, which decides how it moves things.
@@ -85,6 +90,8 @@ pub(crate) enum Target {
     More(NaiveDate),
     /// A day's name or number.
     Date(NaiveDate),
+    /// A month's name in the year view: its first day.
+    Month(NaiveDate),
     /// "+N" in the all-day row, which opens the row to show everything.
     Expand,
     /// "+N" beside side-by-side events, for those that didn't fit: which they are, and where
@@ -187,6 +194,39 @@ pub(crate) struct Geo {
     /// Taken by touch: small things take taps around them, and only the selected event
     /// shows a handle to change its end.
     pub touch: bool,
+    /// The week's first day, which the year view's months start their rows on.
+    pub week_start: Weekday,
+}
+
+/// The year view's twelve months: each a name, a row of weekday letters and six rows of
+/// square days, as many months across as makes the days biggest, centred in the body.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct YearGrid {
+    pub cols: u32,
+    pub origin: Point<Pixels>,
+    pub cell: Pixels,
+    pub gap: Pixels,
+    pub title: Pixels,
+    pub weekdays: Pixels,
+}
+
+impl YearGrid {
+    fn month_size(&self) -> Size<Pixels> {
+        size(self.cell * 7., self.title + self.weekdays + self.cell * 6.)
+    }
+
+    /// Where month `m` (0 for January) is.
+    fn month_bounds(&self, m: u32) -> Bounds<Pixels> {
+        let s = self.month_size();
+        let (row, col) = (m / self.cols, m % self.cols);
+        Bounds::new(
+            point(
+                self.origin.x + (s.width + self.gap) * col as f32,
+                self.origin.y + (s.height + self.gap) * row as f32,
+            ),
+            s,
+        )
+    }
 }
 
 /// The time grid's scroll bar as last drawn: its track (where the pointer shows it), and its
@@ -261,6 +301,102 @@ impl Geo {
         }
     }
 
+    pub(crate) fn year(&self) -> YearGrid {
+        let u = |v: f32| px(v * self.s);
+        let b = self.bounds;
+        let (pad, gap) = if b.size.width < u(NARROW) {
+            (u(8.), u(10.))
+        } else {
+            (u(16.), u(16.))
+        };
+        let (title, weekdays) = (u(YEAR_TITLE), u(YEAR_WEEKDAYS));
+        let fit = |cols: u32| {
+            let rows = 12 / cols;
+            let w = (b.size.width - pad * 2. - gap * (cols - 1) as f32) / (7 * cols) as f32;
+            let h = (b.size.height
+                - pad * 2.
+                - gap * (rows - 1) as f32
+                - (title + weekdays) * rows as f32)
+                / (6 * rows) as f32;
+            w.min(h)
+        };
+        let cols = [6, 4, 3, 2]
+            .into_iter()
+            .max_by(|a, b| {
+                fit(*a)
+                    .partial_cmp(&fit(*b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(4);
+        let cell = fit(cols).min(u(YEAR_CELL_MAX)).max(px(1.));
+        let rows = 12 / cols;
+        let w = cell * (7 * cols) as f32 + gap * (cols - 1) as f32;
+        let h = (title + weekdays + cell * 6.) * rows as f32 + gap * (rows - 1) as f32;
+        YearGrid {
+            cols,
+            origin: point(
+                b.left() + ((b.size.width - w) / 2.).max(px(0.)),
+                b.top() + ((b.size.height - h) / 2.).max(px(0.)),
+            ),
+            cell,
+            gap,
+            title,
+            weekdays,
+        }
+    }
+
+    /// The first day of the year view's month `m` (0 for January).
+    fn year_month(&self, m: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(self.first.year(), m + 1, 1).unwrap_or(self.first)
+    }
+
+    /// Where a day of the year view is drawn.
+    pub(crate) fn year_cell(&self, date: NaiveDate) -> Option<Bounds<Pixels>> {
+        if date.year() != self.first.year() {
+            return None;
+        }
+        let y = self.year();
+        let month = y.month_bounds(date.month0());
+        let start = time::week_start(time::month_start(date), self.week_start);
+        let i = (date - start).num_days() as f32;
+        let (row, col) = ((i / 7.).floor(), i % 7.);
+        Some(Bounds::new(
+            point(
+                month.left() + y.cell * col,
+                month.top() + y.title + y.weekdays + y.cell * row,
+            ),
+            size(y.cell, y.cell),
+        ))
+    }
+
+    /// What's under a point in the year view: a day, or a month's name.
+    fn year_at(&self, p: Point<Pixels>) -> Target {
+        let y = self.year();
+        for m in 0..12 {
+            let b = y.month_bounds(m);
+            if !b.contains(&p) {
+                continue;
+            }
+            let first = self.year_month(m);
+            if p.y < b.top() + y.title {
+                return Target::Month(first);
+            }
+            let top = b.top() + y.title + y.weekdays;
+            if p.y < top {
+                return Target::Nothing;
+            }
+            let col = (f32::from(p.x - b.left()) / f32::from(y.cell)).floor() as i64;
+            let row = (f32::from(p.y - top) / f32::from(y.cell)).floor() as i64;
+            let date = time::week_start(first, self.week_start) + Duration::days(row * 7 + col);
+            return if date.month() == first.month() {
+                Target::Date(date)
+            } else {
+                Target::Nothing
+            };
+        }
+        Target::Nothing
+    }
+
     pub fn point_at(&self, date: NaiveDate, minute: f32) -> Option<Point<Pixels>> {
         let i = (date - self.first).num_days() as i32;
         if i < 0 || i >= self.days as i32 {
@@ -284,6 +420,7 @@ impl Geo {
                 ))
             }
             Kind::Agenda => None,
+            Kind::Year => self.year_cell(date).map(|b| b.center()),
         }
     }
 }
@@ -452,6 +589,7 @@ fn geometry(
                 rows: 0,
                 row_h: px(0.),
                 touch: scene.options.touch,
+                week_start: scene.options.week_start,
             };
             let shown = geo.visible_minutes();
             let max = (time::DAY_MINUTES - shown).max(0.);
@@ -489,10 +627,11 @@ fn geometry(
                 rows,
                 row_h: (bounds.bottom() - head_bottom) / rows as f32,
                 touch: scene.options.touch,
+                week_start: scene.options.week_start,
             }
         }
-        Kind::Agenda => Geo {
-            kind: Kind::Agenda,
+        Kind::Agenda | Kind::Year => Geo {
+            kind: scene.kind,
             bounds,
             s,
             first: scene.first,
@@ -510,6 +649,7 @@ fn geometry(
             rows: 0,
             row_h: px(0.),
             touch: scene.options.touch,
+            week_start: scene.options.week_start,
         },
     }
 }
@@ -647,6 +787,7 @@ pub(crate) fn target_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> Target 
             date: geo.pos(p, Area::Month).0,
             area: Area::Month,
         },
+        Kind::Year => geo.year_at(p),
         _ => Target::Nothing,
     }
 }
@@ -667,6 +808,7 @@ pub(crate) fn cursor_at(geo: &Geo, shared: &Shared, p: Point<Pixels>) -> CursorS
         | Target::Link { .. }
         | Target::More(_)
         | Target::Date(_)
+        | Target::Month(_)
         | Target::Expand
         | Target::Crowd(..) => CursorStyle::PointingHand,
         _ => CursorStyle::Arrow,
@@ -825,6 +967,7 @@ fn draw(
                         Kind::Grid => paint_grid(&mut ink, &beside, &beside_geo, shared),
                         Kind::Month => paint_month(&mut ink, &beside, &beside_geo, shared),
                         Kind::Agenda => {}
+                        Kind::Year => paint_year(&mut ink, &beside, &beside_geo),
                     }
                     shared.hits.borrow_mut().clear();
                     shared.links.borrow_mut().clear();
@@ -837,6 +980,7 @@ fn draw(
                     Kind::Grid => paint_grid(&mut ink, scene, geo, shared),
                     Kind::Month => paint_month(&mut ink, scene, geo, shared),
                     Kind::Agenda => paint_agenda(&mut ink, scene, geo, shared),
+                    Kind::Year => paint_year(&mut ink, scene, geo),
                 }
             });
         if scene.kind == Kind::Grid {
@@ -2760,6 +2904,112 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         for row in 0..geo.rows {
             let top = geo.row_top(row) + ink.u(MONTH_DATE);
             paint_span_ghost(ink, scene, geo, shared, ghost, row, top);
+        }
+    }
+}
+
+/// The year: twelve small months, today marked as in the month, the selected day ringed, and
+/// each day with events shaded by how many it has (in the find colour while finding).
+fn paint_year(ink: &mut Ink, scene: &Scene, geo: &Geo) {
+    let c = &scene.colors;
+    ink.fill(geo.bounds, c.background);
+    let y = geo.year();
+    let cell_units = f32::from(y.cell) / ink.s;
+    // The numbers shrink with the days on a phone.
+    let number = (cell_units * 0.6).clamp(8., LABEL);
+    let title = (cell_units * 0.75).clamp(10., 15.);
+    let selected = match &scene.selection {
+        Some(Selection::Slot { date, .. }) => Some(*date),
+        _ => None,
+    };
+    let find = scene.find.as_ref().map(|(_, color)| *color);
+    // Two digits' width, for lining the month's name up with its days.
+    let digits = ink.measure("30", number, FontWeight::MEDIUM);
+    let inset = ((y.cell - digits) / 2.).max(px(0.));
+    for m in 0..12 {
+        let b = y.month_bounds(m);
+        let first = geo.year_month(m);
+        let name = time::month_name(first.month());
+        let name = if ink.measure(name, title, FontWeight::SEMIBOLD) > b.size.width - inset {
+            time::month_short(first.month())
+        } else {
+            name
+        };
+        let this_month = first.year() == scene.today.year() && first.month() == scene.today.month();
+        ink.text(
+            name,
+            title,
+            YEAR_TITLE,
+            FontWeight::SEMIBOLD,
+            if this_month { c.now } else { c.text },
+            point(b.left() + inset, b.top()),
+            Some(b.size.width - inset),
+        );
+        let start = time::week_start(first, geo.week_start);
+        let rows_top = b.top() + y.title + y.weekdays;
+        for col in 0..7 {
+            let day = start + Duration::days(col);
+            let letter = &time::weekday_name(day.weekday(), true)[..1];
+            let w = ink.measure(letter, number, FontWeight::MEDIUM);
+            ink.text(
+                letter,
+                number,
+                YEAR_WEEKDAYS,
+                FontWeight::MEDIUM,
+                c.muted_text,
+                point(
+                    b.left() + y.cell * col as f32 + (y.cell - w) / 2.,
+                    b.top() + y.title,
+                ),
+                None,
+            );
+        }
+        let mut date = first;
+        while date.month() == first.month() {
+            let i = (date - start).num_days();
+            let at = point(
+                b.left() + y.cell * (i % 7) as f32,
+                rows_top + y.cell * (i / 7) as f32,
+            );
+            let square = Bounds::new(at, size(y.cell, y.cell));
+            let round = Bounds::from_corners(
+                point(square.left() + px(1.), square.top() + px(1.)),
+                point(square.right() - px(1.), square.bottom() - px(1.)),
+            );
+            let r = round.size.width / 2.;
+            let busy = scene
+                .laid
+                .year
+                .get((date - geo.first).num_days() as usize)
+                .copied()
+                .unwrap_or(0);
+            let today = date == scene.today;
+            if today {
+                ink.rounded(round, r, c.now);
+            } else if busy > 0 {
+                let shade = find.unwrap_or(c.text.opacity(0.05 + 0.05 * busy.min(3) as f32));
+                ink.rounded(round, r, shade);
+            }
+            if selected == Some(date) {
+                ink.outlined(round, r, transparent_black(), ink.u(1.5), c.selection);
+            }
+            let label = date.day().to_string();
+            let weight = if today || busy > 0 {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::NORMAL
+            };
+            let w = ink.measure(&label, number, weight);
+            ink.text(
+                &label,
+                number,
+                cell_units,
+                weight,
+                if today { c.on_now } else { c.text },
+                point(square.left() + (y.cell - w) / 2., square.top()),
+                Some(y.cell),
+            );
+            date += Duration::days(1);
         }
     }
 }
