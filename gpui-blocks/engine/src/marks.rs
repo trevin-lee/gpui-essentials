@@ -78,6 +78,96 @@ pub(crate) fn default_highlight() -> Hsla {
     gpui::rgb(0xfef08a).into()
 }
 
+/// One of Notion's colours: its name, how it looks in a light theme (what a document stores),
+/// and how it's drawn in a dark theme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaletteColor {
+    pub name: &'static str,
+    pub light: u32,
+    pub dark: u32,
+}
+
+/// Notion's background colours, in its menu's order: a highlight's fill, stored as
+/// `<mark color="#…">`.
+pub const BACKGROUNDS: [PaletteColor; 9] = [
+    PaletteColor {
+        name: "Gray",
+        light: 0xf1f1ef,
+        dark: 0x373737,
+    },
+    PaletteColor {
+        name: "Brown",
+        light: 0xf4eeee,
+        dark: 0x4a3228,
+    },
+    PaletteColor {
+        name: "Orange",
+        light: 0xfbecdd,
+        dark: 0x5c3b23,
+    },
+    PaletteColor {
+        name: "Yellow",
+        light: 0xfbf3db,
+        dark: 0x564328,
+    },
+    PaletteColor {
+        name: "Green",
+        light: 0xedf3ec,
+        dark: 0x243d30,
+    },
+    PaletteColor {
+        name: "Blue",
+        light: 0xe7f3f8,
+        dark: 0x143a4e,
+    },
+    PaletteColor {
+        name: "Purple",
+        light: 0xf6f3f9,
+        dark: 0x3c2d49,
+    },
+    PaletteColor {
+        name: "Pink",
+        light: 0xfaf1f5,
+        dark: 0x4e2c3c,
+    },
+    PaletteColor {
+        name: "Red",
+        light: 0xfdebec,
+        dark: 0x522e2a,
+    },
+];
+
+/// `color` as `0xrrggbb`, when it's opaque.
+pub(crate) fn rgb_of(color: Hsla) -> Option<u32> {
+    let rgba = gpui::Rgba::from(color);
+    let byte = |value: f32| (value.clamp(0., 1.) * 255.).round() as u32;
+    (byte(rgba.a) == 255).then(|| byte(rgba.r) << 16 | byte(rgba.g) << 8 | byte(rgba.b))
+}
+
+/// The background colour `color` is, if it's one of [`BACKGROUNDS`].
+pub fn background_of(color: Hsla) -> Option<&'static PaletteColor> {
+    let rgb = rgb_of(color)?;
+    BACKGROUNDS.iter().find(|b| b.light == rgb)
+}
+
+impl PaletteColor {
+    /// The colour a document stores for it.
+    pub fn color(&self) -> Hsla {
+        gpui::rgb(self.light).into()
+    }
+
+    /// How it's drawn in a light theme, or a dark one when `dark`.
+    pub fn fill(&self, dark: bool) -> Hsla {
+        gpui::rgb(if dark { self.dark } else { self.light }).into()
+    }
+}
+
+/// The fill a highlight in `color` is drawn with: in a dark theme a background colour's dark
+/// twin, so the page doesn't glare; else `color` itself.
+pub(crate) fn drawn_highlight(color: Hsla, dark: bool) -> Hsla {
+    background_of(color).map_or(color, |b| b.fill(dark))
+}
+
 impl MarkChange {
     pub fn new() -> Self {
         Self::default()

@@ -104,6 +104,15 @@ pub(crate) fn bind_keys(cx: &mut App) {
             MoveBlockDown,
             editor,
         ),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "cmd-shift-h"
+            } else {
+                "ctrl-shift-h"
+            },
+            HighlightAgain,
+            editor,
+        ),
     ]);
 }
 
@@ -403,6 +412,10 @@ pub struct Editor {
     pub(crate) block_sheet: Option<BlockId>,
     /// Whether the format bar's Turn into menu is open.
     pub(crate) format_turn: bool,
+    /// Whether the format bar's Color menu is open.
+    pub(crate) format_color: bool,
+    /// The background colour last picked in the Color menu, which ⌘⇧H gives again.
+    pub(crate) last_highlight: Option<&'static markdown_editor::PaletteColor>,
     scroll: ScrollHandle,
     pub(crate) menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
@@ -608,6 +621,8 @@ impl Editor {
             block_menu: None,
             block_sheet: None,
             format_turn: false,
+            format_color: false,
+            last_highlight: None,
             menu_used_on: None,
             _subscriptions: vec![subscription],
         };
@@ -2270,6 +2285,7 @@ impl Render for Editor {
             .on_action(cx.listener(Self::slash_close))
             .on_action(cx.listener(|this, _: &MoveBlockUp, _, cx| this.move_block(false, cx)))
             .on_action(cx.listener(|this, _: &MoveBlockDown, _, cx| this.move_block(true, cx)))
+            .on_action(cx.listener(|this, _: &HighlightAgain, _, cx| this.highlight_again(cx)))
             .on_mouse_move(cx.listener(Self::hover))
             // The side menu was placed for the block under the pointer before the scroll; it
             // comes back on the next pointer move.
@@ -2924,14 +2940,14 @@ mod tests {
     fn cmd_shift_arrows_move_the_block_at_the_caret(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "one\n\ntwo\n\n- a\n- b");
         caret_at_end(&editor, cx, 0);
-        cx.simulate_keystrokes("cmd-shift-down");
+        cx.simulate_keystrokes("secondary-shift-down");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "two\n\none\n\n- a\n- b");
         caret_at_end(&editor, cx, 3);
-        cx.simulate_keystrokes("cmd-shift-up");
+        cx.simulate_keystrokes("secondary-shift-up");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "two\n\none\n\n- b\n- a");
-        cx.simulate_keystrokes("cmd-z cmd-z");
+        cx.simulate_keystrokes("secondary-z secondary-z");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "one\n\ntwo\n\n- a\n- b");
     }
@@ -2961,7 +2977,7 @@ mod tests {
         let typed = ids(&editor, cx);
         assert_eq!(typed[0], ("one!".into(), first[0].1.clone()));
         // Moving keeps both.
-        cx.simulate_keystrokes("cmd-shift-down");
+        cx.simulate_keystrokes("secondary-shift-down");
         draw(cx);
         let moved = ids(&editor, cx);
         assert_eq!(moved, [typed[1].clone(), typed[0].clone()]);
@@ -3254,6 +3270,36 @@ mod tests {
         assert_eq!(markdown(&editor, cx), "# hello world");
     }
 
+    /// Color gives the selection a background colour, stored as `<mark color>`, shows it
+    /// checked, and takes it off again; ⌘⇧H gives the last colour again, or takes it off.
+    #[gpui::test]
+    fn the_format_bar_colours_the_selection(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "hello world again");
+        drag_select(&editor, cx, 6, 11);
+        press(cx, "blocks-format-color");
+        // Blue background: the menu's entries are Default, then Gray, Brown, Orange, Yellow,
+        // Green and Blue.
+        press(cx, "menu-item-color-5");
+        assert_eq!(
+            markdown(&editor, cx),
+            "hello <mark color=\"#e7f3f8\">world</mark> again"
+        );
+        let blue = editor.update(cx, |e, cx| e.selection_background(cx));
+        assert_eq!(blue.map(|b| b.name), Some("Blue"), "the selection stays");
+        press(cx, "blocks-format-color");
+        press(cx, "menu-item-color-none");
+        assert_eq!(markdown(&editor, cx), "hello world again");
+        // ⌘⇧H: the last colour picked, then off.
+        let key = "secondary-shift-h";
+        cx.simulate_keystrokes(key);
+        assert_eq!(
+            markdown(&editor, cx),
+            "hello <mark color=\"#e7f3f8\">world</mark> again"
+        );
+        cx.simulate_keystrokes(key);
+        assert_eq!(markdown(&editor, cx), "hello world again");
+    }
+
     /// No bar in a read-only document; on touch the marks are the edit menu's second row.
     #[gpui::test]
     fn touch_formats_from_the_edit_menu_and_read_only_has_no_bar(cx: &mut TestAppContext) {
@@ -3522,7 +3568,7 @@ mod tests {
         cx.simulate_keystrokes("enter");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "# ");
-        cx.simulate_keystrokes("cmd-z");
+        cx.simulate_keystrokes("secondary-z");
         draw(cx);
         assert_eq!(markdown(&editor, cx), "/head");
     }
@@ -3589,7 +3635,7 @@ mod tests {
             "<details open>\n<summary>Title</summary>\n\nBody\n\n</details>",
         );
         caret_at_end(&editor, cx, 1);
-        cx.simulate_keystrokes("cmd-shift-up");
+        cx.simulate_keystrokes("secondary-shift-up");
         draw(cx);
         assert!(markdown(&editor, cx).contains("<summary>Title</summary>"));
     }
@@ -3598,7 +3644,7 @@ mod tests {
     fn cmd_shift_arrows_in_a_table_keep_its_columns(cx: &mut TestAppContext) {
         let (editor, cx) = open(cx, "| h1 | h2 |\n| --- | --- |\n| a | b |");
         caret_at_end(&editor, cx, 3);
-        cx.simulate_keystrokes("cmd-shift-up");
+        cx.simulate_keystrokes("secondary-shift-up");
         draw(cx);
         assert_eq!(
             markdown(&editor, cx),

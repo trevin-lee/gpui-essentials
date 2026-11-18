@@ -23,8 +23,10 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   blocks), Duplicate (⌘D, Ctrl+D off the Mac) and Delete. Shift-click grips to select several blocks
   whole: Delete, ⌘D and ⌘⇧↑ or ↓ act on them all.
 - **Format bar:** select text with the pointer for a bar above it: Turn into, bold, italic,
-  underline, strikethrough, code and link (the app's link field, as ⌘K). On touch the same marks
-  and link are a second row of the long press's menu.
+  underline, strikethrough, code, link (the app's link field, as ⌘K) and Color, Notion's nine
+  background colours (stored as `<mark color="#…">`, drawn darker in a dark theme). ⌘⇧H gives
+  the last colour again. On touch the same marks and link are a second row of the long press's
+  menu.
 - **Notion's keys:** ⌘B, ⌘I, ⌘U, ⌘⇧S and ⌘E mark the selection bold, italic, underlined, struck
   through or code. ⌘⌥0 to ⌘⌥8 turn the block, or each selected block, into text, heading 1 to 3,
   a to-do, bulleted or numbered item, a toggle or code. Off the Mac, Ctrl takes ⌘'s place.
