@@ -10,7 +10,7 @@ events; the crate itself sends nothing, opens nothing and fetches nothing.
 
 Reads OpenUI Lang (openui.com, MIT, by Thesys). An independent port, not affiliated.
 
-![A card of account metrics: snippet cards with icons, values and trends, and a product card with a bar chart](docs/cards-kpi.png)
+![A card of account metrics: snippet cards with icons, values and trends, two to a line and the last the full width, and a product card with a bar chart](docs/cards-kpi.png)
 
 ## What's in it
 
