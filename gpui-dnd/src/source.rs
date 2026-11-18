@@ -54,6 +54,9 @@ pub enum Preview<T: 'static> {
     /// without one a card of the source's size in the theme's card colours, with a ring, a
     /// shadow, and the count when several items are dragged.
     Default(Option<BuildTyped<T>>),
+    /// The provider's [`layer`](crate::DndProvider::layer) draws it (react-dnd's custom drag
+    /// layer).
+    Layer,
     /// Nothing: the source shows the drag itself.
     None,
 }
@@ -184,6 +187,7 @@ impl<T: 'static> DragSource<T> {
                 },
             ))),
             Preview::Default(None) => PreviewSpec::Default(None),
+            Preview::Layer => PreviewSpec::Layer,
             Preview::None => PreviewSpec::None,
         };
         SourceSpec {
@@ -216,6 +220,7 @@ pub(crate) type BuildPreview = Rc<dyn Fn(&DragItem, &mut Window, &mut App) -> An
 
 pub(crate) enum PreviewSpec {
     Default(Option<BuildPreview>),
+    Layer,
     None,
 }
 

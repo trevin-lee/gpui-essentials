@@ -140,6 +140,8 @@ fn a_drop_where_nothing_takes_it_cancels(cx: &mut TestAppContext) {
     let a = o.center("a");
     o.drag(a, point(px(700.), px(500.)));
     assert!(with(&log, "drop").is_empty());
+    // It ends once the preview is back.
+    o.wait(250);
     assert_eq!(
         with(&log, "end"),
         ["end 1 dropped=false cancelled=true target=- result=-"]
@@ -303,6 +305,7 @@ fn a_target_takes_only_the_types_it_accepts_and_what_it_can(cx: &mut TestAppCont
     });
     let (a, others) = (o.center("a"), o.center("others"));
     o.drag(a, others);
+    o.wait(250);
     assert!(
         with(&log, "hover others").is_empty(),
         "it doesn't accept cards"
@@ -324,6 +327,7 @@ fn a_target_takes_only_the_types_it_accepts_and_what_it_can(cx: &mut TestAppCont
     assert!(over && !can, "over it, and it can't take it");
     o.up(full);
     assert!(with(&log, "drop").is_empty());
+    o.wait(250);
     assert_eq!(
         with(&log, "end"),
         ["end 1 dropped=false cancelled=true target=- result=-"]
@@ -396,6 +400,7 @@ fn escape_cancels_a_drag(cx: &mut TestAppContext) {
     let (a, t) = (o.center("a"), o.center("t"));
     o.hold(a, t);
     o.keys("escape");
+    o.wait(250);
     assert_eq!(
         with(&log, "end"),
         ["end 1 dropped=false cancelled=true target=- result=-"]
@@ -589,7 +594,10 @@ fn the_preview_follows_the_pointer_from_the_grab_point(cx: &mut TestAppContext) 
     assert!(!o.shown("dnd-preview-count"), "one item, no count");
     o.up(point(px(400.), px(300.)));
     o.draw();
-    assert!(!o.shown("dnd-preview"), "gone after the drop");
+    assert!(o.shown("dnd-preview"), "going back, nothing took it");
+    o.wait(250);
+    o.draw();
+    assert!(!o.shown("dnd-preview"), "gone once it's back");
 }
 
 #[gpui::test]
@@ -636,6 +644,7 @@ fn nothing_draws_while_idle_or_while_a_drag_holds_still(cx: &mut TestAppContext)
         .advance_clock(std::time::Duration::from_secs(5));
     o.settle();
     assert_eq!(o.renders.get(), idle, "idle");
+    assert_eq!(o.frames_wanted(), 0, "no frame asked for while idle");
 
     o.hold(a, t);
     let held = o.renders.get();
@@ -644,6 +653,7 @@ fn nothing_draws_while_idle_or_while_a_drag_holds_still(cx: &mut TestAppContext)
         .advance_clock(std::time::Duration::from_secs(5));
     o.settle();
     assert_eq!(o.renders.get(), held, "a drag holding still");
+    assert_eq!(o.frames_wanted(), 0, "nor while a drag holds still");
 
     o.up(t);
     let after = o.renders.get();
@@ -652,4 +662,5 @@ fn nothing_draws_while_idle_or_while_a_drag_holds_still(cx: &mut TestAppContext)
         .advance_clock(std::time::Duration::from_secs(5));
     o.settle();
     assert_eq!(o.renders.get(), after, "idle after the drop");
+    assert_eq!(o.frames_wanted(), 0, "nor after the drop");
 }

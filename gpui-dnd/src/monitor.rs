@@ -32,6 +32,8 @@ pub(crate) struct Snapshot {
     pub modifiers: Modifiers,
     pub did_drop: bool,
     pub drop_result: Option<DropResult>,
+    /// Ended without a drop, the preview going back to the source.
+    pub returning: bool,
 }
 
 impl Snapshot {
@@ -144,6 +146,12 @@ impl DragMonitor {
             .is_some_and(|s| s.targets.iter().any(|t| &t.id == target && t.can_drop))
     }
 
+    /// Whether it ended without a drop and its preview is going back to the source. Still
+    /// dragging until it lands; no target is under it meanwhile.
+    pub fn is_returning(&self) -> bool {
+        self.snap.as_ref().is_some_and(|s| s.returning)
+    }
+
     /// During a drop: whether a target inside this one already handled it.
     pub fn did_drop(&self) -> bool {
         self.snap.as_ref().is_some_and(|s| s.did_drop)
@@ -193,6 +201,29 @@ impl DropMonitor {
 }
 
 impl Deref for DropMonitor {
+    type Target = DragMonitor;
+
+    fn deref(&self) -> &DragMonitor {
+        &self.monitor
+    }
+}
+
+/// The drag layer's view of the drag: the monitor, and where the preview's top-left is now
+/// (following the pointer, or on its way back to the source).
+#[derive(Clone, Debug)]
+pub struct DragLayerMonitor {
+    pub(crate) monitor: DragMonitor,
+    pub(crate) origin: Point<Pixels>,
+}
+
+impl DragLayerMonitor {
+    /// Where to draw the preview's top-left, in window coordinates.
+    pub fn preview_origin(&self) -> Point<Pixels> {
+        self.origin
+    }
+}
+
+impl Deref for DragLayerMonitor {
     type Target = DragMonitor;
 
     fn deref(&self) -> &DragMonitor {

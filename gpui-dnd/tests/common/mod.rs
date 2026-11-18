@@ -17,15 +17,20 @@ pub type Log = Rc<RefCell<Vec<String>>>;
 
 pub type Build = Rc<dyn Fn(&mut Window, &mut Context<Host>) -> AnyElement>;
 
+pub type Wrap = Rc<dyn Fn(DndProvider) -> DndProvider>;
+
 pub struct Host {
     pub build: Build,
+    pub wrap: Wrap,
     pub renders: Rc<Cell<usize>>,
 }
 
 impl Render for Host {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.renders.set(self.renders.get() + 1);
-        DndProvider::new(div().size_full().child((self.build)(window, cx)))
+        (self.wrap)(DndProvider::new(
+            div().size_full().child((self.build)(window, cx)),
+        ))
     }
 }
 
@@ -39,11 +44,25 @@ pub fn open(
     cx: &mut TestAppContext,
     build: impl Fn(&mut Window, &mut Context<Host>) -> AnyElement + 'static,
 ) -> Opened<'_> {
+    open_with(cx, |p| p, build)
+}
+
+/// As `open`, with the provider set up by `wrap`.
+pub fn open_with(
+    cx: &mut TestAppContext,
+    wrap: impl Fn(DndProvider) -> DndProvider + 'static,
+    build: impl Fn(&mut Window, &mut Context<Host>) -> AnyElement + 'static,
+) -> Opened<'_> {
     cx.update(gpui_core::init);
+    let wrap: Wrap = Rc::new(wrap);
     let renders = Rc::new(Cell::new(0));
     let r = renders.clone();
     let build: Build = Rc::new(build);
-    let (host, vcx) = cx.add_window_view(move |_, _| Host { build, renders: r });
+    let (host, vcx) = cx.add_window_view(move |_, _| Host {
+        build,
+        wrap,
+        renders: r,
+    });
     vcx.simulate_resize(size(px(800.), px(600.)));
     vcx.update(|window, _| window.activate_window());
     let mut o = Opened { host, renders, vcx };
@@ -110,6 +129,27 @@ impl Opened<'_> {
     pub fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>) {
         self.hold(from, to);
         self.up(to);
+    }
+
+    /// Delivers the next frame, as the display would, and lets what it scheduled run.
+    pub fn frame(&mut self) {
+        self.vcx.update(|window, cx| {
+            window.simulate_next_frame(cx);
+        });
+        self.settle();
+    }
+
+    /// Lets `ms` milliseconds pass.
+    pub fn wait(&mut self, ms: u64) {
+        self.vcx
+            .executor()
+            .advance_clock(std::time::Duration::from_millis(ms));
+        self.settle();
+    }
+
+    /// How many callbacks wait for the next frame: none when nothing is animating.
+    pub fn frames_wanted(&mut self) -> usize {
+        self.vcx.update(|window, cx| window.simulate_next_frame(cx))
     }
 
     pub fn keys(&mut self, keys: &str) {
