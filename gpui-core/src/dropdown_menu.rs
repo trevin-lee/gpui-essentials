@@ -64,20 +64,22 @@ fn css(v: f32) -> Rems {
 /// one, is replaced by the menu's.
 pub struct DropdownMenuTrigger(TriggerKind);
 
+// Both boxed: the two differ in size by a different amount on each target (pointers are 4
+// bytes on wasm32), so boxing only the larger one would trip clippy somewhere.
 enum TriggerKind {
-    Button(Button),
-    Press(Press),
+    Button(Box<Button>),
+    Press(Box<Press>),
 }
 
 impl From<Button> for DropdownMenuTrigger {
     fn from(button: Button) -> Self {
-        Self(TriggerKind::Button(button))
+        Self(TriggerKind::Button(Box::new(button)))
     }
 }
 
 impl From<Press> for DropdownMenuTrigger {
     fn from(press: Press) -> Self {
-        Self(TriggerKind::Press(press))
+        Self(TriggerKind::Press(Box::new(press)))
     }
 }
 
@@ -253,10 +255,10 @@ impl RenderOnce for DropdownMenu {
         let disabled = self.disabled;
         let trigger = self.trigger.map(|t| match t.0 {
             TriggerKind::Button(b) => {
-                let b = b.expanded(is_open).on_click(toggle);
+                let b = (*b).expanded(is_open).on_click(toggle);
                 if disabled { b.disabled(true) } else { b }.into_any_element()
             }
-            TriggerKind::Press(p) => press_trigger(p, is_open, disabled)
+            TriggerKind::Press(p) => press_trigger(*p, is_open, disabled)
                 .on_click(toggle)
                 .into_any_element(),
         });
