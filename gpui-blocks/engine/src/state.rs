@@ -972,7 +972,18 @@ impl BlockEditorState {
     /// selection's start is selected and scrolled to. Letters match whatever their case unless `case_sensitive`.
     /// The matches follow edits until [`Self::clear_find`].
     pub fn find(&mut self, query: &str, case_sensitive: bool, cx: &mut Context<Self>) {
-        let matches = self.model.find(query, case_sensitive);
+        self.find_words(query, case_sensitive, false, cx);
+    }
+
+    /// As [`Self::find`], and with `whole_word` only matches that aren't part of a longer word.
+    pub fn find_words(
+        &mut self,
+        query: &str,
+        case_sensitive: bool,
+        whole_word: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let matches = self.model.find_words(query, case_sensitive, whole_word);
         // From where the selection starts, so a selected word is its own first match.
         let current = self
             .model
@@ -986,6 +997,7 @@ impl BlockEditorState {
         self.find = Some(Find {
             query: query.to_string(),
             case_sensitive,
+            whole_word,
             matches,
             current,
         });
@@ -1152,7 +1164,9 @@ impl BlockEditorState {
         let Some(find) = &self.find else {
             return;
         };
-        let matches = self.model.find(&find.query, find.case_sensitive);
+        let matches = self
+            .model
+            .find_words(&find.query, find.case_sensitive, find.whole_word);
         let current = find
             .current
             .map(|i| i.min(matches.len().saturating_sub(1)))
@@ -4227,6 +4241,7 @@ pub(crate) fn highlights(
 struct Find {
     query: String,
     case_sensitive: bool,
+    whole_word: bool,
     matches: Vec<super::FindMatch>,
     current: Option<usize>,
 }
