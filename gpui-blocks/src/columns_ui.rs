@@ -35,6 +35,7 @@ impl Editor {
             .column_drag
             .as_ref()
             .map(|d| d.columns)
+            .or(self.column_keys)
             .or(self.hovered)?;
         let state = self.state.read(cx);
         if state.is_readonly()
@@ -106,51 +107,89 @@ impl Editor {
         let top = bounds.iter().map(|(_, b)| b.top()).reduce(Pixels::min)?;
         let bottom = bounds.iter().map(|(_, b)| b.bottom()).reduce(Pixels::max)?;
         let dragging = self.column_drag.as_ref().map(|d| (d.at, d.x));
-        let handles = bounds.windows(2).enumerate().map(|(at, pair)| {
-            // At the left of the gap: its right is the grip of the blocks in the next column.
-            let x = match dragging {
-                Some((dragged, x)) if dragged == at => x,
-                _ => pair[0].1.right() + px(3.),
-            };
-            let active = dragging.is_some_and(|(dragged, _)| dragged == at);
-            let this = cx.entity().downgrade();
-            anchored()
-                .position(point(x - px(4.), top))
-                .child(
-                    div()
-                        .id(("blocks-column-handle", at))
-                        .debug_selector(move || format!("blocks-column-handle-{at}"))
-                        .control(
-                            module_path!(),
-                            Role::Splitter,
-                            format!("Width of columns {} and {}", at + 1, at + 2),
-                        )
-                        .w(px(8.))
-                        .h(bottom - top)
-                        .flex()
-                        .justify_center()
-                        .cursor(CursorStyle::ResizeLeftRight)
-                        .child(
-                            div()
-                                .w(px(if active { 3. } else { 2. }))
-                                .h_full()
-                                .rounded(px(1.))
-                                .bg(if active { theme.primary } else { theme.border }),
-                        )
-                        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-                            cx.stop_propagation();
-                            let _ = this.update(cx, |this, cx| {
-                                this.column_drag = Some(ColumnDrag {
-                                    columns,
-                                    at,
-                                    x: event.position.x,
+        let shares: Vec<f32> = {
+            let state = self.state.read(cx);
+            state
+                .model()
+                .document()
+                .block(columns)
+                .map(|b| {
+                    b.children()
+                        .map(|c| c.column_width().unwrap_or(1.))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let handles = bounds
+            .windows(2)
+            .enumerate()
+            .map(|(at, pair)| {
+                let focus = self.column_focus(columns, at, cx);
+                let share = shares.get(at).copied().unwrap_or_default();
+                // At the left of the gap: its right is the grip of the blocks in the next column.
+                let x = match dragging {
+                    Some((dragged, x)) if dragged == at => x,
+                    _ => pair[0].1.right() + px(3.),
+                };
+                let active = dragging.is_some_and(|(dragged, _)| dragged == at)
+                    || self.column_keys == Some(columns);
+                let this = cx.entity().downgrade();
+                let keyed = this.clone();
+                anchored()
+                    .position(point(x - px(4.), top))
+                    .child(crate::handles::handle_keys(
+                        div()
+                            .id(("blocks-column-handle", at))
+                            .debug_selector(move || format!("blocks-column-handle-{at}"))
+                            .track_focus(&focus)
+                            .control(
+                                module_path!(),
+                                Role::Splitter,
+                                format!("Width of columns {} and {}", at + 1, at + 2),
+                            )
+                            .aria_value(format!(
+                                "Column {}, {}% wide",
+                                at + 1,
+                                (share * 100.).round()
+                            ))
+                            .w(px(8.))
+                            .h(bottom - top)
+                            .flex()
+                            .justify_center()
+                            .cursor(CursorStyle::ResizeLeftRight)
+                            .child(
+                                div()
+                                    .w(px(if active { 3. } else { 2. }))
+                                    .h_full()
+                                    .rounded(px(1.))
+                                    .bg(if active { theme.primary } else { theme.border }),
+                            )
+                            .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+                                cx.stop_propagation();
+                                let _ = this.update(cx, |this, cx| {
+                                    this.column_drag = Some(ColumnDrag {
+                                        columns,
+                                        at,
+                                        x: event.position.x,
+                                    });
+                                    cx.notify();
                                 });
-                                cx.notify();
-                            });
+                            }),
+                        crate::handles::COLUMN_HANDLE,
+                        5,
+                        1,
+                        std::rc::Rc::new({
+                            let this = keyed;
+                            move |key: crate::docs::HandleKey, window: &mut Window, cx: &mut App| {
+                                let _ = this.update(cx, |this, cx| {
+                                    this.column_key(columns, at, key, window, cx)
+                                });
+                            }
                         }),
-                )
-                .into_any_element()
-        });
+                    ))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
         let watch = self.column_drag.is_some().then(|| {
             let this = cx.entity().downgrade();
             canvas(

@@ -106,6 +106,26 @@ impl Editor {
             .map(|_| PopupMenuItem::new("open", "Open").icon(IconName::ExternalLink))
     }
 
+    /// Resize, for an embed (its height) or a columns block (its widths): the keyboard goes to
+    /// the handle, whose arrows then resize it.
+    fn resize_item(&self, block: BlockId, cx: &App) -> Option<PopupMenuItem> {
+        let doc = self.state.read(cx).model().document();
+        let b = doc.block(block)?;
+        let label = match b.kind() {
+            markdown_editor::BlockKind::Columns => "Resize columns",
+            markdown_editor::BlockKind::Custom
+                if matches!(
+                    crate::json::kind_of_custom(&b.markdown()),
+                    crate::json::Kind::Embed { .. }
+                ) =>
+            {
+                "Resize"
+            }
+            _ => return None,
+        };
+        Some(PopupMenuItem::new("resize", label).icon(IconName::MoveVertical))
+    }
+
     /// Copy code, for a code block: its chrome's Copy, by keyboard too.
     fn copy_code_item(&self, block: BlockId, cx: &App) -> Option<PopupMenuItem> {
         let doc = self.state.read(cx).model().document();
@@ -136,6 +156,21 @@ impl Editor {
                 state.lift_block(block, cx);
             });
             cx.notify();
+            return;
+        }
+        if id == "resize" {
+            let columns = self
+                .state
+                .read(cx)
+                .model()
+                .document()
+                .block(block)
+                .is_some_and(|b| b.kind() == markdown_editor::BlockKind::Columns);
+            if columns {
+                self.resize_columns_by_key(block, window, cx);
+            } else {
+                self.resize_embed_by_key(block, window, cx);
+            }
             return;
         }
         if id == "open" {
@@ -393,6 +428,7 @@ impl Editor {
                     ))
             }))
             .items(self.open_item(block, cx))
+            .items(self.resize_item(block, cx))
             .items(self.copy_code_item(block, cx))
             .items(self.copy_link_item())
             .item(
@@ -457,6 +493,7 @@ impl Editor {
                 .separator()
                 .item(PopupMenuItem::new("move", "Move").icon(IconName::Move))
                 .items(self.open_item(block, cx))
+                .items(self.resize_item(block, cx))
                 .items(self.copy_code_item(block, cx))
                 .items(self.copy_link_item())
                 .item(PopupMenuItem::new("duplicate", "Duplicate").icon(IconName::Copy))
