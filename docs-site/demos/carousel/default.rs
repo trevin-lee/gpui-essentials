@@ -1,0 +1,20 @@
+// Slides one at a time, with buttons either side and dots under. Tab to it and Left and
+// Right move it; a sideways swipe on a trackpad drags it.
+Carousel::new("numbers")
+    .accessibility_label("Numbers")
+    .w(rems(18.))
+    .dots(true)
+    .children((1..=5).map(|i| {
+        div()
+            .h(rems(14.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(cx.theme().radius_lg())
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().card)
+            .text_size(cx.theme().text.xl)
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(format!("{i}"))
+    }))

@@ -1,0 +1,32 @@
+// Sideways: a row wider than its box.
+ScrollArea::new("photos")
+    .accessibility_label("Photos")
+    .horizontal()
+    .w(rems(24.))
+    .rounded(cx.theme().radius_md())
+    .border_1()
+    .border_color(cx.theme().border)
+    .child(
+        div().flex().gap(rems(1.)).p(rems(1.)).children(
+            ["Harbour", "Dunes", "Glacier", "Orchard", "Canyon"].map(|place| {
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap(rems(0.5))
+                    .child(
+                        div()
+                            .w(rems(9.))
+                            .h(rems(12.))
+                            .rounded(cx.theme().radius_md())
+                            .bg(cx.theme().muted),
+                    )
+                    .child(
+                        div()
+                            .text_size(cx.theme().text.xs)
+                            .text_color(cx.theme().muted_foreground)
+                            .child(place),
+                    )
+            }),
+        ),
+    )
