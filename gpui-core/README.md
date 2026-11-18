@@ -387,9 +387,11 @@ item](docs/gallery.png)
   resolved to their definitions. `TextView::blocks(id, [(key, source), …])` draws several
   keyed sources as one document (a streamed reply's settled blocks and its live tail): spaced,
   selected and copied as one view, with each source read again only when its text changes and
-  each top-level block laid out again only when it changes. A selection in unchanged sources
-  stays while later ones change. `trailing_caret(Some(colour))` draws a caret after the last
-  source's text, painted only, so it never moves a line.
+  each top-level block laid out again only when it changes. A source's blocks stay put
+  together while none of them changes, and a draw looks only at what's in view (found by binary
+  search), so a delta at the end costs about the same after 1,400 lines as after 150. A
+  selection in unchanged sources stays while later ones change. `trailing_caret(Some(colour))`
+  draws a caret after the last source's text, painted only, so it never moves a line.
 - **Sidebar.** `Sidebar::new(id, &state).header(…).group(SidebarGroup::new(id).label(…)
   .item(SidebarItem::new(id, label).icon(…).badge(…).action(icon, label, …)))….footer(…)
   .active(id).on_select(…).content(page)`: shadcn's app sidebar beside the page, with the host's
