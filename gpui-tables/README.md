@@ -387,7 +387,10 @@ tabs over one entity and switches with `set_view`.
   is focused.
 - **Keys.** The arrows move between cards (down past the last is its column's New) and across
   columns at the same height, into the folded ones at the end; Tab goes down the columns in turn.
-  Enter opens a card, makes one from New and unfolds a folded column. Escape lets go.
+  Enter opens a card, makes one from New and unfolds a folded column. Escape lets go. What a
+  drag or a mouse does to the focused card, keys do too: ⌘⇧↑ and ⌘⇧↓ move it in its column
+  (with no sort), ⌘⇧← and ⌘⇧→ to the next column at the same place (its group value
+  changing, the keyboard going with it), ⌘D duplicates it and ⌘⌫ deletes it.
 - **Touch.** With `TableTheme::with_touch(true)` cards, New buttons and folded columns are at
   least 44 points each way, and the fold button takes a 44-point press (`Press::min_hit`) while
   it's drawn small.
@@ -436,7 +439,8 @@ A view of type `list` draws as a list: again the same `TableView` entity, `Table
   back, the new row's line is focused.
 - **Keys.** Up and Down (and Tab and shift-Tab) move between lines, Page Up and Page Down by a
   screenful; Enter opens a row, folds or unfolds a group, or makes a row from New. Escape lets
-  go.
+  go. ⌘⇧↑ and ⌘⇧↓ move the focused line in its group (with no sort), ⌘D duplicates it and ⌘⌫
+  deletes it (or the selected lines, after asking for several), as in a table.
 - **Touch.** With `TableTheme::with_touch(true)` lines, headers and New lines are 44 points tall
   and take presses through `Press::min_hit`.
 - **Scale.** Every line is the same height, so only those on screen are drawn (`uniform_list`),
@@ -836,6 +840,8 @@ How each type behaves:
 - **Gallery.** The rows as cards in a grid, as many to a line as the view's width takes: each
   the board's card, its title and the view's `cardProperties`. Pressing a card opens its row (or
   peeks it); the arrows move between cards and Enter opens one; New after the cards makes a row.
+  ⌘⇧← and ⌘⇧→ move the focused card a place back or on (with no sort), ⌘⇧↑ and ⌘⇧↓ a line,
+  and ⌘D and ⌘⌫ duplicate and delete it.
   A card dragged to another place (with no sort) is a `rowsMoved`, the board's drag, with a line
   where it'll land. Grouping isn't drawn in a gallery yet (its settings have no Group by), and
   cards have no cover image.

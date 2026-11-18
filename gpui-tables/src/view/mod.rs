@@ -121,6 +121,12 @@ actions!(
         MoveRowsUp,
         /// ⌘⇧↓: moves the selected rows (or the focused row) down a place.
         MoveRowsDown,
+        /// ⌘⇧←: on a board, moves the focused card to the column on its left; in a gallery, a
+        /// place back.
+        MoveCardLeft,
+        /// ⌘⇧→: on a board, moves the focused card to the column on its right; in a gallery, a
+        /// place on.
+        MoveCardRight,
         /// ⌘F: opens the bar of views' search field (with the bar on).
         Search,
     ]
@@ -147,8 +153,9 @@ macro_rules! cmd {
 /// Binds the table's keys: the arrows, Tab and shift-Tab, Enter, Escape, Delete and Backspace,
 /// F2 to edit, ⌥↓ for the column's menu, Page Up and Page Down; a table's rows' (Space and
 /// Shift-arrows to select, ⌘⌫ to delete, ⌘D to duplicate, ⌘/ for their menu, ⌘⇧↑ and ⌘⇧↓ to
-/// move); ⌘F to search the rows from the bar; and the bar of views' ([`VIEW_BAR`]). ⌘ is Ctrl
-/// off the Mac and iOS.
+/// move); a board's, a list's and a gallery's cards and lines (⌘⌫, ⌘D, and ⌘⇧ with an arrow
+/// to move, ⌘⇧← and ⌘⇧→ to another column on a board); ⌘F to search the rows from the bar;
+/// and the bar of views' ([`VIEW_BAR`]). ⌘ is Ctrl off the Mac and iOS.
 pub fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     cx.bind_keys([
@@ -175,6 +182,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(cmd!("/"), RowMenu, c),
         KeyBinding::new(cmd!("shift-up"), MoveRowsUp, c),
         KeyBinding::new(cmd!("shift-down"), MoveRowsDown, c),
+        KeyBinding::new(cmd!("shift-left"), MoveCardLeft, c),
+        KeyBinding::new(cmd!("shift-right"), MoveCardRight, c),
         KeyBinding::new(cmd!("f"), Search, c),
     ]);
     let b = Some(VIEW_BAR);
