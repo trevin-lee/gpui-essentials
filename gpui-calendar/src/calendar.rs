@@ -7,7 +7,12 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
+// GPUI's clock: std's Instant, but in a browser (which has none) web-time's.
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use gpui::prelude::FluentBuilder as _;

@@ -1885,6 +1885,7 @@ dependencies = [
  "gpui-pre-macos",
  "gpui-pre-platform",
  "image",
+ "web-time",
 ]
 
 [[package]]
