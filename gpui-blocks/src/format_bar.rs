@@ -475,7 +475,14 @@ impl Editor {
             let dismiss = this.clone();
             let menu = turn_into_titles().into_iter().enumerate().fold(
                 PopupMenu::new("blocks-format-turn-menu"),
-                |menu, (ix, title)| menu.item(PopupMenuItem::new(format!("turn-{ix}"), title)),
+                |menu, (ix, title)| {
+                    let keys = crate::slash::turn_into_keys(&title);
+                    let item = PopupMenuItem::new(format!("turn-{ix}"), title);
+                    menu.item(match keys {
+                        Some(keys) => item.shortcut(keys),
+                        None => item,
+                    })
+                },
             );
             Popover::new("blocks-format-turn-popover")
                 .open(self.format_turn)

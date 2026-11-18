@@ -51,6 +51,8 @@ pub struct SlashItem {
     /// The heading it's listed under while nothing is typed: [`MEDIA`] unless set.
     pub group: SharedString,
     pub action: SlashAction,
+    /// The keys that do the same, shown at the end of its row (`⌘⌥1`).
+    pub shortcut: Option<SharedString>,
 }
 
 impl SlashItem {
@@ -62,7 +64,14 @@ impl SlashItem {
             icon: "•".into(),
             group: MEDIA.into(),
             action,
+            shortcut: None,
         }
+    }
+
+    /// The keys that do the same, shown at the end of its row.
+    pub fn shortcut(mut self, keys: impl Into<SharedString>) -> Self {
+        self.shortcut = Some(keys.into());
+        self
     }
 
     pub fn hint(mut self, hint: impl Into<SharedString>) -> Self {
@@ -94,8 +103,38 @@ pub const BASIC: &str = "Basic blocks";
 /// The group pictures, tables and widgets are listed under.
 pub const MEDIA: &str = "Media and widgets";
 
+/// The keys that turn a line into the built-in block titled `title` (see the engine's
+/// `Heading1` and the rest), as this platform writes them.
+pub(crate) fn turn_into_keys(title: &str) -> Option<SharedString> {
+    let digit = match title {
+        "Text" => '0',
+        "Heading 1" => '1',
+        "Heading 2" => '2',
+        "Heading 3" => '3',
+        "To-do list" => '4',
+        "Bulleted list" => '5',
+        "Numbered list" => '6',
+        "Toggle" => '7',
+        "Code" => '8',
+        _ => return None,
+    };
+    Some(if cfg!(target_os = "macos") {
+        format!("⌘⌥{digit}").into()
+    } else {
+        format!("Ctrl+Alt+{digit}").into()
+    })
+}
+
 /// The built-in blocks, in order.
 pub fn default_items() -> Vec<SlashItem> {
+    let mut items = built_in_items();
+    for item in &mut items {
+        item.shortcut = turn_into_keys(&item.title);
+    }
+    items
+}
+
+fn built_in_items() -> Vec<SlashItem> {
     use EditorCommand as C;
     use SlashAction::*;
     let basic = |title: &str, hint: &str, aliases: &[&str], icon: &str, action| {
@@ -340,5 +379,31 @@ mod tests {
             .map(|ix| items[ix].title.clone())
             .collect();
         assert_eq!(found, ["Chart"]);
+    }
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn the_built_in_blocks_show_their_keys() {
+        let items = default_items();
+        let keys = |title: &str| {
+            items
+                .iter()
+                .find(|i| i.title == title)
+                .and_then(|i| i.shortcut.clone())
+                .map(|k| k.to_string())
+        };
+        let (h1, code) = if cfg!(target_os = "macos") {
+            ("⌘⌥1", "⌘⌥8")
+        } else {
+            ("Ctrl+Alt+1", "Ctrl+Alt+8")
+        };
+        assert_eq!(keys("Heading 1").as_deref(), Some(h1));
+        assert_eq!(keys("Code").as_deref(), Some(code));
+        assert_eq!(keys("Quote"), None);
+        assert_eq!(keys("Table"), None);
     }
 }
