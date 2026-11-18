@@ -84,6 +84,7 @@ pub struct DragSource<T: 'static> {
     is_dragging: Option<IsDragging<T>>,
     preview: Preview<T>,
     threshold: Option<Rems>,
+    keyboard: bool,
 }
 
 impl<T: 'static> DragSource<T> {
@@ -103,6 +104,7 @@ impl<T: 'static> DragSource<T> {
             is_dragging: None,
             preview: Preview::default(),
             threshold: None,
+            keyboard: true,
         }
     }
 
@@ -149,6 +151,13 @@ impl<T: 'static> DragSource<T> {
     /// rem unless given, so it grows with the zoom.
     pub fn threshold(mut self, threshold: Rems) -> Self {
         self.threshold = Some(threshold);
+        self
+    }
+
+    /// Whether the keyboard can pick it up: it's then a Tab stop, and Space or Enter picks it
+    /// up. On unless turned off (a list that's one Tab stop moves its items itself).
+    pub fn keyboard(mut self, on: bool) -> Self {
+        self.keyboard = on;
         self
     }
 
@@ -201,6 +210,7 @@ impl<T: 'static> DragSource<T> {
             is_dragging,
             preview,
             threshold: self.threshold,
+            keyboard: self.keyboard,
         }
     }
 }
@@ -211,6 +221,8 @@ use gpui::IntoElement as _;
 pub(crate) struct EndInfo {
     pub dropped: bool,
     pub target: Option<ElementId>,
+    /// The target's label, for the announcement.
+    pub target_label: Option<SharedString>,
     pub result: Option<DropResult>,
     pub cancelled: bool,
     pub backend: Backend,
@@ -233,4 +245,5 @@ pub(crate) struct SourceSpec {
     pub is_dragging: Option<IsDraggingErased>,
     pub preview: PreviewSpec,
     pub threshold: Option<Rems>,
+    pub keyboard: bool,
 }

@@ -1,14 +1,15 @@
 //! The `dnd` element: a div that's a drag source, a drop target, or both.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::Refineable as _;
 use gpui::{
-    AnyElement, App, BorderStyle, Bounds, DispatchPhase, Div, Element, ElementId, GlobalElementId,
-    Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, Interactivity, IntoElement,
-    LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, RenderOnce, SharedString,
-    Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, quad, rems,
-    transparent_black,
+    AnyElement, App, BorderStyle, Bounds, DispatchPhase, Div, Element, ElementId, FocusHandle,
+    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, Interactivity,
+    IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, RenderOnce,
+    SharedString, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, quad,
+    rems, transparent_black,
 };
 use gpui_core::ActiveTheme as _;
 
@@ -16,6 +17,9 @@ use crate::monitor::{DragMonitor, Over};
 use crate::source::{DragSource, SourceSpec};
 use crate::state::{self, Pending, SourceRecord, TargetRecord};
 use crate::target::DropTarget;
+
+/// What VoiceOver says a source the keyboard can pick up does.
+pub const PICK_UP_HINT: &str = "Press Space to pick up.";
 
 /// A div that's a drag source, a drop target, or both (a sortable item is both), like
 /// react-dnd's `drag(drop(ref))`. Its id is its source's and target's id, which the
@@ -126,12 +130,33 @@ impl InteractiveElement for Dnd {
 impl StatefulInteractiveElement for Dnd {}
 
 impl RenderOnce for Dnd {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let monitor = DragMonitor::of(cx);
         let source = self.source.map(|make| Rc::new(make(self.label.clone())));
         let mut base = self.base;
         if let Some(label) = &self.label {
             base = base.aria_label(label.clone());
+        }
+        // A source the keyboard can pick up is a Tab stop with the theme's focus ring.
+        let focus = source.as_ref().filter(|s| s.keyboard).map(|_| {
+            window
+                .use_keyed_state(
+                    ElementId::NamedChild(Arc::new(self.id.clone()), "dnd-focus".into()),
+                    cx,
+                    |_, cx| cx.focus_handle(),
+                )
+                .read(cx)
+                .clone()
+        });
+        if let Some(focus) = &focus {
+            let ring = gpui_core::focus_ring(cx);
+            base = base
+                .track_focus(&focus.clone().tab_stop(true))
+                .focus_visible(move |s| s.shadow(vec![ring]))
+                // A press doesn't take the focus (GPUI's focus-on-press checks this): a focus
+                // change draws every view anew, and a drag by mouse needn't move the keyboard.
+                .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+                .aria_description(PICK_UP_HINT);
         }
         let mut over = false;
         if let Some(item) = monitor.item() {
@@ -160,7 +185,9 @@ impl RenderOnce for Dnd {
             id: self.id,
             child: Some(base.into_any_element()),
             source,
+            focus,
             target: self.target.map(Rc::new),
+            label: self.label,
             indicator: over && self.indicator,
         }
     }
@@ -172,7 +199,9 @@ struct Registrar {
     id: ElementId,
     child: Option<AnyElement>,
     source: Option<Rc<SourceSpec>>,
+    focus: Option<FocusHandle>,
     target: Option<Rc<DropTarget>>,
+    label: Option<SharedString>,
     indicator: bool,
 }
 
@@ -232,6 +261,7 @@ impl Element for Registrar {
                     id: self.id.clone(),
                     bounds,
                     spec,
+                    focus: self.focus.clone(),
                 })
             });
             let target = self.target.clone().map(|spec| {
@@ -243,6 +273,7 @@ impl Element for Registrar {
                     seq: state.next_seq(),
                     parent,
                     spec,
+                    label: self.label.clone(),
                 })
             });
             let registry = state.registry(window_id);

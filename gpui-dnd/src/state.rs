@@ -7,8 +7,8 @@ use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use gpui::{
-    App, Bounds, ElementId, EntityId, Global, KeystrokeEvent, Modifiers, Pixels, Point,
-    Subscription, Window, WindowId,
+    App, Bounds, ElementId, EntityId, FocusHandle, Global, KeystrokeEvent, Modifiers, Pixels,
+    Point, SharedString, Subscription, Window, WindowId,
 };
 
 use crate::item::{DragItem, DropResult};
@@ -22,6 +22,8 @@ pub(crate) struct SourceRecord {
     pub id: ElementId,
     pub bounds: Bounds<Pixels>,
     pub spec: Rc<SourceSpec>,
+    /// What has the keyboard's focus when the keyboard can pick it up.
+    pub focus: Option<FocusHandle>,
 }
 
 /// A target as last drawn.
@@ -35,6 +37,7 @@ pub(crate) struct TargetRecord {
     /// The nearest target it's drawn inside.
     pub parent: Option<Weak<TargetRecord>>,
     pub spec: Rc<DropTarget>,
+    pub label: Option<SharedString>,
 }
 
 #[derive(Default)]
@@ -52,6 +55,20 @@ impl Registry {
             .rev()
             .filter_map(Weak::upgrade)
             .find(|s| &s.id == id)
+    }
+
+    /// The source the keyboard can pick up that has the focus.
+    pub fn focused_source(&self, window: &Window) -> Option<Rc<SourceRecord>> {
+        self.sources
+            .iter()
+            .rev()
+            .filter_map(Weak::upgrade)
+            .find(|s| s.spec.keyboard && s.focus.as_ref().is_some_and(|f| f.is_focused(window)))
+    }
+
+    /// The targets drawn in the last frame.
+    pub fn live_targets(&self) -> Vec<Rc<TargetRecord>> {
+        self.targets.iter().filter_map(Weak::upgrade).collect()
     }
 
     pub fn add_source(&mut self, source: &Rc<SourceRecord>) {
@@ -116,6 +133,8 @@ pub(crate) struct ActiveDrag {
     pub targets: Vec<Rc<TargetRecord>>,
     /// Set once it's ended without a drop and its preview is going back to the source.
     pub returning: Option<Returning>,
+    /// The target a keyboard drag last said it was over.
+    pub said_over: Option<Option<ElementId>>,
 }
 
 /// How long a preview takes to go back to its source after a cancel.
@@ -167,6 +186,11 @@ pub(crate) struct DndState {
     pub registries: HashMap<WindowId, Registry>,
     /// The view each window's working provider is drawn in: the one redrawn as the drag moves.
     pub provider_views: HashMap<WindowId, EntityId>,
+    /// Whether each window's provider lets the keyboard drag, and what it says while it does.
+    pub keyboard: HashMap<WindowId, bool>,
+    pub announcements: HashMap<WindowId, crate::keyboard::Announcements>,
+    /// What each window's live region says.
+    pub said: HashMap<WindowId, SharedString>,
     pub drag: Option<ActiveDrag>,
     pub pending: Option<Pending>,
     pub collectors: Vec<Weak<dyn Collector>>,
@@ -199,10 +223,10 @@ pub(crate) fn shared(cx: &mut App) -> Rc<RefCell<DndState>> {
         return global.0.clone();
     }
     let state = Rc::new(RefCell::new(DndState::default()));
-    // Escape cancels a drag whatever has the focus, before any binding sees it.
+    // Keys reach the drag before any binding or element: Escape cancels whatever has the
+    // focus, and a keyboard drag holds the keyboard.
     let keys = cx.intercept_keystrokes(|event: &KeystrokeEvent, window, cx| {
-        if event.keystroke.key == "escape" && drag_in(window, cx).is_some() {
-            cancel(window, cx);
+        if crate::keyboard::key(event, window, cx) {
             cx.stop_propagation();
         }
     });
@@ -224,6 +248,12 @@ pub(crate) fn drag_in(window: &Window, cx: &App) -> Option<bool> {
     let state = global.0.borrow();
     let drag = state.drag.as_ref().filter(|d| d.window == id)?;
     Some(drag.returning.is_some())
+}
+
+pub(crate) fn said(window: &Window, cx: &App) -> Option<SharedString> {
+    let global = cx.try_global::<DndGlobal>()?;
+    let state = global.0.borrow();
+    state.said.get(&window_id(window)).cloned()
 }
 
 pub(crate) fn window_id(window: &Window) -> WindowId {
@@ -269,6 +299,7 @@ pub(crate) fn begin(
             snap: Rc::new(snap),
             targets: Vec::new(),
             returning: None,
+            said_over: None,
         });
     }
     if let Some(on_begin) = &spec.on_begin {
@@ -355,6 +386,7 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
         return false;
     };
     let mut taken_by: Option<ElementId> = None;
+    let mut taken_label: Option<SharedString> = None;
     let mut result: Option<DropResult> = None;
     for (record, t) in records.iter().zip(snap.targets.clone()).rev() {
         if !t.can_drop {
@@ -374,6 +406,7 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
         };
         if let Some(r) = handled {
             taken_by = Some(record.id.clone());
+            taken_label = record.label.clone();
             if r.is_some() {
                 result = r;
             }
@@ -387,6 +420,7 @@ pub(crate) fn release(at: Point<Pixels>, window: &mut Window, cx: &mut App) -> b
     let end = EndInfo {
         dropped: taken_by.is_some(),
         target: taken_by,
+        target_label: taken_label,
         result,
         cancelled: false,
         backend: snap.backend,
@@ -414,6 +448,7 @@ pub(crate) fn cancel(window: &mut Window, cx: &mut App) {
         EndInfo {
             dropped: false,
             target: None,
+            target_label: None,
             result: None,
             cancelled: true,
             backend: snap.backend,
@@ -504,6 +539,15 @@ fn finish(end: EndInfo, window: &mut Window, cx: &mut App) {
     publish(cx);
     if let Some(on_end) = &drag.spec.on_end {
         on_end(&drag.snap.item, &end, window, cx);
+    }
+    if end.backend == Backend::Keyboard {
+        let said = crate::keyboard::announcements(window, cx);
+        let text = if end.dropped {
+            (said.dropped)(&drag.snap.item, end.target_label.as_ref())
+        } else {
+            (said.cancelled)(&drag.snap.item)
+        };
+        crate::keyboard::announce(text, window, cx);
     }
     redraw(window, cx);
 }
