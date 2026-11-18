@@ -4,7 +4,12 @@
 //! it as any GPUI scrolling box, and with the focus the arrows, Page Up and Page Down, Space,
 //! Home and End do.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// GPUI's clock: std's Instant, but in a browser (which has none) web-time's.
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use gpui::{
     AnyElement, App, Bounds, ElementId, EntityId, FocusHandle, Hsla, InteractiveElement as _,

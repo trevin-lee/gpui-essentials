@@ -436,6 +436,39 @@ fn run(cx: &mut App) {
 Components draw Lucide icons from gpui-core's assets, so the app serves them:
 `gpui_platform::application().with_assets(gpui_core::Icons)`.
 
+## On the web
+
+gpui-core builds for `wasm32-unknown-unknown`, so it runs in a browser with GPUI's web
+platform (CI checks it). Two things differ from macOS and iOS:
+
+- **Fonts.** A browser gives GPUI no system fonts: it draws only the fonts the app loads. If
+  none of them resolves (not the theme's family, and none of GPUI's fallbacks), GPUI panics at
+  the first text with "failed to resolve font … or any of the fallbacks". Load the font files
+  before opening a window, and name their family in the theme:
+
+  ```text
+  cx.text_system().add_fonts(vec![
+      Cow::Borrowed(include_bytes!("../fonts/Inter-Regular.ttf")),
+      Cow::Borrowed(include_bytes!("../fonts/Inter-Medium.ttf")),
+      Cow::Borrowed(include_bytes!("../fonts/Inter-SemiBold.ttf")),
+      Cow::Borrowed(include_bytes!("../fonts/GeistMono-Regular.ttf")),
+  ])?;
+  let mut theme = Theme::dark();
+  theme.font_family = "Inter".into();
+  theme.mono_font_family = "Geist Mono".into();
+  Theme::set(theme, cx);
+  ```
+
+  The components use the regular, medium (500) and semibold (600) weights, and bold in a few
+  places. Without the right weight, the nearest one loaded is drawn. To keep the default theme,
+  load IBM Plex Sans: on the web, GPUI draws `.SystemUIFont` (the theme's default family) in
+  IBM Plex Sans. Set `mono_font_family` to a monospace family you load, since Menlo isn't
+  there. gpui-core doesn't ship a font of its own to fall back on, because that would add one
+  to every app's binary, Mac apps included.
+- **Time.** GPUI's clock is `web_time::Instant` in a browser. gpui-core uses it there (through a
+  wasm-only `web-time` dependency), so its animations run as on the Mac. A copied carousel or
+  scroll area does the same, and needs `web-time = "1.1"` in a wasm host's dependencies.
+
 ## Copy a component into your crate
 
 You can also copy a component's source into your own crate, the way shadcn/ui's components

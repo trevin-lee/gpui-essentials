@@ -328,7 +328,8 @@ impl Theme {
     /// The Mac app's look: the web's dark colours on a 15 pixel base. Its fonts are the
     /// system's (San Francisco, and Menlo for code), which every Mac and iPhone has; a host that
     /// bundles the app's fonts sets `font_family` to "Inter" and `mono_font_family` to
-    /// "Geist Mono" after loading them. A family that isn't loaded draws no text at all.
+    /// "Geist Mono" after loading them. A family that isn't loaded draws no text at all. A
+    /// browser has no system fonts: there the app loads its own (the README's "On the web").
     pub fn dark() -> Self {
         Self {
             mode: ThemeMode::Dark,

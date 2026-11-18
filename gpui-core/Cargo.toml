@@ -92,3 +92,8 @@ gpui = { workspace = true, features = ["test-support", "bench-support"] }
 # never draw with Metal.
 gpui-pre-apple = { workspace = true, features = ["font-kit", "runtime_shaders"] }
 gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
+
+# GPUI's Instant in a browser, where wasm32 has no std::time::Instant: the version GPUI's own
+# clock uses, so the lock doesn't grow.
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1.1.0"
