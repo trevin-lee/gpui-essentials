@@ -50,6 +50,12 @@ const COMPACT_INSET: f32 = 16.;
 /// left of the text to lift its block.
 const COMPACT_SIDE: f32 = 24.;
 
+/// How far below the top of the page a block gone to lands.
+const GO_TO_MARGIN: f32 = 48.;
+
+/// The frames a block gone to is waited for.
+const GO_TO_TRIES: u8 = 6;
+
 /// How much of the page Page Down keeps in view from before: a few lines.
 const PAGE_OVERLAP: f32 = 64.;
 
@@ -671,6 +677,9 @@ pub struct Editor {
     /// Page Up or Down waiting for the page it scrolled to be drawn: where in the window the
     /// caret goes, the selection's other end when it extends, and the frames left to wait.
     page_to: Option<(Point<Pixels>, Option<BlockPosition>, u8)>,
+    /// A block gone to (from a table of contents or a link to it), to bring near the top of the
+    /// page once it's drawn, and the frames left to wait for that.
+    go_to_top: Option<(BlockPosition, u8)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -870,6 +879,7 @@ impl Editor {
             code_menu: None,
             menu_used_on: None,
             page_to: None,
+            go_to_top: None,
             _subscriptions: vec![subscription],
         };
         editor.update_headings(cx);
@@ -1003,7 +1013,7 @@ impl Editor {
         let Some(block) = self.lock_ids().block_of(state.read(cx).model(), id) else {
             return false;
         };
-        state.update(cx, |state, cx| {
+        let leaf = state.update(cx, |state, cx| {
             let doc = state.model().document();
             let inside = |leaf: markdown_editor::BlockRef<'_>| {
                 let mut at = Some(leaf);
@@ -1015,20 +1025,54 @@ impl Editor {
                 }
                 false
             };
-            let Some(leaf) = doc
+            let leaf = doc
                 .leaves()
                 .find(|leaf| inside(*leaf))
-                .map(|leaf| leaf.id())
-            else {
-                return false;
-            };
+                .map(|leaf| leaf.id())?;
             let moved = state
                 .set_selection(BlockSelection::caret(BlockPosition::new(leaf, 0)), cx)
                 .is_ok();
             state.reveal_caret(cx);
             state.focus(window, cx);
-            moved
-        })
+            moved.then_some(leaf)
+        });
+        let Some(leaf) = leaf else {
+            return false;
+        };
+        self.bring_to_top(BlockPosition::new(leaf, 0), cx);
+        true
+    }
+
+    /// Brings `at` near the top of the page once it's drawn, as Notion does for a heading picked
+    /// from a table of contents or a link to a block: below it, the rest of its section.
+    fn bring_to_top(&mut self, at: BlockPosition, cx: &mut Context<Self>) {
+        self.go_to_top = Some((at, GO_TO_TRIES));
+        cx.notify();
+    }
+
+    /// Scrolls the block gone to near the top, once it's been drawn (it may have been out of
+    /// the drawn part of a long page, and the caret's reveal draws it first).
+    fn finish_go_to(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((at, frames)) = self.go_to_top else {
+            return;
+        };
+        // The caret's reveal scrolls in the first frame and draws the block in the second: its
+        // place is read once that frame has been drawn, and a few frames later at most.
+        let drawn = self.state.read(cx).position_bounds(at);
+        let Some(line) = drawn.filter(|_| frames <= GO_TO_TRIES - 2) else {
+            self.go_to_top = frames.checked_sub(1).map(|f| (at, f));
+            window.request_animation_frame();
+            return;
+        };
+        self.go_to_top = None;
+        let view = self.scroll.bounds();
+        let max = self.scroll.max_offset().y;
+        let offset = self.scroll.offset();
+        let y = (offset.y + (view.top() + px(GO_TO_MARGIN)) - line.top()).clamp(-max, px(0.));
+        if (y - offset.y).abs() >= px(1.) {
+            self.scroll.set_offset(point(offset.x, y));
+            window.refresh();
+        }
     }
 
     /// Makes the one embed whose block has the lasting id `block` (as [`docs::Embed::block`] and
@@ -1519,14 +1563,17 @@ impl Editor {
 
     /// Puts the caret at the start of `block` and scrolls to it.
     fn go_to(&mut self, block: BlockId, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.update(cx, |state, cx| {
-            if state
-                .set_selection(BlockSelection::caret(BlockPosition::new(block, 0)), cx)
-                .is_ok()
-            {
+        let at = BlockPosition::new(block, 0);
+        let moved = self.state.update(cx, |state, cx| {
+            let moved = state.set_selection(BlockSelection::caret(at), cx).is_ok();
+            if moved {
                 state.reveal_caret(cx);
             }
+            moved
         });
+        if moved {
+            self.bring_to_top(at, cx);
+        }
         self.focus(window, cx);
     }
 
@@ -2971,6 +3018,7 @@ impl Editor {
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.finish_page(window, cx);
+        self.finish_go_to(window, cx);
         let compact = self.compact(window);
         let side_menu = if self.shows_side_menu(window) {
             self.side_menu(cx)
@@ -3312,6 +3360,49 @@ mod tests {
         assert_eq!(
             cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
             Some("fn main() {}")
+        );
+    }
+
+    /// A heading picked from the table of contents, far down a long page, lands near the top
+    /// of the page, as Notion's does, not at its bottom edge.
+    #[gpui::test]
+    fn a_heading_gone_to_lands_near_the_top(cx: &mut TestAppContext) {
+        let mut parts = vec![crate::toc::MARKDOWN.to_string()];
+        for section in 1..=6 {
+            parts.push(format!("## Part {section}"));
+            for line in 1..=30 {
+                parts.push(format!("Line {line} of part {section}"));
+            }
+        }
+        let source = parts.join("\n\n");
+        let (editor, cx) = open(cx, &source);
+        let target = cx
+            .debug_bounds("blocks-toc-4")
+            .expect("the contents")
+            .center();
+        cx.simulate_click(target, gpui::Modifiers::none());
+        for _ in 0..8 {
+            draw(cx);
+        }
+        let (heading, view) = editor.update(cx, |e, cx| {
+            let state = e.state().read(cx);
+            let heading = state
+                .model()
+                .document()
+                .leaves()
+                .find(|l| l.text() == Some("Part 5"))
+                .unwrap()
+                .id();
+            (
+                state
+                    .position_bounds(BlockPosition::new(heading, 0))
+                    .unwrap(),
+                e.scroll.bounds(),
+            )
+        });
+        assert!(
+            heading.top() >= view.top() && heading.top() < view.top() + gpui::px(100.),
+            "near the top: {heading:?} in {view:?}"
         );
     }
 
