@@ -412,6 +412,24 @@ impl Node {
         self
     }
 
+    /// Drags the node only by a handle its renderer draws ([`crate::NodeContext::drag_handle`]),
+    /// as React Flow's `dragHandle`, saved under that name (React Flow's is a CSS selector;
+    /// here any value says the node has one). A press elsewhere on it selects it, without
+    /// moving it: the rest of the node is the renderer's own, for text or controls.
+    pub fn drag_handle(mut self, name: impl Into<String>) -> Self {
+        self.extra
+            .insert("dragHandle".into(), Value::String(name.into()));
+        self
+    }
+
+    /// Whether the node is dragged only by a handle its renderer draws.
+    pub fn has_drag_handle(&self) -> bool {
+        self.extra
+            .get("dragHandle")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty())
+    }
+
     /// What assistive technology calls the node (React Flow's `ariaLabel`, saved under that
     /// name); its label when unset.
     pub fn aria_label(mut self, label: impl Into<String>) -> Self {
