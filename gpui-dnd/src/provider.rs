@@ -3,9 +3,9 @@
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
-    InspectorElementId, InteractiveElement as _, IntoElement, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Size, Style,
-    Styled as _, Window, div, rems,
+    InspectorElementId, InteractiveElement as _, IntoElement, LayoutId, LongPressEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Size, Style, Styled as _, TouchDragEvent, TouchPhase, Window, div, rems,
 };
 use gpui_core::ActiveTheme as _;
 
@@ -194,6 +194,12 @@ impl Element for DndProvider {
         window: &mut Window,
         cx: &mut App,
     ) {
+        // The presses that start drags, for every source in the window: registered before the
+        // content's own listeners, so (bubbling) those hear a press first, as an element's own
+        // would.
+        if *active {
+            listen_for_presses(self.mouse, self.touch, window);
+        }
         child.paint(window, cx);
         if !*active {
             return;
@@ -230,6 +236,83 @@ impl Element for DndProvider {
             }
         }
     }
+}
+
+/// Finds the source a press (or a finger) is on, the innermost first, and starts its pending
+/// press, long press or touch drag: one set of listeners for every source, not one per source.
+fn listen_for_presses(mouse: bool, touch: bool, window: &mut Window) {
+    if mouse {
+        window.on_mouse_event(|event: &MouseDownEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble
+                || event.button != MouseButton::Left
+                || cx.has_active_drag()
+            {
+                return;
+            }
+            let shared = state::shared(cx);
+            let window_id = state::window_id(window);
+            let mut state = shared.borrow_mut();
+            if state.drag.is_some() || state.pending.is_some() {
+                return;
+            }
+            let Some(source) = state
+                .registry(window_id)
+                .sources_where(|h| h.is_hovered(window))
+                .next()
+            else {
+                return;
+            };
+            let threshold = source
+                .spec
+                .threshold
+                .unwrap_or(rems(0.25))
+                .to_pixels(window.rem_size());
+            state.pending = Some(state::Pending {
+                source,
+                at: event.position,
+                threshold,
+                window: window_id,
+            });
+        });
+    }
+    if touch {
+        window.on_mouse_event(|event: &LongPressEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble || event.phase != TouchPhase::Started {
+                return;
+            }
+            let at = event.start_position;
+            for source in sources_at(at, window, cx) {
+                if crate::touch::long_press(&source, event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        });
+        window.on_mouse_event(|event: &TouchDragEvent, phase, window, cx| {
+            if phase != DispatchPhase::Bubble || event.phase != TouchPhase::Started {
+                return;
+            }
+            let at = event.start_position;
+            for source in sources_at(at, window, cx) {
+                if crate::touch::offer(&source, event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    return;
+                }
+            }
+        });
+    }
+}
+
+/// The sources under a finger at `at`, the innermost first.
+fn sources_at(at: Point<Pixels>, window: &Window, cx: &mut App) -> Vec<Rc<state::SourceRecord>> {
+    let shared = state::shared(cx);
+    let mut state = shared.borrow_mut();
+    state
+        .registry(state::window_id(window))
+        .sources_where(|h| h.is_hovered_at(at, window))
+        .collect()
 }
 
 fn listen_to_mouse(window: &mut Window) {

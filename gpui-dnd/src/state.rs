@@ -22,6 +22,12 @@ pub(crate) struct SourceRecord {
     pub id: ElementId,
     pub bounds: Bounds<Pixels>,
     pub spec: Rc<SourceSpec>,
+    /// A shared source's key for this element: what its item is made from.
+    pub key: Option<Rc<dyn std::any::Any>>,
+    /// The element's label, the item's in announcements.
+    pub label: Option<SharedString>,
+    /// Where it takes a press.
+    pub hitbox: Option<gpui::Hitbox>,
     /// What has the keyboard's focus when the keyboard can pick it up.
     pub focus: Option<FocusHandle>,
 }
@@ -69,6 +75,18 @@ impl Registry {
     /// The targets drawn in the last frame.
     pub fn live_targets(&self) -> Vec<Rc<TargetRecord>> {
         self.targets.iter().filter_map(Weak::upgrade).collect()
+    }
+
+    /// The live sources whose hitbox `hit` takes, the last registered (innermost) first.
+    pub fn sources_where<'a>(
+        &'a self,
+        hit: impl Fn(&gpui::Hitbox) -> bool + 'a,
+    ) -> impl Iterator<Item = Rc<SourceRecord>> + 'a {
+        self.sources
+            .iter()
+            .rev()
+            .filter_map(Weak::upgrade)
+            .filter(move |s| s.hitbox.as_ref().is_some_and(&hit))
     }
 
     pub fn add_source(&mut self, source: &Rc<SourceRecord>) {
@@ -306,7 +324,7 @@ pub(crate) fn begin(
     if spec.can_drag.as_ref().is_some_and(|f| !f(cx)) {
         return false;
     }
-    let Some(item) = (spec.make)(cx) else {
+    let Some(item) = (spec.make)(source.key.as_deref(), source.label.clone(), cx) else {
         return false;
     };
     let snap = Snapshot {

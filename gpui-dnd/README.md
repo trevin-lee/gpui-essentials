@@ -70,6 +70,9 @@ dnd("done")
 
 - An item's type is its Rust type: a target `accept::<Card>()`s. `DragSource::many` drags a
   selection, and the default preview shows how many.
+- Many sources in one view (a board's cards): build one `DragSource::keyed(|key, cx| item)` per
+  view, `.shared()`, and give each element `dnd(id).shared_source(&shared, key)`: nothing per
+  element but its key; the item is made from the key when a drag begins.
 - Targets nest. The innermost under the pointer is asked first. It returns `Handled`, `Pass`
   (the next one out decides) or `HandledContinue` (both do, and the outer one sees
   `did_drop()`).

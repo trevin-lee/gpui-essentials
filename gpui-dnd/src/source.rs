@@ -1,5 +1,7 @@
 //! Drag sources: react-dnd's `useDrag`.
 
+use std::any::Any;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
 use gpui::{AnyElement, App, ElementId, Rems, SharedString, Window};
@@ -7,13 +9,16 @@ use gpui::{AnyElement, App, ElementId, Rems, SharedString, Window};
 use crate::item::{DragItem, DropResult};
 use crate::monitor::DragMonitor;
 
-type MakeItems<T> = Rc<dyn Fn(&mut App) -> Vec<T>>;
+type MakeItems<T, K> = Rc<dyn Fn(&K, &mut App) -> Vec<T>>;
 type CanDrag = Rc<dyn Fn(&App) -> bool>;
 type OnBegin = Rc<dyn Fn(&DragMonitor, &mut Window, &mut App)>;
 type OnEnd<T> = Rc<dyn Fn(&DragEnd<T>, &mut Window, &mut App)>;
 type IsDragging<T> = Rc<dyn Fn(&[T]) -> bool>;
 type BuildTyped<T> = Rc<dyn Fn(&[T], &mut Window, &mut App) -> AnyElement>;
-pub(crate) type MakeItem = Rc<dyn Fn(&mut App) -> Option<DragItem>>;
+/// Makes the item as a drag begins, from the element's key (none for an element's own source)
+/// and its label.
+pub(crate) type MakeItem =
+    Rc<dyn Fn(Option<&dyn Any>, Option<SharedString>, &mut App) -> Option<DragItem>>;
 pub(crate) type OnEndErased = Rc<dyn Fn(&DragItem, &EndInfo, &mut Window, &mut App)>;
 pub(crate) type IsDraggingErased = Rc<dyn Fn(&DragItem) -> bool>;
 
@@ -87,8 +92,13 @@ impl<T: 'static> Default for Preview<T> {
 
 /// A drag source (react-dnd's `useDrag`): what a [`dnd`](crate::dnd) element hands over when
 /// it's dragged, and what it hears back.
-pub struct DragSource<T: 'static> {
-    make: MakeItems<T>,
+///
+/// One built for each element costs a few closures a frame. For many elements of one view (a
+/// board's cards), build one [`keyed`](Self::keyed) source per view, [`share`](Self::shared)
+/// it, and give each element only its key with [`Dnd::shared_source`](crate::Dnd::shared_source):
+/// the item is made from the key when a drag begins.
+pub struct DragSource<T: 'static, K: 'static = ()> {
+    make: MakeItems<T, K>,
     can_drag: Option<CanDrag>,
     on_begin: Option<OnBegin>,
     on_end: Option<OnEnd<T>>,
@@ -108,6 +118,27 @@ impl<T: 'static> DragSource<T> {
     /// Several items dragged together (a selection), made when the drag begins. No drag
     /// begins when it makes none.
     pub fn many(items: impl Fn(&mut App) -> Vec<T> + 'static) -> Self {
+        DragSource::keyed_many(move |_: &(), cx| items(cx))
+    }
+
+    /// The same item every time.
+    pub fn item(item: T) -> Self
+    where
+        T: Clone,
+    {
+        Self::new(move |_| item.clone())
+    }
+}
+
+impl<T: 'static, K: 'static> DragSource<T, K> {
+    /// A source shared by many elements, each with its key: the item is made from the key
+    /// when a drag begins. See [`shared`](Self::shared).
+    pub fn keyed(item: impl Fn(&K, &mut App) -> T + 'static) -> Self {
+        Self::keyed_many(move |key, cx| vec![item(key, cx)])
+    }
+
+    /// Several items from the element's key (a selection), made when the drag begins.
+    pub fn keyed_many(items: impl Fn(&K, &mut App) -> Vec<T> + 'static) -> Self {
         Self {
             make: Rc::new(items),
             can_drag: None,
@@ -119,14 +150,6 @@ impl<T: 'static> DragSource<T> {
             keyboard: true,
             touch: TouchActivation::LongPress,
         }
-    }
-
-    /// The same item every time.
-    pub fn item(item: T) -> Self
-    where
-        T: Clone,
-    {
-        Self::new(move |_| item.clone())
     }
 
     /// Whether a drag may begin now. Asked when it would.
@@ -180,9 +203,16 @@ impl<T: 'static> DragSource<T> {
         self
     }
 
-    pub(crate) fn erase(self, label: Option<SharedString>) -> SourceSpec {
+    /// Erases its types once, for every element that takes it (by key) to share.
+    pub fn shared(self) -> SharedSource<K> {
+        SharedSource {
+            spec: Rc::new(self.erase()),
+            key: PhantomData,
+        }
+    }
+
+    pub(crate) fn erase(self) -> SourceSpec {
         let make = self.make;
-        let make_label = label.clone();
         let on_end = self.on_end.map(|f| {
             Rc::new(
                 move |item: &DragItem, end: &EndInfo, window: &mut Window, cx: &mut App| {
@@ -219,9 +249,13 @@ impl<T: 'static> DragSource<T> {
             Preview::None => PreviewSpec::None,
         };
         SourceSpec {
-            make: Rc::new(move |cx| {
-                let items = make(cx);
-                (!items.is_empty()).then(|| DragItem::new(items, make_label.clone()))
+            make: Rc::new(move |key, label, cx| {
+                let key = key.and_then(|k| k.downcast_ref::<K>()).or_else(|| {
+                    // An element's own source (K is ()) has no key.
+                    (&() as &dyn Any).downcast_ref::<K>()
+                })?;
+                let items = make(key, cx);
+                (!items.is_empty()).then(|| DragItem::new(items, label))
             }),
             can_drag: self.can_drag,
             on_begin: self.on_begin,
@@ -236,6 +270,22 @@ impl<T: 'static> DragSource<T> {
 }
 
 use gpui::IntoElement as _;
+
+/// A [`DragSource`] with its types erased once, for many elements to share: each gives its key
+/// with [`Dnd::shared_source`](crate::Dnd::shared_source). Cloning it is a reference count.
+pub struct SharedSource<K: 'static> {
+    pub(crate) spec: Rc<SourceSpec>,
+    key: PhantomData<fn(K)>,
+}
+
+impl<K: 'static> Clone for SharedSource<K> {
+    fn clone(&self) -> Self {
+        Self {
+            spec: self.spec.clone(),
+            key: PhantomData,
+        }
+    }
+}
 
 /// How a drag ended, before it's typed for the source.
 pub(crate) struct EndInfo {
