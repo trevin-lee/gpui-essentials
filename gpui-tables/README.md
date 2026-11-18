@@ -1102,22 +1102,29 @@ nothing draws while nothing changes.
 - **The table view** draws only the rows on screen (GPUI's `uniform_list`), works the rows out
   again only when the docs or the view change, and keeps no timers. Measured with `cargo test
   --release --test view_performance -- --nocapture` on an Apple M4 Pro, 10,000 rows of every
-  type in a 1400 by 900 window, text laid out with Core Text:
+  type in a 1400 by 900 window, text laid out with Core Text. Each step is timed with the one
+  draw that does its work (not a redraw after it, which GPUI serves from its caches):
 
   | | median |
   |---|---|
-  | The first draw | 2.6 ms |
-  | A frame while scrolling down a page, or sideways | 2.6 ms |
-  | A sort, a filter and a group by select, worked out / and drawn | 5.7 / 17 ms |
-  | A filter's value typed a key at a time, worked out (the notes kept) | 1.9 ms |
-  | A value changed, regrouped by select / multi-select / date / person | 1.2 / 1.6 / 1.2 / 1.7 ms |
-  | The same, regrouped and drawn | 3.3 / 3.7 / 3.5 / 3.8 ms |
-  | Opening the search field, drawn (the rows' words then folded off the main thread, 11 ms) | 6.7 ms |
-  | A search's first key / with its frame | 0.2 / 6.2 ms |
-  | Each key after it / with its frame | 0.2 / 5.2 ms |
+  | The first draw (the rows worked out and drawn) | 9.7 ms |
+  | A frame while scrolling down a page, or sideways | 10 ms |
+  | A sort, a filter and a group by select, worked out / and drawn | 5.9 / 15 ms |
+  | A filter's value typed a key at a time, worked out (the notes kept) | 1.7 ms |
+  | A value changed, regrouped by select / multi-select / date / person | 1.3 / 1.6 / 1.2 / 1.7 ms |
+  | The same, regrouped and drawn | 5.8 / 6.0 / 5.8 / 6.3 ms |
+  | Opening the search field, drawn (the rows' words then folded off the main thread, 11 ms) | 7.0 ms |
+  | A search's first key / with its frame | 0.2 / 4.0 ms |
+  | Each key after it / with its frame | 0.2 / 2.8 ms |
   | A first key typed before the fold is done (folded then) | 14 ms |
 
-  The test fails past 50, 12 and 50 ms in a release build (forty times that in a debug one), a
+  Most of a draw that brings new rows on screen is laying out their text: Core Text shapes a
+  line in about 30 µs, so a page scrolled (about 160 new lines) spends about 4.5 ms of its 10 ms
+  on it, and the draw after a sort (about 180 lines) about 5 ms of its 7.6 ms. A draw of the
+  same rows again takes about 2.5 ms, since GPUI keeps each line's layout from the frame
+  before.
+
+  The test fails past 50, 16 and 50 ms in a release build (forty times that in a debug one), a
   regroup past 10 ms worked out and 25 ms drawn, opening the search past 25 ms, and a search's
   keys, the first one included, past 3 ms and 12 ms drawn.
 - **The board view** draws only the cards on screen in each column (a `uniform_list` each).
@@ -1126,8 +1133,8 @@ nothing draws while nothing changes.
 
   | | median |
   |---|---|
-  | The first draw | 1.9 ms |
-  | A frame while scrolling a column down a page, or the board sideways | 1.8 ms |
+  | The first draw (the cards worked out and drawn) | 10 ms |
+  | A frame while scrolling a column down a page, or the board sideways | 2.6 ms |
   | A frame while dragging a card across the columns | 2.0 ms |
 
   The test fails past 50, 12 and 12 ms in a release build.
@@ -1136,9 +1143,9 @@ nothing draws while nothing changes.
 
   | | median |
   |---|---|
-  | The first draw | 1.2 ms |
-  | A frame while scrolling down a page | 1.4 ms |
-  | A frame while dragging a row down the list | 1.4 ms |
+  | The first draw (the lines worked out and drawn) | 9.3 ms |
+  | A frame while scrolling down a page | 2.7 ms |
+  | A frame while dragging a row down the list | 1.5 ms |
 
   The test fails past 50, 12 and 12 ms in a release build.
 - **No text overflows its cell** at any width: cells, headers, group headers, menus and cards

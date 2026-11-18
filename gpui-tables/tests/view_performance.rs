@@ -4,6 +4,11 @@
 //! forty times that in a debug one. On CI (`CI` set, as GitHub's runners do) the bound is four
 //! times looser: the shared runners' timings swing with their load, and the strict bound is for
 //! a quiet machine.
+//!
+//! Each step is timed with the one draw that does its work: a test window draws as each update
+//! and each event ends, so that draw is in the update's or event's time. A redraw after it would
+//! come from GPUI's caches (no new text to lay out) and measure nothing the step costs.
+//!
 //! `cargo test --release --test view_performance -- --nocapture` prints the numbers the README
 //! quotes.
 
@@ -168,7 +173,7 @@ fn report(label: &str, mut times: Vec<Duration>, bound_ms: u64) {
     );
 }
 
-/// One frame drawn now, timed.
+/// A redraw now, timed: nothing new to lay out, so it mostly comes from GPUI's caches.
 fn frame(cx: &mut VisualTestContext) -> Duration {
     let start = Instant::now();
     cx.update(|window, cx| {
@@ -209,27 +214,30 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
         let table = made.borrow().clone().unwrap();
         cx.simulate_resize(size(px(1400.), px(900.)));
         // The first draw: the rows worked out, the visible ones laid out.
+        let start = Instant::now();
         table.update(cx, |t, cx| t.set_rows(t.rows().to_vec(), cx));
-        firsts.push(frame(cx));
+        firsts.push(start.elapsed());
         draw(cx);
         assert_eq!(table.update(cx, |t, _| t.shown_rows().len()), ROWS);
         // Scrolling a page at a time.
         for _ in 0..20 {
+            let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(600.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(0.), px(-800.))),
                 ..Default::default()
             });
-            scrolls.push(frame(cx));
+            scrolls.push(start.elapsed());
         }
         // And sideways.
         for _ in 0..5 {
+            let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(600.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(-120.), px(0.))),
                 ..Default::default()
             });
-            scrolls.push(frame(cx));
+            scrolls.push(start.elapsed());
         }
         assert!(table.update(cx, |t, _| t.scroll_x()) > px(0.));
         // A sort and a group: the rows worked out again and drawn.
@@ -243,18 +251,15 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
         ));
         let mut db = table.read_with(cx, |t, _| t.database().clone());
         db.database.as_mut().unwrap().views[0] = view;
+        // Worked out, timed alone inside the update; then with the update's own draw (a test's
+        // update ends in one), the step as a person sees it: one draw, its new text laid out.
         let start = Instant::now();
-        // Worked out, timed alone (a test's update ends in a draw of its own).
         works.push(table.update(cx, |t, cx| {
             t.set_database(db, cx);
             let start = Instant::now();
             let _ = t.shown_rows().len();
             start.elapsed()
         }));
-        cx.update(|window, cx| {
-            window.refresh();
-            let _ = window.draw(cx);
-        });
         sorts.push(start.elapsed());
         // A filter's value typed a key at a time: the same rows, their notes kept lowercased.
         for typed in ["h", "ha", "har", "harb"] {
@@ -271,7 +276,8 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
         }
     }
     report("first draw of 10,000 rows", firsts, 50);
-    report("a frame while scrolling", scrolls, 12);
+    // A 60 Hz frame: a page of new rows lays out about 160 lines of text.
+    report("a frame while scrolling", scrolls, 16);
     report("sort, filter and group, worked out", works, 25);
     report("sort, filter and group, then draw", sorts, 50);
     report("a filter's value typed, worked out", keys, 25);
@@ -310,29 +316,32 @@ fn ten_thousand_cards_draw_and_scroll_without_dropping_frames() {
         });
         let table = made.borrow().clone().unwrap();
         cx.simulate_resize(size(px(1400.), px(900.)));
+        let start = Instant::now();
         table.update(cx, |t, cx| t.set_rows(t.rows().to_vec(), cx));
-        firsts.push(frame(cx));
+        firsts.push(start.elapsed());
         draw(cx);
         let cols = table.update(cx, |t, _| t.board_columns().to_vec());
         assert_eq!(cols.len(), 7, "no stage, then six options");
         assert_eq!(cols.iter().map(|c| c.rows.len()).sum::<usize>(), ROWS);
         // Down a column a page at a time.
         for _ in 0..20 {
+            let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(450.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(0.), px(-800.))),
                 ..Default::default()
             });
-            scrolls.push(frame(cx));
+            scrolls.push(start.elapsed());
         }
         // And the board sideways.
         for _ in 0..5 {
+            let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(600.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(-120.), px(0.))),
                 ..Default::default()
             });
-            scrolls.push(frame(cx));
+            scrolls.push(start.elapsed());
         }
         assert!(table.read_with(cx, |t, _| t.board_scroll_x()) > px(0.));
         // A card dragged across the columns, a frame for each move.
@@ -348,8 +357,9 @@ fn ten_thousand_cards_draw_and_scroll_without_dropping_frames() {
         frame(cx);
         for i in 1..=10 {
             let at = from + point(px(60. * i as f32), px(15. * i as f32));
+            let start = Instant::now();
             cx.simulate_mouse_move(at, MouseButton::Left, Modifiers::none());
-            drags.push(frame(cx));
+            drags.push(start.elapsed());
         }
         assert!(table.read_with(cx, |t, _| t.is_dragging_card()));
         cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
@@ -392,20 +402,22 @@ fn ten_thousand_lines_draw_and_scroll_without_dropping_frames() {
         });
         let table = made.borrow().clone().unwrap();
         cx.simulate_resize(size(px(1400.), px(900.)));
+        let start = Instant::now();
         table.update(cx, |t, cx| t.set_rows(t.rows().to_vec(), cx));
-        firsts.push(frame(cx));
+        firsts.push(start.elapsed());
         draw(cx);
         let groups = table.update(cx, |t, _| t.list_groups().to_vec());
         assert_eq!(groups.len(), 7, "no stage, then six options");
         assert_eq!(groups.iter().map(|g| g.rows.len()).sum::<usize>(), ROWS);
         // Down the list a page at a time.
         for _ in 0..20 {
+            let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(600.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(0.), px(-800.))),
                 ..Default::default()
             });
-            scrolls.push(frame(cx));
+            scrolls.push(start.elapsed());
         }
         // A row dragged down the list, a frame for each move.
         let from = table
@@ -427,8 +439,9 @@ fn ten_thousand_lines_draw_and_scroll_without_dropping_frames() {
         frame(cx);
         for i in 1..=10 {
             let at = from + point(px(4. * i as f32), px(40. * i as f32));
+            let start = Instant::now();
             cx.simulate_mouse_move(at, MouseButton::Left, Modifiers::none());
-            drags.push(frame(cx));
+            drags.push(start.elapsed());
         }
         assert!(table.read_with(cx, |t, _| t.is_dragging_card()));
         cx.simulate_mouse_up(from, MouseButton::Left, Modifiers::none());
@@ -514,7 +527,9 @@ fn ten_thousand_rows_regroup_as_a_value_changes() {
                 b.clone()
             };
             next[row].values.as_mut().unwrap().insert(by.into(), value);
-            // Timed inside the update: a test window draws as each update ends.
+            // Worked out, timed inside the update; drawn, the whole update (a test window draws
+            // as each update ends).
+            let start = Instant::now();
             let (work, groups) = table.update(cx, |t, cx| {
                 t.set_rows(next, cx);
                 let start = Instant::now();
@@ -523,7 +538,7 @@ fn ten_thousand_rows_regroup_as_a_value_changes() {
             });
             assert!(groups > 1);
             works.push(work);
-            frames.push(work + frame(cx));
+            frames.push(start.elapsed());
         }
         report(&format!("a {label} value changed, worked out"), works, 10);
         report(
@@ -576,19 +591,19 @@ fn ten_thousand_rows_searched_a_key_at_a_time() {
         let start = Instant::now();
         cx.run_until_parked();
         folds.push(start.elapsed());
-        // The first key only searches them: timed alone, then with its frame.
+        // The first key only searches them: timed alone, then with its update's own draw.
         let start = Instant::now();
         firsts.push(table.update(cx, |t, cx| {
             let start = Instant::now();
             t.set_search(Some("h".into()), cx);
             start.elapsed()
         }));
-        first_frames.push(start.elapsed() + frame(cx));
+        first_frames.push(start.elapsed());
         // Each key after that searches them again.
         for typed in [
             "ha", "har", "harb", "harbo", "harbou", "harbour", "harbou", "harbo",
         ] {
-            // The search alone (a test's update ends in a draw of its own), then with a frame.
+            // The search alone, then with the update's own draw (a test's update ends in one).
             let start = Instant::now();
             let key = table.update(cx, |t, cx| {
                 let start = Instant::now();
@@ -596,7 +611,7 @@ fn ten_thousand_rows_searched_a_key_at_a_time() {
                 start.elapsed()
             });
             keys.push(key);
-            frames.push(start.elapsed() + frame(cx));
+            frames.push(start.elapsed());
             let found = table.update(cx, |t, _| t.shown_rows().len());
             assert!(found > 0 && found < ROWS, "{typed}: {found}");
         }
