@@ -9,6 +9,10 @@
 //! goes with the selection. On touch the marks and Link are a second row of the long press's
 //! edit menu instead, whose Block… has Turn into.
 //!
+//! With [`Options::comments`](crate::Options::comments), Comment comes first: it sends
+//! [`EditorEvent::CommentRequested`](crate::EditorEvent::CommentRequested) with the
+//! selection's anchor, for the app to start a thread on.
+//!
 //! Color gives the selection one of Notion's text colours ([`TEXT_COLORS`]), stored as
 //! `<span style="color:#…">`, or background colours ([`BACKGROUNDS`]), stored as
 //! `<mark color="#…">`, or takes either off; ⌘⇧H gives the last one picked again. A dark theme
@@ -499,6 +503,39 @@ impl Editor {
                 .bg(theme.border)
                 .into_any_element()
         };
+        let comment = self.comments.then(|| {
+            div()
+                .id("blocks-format-comment")
+                .debug_selector(|| "blocks-format-comment".into())
+                .role(Role::Button)
+                .aria_label("Comment")
+                .h(px(28.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .text_sm()
+                .whitespace_nowrap()
+                .hover(|s| s.bg(theme.accent))
+                .child(
+                    Icon::new(IconName::MessageSquare)
+                        .size(px(14.))
+                        .color(theme.popover_foreground),
+                )
+                .child("Comment")
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        if let Some((block, quote)) = this.selection_anchor(cx) {
+                            cx.emit(crate::EditorEvent::CommentRequested { block, quote });
+                        }
+                    }),
+                )
+                .into_any_element()
+        });
         Some(
             deferred(
                 anchored()
@@ -523,6 +560,7 @@ impl Editor {
                             .shadow_md()
                             // A press on the bar is the bar's, not the editor's selection.
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .when_some(comment, |bar, comment| bar.child(comment).child(divider()))
                             .when_some(turn, |bar, turn| bar.child(turn).child(divider()))
                             .children(buttons)
                             .child(divider())

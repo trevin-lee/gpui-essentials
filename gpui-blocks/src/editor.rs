@@ -168,6 +168,7 @@ pub struct Options {
     embeds: Option<Arc<EmbedFn>>,
     mentions: Option<Arc<dyn Mentions>>,
     html_clipboard: Option<HtmlClipboard>,
+    comments: bool,
     gutter: Pixels,
     top: Pixels,
     compact_below: Pixels,
@@ -185,6 +186,7 @@ impl Default for Options {
             embeds: None,
             mentions: None,
             html_clipboard: None,
+            comments: false,
             gutter: px(GUTTER),
             top: px(TOP),
             compact_below: px(COMPACT_BELOW),
@@ -211,6 +213,7 @@ impl std::fmt::Debug for Options {
             .field("embeds", &self.embeds.is_some())
             .field("mentions", &self.mentions.is_some())
             .field("html_clipboard", &self.html_clipboard.is_some())
+            .field("comments", &self.comments)
             .field("gutter", &self.gutter)
             .field("top", &self.top)
             .field("compact_below", &self.compact_below)
@@ -303,6 +306,13 @@ impl Options {
         self
     }
 
+    /// The app takes comments on the text: the format bar gets Comment, as Notion's, which
+    /// sends [`EditorEvent::CommentRequested`] with the selection's anchor.
+    pub fn comments(mut self) -> Self {
+        self.comments = true;
+        self
+    }
+
     /// Add an item to the end of the slash menu.
     pub fn slash_item(mut self, item: SlashItem) -> Self {
         self.items.push(item);
@@ -362,6 +372,10 @@ pub enum EditorEvent {
     /// A click on a person, agent or date mention (see [`crate::mentions`]): the app shows it.
     /// A page's mention sends [`EditorEvent::DocClicked`].
     MentionClicked { kind: MentionKind, id: SharedString },
+    /// The format bar's Comment (see [`Options::comments`]): the app starts a thread on the
+    /// selection, anchored as [`Editor::selection_anchor`] gives it: `block` is the lasting id
+    /// of the block the selection starts in, and `quote` the selected words.
+    CommentRequested { block: String, quote: String },
 }
 
 /// Splits YAML front matter (between `---` lines at the very top) from the document, so the
@@ -433,6 +447,8 @@ pub struct Editor {
     pub(crate) mentions: Option<Arc<dyn Mentions>>,
     /// Reads the system clipboard's HTML, for pastes that keep their structure.
     html_clipboard: Option<HtmlClipboard>,
+    /// Whether the format bar has Comment ([`Options::comments`]).
+    pub(crate) comments: bool,
     /// The open @ menu.
     pub(crate) mention: Option<MentionMenu>,
     /// The `@` closed with Esc. It stays closed until the caret leaves it.
@@ -605,6 +621,7 @@ impl Editor {
             slash: None,
             mentions: options.mentions.clone(),
             html_clipboard: options.html_clipboard.clone(),
+            comments: options.comments,
             mention: None,
             mention_dismissed: None,
             dismissed: None,
@@ -3382,6 +3399,10 @@ mod tests {
             cx.debug_bounds("blocks-format-bar").is_some(),
             "the bar shows"
         );
+        assert!(
+            cx.debug_bounds("blocks-format-comment").is_none(),
+            "no Comment unless the app takes comments"
+        );
         press(cx, "blocks-format-Bold");
         assert_eq!(markdown(&editor, cx), "hello **world** again");
         let bold = editor.update(cx, |e, cx| {
@@ -3401,6 +3422,58 @@ mod tests {
         cx.simulate_click(start, gpui::Modifiers::none());
         draw(cx);
         assert!(cx.debug_bounds("blocks-format-bar").is_none());
+    }
+
+    /// With [`Options::comments`], the bar's Comment asks the app for a thread on the
+    /// selection, with its anchor; without it the bar has no Comment.
+    #[gpui::test]
+    fn the_format_bar_asks_for_a_comment(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            Editor::with_options(
+                "intro\n\nhello world",
+                super::Options::default().comments(),
+                window,
+                cx,
+            )
+        });
+        cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
+        draw(cx);
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let seen = asked.clone();
+        cx.update(|_, cx| {
+            cx.subscribe(&editor, move |_, event: &super::EditorEvent, _| {
+                if let super::EditorEvent::CommentRequested { block, quote } = event {
+                    *seen.borrow_mut() = Some((block.clone(), quote.clone()));
+                }
+            })
+            .detach()
+        });
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let leaf = s.model().document().leaves().nth(1).unwrap().id();
+                s.set_selection(
+                    BlockSelection::Text {
+                        anchor: BlockPosition::new(leaf, 6),
+                        head: BlockPosition::new(leaf, 11),
+                    },
+                    cx,
+                )
+                .unwrap();
+            })
+        });
+        draw(cx);
+        press(cx, "blocks-format-comment");
+        let lasting = editor.update(cx, |e, cx| e.document(cx).blocks[1].id.clone());
+        assert_eq!(
+            asked.borrow().clone(),
+            Some((lasting, "world".to_string())),
+            "the app gets the selection's anchor"
+        );
+        assert_eq!(markdown(&editor, cx), "intro\n\nhello world");
     }
 
     /// Link asks the app for the link, as ⌘K does; Turn into turns the selection's block.
