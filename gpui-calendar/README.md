@@ -89,6 +89,12 @@ their look.
   Shift-F10 opens the selection's menu from the keyboard. Each entry does what its key does
   (Enter, `e`, Delete, `n`), so a repeating event's Delete still asks which occurrences.
   `menu_items()` and `pick_menu_item(id)` drive it from your app and its tests.
+- **"+N" lists from the keyboard:** on an event or a day that a "+N" stands for (side by side,
+  a month day's "+N more", or the all-day row's), the menu adds "Show all", which opens that
+  list with the event's row highlighted (or the all-day row). The up and down arrows then go
+  from row to row, selecting each, Enter opens the row's event, left and right go back to the
+  days, and Escape closes the list. The arrows reach a hidden event in the first place, since
+  they go through every event on a day, drawn or not.
 - **Keys:** the arrows move the selection: a 30-minute slot on the grid, a day in the month, or
   from event to event; ← and → cross into the next or previous day (and period) in the day,
   week and month views. With nothing selected, ← and → change the period. `j` goes to the next

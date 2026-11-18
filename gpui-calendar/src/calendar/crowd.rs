@@ -2,10 +2,14 @@
 //! day's events behind its "+N more", in a popover beside the "+N" (a sheet on touch). Each row
 //! is the event's colour, title and time; a click opens the event, as a double click on its
 //! chip does, and on the time grid a drag carries it into the grid as a drag of the chip would.
+//! The keyboard has it too: the menu's "Show all" opens it with the event highlighted, the up and
+//! down arrows go from row to row (selecting each), Enter opens the row's event, and Escape
+//! closes the list.
 
 use chrono::{Datelike, NaiveDate};
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::{DismissReason, Popover, PopoverAnchor, Press, Sheet, Theme};
+use gpui_core::{DismissReason, Popover, PopoverAnchor, Press, Selectable as _, Sheet, Theme};
 
 use super::Calendar;
 use crate::model::*;
@@ -22,6 +26,8 @@ pub(crate) struct Crowd {
     pub ids: Vec<EventId>,
     pub anchor: Bounds<Pixels>,
     pub day: Option<NaiveDate>,
+    /// The row the arrow keys are on, if they've been used.
+    pub highlighted: Option<usize>,
 }
 
 impl Calendar {
@@ -35,6 +41,7 @@ impl Calendar {
             ids,
             anchor,
             day: None,
+            highlighted: None,
         });
         cx.notify();
     }
@@ -57,6 +64,7 @@ impl Calendar {
             ids,
             anchor,
             day: Some(date),
+            highlighted: None,
         });
         cx.notify();
     }
@@ -78,6 +86,58 @@ impl Calendar {
             }
             None => false,
         }
+    }
+
+    /// Puts the open list's highlight on an event's row, if it has one (else on the first).
+    pub(crate) fn highlight_row(&mut self, id: &EventId) {
+        if let Some(crowd) = self.crowd.as_mut() {
+            crowd.highlighted = Some(crowd.ids.iter().position(|i| i == id).unwrap_or(0));
+        }
+    }
+
+    /// The up and down arrows while the list is open: the next row that way (the first, from
+    /// none), its event selected. False when no list is open.
+    pub(crate) fn move_in_list(&mut self, by: i32, cx: &mut Context<Self>) -> bool {
+        let Some(crowd) = self.crowd.as_mut() else {
+            return false;
+        };
+        if crowd.ids.is_empty() {
+            return true;
+        }
+        let last = crowd.ids.len() as i32 - 1;
+        let at = match crowd.highlighted {
+            Some(i) => (i as i32 + by).clamp(0, last),
+            None if by > 0 => 0,
+            None => last,
+        } as usize;
+        crowd.highlighted = Some(at);
+        let id = crowd.ids[at].clone();
+        self.select(Some(Selection::Event(id)), cx);
+        cx.notify();
+        true
+    }
+
+    /// Enter while the list's highlight is on a row: that row's event opens, as a click on the
+    /// row does. False when there's no highlighted row.
+    pub(crate) fn open_list_row(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(id) = self
+            .crowd
+            .as_ref()
+            .and_then(|c| c.highlighted.and_then(|i| c.ids.get(i)).cloned())
+        else {
+            return false;
+        };
+        self.drag = None;
+        self.crowd = None;
+        self.open_event(id, cx);
+        true
+    }
+
+    /// The row the open list's highlight is on, for tests and hosts.
+    pub fn list_highlight(&self) -> Option<&EventId> {
+        self.crowd
+            .as_ref()
+            .and_then(|c| c.highlighted.and_then(|i| c.ids.get(i)))
     }
 
     /// The day whose events the open list shows, for a month day's "+N more".
@@ -214,6 +274,8 @@ impl Calendar {
             Some(
                 Press::new(("crowd-row", i))
                     .accessibility_label(label)
+                    .selected(crowd.highlighted == Some(i))
+                    .when(crowd.highlighted == Some(i), |d| d.bg(c.accent))
                     .focus_on_press(false)
                     .flex()
                     .items_center()
