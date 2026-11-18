@@ -346,9 +346,15 @@ made.
   name). Without one, a node is named by its label (or its kind) and an edge "Edge from … to …"
   with its nodes' names, after its own label. Edges, which are painted, are the canvas's own
   nodes, where their lines are.
+- **By keyboard,** as React Flow's: Tab and shift-Tab move between the nodes (top to bottom,
+  then left to right) and then the edges, with a focus ring round the one the keyboard is on,
+  which is also what assistive technology is told is focused; past the last, Tab goes on out of
+  the canvas. Enter or space selects it, the arrows move it (shift for four steps) when
+  nothing is selected, delete removes it, and escape leaves it for the canvas. A click takes
+  the keyboard off. In a tree, Tab and enter add nodes as before, once one is selected.
+  `Flow::keyboard_on` and `set_keyboard_on` read and set it.
 - **Not yet.** A node toolbar; edge renderers of the host's own (a custom type is drawn as a
-  bezier); `dragHandle`; a keyboard path through nodes, and announcing
-  changes as they happen; undo.
+  bezier); `dragHandle`; announcing changes as they happen; undo.
 
 ## License
 
