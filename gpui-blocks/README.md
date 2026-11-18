@@ -15,7 +15,8 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   numbered and to-do lists, quotes, callouts, toggles, code with syntax highlighting, dividers,
   tables you can edit, pictures, and a table of contents that follows the headings.
 - **Slash menu:** type `/` at the start of a line or after a space. Narrow the list by typing,
-  pick with ↑ ↓ and Enter, and close it with Esc.
+  words and all (`/heading 1`), pick with ↑ ↓ and Enter, and close it with Esc. Typing a colour
+  (`/red`, `/blue background`, `/default text`) colours the whole line.
 - **@-mentions:** type `@` for the people, agents, pages and dates your app offers, and pick
   one to put a mention chip in the text.
 - **Side menu:** hover a block for its handles. "+" adds a line below with the menu open, and the
