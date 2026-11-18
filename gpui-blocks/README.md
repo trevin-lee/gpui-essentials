@@ -28,7 +28,7 @@ apps on the same `gpui-pre` but not with Zed's own `gpui` crate.
   as ⌘K) and Color: Notion's nine text colours (stored as `<span style="color:#…">`) and nine
   background colours (stored as `<mark color="#…">`), each drawn with a twin made for a dark
   theme. ⌘⇧H gives the last colour again. On touch the same marks and link are a second row of
-  the long press's menu.
+  the long press's menu, with Color, which opens the colours in a sheet.
 - **Notion's keys:** ⌘B, ⌘I, ⌘U, ⌘⇧S and ⌘E mark the selection bold, italic, underlined, struck
   through or code. ⌘⌥0 to ⌘⌥8 turn the block, or each selected block, into text, heading 1 to 3,
   a to-do, bulleted or numbered item, a toggle or code. Off the Mac, Ctrl takes ⌘'s place.
