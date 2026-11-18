@@ -1,5 +1,6 @@
 //! The provider: react-dnd's `DndProvider`. It follows the drag and draws its preview.
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     InspectorElementId, InteractiveElement as _, IntoElement, LayoutId, MouseButton,
@@ -454,8 +455,8 @@ impl Element for Floating {
     }
 }
 
-/// A card of the source's size, lifted: the theme's card colours, its ring and a shadow, and
-/// the count when several items are dragged.
+/// A card of the source's size, lifted: the theme's card colours, its ring and a shadow, the
+/// source's label if it has one, and the count when several items are dragged.
 fn default_preview(item: &DragItem, size: Size<Pixels>, cx: &App) -> AnyElement {
     let theme = cx.theme();
     let card = div()
@@ -466,7 +467,18 @@ fn default_preview(item: &DragItem, size: Size<Pixels>, cx: &App) -> AnyElement 
         .border_1()
         .border_color(theme.ring)
         .shadow_lg()
-        .opacity(0.9);
+        .opacity(0.9)
+        .overflow_hidden()
+        .when_some(item.label().cloned(), |card, label| {
+            card.px(rems(0.75)).flex().items_center().child(
+                div()
+                    .debug_selector(|| "dnd-preview-label".into())
+                    .text_sm()
+                    .text_color(theme.card_foreground)
+                    .truncate()
+                    .child(label),
+            )
+        });
     if item.count() < 2 {
         return card.into_any_element();
     }
