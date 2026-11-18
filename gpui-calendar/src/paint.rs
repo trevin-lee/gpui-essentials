@@ -1612,10 +1612,24 @@ fn paint_timed_chip(
                     badge_width(&mut ink, links) + ink.u(6.)
                 };
                 let reserved = if list { rows } else { px(0.) };
-                // The title over as many lines as leave room for the time (and the links).
-                let room = h - pad * 2. - ink.u(SMALL_LEADING) - reserved;
-                // Narrow chips keep the title to a line: wrapping there breaks words apart.
-                let lines = if w < ink.u(84.) || badge > px(0.) {
+                // A narrow chip wraps its title only between words: one with a word wider than
+                // the chip keeps it to a line, cut with "…", rather than break the word apart.
+                // Where it wraps, the title comes before the time, as in Google Calendar's
+                // narrow columns: "Team / lunch" says more than "Team l…" over its hours.
+                let narrow = w < ink.u(84.);
+                let wraps = !narrow || words_fit(&mut ink, text.title, w - badge);
+                let time_first = !narrow;
+                // The title over as many lines as leave room for the time (and the links), or
+                // in a narrow chip as many as fit.
+                let room = h
+                    - pad * 2.
+                    - reserved
+                    - if time_first {
+                        ink.u(SMALL_LEADING)
+                    } else {
+                        px(0.)
+                    };
+                let lines = if !wraps || badge > px(0.) {
                     1
                 } else {
                     ((f32::from(room) / f32::from(ink.u(TITLE_LEADING))).floor() as usize)
@@ -1642,15 +1656,18 @@ fn paint_timed_chip(
                     }
                 }
                 let mut y = top + ink.u(TITLE_LEADING) * used.max(1) as f32;
-                ink.text(
-                    text.time,
-                    SMALL,
-                    SMALL_LEADING,
-                    FontWeight::NORMAL,
-                    muted,
-                    point(x, y),
-                    Some(w),
-                );
+                // The time where there's room for it (always, unless a narrow title took it).
+                if time_first || y + ink.u(SMALL_LEADING) <= rect.bottom() - pad {
+                    ink.text(
+                        text.time,
+                        SMALL,
+                        SMALL_LEADING,
+                        FontWeight::NORMAL,
+                        muted,
+                        point(x, y),
+                        Some(w),
+                    );
+                }
                 y += ink.u(SMALL_LEADING);
                 if let Some(location) = text.location
                     && y + ink.u(SMALL_LEADING) + reserved <= rect.bottom() - pad
@@ -1728,6 +1745,13 @@ fn paint_timed_chip(
             }
         });
     out
+}
+
+/// Whether every word of a title fits a line `width` wide, so wrapping it never breaks one.
+fn words_fit(ink: &mut Ink, title: &str, width: Pixels) -> bool {
+    title
+        .split_whitespace()
+        .all(|word| ink.measure(word, TITLE, FontWeight::MEDIUM) <= width)
 }
 
 /// The clickable area round a badge: a little more than the mark.
