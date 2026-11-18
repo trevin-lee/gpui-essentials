@@ -303,8 +303,10 @@ impl Calendar {
             }
         };
         self.drag = Some(drag);
+        // An all-day event on the grid is in the all-day row (minute -1).
+        let row = |m: f32| if area == Area::AllDay { -1. } else { m };
         let at = self
-            .point_at(start.0, start.1)
+            .point_at(start.0, row(start.1))
             .unwrap_or_else(|| geo.bounds.center());
         let held = self.held(at, CursorStyle::Arrow, cx);
         let view = cx.entity().downgrade();
@@ -349,7 +351,14 @@ impl Calendar {
         let minute = if area == Area::Grid { now.1 } else { -1. };
         self.reveal(now.0, minute, cx);
         cx.notify();
-        self.point_at(now.0, now.1.max(0.))
+        self.point_at(
+            now.0,
+            if area == Area::AllDay {
+                -1.
+            } else {
+                now.1.max(0.)
+            },
+        )
     }
 
     /// What a keyboard drag says, in the calendar's formats (12- or 24-hour, the display zone,
