@@ -815,3 +815,149 @@ fn a_summary_heading_reads_strictly() {
     assert_eq!(summary_heading("<h2>Open"), None);
     assert_eq!(summary_heading("Plain"), None);
 }
+
+/// A long document parsed in pieces on several threads reads as the same blocks as one parse
+/// of it: around fences holding `#` lines, comments and `<pre>`s running past blank lines,
+/// toggles, columns, lists, quotes and tables.
+#[test]
+fn a_long_document_parsed_in_pieces_is_the_same_document() {
+    let section = |i: usize| {
+        format!(
+            "## Part {i}\n\nA paragraph with **bold** and a [link](https://e.com/{i}).\n\n- a list\n- of items\n\n> a quote\n> # not a heading\n\n```sh\n# a comment, not a heading\n\n# another\n```\n\n<!--\n\n# in a comment\n\n-->\n\n<pre>\n\n# in pre\n\n</pre>\n\n<details>\n<summary>Toggle {i}</summary>\n\n# inside a toggle\n\nbody\n\n</details>\n\n<!-- columns -->\n\n<!-- column 0.5 -->\n\n# left {i}\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n1. one\n2. two\n\n"
+        )
+    };
+    let ext = std::sync::Arc::new(crate::Extensions::default());
+    let mut source = String::new();
+    let mut i = 0;
+    while source.len() < 3 * 64 * 1024 {
+        source.push_str(&section(i));
+        i += 1;
+    }
+    let starts = crate::import::pieces(&source, 4);
+    assert!(starts.len() > 1, "split");
+    for start in &starts[1..] {
+        assert!(
+            source[*start..].starts_with("## Part"),
+            "{:?}",
+            &source[*start..*start + 20]
+        );
+    }
+    let whole = crate::import::read_document(&source, ext.clone(), None).unwrap();
+    let pieces = crate::import::read_document(
+        &source,
+        ext.clone(),
+        crate::import::parse_in_pieces(&source),
+    )
+    .unwrap();
+    assert_eq!(
+        crate::serialize::serialize(&pieces),
+        crate::serialize::serialize(&whole)
+    );
+    assert_eq!(pieces.leaves().len(), whole.leaves().len());
+    // A definition reaches across the document: not split.
+    let defined = format!("{source}[r]: https://e.com\n");
+    assert_eq!(crate::import::pieces(&defined, 4), vec![0]);
+}
+
+/// Markdown of every kind the editor reads: marks, breaks, escapes, entities, links, pictures,
+/// headings, lists, quotes, callouts, toggles, code, tables, rules, HTML, colours, columns.
+const CORPUS: &[&str] = &[
+    "Plain text with *emphasis*, **strong**, ***both***, ~~strike~~, `code` and <u>under</u>.",
+    "A line\nwith a soft break.",
+    "A line  \nwith a hard break.",
+    "A line\\\nwith a backslash break.",
+    "Escapes: \\* \\_ \\# \\[ \\] \\` \\\\ 1\\. not a list",
+    "Entities: &amp; &lt; &gt; &copy; &#169; &nbsp;x",
+    "[link](https://example.com \"Title\") and <https://auto.example.com> and www.example.com",
+    "![image](a.png \"Title\")",
+    "# H1\n\n## H2\n\n### H3\n\n#### H4\n\n##### H5\n\n###### H6",
+    "Setext\n======\n\nTwo\n---",
+    "- a\n- b\n  - nested\n    - deeper\n- c",
+    "* star\n* list",
+    "+ plus\n+ list",
+    "1. one\n1. one again\n1. and again",
+    "1) paren\n2) list",
+    "- a\n\n- loose\n\n- list",
+    "- item with\n  two lines\n- next",
+    "- item\n\n  second paragraph in item\n- next",
+    "- [ ] todo\n  - [x] nested done\n- [x] done",
+    "1. ordered\n   - mixed bullet\n2. two",
+    "> quote\n> > nested quote\n>\n> back",
+    "> [!NOTE]\n> callout\n>\n> - with a list",
+    "> [!WARNING] <!-- icon:🔥 color:red -->\n> look",
+    "<details>\n<summary>Closed toggle</summary>\n\nbody\n\n</details>",
+    "<details open>\n<summary><h2>Toggle heading</h2></summary>\n\n- list inside\n\n</details>",
+    "```\nno language\n```",
+    "```rust title=\"main.rs\"\nfn main() {}\n```",
+    "    indented code",
+    "~~~python\nprint(1)\n~~~",
+    "| a | b |\n| :-- | --: |\n| **bold** | `code` |\n| [l](x) | a \\| pipe |",
+    "---\n\n***\n\n___",
+    "<div>raw html block</div>",
+    "Inline <span style=\"color:#c0392b\">red</span> and <mark>marked</mark> and <mark color=\"#fbecdd\">orange</mark>.",
+    "$x^2$ inline maths?",
+    "<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->",
+    "[TOC]",
+    "Emoji 👩‍💻 and CJK 中文 and RTL עברית",
+    "Trailing spaces   \nand tabs\tin text",
+    "Line one\n\n\n\nmany blank lines",
+    "*a **b** c*",
+    "**a *b* c**",
+    "`` code with ` tick ``",
+    "a_b_c snake_case and 2*3*4",
+    "https://bare.example.com/path_with_underscores_",
+    "<!--\n\n# in a comment\n\n-->",
+    "<pre>\n\n# in pre\n\n</pre>",
+];
+
+/// Whole and in pieces, `source` reads as the same document.
+fn same_both_ways(source: &str) -> usize {
+    let ext = std::sync::Arc::new(crate::Extensions::default());
+    let pieces = if source.len() < 64 * 1024 {
+        crate::import::parse_in_pieces(source)
+    } else {
+        crate::import::parse_pieces(source, 4)
+    };
+    let count = pieces.as_ref().map_or(1, Vec::len);
+    let whole = crate::import::read_document(source, ext.clone(), None).unwrap();
+    let split = crate::import::read_document(source, ext, pieces).unwrap();
+    assert_eq!(
+        crate::serialize::serialize(&split),
+        crate::serialize::serialize(&whole)
+    );
+    assert_eq!(split.leaves().len(), whole.leaves().len());
+    count
+}
+
+/// The corpus, each case under a heading, many times over, and the 5,000-block page: the
+/// same document whether parsed whole or in pieces.
+#[test]
+fn the_corpus_and_a_long_page_read_the_same_in_pieces() {
+    let mut corpus = String::new();
+    let mut round = 0;
+    while corpus.len() < 4 * 64 * 1024 {
+        for (i, case) in CORPUS.iter().enumerate() {
+            corpus.push_str(&format!("## Case {round}.{i}\n\n{case}\n\n"));
+        }
+        round += 1;
+    }
+    assert!(same_both_ways(&corpus) > 1, "the corpus is split");
+    let mut page = String::new();
+    for i in 0..5000 {
+        match i % 10 {
+            0 => page.push_str(&format!("## Section {i}\n\n")),
+            1 | 2 => page.push_str(&format!(
+                "- item {i} with **bold**, `code` and a [link](https://example.com/{i})\n"
+            )),
+            3 => page.push_str(&format!("\n> A quote, number {i}, with *emphasis*.\n\n")),
+            4 => page.push_str(&format!("```rust\nfn f{i}() -> u32 {{ {i} }}\n```\n\n")),
+            5 => page.push_str(&format!("- [ ] task {i}\n\n")),
+            _ => page.push_str(&format!(
+                "Paragraph {i}: the plan is to write, review and ship it, with notes on what changed and why.\n\n"
+            )),
+        }
+    }
+    assert!(same_both_ways(&page) > 1, "the page is split");
+    // Short: whole.
+    assert_eq!(same_both_ways(CORPUS[0]), 1);
+}
