@@ -120,6 +120,8 @@ actions!(
         /// selection from block to block, ⇧↑ and ⇧↓ extend it, and Enter goes back into the
         /// text. With blocks selected already, Esc is the app's.
         SelectBlock,
+        /// Picks the selected blocks up to move them with the arrow keys (Space).
+        PickUpBlocks,
         /// Underlines the selection, or takes the underline off (⌘U).
         ToggleUnderline,
         /// Strikes the selection through, or takes the line off (⌘⇧S).
@@ -271,6 +273,12 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new(platform_key!("cmd", "alt-down"), TableInsertRowBelow, ctx),
         KeyBinding::new(platform_key!("cmd", "alt-backspace"), TableDeleteLine, ctx),
         KeyBinding::new("escape", SelectBlock, ctx),
+        // Only with whole blocks selected: elsewhere Space types a space.
+        KeyBinding::new(
+            "space",
+            PickUpBlocks,
+            Some("BlockEditor && blocks_selected"),
+        ),
         KeyBinding::new("escape", CloseTableMenu, Some("BlockEditor && table_menu")),
         KeyBinding::new("shift-enter", SoftBreak, ctx),
         KeyBinding::new(platform_key!("cmd", "enter"), ExitBlock, ctx),
@@ -437,6 +445,9 @@ pub(crate) struct BlockDrag {
     pub(crate) nested: bool,
     /// Where they drop when it isn't a gap between top-level blocks (see `side_drop.rs`).
     pub(crate) side: Option<super::side_drop::Target>,
+    /// Picked up by the keyboard: its drop and side are set by its steps (see `dnd`), not
+    /// worked out from where its pointer is.
+    pub(crate) by_keys: bool,
 }
 
 impl BlockDrag {
@@ -460,6 +471,7 @@ impl BlockDrag {
             by_touch: false,
             nested: false,
             side: None,
+            by_keys: false,
         }
     }
 
@@ -520,6 +532,8 @@ pub struct BlockEditorState {
     touch_lifts: bool,
     /// The editor's content as its block drags' target, registered each frame (see `dnd`).
     pub(crate) dnd_target: RefCell<Option<gpui_dnd::TargetHold>>,
+    /// A keyboard drag's places (see `dnd`).
+    pub(crate) key_drop: Option<super::dnd::KeyDrop>,
     /// The motion of top-level blocks changing places: gpui-dnd's `SortableState`, which this
     /// editor drives from its prepaint.
     pub(crate) reorder: gpui_dnd::SortableState<BlockId>,
@@ -602,6 +616,7 @@ impl BlockEditorState {
             sweep: None,
             touch_lifts: false,
             dnd_target: RefCell::new(None),
+            key_drop: None,
             reorder: Default::default(),
             readonly: false,
             image_policy: super::ImagePolicy::default(),
@@ -632,16 +647,20 @@ impl BlockEditorState {
     pub fn set_submit_policy(&mut self, policy: SubmitPolicy) {
         self.submit_policy = policy;
     }
-    pub(crate) fn key_context(&self) -> &'static str {
-        match (
-            self.submit_policy == SubmitPolicy::Enter,
-            self.table_menu.is_some(),
-        ) {
-            (true, false) => "BlockEditor submit=enter",
-            (true, true) => "BlockEditor submit=enter table_menu",
-            (false, false) => CONTEXT,
-            (false, true) => "BlockEditor table_menu",
+    pub(crate) fn key_context(&self) -> gpui::KeyContext {
+        let mut context = gpui::KeyContext::default();
+        context.add(CONTEXT);
+        if self.submit_policy == SubmitPolicy::Enter {
+            context.set("submit", "enter");
         }
+        if self.table_menu.is_some() {
+            context.add("table_menu");
+        }
+        // Whole blocks selected: Space picks them up.
+        if !self.readonly && self.model.selected_blocks().is_some() {
+            context.add("blocks_selected");
+        }
+        context
     }
     pub fn with_clipboard_policy(mut self, policy: ClipboardPolicy) -> Self {
         self.clipboard_policy = policy;
@@ -1445,6 +1464,15 @@ impl BlockEditorState {
             }
             block = parent;
         }
+    }
+
+    pub(crate) fn on_pick_up_blocks(
+        &mut self,
+        _: &PickUpBlocks,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pick_up_blocks(window, cx);
     }
 
     pub(crate) fn on_select_block(
@@ -2645,6 +2673,14 @@ impl BlockEditorState {
         let Some(mut drag) = self.live_block_drag() else {
             return false;
         };
+        // The keyboard's steps set where it drops; its pointer only moves the blocks.
+        if drag.by_keys {
+            drag.at = at;
+            drag.moved = crate::clock::Instant::now();
+            self.block_drag = Some(drag);
+            cx.notify();
+            return true;
+        }
         if !drag.active {
             let d = at - drag.start;
             if d.x.abs().max(d.y.abs()) < px(4.) {
@@ -2826,12 +2862,20 @@ impl BlockEditorState {
                 drag.velocity = 0.;
             }
             let held = self.dragged_blocks(&drag);
-            // Scrolled since the last move: the drop is where the pointer is now.
-            drag.side = self.side_target_of(&drag, &held);
-            if !drag.nested {
-                let dragged = drag.dragged(self.content_top());
-                drag.drop = self.reorder.drop_gap(&dragged);
-                self.reorder.release(dragged);
+            if drag.by_keys {
+                // Dropped where the keyboard's steps put it.
+                self.key_drop = None;
+                if !drag.nested {
+                    self.reorder.release(drag.dragged(self.content_top()));
+                }
+            } else {
+                // Scrolled since the last move: the drop is where the pointer is now.
+                drag.side = self.side_target_of(&drag, &held);
+                if !drag.nested {
+                    let dragged = drag.dragged(self.content_top());
+                    drag.drop = self.reorder.drop_gap(&dragged);
+                    self.reorder.release(dragged);
+                }
             }
             if let Some(target) = drag.side {
                 self.model.break_coalescing();

@@ -153,6 +153,33 @@ impl BlockEditorState {
         })
     }
 
+    /// Out of a column into the top level's gap `index` (0 is above the first block), with its
+    /// line: for a keyboard drag, which goes by places rather than by where a pointer is.
+    pub(crate) fn top_level_gap_target(&self, index: usize) -> Option<Target> {
+        let tops = self.top_level_bounds();
+        let left = tops
+            .iter()
+            .map(|(_, _, b)| b.left())
+            .reduce(|a, b| a.min(b))?;
+        let right = tops
+            .iter()
+            .map(|(_, _, b)| b.right())
+            .reduce(|a, b| a.max(b))?;
+        let y = match (
+            index.checked_sub(1).and_then(|i| tops.get(i)),
+            tops.get(index),
+        ) {
+            (Some((_, _, above)), Some((_, _, below))) => (above.bottom() + below.top()) / 2.,
+            (Some((_, _, above)), None) => above.bottom() + px(4.),
+            (None, Some((_, _, below))) => below.top() - px(4.),
+            (None, None) => return None,
+        };
+        Some(Target {
+            drop: SideDrop::TopLevel { index },
+            line: horizontal(y, left, right),
+        })
+    }
+
     /// A drop over the columns block `columns`: a new column at its edges or in a gap between
     /// columns, else a place among the blocks of the column under the pointer.
     fn target_in_columns(

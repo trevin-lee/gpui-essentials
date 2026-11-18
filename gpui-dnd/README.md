@@ -137,6 +137,7 @@ hands them over:
   `AutoScroll::for_items` and `beyond_edges`.
 - `Press { relative: true, .. }` with `begin_at(Touch)` lifts something in place: the next
   finger, landing anywhere, carries it by how far it moves.
+- `Press::picked_up` gives a keyboard pick-up's whole sentence in the host's own words.
 - `DropTarget::say(|item, monitor, said, cx| …)` speaks a keyboard drag in the host's own words
   over the target (`Said::Over`), on the drop (`Said::Dropped`) and on Escape
   (`Said::Cancelled`). An empty sentence leaves that moment to the provider.

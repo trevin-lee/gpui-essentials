@@ -1853,6 +1853,7 @@ dependencies = [
  "futures",
  "gpui-blocks-engine",
  "gpui-core",
+ "gpui-dnd",
  "gpui-pre",
  "gpui-pre-macos",
  "gpui-pre-platform",
