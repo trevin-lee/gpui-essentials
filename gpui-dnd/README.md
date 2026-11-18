@@ -6,7 +6,7 @@ monitor of the drag, and a preview that follows the pointer, drawn in gpui-core'
 See [DESIGN.md](DESIGN.md) for the whole API and how it maps to react-dnd's.
 
 Being built in small steps: the mouse, the keyboard, touch, sources, targets, the monitor, the
-default preview, custom drag layers and the animated return are in; sortable lists, auto-scroll
+default preview, custom drag layers, the animated return and auto-scroll are in; sortable lists
 and kanban come next.
 
 ## Install
@@ -71,5 +71,7 @@ impl Render for Board {
 - **Touch.** A long press picks a source up, so a touch that moves at once still scrolls;
   `DragSource::touch_activation(TouchActivation::Immediate)` picks up as soon as the finger
   moves (for handles).
+- **Auto-scroll.** `.auto_scroll(&handle, AutoScroll::vertical())`, last on a scroll container,
+  scrolls it while a drag is near its edge, on each frame, until the pointer leaves the edge.
 - Escape, or a drop where nothing takes it, sends the preview back to its source in 200 ms; the
   source hears `on_end` when it lands. Nothing runs while nothing moves.
