@@ -2454,7 +2454,7 @@ impl BlockEditorState {
     }
 
     /// Lifts the top-level `block` where it is, as the block sheet's Move does: it's drawn
-    /// lifted, and the next finger drag anywhere moves it (see [`Self::lifted_touch`]); a tap
+    /// lifted, and the next finger drag anywhere moves it by as much as the finger moves; a tap
     /// sets it down where it was.
     pub fn lift_block(&mut self, block: BlockId, cx: &mut Context<Self>) {
         let Some(at) = self
