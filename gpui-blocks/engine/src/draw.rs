@@ -1014,13 +1014,17 @@ pub(crate) fn draw(
         } => {
             let body = children_of(children, place.depth, color, d, window, app);
             let mut container = super::surfaces::callout_container(name, app);
-            // Its own background: the colour's, drawn for the theme.
-            if let Some(fill) = fill.as_deref().and_then(|name| {
-                crate::marks::BACKGROUNDS
-                    .iter()
-                    .find(|b| b.name.eq_ignore_ascii_case(name))
-            }) {
-                container = container.bg(fill.fill(d.dark));
+            // Its own colour, drawn for the theme: the background's behind, and the bar in the
+            // same colour's text tone, so the kind's bar doesn't clash with it.
+            let named = |palette: &'static [crate::marks::PaletteColor]| {
+                let fill = fill.as_deref()?;
+                palette.iter().find(|c| c.name.eq_ignore_ascii_case(fill))
+            };
+            if let Some(background) = named(&crate::marks::BACKGROUNDS) {
+                container = container.bg(background.fill(d.dark));
+            }
+            if let Some(bar) = named(&crate::marks::TEXT_COLORS) {
+                container = container.border_color(bar.fill(d.dark));
             }
             let content = div().flex_1().min_w_0().children(body);
             let inner = match icon {
