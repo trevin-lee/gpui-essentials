@@ -53,6 +53,15 @@ actions!(
         SelectUp,
         /// Moves the selection later.
         SelectDown,
+        /// Stretches the selected slot a slot earlier (a week in the month): Enter or `n` then
+        /// makes an event over all of it, as dragging empty time does.
+        StretchUp,
+        /// Stretches the selected slot a slot later (a week in the month).
+        StretchDown,
+        /// Stretches the selected day a day earlier, in the month.
+        StretchLeft,
+        /// Stretches the selected day a day later, in the month.
+        StretchRight,
         /// Goes to today.
         Today,
         DayView,
@@ -98,6 +107,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", SelectRight, c),
         KeyBinding::new("up", SelectUp, c),
         KeyBinding::new("down", SelectDown, c),
+        KeyBinding::new("shift-up", StretchUp, c),
+        KeyBinding::new("shift-down", StretchDown, c),
+        KeyBinding::new("shift-left", StretchLeft, c),
+        KeyBinding::new("shift-right", StretchRight, c),
         KeyBinding::new("t", Today, c),
         KeyBinding::new("d", DayView, c),
         KeyBinding::new("w", WeekView, c),
@@ -440,6 +453,9 @@ pub struct Calendar {
     pub(crate) all_day_expanded: bool,
 
     selection: Option<Selection>,
+    /// The other end of a selected slot stretched by Shift and the arrows: a slot on the grid,
+    /// a day in the month. Any new selection drops it.
+    pub(crate) stretch: Option<(NaiveDate, u32)>,
     pub(crate) drag: Option<Drag>,
     hover_cursor: CursorStyle,
     /// The grid's scroll bar: shown until this time after a scroll, wider while the pointer is
@@ -550,6 +566,7 @@ impl Calendar {
             header: true,
             all_day_expanded: false,
             selection: None,
+            stretch: None,
             drag: None,
             hover_cursor: CursorStyle::Arrow,
             bar_until: None,
@@ -1131,6 +1148,7 @@ impl Calendar {
     pub fn select(&mut self, selection: Option<Selection>, cx: &mut Context<Self>) {
         let before = self.selected_event().cloned();
         self.selection = selection;
+        self.stretch = None;
         let after = self.selected_event().cloned();
         if before != after {
             cx.emit(CalendarEvent::Select(after));
@@ -2233,6 +2251,62 @@ impl Calendar {
         }
     }
 
+    /// The time a new event at the selected slot takes: the slot stretched by Shift and the
+    /// arrows, or from the slot the usual length (a day in the month).
+    fn slot_time(&self) -> Option<EventTime> {
+        let Some(Selection::Slot { date, minute }) = self.selection.clone() else {
+            return None;
+        };
+        let tz = self.options.time_zone;
+        let month = self.view == CalendarView::Month;
+        Some(match self.stretch {
+            Some((to, _)) if month => time::created_days(date.min(to), date.max(to)),
+            None if month => time::created_days(date, date),
+            Some((_, to)) => {
+                let slot = self.options.slot_minutes.max(1);
+                let (a, b) = (minute.min(to), minute.max(to) + slot);
+                EventTime::timed(
+                    time::at_minutes(date, a as f32, tz),
+                    time::at_minutes(date, b as f32, tz),
+                )
+            }
+            None => {
+                let start = time::at_minutes(date, minute as f32, tz);
+                EventTime::timed(start, start + self.options.default_duration)
+            }
+        })
+    }
+
+    /// Shift and an arrow: the selected slot's other end a slot up or down on the grid, or a
+    /// day (a week up or down) in the month, past a hidden weekend. Nothing without a slot
+    /// selected, or sideways on the grid.
+    fn stretch_selection(&mut self, dx: i32, dy: i32, cx: &mut Context<Self>) {
+        let Some(Selection::Slot { date, minute }) = self.selection.clone() else {
+            return;
+        };
+        let (end_date, end_minute) = self.stretch.unwrap_or((date, minute));
+        let to = match self.view {
+            CalendarView::Month => {
+                let d = paint::step_days(self.weekends_shown(), end_date, dx as i64)
+                    + Duration::days(7 * dy as i64);
+                (d, 0)
+            }
+            v if v.is_time_grid() && dy != 0 => {
+                let slot = self.options.slot_minutes.max(1) as i64;
+                let last = (time::DAY_MINUTES as i64 / slot - 1) * slot;
+                let m = (end_minute as i64 + dy as i64 * slot).clamp(0, last);
+                self.reveal(date, m as f32, cx);
+                (date, m as u32)
+            }
+            _ => return,
+        };
+        if self.view == CalendarView::Month {
+            self.reveal(to.0, -1., cx);
+        }
+        self.stretch = (to != (date, minute)).then_some(to);
+        cx.notify();
+    }
+
     /// The date and minute the selection is at, if any.
     fn selection_place(&self) -> Option<(NaiveDate, f32)> {
         let tz = self.options.time_zone;
@@ -2438,15 +2512,10 @@ impl Calendar {
         let tz = self.options.time_zone;
         let length = self.options.default_duration;
         let time = match self.selection.clone() {
-            Some(Selection::Slot { date, .. })
-                if matches!(self.view, CalendarView::Month | CalendarView::Year) =>
-            {
-                time::created_days(date, date)
+            Some(Selection::Slot { .. }) if self.view != CalendarView::Year => {
+                self.slot_time().expect("a slot is selected")
             }
-            Some(Selection::Slot { date, minute }) => {
-                let start = time::at_minutes(date, minute as f32, tz);
-                EventTime::timed(start, start + length)
-            }
+            Some(Selection::Slot { date, .. }) => time::created_days(date, date),
             _ => {
                 let (today, now) = time::local(self.now(), tz);
                 let start_minute = time::snap_ceil(now + 0.001, 30.);
@@ -2467,15 +2536,10 @@ impl Calendar {
                 self.view = CalendarView::Day;
                 self.go_to(date, cx);
             }
-            Some(Selection::Slot { date, minute }) => {
-                let tz = self.options.time_zone;
-                let time = if self.view == CalendarView::Month {
-                    time::created_days(date, date)
-                } else {
-                    let start = time::at_minutes(date, minute as f32, tz);
-                    EventTime::timed(start, start + self.options.default_duration)
-                };
-                self.propose_create(time, cx);
+            Some(Selection::Slot { .. }) => {
+                if let Some(time) = self.slot_time() {
+                    self.propose_create(time, cx);
+                }
             }
             None => {}
         }
@@ -3251,6 +3315,7 @@ impl Render for Calendar {
             find: self.query.clone().map(|q| (q, colors.find.opacity(0.38))),
             weekends: self.weekends_shown(),
             scrollbar: self.scrollbar_shown(cx),
+            stretch: self.stretch,
         };
         let this = cx.entity().downgrade();
         let body = crate::a11y::Accessible::new(
@@ -3306,6 +3371,10 @@ impl Render for Calendar {
                     c.move_selection(0, 1, cx)
                 }
             }))
+            .on_action(cx.listener(|c, _: &StretchUp, _, cx| c.stretch_selection(0, -1, cx)))
+            .on_action(cx.listener(|c, _: &StretchDown, _, cx| c.stretch_selection(0, 1, cx)))
+            .on_action(cx.listener(|c, _: &StretchLeft, _, cx| c.stretch_selection(-1, 0, cx)))
+            .on_action(cx.listener(|c, _: &StretchRight, _, cx| c.stretch_selection(1, 0, cx)))
             .on_action(cx.listener(|c, _: &Today, _, cx| c.go_to_today(cx)))
             .on_action(cx.listener(|c, _: &DayView, _, cx| c.set_view(CalendarView::Day, cx)))
             .on_action(cx.listener(|c, _: &WeekView, _, cx| c.set_view(CalendarView::Week, cx)))
