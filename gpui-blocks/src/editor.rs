@@ -52,6 +52,9 @@ const COMPACT_SIDE: f32 = 24.;
 /// (key context `BlocksEditor`, or `BlocksSlashMenu` while the menu is open), and are bound
 /// after the editor's own, so ↑, ↓, Enter, Tab and Esc go to the menu while it's open. An app
 /// can bind the actions in [`crate::actions`] to other keys after [`crate::init`].
+/// How much of the page Page Down keeps in view from before: a few lines.
+const PAGE_OVERLAP: f32 = 64.;
+
 pub(crate) fn bind_keys(cx: &mut App) {
     let menu = Some("BlocksSlashMenu > BlockEditor");
     let editor = Some("BlocksEditor > BlockEditor");
@@ -116,6 +119,12 @@ pub(crate) fn bind_keys(cx: &mut App) {
             HighlightAgain,
             editor,
         ),
+        // Page Up and Down (fn-↑ and fn-↓ on a Mac keyboard) move the caret a page, as
+        // Notion's and the code editors' do, so typing doesn't jump back.
+        KeyBinding::new("pagedown", PageDown, editor),
+        KeyBinding::new("pageup", PageUp, editor),
+        KeyBinding::new("shift-pagedown", SelectPageDown, editor),
+        KeyBinding::new("shift-pageup", SelectPageUp, editor),
     ]);
 }
 
@@ -572,6 +581,9 @@ pub struct Editor {
     /// The selection the touch edit menu was used on: it stays hidden until the selection
     /// changes.
     menu_used_on: Option<(BlockPosition, BlockPosition)>,
+    /// Page Up or Down waiting for the page it scrolled to be drawn: where in the window the
+    /// caret goes, the selection's other end when it extends, and the frames left to wait.
+    page_to: Option<(Point<Pixels>, Option<BlockPosition>, u8)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -745,6 +757,7 @@ impl Editor {
             last_paint: None,
             code_menu: None,
             menu_used_on: None,
+            page_to: None,
             _subscriptions: vec![subscription],
         };
         editor.update_headings(cx);
@@ -1463,6 +1476,76 @@ impl Editor {
         if !picked {
             cx.propagate();
         }
+    }
+
+    /// Page Down (`down`) or Up: scrolls a page, less a few lines kept in view, and once that's
+    /// drawn puts the caret where it was in the window, extending the selection when `extend`.
+    /// With no page left to scroll it goes to the document's last or first line.
+    fn page(&mut self, down: bool, extend: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.clone();
+        let (head, anchor) = match *state.read(cx).model().selection() {
+            BlockSelection::Text { anchor, head } => (head, anchor),
+            _ => return,
+        };
+        let Some(at) = state.read(cx).position_bounds(head) else {
+            return;
+        };
+        let view = self.scroll.bounds().size.height;
+        let step = (view - px(PAGE_OVERLAP)).max(view / 2.);
+        let offset = self.scroll.offset();
+        let max = self.scroll.max_offset().y;
+        let y = if down {
+            (offset.y - step).max(-max)
+        } else {
+            (offset.y + step).min(px(0.))
+        };
+        if (y - offset.y).abs() < px(1.) {
+            // Nothing left to scroll: the first or last line, as a text field's Page keys go.
+            state.update(cx, |s, cx| {
+                let doc = s.model().document();
+                let end = if down {
+                    doc.leaves()
+                        .filter(|l| l.text().is_some())
+                        .last()
+                        .map(|l| BlockPosition::new(l.id(), l.text().map_or(0, str::len)))
+                } else {
+                    doc.leaves()
+                        .find(|l| l.text().is_some())
+                        .map(|l| BlockPosition::new(l.id(), 0))
+                };
+                if let Some(end) = end {
+                    let anchor = if extend { anchor } else { end };
+                    let _ = s.set_selection(BlockSelection::Text { anchor, head: end }, cx);
+                }
+            });
+            return;
+        }
+        self.scroll.set_offset(point(offset.x, y));
+        // Placed once the blocks scrolled into view are laid out, in the frame after next.
+        self.page_to = Some((at.center(), extend.then_some(anchor), 1));
+        window.refresh();
+        cx.notify();
+    }
+
+    /// Puts the caret where Page Up or Down scrolled to, once that's been drawn.
+    fn finish_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((target, anchor, frames)) = self.page_to.as_mut() else {
+            return;
+        };
+        if *frames > 0 {
+            *frames -= 1;
+            window.request_animation_frame();
+            return;
+        }
+        let (target, anchor) = (*target, *anchor);
+        self.page_to = None;
+        self.state.update(cx, |s, cx| {
+            let Some(head) = s.position_at(target) else {
+                return;
+            };
+            let anchor = anchor.unwrap_or(head);
+            let _ = s.set_selection(BlockSelection::Text { anchor, head }, cx);
+        });
     }
 
     fn move_block(&mut self, down: bool, cx: &mut Context<Self>) {
@@ -2512,6 +2595,7 @@ impl Editor {
 
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.finish_page(window, cx);
         let compact = self.compact(window);
         let side_menu = if self.shows_side_menu(window) {
             self.side_menu(cx)
@@ -2609,6 +2693,10 @@ impl Render for Editor {
             .on_action(cx.listener(|this, _: &MoveBlockUp, _, cx| this.move_block(false, cx)))
             .on_action(cx.listener(|this, _: &MoveBlockDown, _, cx| this.move_block(true, cx)))
             .on_action(cx.listener(|this, _: &HighlightAgain, _, cx| this.highlight_again(cx)))
+            .on_action(cx.listener(|this, _: &PageDown, w, cx| this.page(true, false, w, cx)))
+            .on_action(cx.listener(|this, _: &PageUp, w, cx| this.page(false, false, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageDown, w, cx| this.page(true, true, w, cx)))
+            .on_action(cx.listener(|this, _: &SelectPageUp, w, cx| this.page(false, true, w, cx)))
             .on_mouse_move(cx.listener(Self::hover))
             // The side menu was placed for the block under the pointer before the scroll; it
             // comes back on the next pointer move.
@@ -2708,6 +2796,63 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// Page Down and Up move the caret a page with the view, ⇧ extending the selection; past
+    /// the last page, to the last line.
+    #[gpui::test]
+    fn page_keys_move_the_caret_a_page(cx: &mut TestAppContext) {
+        let source = (1..=300)
+            .map(|n| format!("Line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (editor, cx) = open(cx, &source);
+        let line = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                let state = e.state().read(cx);
+                let doc = state.model().document();
+                let BlockSelection::Text { head, .. } = *state.model().selection() else {
+                    panic!("a text selection");
+                };
+                doc.leaves().position(|l| l.id() == head.block).unwrap()
+            })
+        };
+        let page = |cx: &mut VisualTestContext, key: &str| {
+            cx.simulate_keystrokes(key);
+            for _ in 0..3 {
+                draw(cx);
+            }
+        };
+        assert_eq!(line(&editor, cx), 0);
+        page(cx, "pagedown");
+        let one = line(&editor, cx);
+        assert!(one > 5, "a page down: line {one}");
+        let offset = editor.read_with(cx, |e, _| e.scroll.offset().y);
+        assert!(offset < gpui::px(-100.), "scrolled: {offset:?}");
+        page(cx, "pagedown");
+        let two = line(&editor, cx);
+        assert!(two > one + 5, "another page: line {two}");
+        page(cx, "pageup");
+        let back = line(&editor, cx);
+        assert!(
+            back < two && back + 3 >= one && back <= one + 3,
+            "back up: {back} after {one}"
+        );
+        // ⇧ extends from where it was.
+        page(cx, "shift-pagedown");
+        editor.update(cx, |e, cx| {
+            let selection = e.state().read(cx).model().selection().clone();
+            assert!(!selection.is_collapsed(), "{selection:?}");
+        });
+        // Up past the top: the first line; down past the end: the last.
+        for _ in 0..40 {
+            page(cx, "pageup");
+        }
+        assert_eq!(line(&editor, cx), 0);
+        for _ in 0..80 {
+            page(cx, "pagedown");
+        }
+        assert_eq!(line(&editor, cx), 299);
     }
 
     /// Typing shortcuts: arrows and an em dash, one undo putting back what was typed, never in
