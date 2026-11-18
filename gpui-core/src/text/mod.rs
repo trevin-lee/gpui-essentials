@@ -3,10 +3,14 @@
 
 pub mod italic;
 mod markdown;
+#[cfg(feature = "math")]
+pub mod math;
 pub mod paragraph;
 mod view;
 
-pub use markdown::{Align, Block, Item, MATH_LANGUAGE, parse as parse_markdown};
+pub use markdown::{
+    Align, Block, Item, MATH_LANGUAGE, MATH_SOURCE_LANGUAGE, parse as parse_markdown,
+};
 pub use view::{
     BlockGap, BlockKind, CodeBlock, HeadingMargins, InlineCodeStyle, TextView, TextViewColors,
     TextViewStyle,

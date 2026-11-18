@@ -29,6 +29,9 @@ chrono = { version = "0.4.45", default-features = false, features = ["std", "clo
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+# Only for the math feature: KaTeX's layout (katex-rs, MIT, through katex-native, vendored in
+# third_party/, MIT) and its fonts (OFL-1.1), renamed per face.
+katex-native = { path = "../third_party/katex-native", optional = true }
 # Only for the highlight feature: tree-sitter and its grammars, at the versions GPUI Kit's
 # component crate pins (known to build together).
 tree-sitter = { version = "0.26.13", optional = true }
@@ -55,6 +58,9 @@ tree-sitter-cpp = { version = "0.23.4", optional = true }
 test-support = ["gpui/test-support"]
 # Pictures of the gallery example's window rendered offscreen (`--shot`).
 shots = ["gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
+# Math typeset as KaTeX typesets it, in TextView (inline `$…$` and display `$$…$$`); without it,
+# math shows as its TeX. Off by default: KaTeX's tables and fonts are about 0.6 MB.
+math = ["dep:katex-native"]
 # Syntax highlighting (tree-sitter and its grammars): off by default, for the grammars' size.
 highlight = [
     "dep:tree-sitter",

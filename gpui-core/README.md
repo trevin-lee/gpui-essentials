@@ -392,13 +392,22 @@ item](docs/gallery.png)
   search), so a delta at the end costs about the same after 1,400 lines as after 150. A
   selection in unchanged sources stays while later ones change. `trailing_caret(Some(colour))`
   draws a caret after the last source's text, painted only, so it never moves a line.
-  **Math** is kept as written, not typeset yet: inline `$…$` draws its TeX in the code font,
-  and a display equation (`$$…$$`, even on its own line inside a paragraph, or a ```` ```math ````
-  fence) is a block of its own in the code block's box, each of its lines kept on one line, the
-  box scrolling sideways (a trackpad, Shift and a wheel, a finger) when it's wider than the
-  view. The TeX keeps every backslash, brace, `&` and `*`, and prices (`$5 and $10`) stay
-  words, as pulldown-cmark's math rules read them. A display equation isn't selected with the
-  text around it; a host's `code_block_overlay` gets it (language `math`) for a Copy button.
+  **Math** is typeset as KaTeX typesets it, with the `math` feature (katex-rs and a vendored
+  katex-native, `third_party/`, drawn with GPUI's text in KaTeX's fonts, renamed per face, and
+  paths): inline `$…$` or `\(…\)` in its line, at 1.21 times the text's size as KaTeX's
+  stylesheet sets it, and a display equation (`$$…$$` or `\[…\]`, even on its own line inside
+  a paragraph, or a ```` ```math ```` fence) as a block of its own, in the code block's box,
+  scrolling sideways (a trackpad, Shift and a wheel, a finger) when it's wider than the view.
+  What can't be typeset shows its TeX as written, inline in the code font and a display
+  equation a line each in its box: TeX katex-rs doesn't read, a face that isn't shipped
+  (Fraktur, script, sans serif, typewriter), more than `math::MAX_TEX` (4 KB), or a layout
+  that took longer than `math::MAX_TIME` (50 ms, remembered so it isn't tried again). A
+  ```` ```math-source ```` fence is always shown as its TeX (a reply still writing one).
+  Without the feature, all math shows as its TeX. The TeX keeps every backslash, brace, `&` and
+  `*`, and prices (`$5 and $10`) stay words, as pulldown-cmark's math rules read them. Copying
+  gives an inline formula as `$` its TeX `$` and a display one as `$$…$$`; a host's
+  `code_block_overlay` gets a display equation (language `math`) for a Copy button, laid out
+  beside it.
 - **Sidebar.** `Sidebar::new(id, &state).header(…).group(SidebarGroup::new(id).label(…)
   .item(SidebarItem::new(id, label).icon(…).badge(…).action(icon, label, …)))….footer(…)
   .active(id).on_select(…).content(page)`: shadcn's app sidebar beside the page, with the host's
