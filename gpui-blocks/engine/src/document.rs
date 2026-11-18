@@ -319,6 +319,20 @@ impl EditorDocument {
                     {
                         return Err("list item does not start with a leaf".into());
                     }
+                    if entry.kind == BlockKindData::Columns
+                        && (parent != Some(self.root)
+                            || !(2..=crate::kind::MAX_COLUMNS).contains(&children.len())
+                            || children.iter().any(|c| {
+                                !matches!(self.kind(*c), Some(BlockKindData::Column { .. }))
+                            }))
+                    {
+                        return Err("columns out of shape".into());
+                    }
+                    if let BlockKindData::Column { .. } = entry.kind
+                        && parent.and_then(|p| self.kind(p)) != Some(&BlockKindData::Columns)
+                    {
+                        return Err("a column outside columns".into());
+                    }
                     stack.extend(children.iter().map(|c| (*c, Some(id))));
                 }
                 BlockContent::Inline(inline) if !inline.is_normalized() => {
@@ -469,6 +483,14 @@ impl<'a> BlockRef<'a> {
     pub fn column_aligns(&self) -> Option<&'a [ColumnAlign]> {
         match self.doc.kind(self.id)? {
             BlockKindData::Table { aligns } => Some(aligns.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// A column's width, its share of its row as written; `None` for any other block.
+    pub fn column_width(&self) -> Option<f32> {
+        match self.doc.kind(self.id)? {
+            BlockKindData::Column { width } => Some(*width),
             _ => None,
         }
     }

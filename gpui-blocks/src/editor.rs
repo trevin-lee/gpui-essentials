@@ -452,6 +452,8 @@ pub struct Editor {
     pub(crate) format_turn: bool,
     /// Whether the format bar's Color menu is open.
     pub(crate) format_color: bool,
+    /// A columns block's width handle being dragged (see `columns_ui.rs`).
+    pub(crate) column_drag: Option<crate::columns_ui::ColumnDrag>,
     /// Whether the touch edit menu's Color sheet is open.
     pub(crate) color_sheet: bool,
     /// The colour last picked in the Color menu, which ⌘⇧H gives again.
@@ -670,6 +672,7 @@ impl Editor {
             block_sheet: None,
             format_turn: false,
             format_color: false,
+            column_drag: None,
             color_sheet: false,
             last_paint: None,
             code_menu: None,
@@ -2362,6 +2365,11 @@ impl Render for Editor {
         let edit_menu = self.edit_menu(window, cx);
         let format_bar = self.format_bar(window, cx);
         let code_chrome = self.code_chrome(cx);
+        let column_handles = if self.shows_side_menu(window) {
+            self.column_handles(cx)
+        } else {
+            None
+        };
         let block_sheet = self.block_sheet(cx);
         let color_sheet = self.color_sheet(cx);
         let find_bar = self.find_bar(compact, cx);
@@ -2442,6 +2450,7 @@ impl Render for Editor {
             )
             .children(side_menu)
             .children(code_chrome)
+            .children(column_handles)
             .children(slash_menu)
             .children(mention_menu)
             .children(handles)
@@ -2744,6 +2753,98 @@ mod tests {
         assert_eq!(left, gpui::px(COMPACT_SIDE), "compact: 24 in");
         assert!(top < gpui::px(COMPACT_INSET * 2.), "compact: {top:?} down");
         assert!(!hovered, "compact: no side menu");
+    }
+
+    /// Columns sit side by side in a wide editor, and one under another, in order, on a phone.
+    #[gpui::test]
+    fn columns_sit_side_by_side_and_stack_on_a_phone(cx: &mut TestAppContext) {
+        let (editor, cx) = open(
+            cx,
+            "<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->",
+        );
+        // Where each column's first line is drawn.
+        let places = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            draw(cx);
+            draw(cx);
+            editor.update(cx, |e, cx| {
+                let state = e.state().read(cx);
+                let leaves: Vec<_> = state.model().document().leaves().map(|l| l.id()).collect();
+                let at = |ix: usize| {
+                    state
+                        .position_bounds(BlockPosition::new(leaves[ix], 0))
+                        .unwrap()
+                };
+                (at(0), at(1))
+            })
+        };
+        cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(800.)));
+        let (left, right) = places(&editor, cx);
+        assert!(
+            (left.top() - right.top()).abs() < gpui::px(2.),
+            "{left:?} {right:?}"
+        );
+        assert!(
+            right.left() > left.left() + gpui::px(200.),
+            "{left:?} {right:?}"
+        );
+        cx.simulate_resize(gpui::size(gpui::px(390.), gpui::px(800.)));
+        let (left, right) = places(&editor, cx);
+        assert!(right.top() > left.top(), "stacked: {left:?} {right:?}");
+        assert!(
+            (right.left() - left.left()).abs() < gpui::px(2.),
+            "{left:?} {right:?}"
+        );
+    }
+
+    /// A handle in the gap between two columns moves the line between them: letting go gives
+    /// them their new widths, as one undo step.
+    #[gpui::test]
+    fn a_columns_handle_moves_the_line_between_them(cx: &mut TestAppContext) {
+        let (editor, cx) = open(
+            cx,
+            "<!-- columns -->\n\n<!-- column 0.5 -->\n\nleft\n\n<!-- column 0.5 -->\n\nright\n\n<!-- /columns -->",
+        );
+        cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(800.)));
+        draw(cx);
+        draw(cx);
+        let block = editor.update(cx, |e, cx| e.state().read(cx).top_level_blocks()[0].1);
+        cx.simulate_mouse_move(block.center(), None, gpui::Modifiers::none());
+        draw(cx);
+        let handle = cx
+            .debug_bounds("blocks-column-handle-0")
+            .expect("a handle shows in the gap")
+            .center();
+        cx.simulate_mouse_down(handle, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+        let to = gpui::point(handle.x - gpui::px(120.), handle.y);
+        cx.simulate_mouse_move(to, Some(gpui::MouseButton::Left), gpui::Modifiers::none());
+        draw(cx);
+        cx.simulate_mouse_up(to, gpui::MouseButton::Left, gpui::Modifiers::none());
+        draw(cx);
+        let widths = |editor: &Entity<Editor>, cx: &mut VisualTestContext| {
+            editor.update(cx, |e, cx| {
+                let state = e.state().read(cx);
+                let doc = state.model().document();
+                let columns = doc.root().children().next().unwrap();
+                columns
+                    .children()
+                    .map(|c| c.column_width().unwrap())
+                    .collect::<Vec<f32>>()
+            })
+        };
+        let w = widths(&editor, cx);
+        assert!(
+            w[0] < 0.45 && w[1] > 0.55 && (w[0] + w[1] - 1.).abs() < 0.01,
+            "{w:?}"
+        );
+        assert!(
+            markdown(&editor, cx).contains("<!-- column 0.3"),
+            "{}",
+            markdown(&editor, cx)
+        );
+        cx.simulate_keystrokes("secondary-z");
+        draw(cx);
+        assert_eq!(widths(&editor, cx), [0.5, 0.5], "one undo step");
     }
 
     /// `compact_below(px(0.))` keeps the wide layout on a narrow editor, with the host's own

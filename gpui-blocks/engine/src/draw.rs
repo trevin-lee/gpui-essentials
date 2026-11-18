@@ -660,6 +660,8 @@ pub(crate) enum Tree {
     Callout(gpui::SharedString, Vec<Tree>),
     /// A toggle: its summary, then its body when open.
     Toggle(bool, Vec<Tree>),
+    /// Columns side by side: each one's width and blocks.
+    Columns(Vec<(f32, Vec<Tree>)>),
     Rule,
     /// A code block: its leaf's key, its language, its code and the code's highlights.
     Code {
@@ -750,6 +752,20 @@ pub(crate) fn tree(
                         .collect::<Option<_>>()?,
                 )
             }
+            (K::Columns, _) => Tree::Columns(
+                doc.children(block)
+                    .iter()
+                    .map(|column| {
+                        let width = match doc.kind(*column) {
+                            Some(K::Column { width }) => *width,
+                            _ => 1.,
+                        };
+                        Some((width, children(*column)?))
+                    })
+                    .collect::<Option<_>>()?,
+            ),
+            // Never alone (normalization unwraps one); drawn as a row of one.
+            (K::Column { .. }, _) => Tree::Columns(vec![(1., children(block)?)]),
             (K::HorizontalRule, _) => Tree::Rule,
             (K::CodeBlock { lang, .. }, Some(BlockContent::Plain(text))) => {
                 let lang = lang.clone().unwrap_or_default();
@@ -984,6 +1000,28 @@ pub(crate) fn draw(
                 .child(container.w_full().min_w_0().children(body))
                 .into_any_element()
         }
+        Tree::Columns(columns) => {
+            // Each column grows to its share of the row, and is never narrower than
+            // MIN_COLUMN: where the row has no room for them all (a phone), they wrap, so each
+            // takes the whole width, one under another, in order.
+            let columns = columns.iter().map(|(width, children)| {
+                let body = children_of(children, place.depth, color, d, window, app);
+                let mut column = div().flex().flex_col().min_w(px(MIN_COLUMN)).children(body);
+                column.style().flex_basis = Some(gpui::relative(0.).into());
+                column.style().flex_grow = Some(width.max(0.01));
+                column.style().flex_shrink = Some(1.);
+                column.into_any_element()
+            });
+            div()
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .gap_x(d.body_size * 2.)
+                .gap_y(d.paragraph_gap)
+                .pb(gap)
+                .children(columns)
+                .into_any_element()
+        }
         Tree::Toggle(open, children) => {
             let body = children_of(children, place.depth, color, d, window, app);
             let container = super::surfaces::toggle_container(*open, window, app);
@@ -994,6 +1032,9 @@ pub(crate) fn draw(
         }
     }
 }
+
+/// The narrowest a column is drawn: columns wrap, one under another, rather than be narrower.
+const MIN_COLUMN: f32 = 200.;
 
 /// A container's blocks, each placed among the others.
 pub(crate) fn children_of(

@@ -43,6 +43,7 @@
 
 // Resolve existing GPUI paths and macro expansions through the Kit facade.
 
+mod columns;
 mod command;
 mod cull;
 mod document;
@@ -82,6 +83,7 @@ mod tests;
 
 pub mod surfaces;
 
+pub use columns::{columns_markdown, width_text, written_widths};
 pub use command::{CommandError, EditorCommand};
 pub use document::{BlockRef, DocumentRef};
 pub use editor::BlockEditorModel;
@@ -92,7 +94,7 @@ pub use find::FindMatch;
 /// its docs), so no input brings the app down.
 pub use import::parse as parse_markdown;
 pub use input_rule::InputRule;
-pub use kind::ColumnAlign;
+pub use kind::{ColumnAlign, MAX_COLUMNS};
 pub use state::{
     BlockEditorEvent, BlockEditorState, ClipboardPolicy, CodeHighlightFn, ImageSourceFn,
     PasteRequest, SubmitPolicy,

@@ -205,6 +205,14 @@ pub fn default_items() -> Vec<SlashItem> {
             .hint("Rows and columns")
             .aliases(["grid", "columns"])
             .icon("▦"),
+        SlashItem::new("2 columns", Command(C::InsertColumns { count: 2 }))
+            .hint("Two blocks side by side")
+            .aliases(["columns", "layout", "side by side", "split"])
+            .icon("◫"),
+        SlashItem::new("3 columns", Command(C::InsertColumns { count: 3 }))
+            .hint("Three blocks side by side")
+            .aliases(["columns", "layout", "side by side", "split"])
+            .icon("▥"),
         SlashItem::new("Image", Image)
             .hint("A picture from this computer")
             .aliases(["picture", "photo", "img"])

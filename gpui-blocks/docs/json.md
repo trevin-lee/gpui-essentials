@@ -65,7 +65,37 @@ stored text is read as a space.
 | `embed` | `doc`: the document's id; `title`: its title when the embed was made; `view`: how the app shows it (`table`, `board`, `mindmap`, `calendar`, `page`, or another 1 to 64 of `A-Z a-z 0-9 - _`, such as a database view's id); `height`: in points, 80 to 1600 | |
 | `page` | `doc`: the document's id; `title`: its title when the link was written | |
 | `widget` | `name`, `meta` (the rest of the info string), `body` | |
+| `columns` | | 2 to 5 `column`s. Only at the top level |
+| `column` | `width`: its share of the row, in (0, 1]; the shares add up to 1 | any blocks but `columns` |
 | `markdown` | `markdown`: the block as Markdown | |
+
+Columns are blocks side by side. The editor keeps them in that shape after every edit:
+- an emptied column goes;
+- a columns block left with one column becomes that column's blocks;
+- columns never nest, and never sit below the top level.
+
+Widths are written as shares of 1 to 3 decimals. On reading, a missing width is an even share,
+and a row is rescaled only when its widths add up to more than 0.01 away from 1. In Markdown,
+columns are HTML comments around their blocks, which other tools don't show:
+
+```markdown
+<!-- columns -->
+
+<!-- column 0.5 -->
+
+On the left.
+
+<!-- column 0.5 -->
+
+On the right.
+
+<!-- /columns -->
+```
+
+A bare `<!-- column -->` takes an even share. Markers that don't make a whole columns block at
+the top level are read as the HTML they are, and nothing between them is lost: for example a
+column outside columns, a missing `<!-- /columns -->`, nesting, a bad width, or one or more
+than five columns.
 
 A `markdown` block is what the editor keeps as is: a link definition, an HTML block, and in
 later versions any type a reader doesn't know.
@@ -104,8 +134,8 @@ a new id.
 A later version may add block types within version 1. This version never refuses a document
 for one:
 - A block of a type it doesn't know that has blocks inside is read as those blocks, in its place
-  and in order, at any depth. For example, a later `columns` block reads as its columns' blocks,
-  one after another.
+  and in order, at any depth. For example, an older version reads a `columns` block as its
+  columns' blocks, one after another.
 - One with nothing inside is kept as a `markdown` block: its own `markdown` or `text` if it has
   one, else a comment naming it (`<!-- a sparkle block, from a newer version -->`).
 

@@ -104,6 +104,20 @@ pub(crate) fn block(doc: &EditorDocument, id: BlockId) -> String {
                 format!("{tag}\n<summary>{summary}</summary>\n\n{body}\n\n</details>")
             }
         }
+        (BlockKindData::Columns, _) => crate::columns::columns_markdown(
+            &children
+                .iter()
+                .map(|column| {
+                    let width = match doc.kind(*column) {
+                        Some(BlockKindData::Column { width }) => *width,
+                        _ => 1.,
+                    };
+                    (width, join_blocks(doc, doc.children(*column)))
+                })
+                .collect::<Vec<_>>(),
+        ),
+        // A column is written by its columns block; alone (it never is), as its blocks.
+        (BlockKindData::Column { .. }, _) => join_blocks(doc, children),
         (BlockKindData::List { ordered, start }, _) => {
             let loose = children.iter().any(|item| {
                 matches!(

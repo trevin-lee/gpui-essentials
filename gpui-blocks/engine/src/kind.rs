@@ -1,6 +1,9 @@
 // Changed in Trevin Lee's fork (2026): callout and toggle kinds.
 use gpui::SharedString;
 
+/// The most columns a [`BlockKind::Columns`] has.
+pub const MAX_COLUMNS: usize = 5;
+
 /// The alignment of a table column.
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub enum ColumnAlign {
@@ -50,6 +53,10 @@ pub enum BlockKind {
     Table,
     TableRow,
     TableCell,
+    /// Blocks side by side: 2 to [`MAX_COLUMNS`] columns, only at the top level.
+    Columns,
+    /// One of a [`BlockKind::Columns`]' columns: any blocks but columns.
+    Column,
     // text-bearing leaves
     Paragraph,
     Heading {
@@ -91,6 +98,12 @@ pub(crate) enum BlockKindData {
     },
     TableRow,
     TableCell,
+    Columns,
+    /// `width`: its share of the row, as written; the shares are made to add up to 1 when the
+    /// document is written.
+    Column {
+        width: f32,
+    },
     Paragraph,
     Heading {
         level: u8,
@@ -124,6 +137,8 @@ impl BlockKindData {
             Self::Table { .. } => BlockKind::Table,
             Self::TableRow => BlockKind::TableRow,
             Self::TableCell => BlockKind::TableCell,
+            Self::Columns => BlockKind::Columns,
+            Self::Column { .. } => BlockKind::Column,
             Self::Paragraph => BlockKind::Paragraph,
             Self::Heading { level } => BlockKind::Heading { level: *level },
             Self::CodeBlock { .. } => BlockKind::CodeBlock,
@@ -147,6 +162,8 @@ impl BlockKindData {
                 | Self::ListItem { .. }
                 | Self::Table { .. }
                 | Self::TableRow
+                | Self::Columns
+                | Self::Column { .. }
         )
     }
 

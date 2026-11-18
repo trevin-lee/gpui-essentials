@@ -212,6 +212,8 @@ impl<'a> TransactionBuilder<'a> {
     /// - no container other than `Root` is empty,
     /// - adjacent sibling lists of the same type are merged (Markdown cannot
     ///   write them apart),
+    /// - a `Columns` is at the top level and holds 2 to `MAX_COLUMNS` `Column`s, and a `Column`
+    ///   is only in a `Columns` (so columns never nest),
     /// - there is at least one caret leaf.
     pub(crate) fn normalize(&mut self) -> Result<(), StepError> {
         loop {
@@ -247,6 +249,55 @@ impl<'a> TransactionBuilder<'a> {
                     self.insert(first, len, items)?;
                     self.remove_block(second)?;
                 }
+                Fix::Unwrap(id) => {
+                    let (parent, index) = self
+                        .doc
+                        .index_in_parent(id)
+                        .ok_or(StepError::UnknownBlock(id))?;
+                    let count = self.doc.children(id).len();
+                    let children = self.remove(id, 0..count)?;
+                    self.remove_block(id)?;
+                    self.insert(parent, index, children)?;
+                }
+                Fix::IntoColumn(stray) => {
+                    let (columns, index) = self
+                        .doc
+                        .index_in_parent(stray)
+                        .ok_or(StepError::UnknownBlock(stray))?;
+                    let siblings = self.doc.children(columns).to_vec();
+                    let before = siblings[..index]
+                        .iter()
+                        .rev()
+                        .find(|c| matches!(self.doc.kind(**c), Some(BlockKindData::Column { .. })));
+                    let after = siblings[index + 1..]
+                        .iter()
+                        .find(|c| matches!(self.doc.kind(**c), Some(BlockKindData::Column { .. })));
+                    let block = self.remove_block(stray)?;
+                    match (before, after) {
+                        (Some(column), _) => {
+                            let len = self.doc.children(*column).len();
+                            self.insert(*column, len, vec![block])?;
+                        }
+                        (None, Some(column)) => self.insert(*column, 0, vec![block])?,
+                        // No column at all: a column of its own, and the rules go on from there.
+                        (None, None) => {
+                            let column = DetachedBlock::container(
+                                BlockKindData::Column { width: 1. },
+                                vec![block],
+                            );
+                            self.insert(columns, index, vec![column])?;
+                        }
+                    }
+                }
+                Fix::MergeLastColumn(columns) => {
+                    let ids = self.doc.children(columns).to_vec();
+                    let (last, before) = (ids[ids.len() - 1], ids[ids.len() - 2]);
+                    let count = self.doc.children(last).len();
+                    let blocks = self.remove(last, 0..count)?;
+                    let len = self.doc.children(before).len();
+                    self.insert(before, len, blocks)?;
+                    self.remove_block(last)?;
+                }
                 Fix::NoLeaf => {
                     let root = self.doc.root;
                     let len = self.doc.children(root).len();
@@ -276,6 +327,28 @@ impl<'a> TransactionBuilder<'a> {
                     && !children.first().is_some_and(|c| doc.is_caret_leaf(*c))
                 {
                     return Some(Fix::LeadingParagraph(id));
+                }
+                if let BlockKindData::Columns = entry.kind {
+                    if entry.parent != Some(doc.root) || children.len() < 2 {
+                        return Some(Fix::Unwrap(id));
+                    }
+                    if let Some(stray) = children
+                        .iter()
+                        .find(|c| !matches!(doc.kind(**c), Some(BlockKindData::Column { .. })))
+                    {
+                        return Some(Fix::IntoColumn(*stray));
+                    }
+                    if children.len() > crate::kind::MAX_COLUMNS {
+                        return Some(Fix::MergeLastColumn(id));
+                    }
+                }
+                if let BlockKindData::Column { .. } = entry.kind
+                    && entry
+                        .parent
+                        .and_then(|p| doc.kind(p))
+                        .is_none_or(|k| *k != BlockKindData::Columns)
+                {
+                    return Some(Fix::Unwrap(id));
                 }
                 // A toggle's first child is its summary, a line of text.
                 if let BlockKindData::Toggle { .. } = entry.kind
@@ -342,6 +415,12 @@ impl<'a> TransactionBuilder<'a> {
 
 enum Fix {
     RemoveEmpty(BlockId),
+    /// A container that can't be where it is: its children take its place.
+    Unwrap(BlockId),
+    /// A block in a columns block that isn't a column: into the column before it (or after).
+    IntoColumn(BlockId),
+    /// A columns block with too many columns: its last column's blocks join the one before.
+    MergeLastColumn(BlockId),
     WrapInItem(BlockId),
     LeadingParagraph(BlockId),
     MergeLists(BlockId, BlockId),
