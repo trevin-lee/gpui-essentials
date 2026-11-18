@@ -38,8 +38,10 @@ pub use theme::{
 #[cfg(feature = "gpui")]
 pub use view::CardView;
 
-// The README's examples, compiled as doctests.
-#[cfg(all(doctest, feature = "gpui"))]
+// The README's examples, compiled as doctests. On macOS only: the app example opens its window
+// through gpui_platform, which is a macOS-only dev-dependency (as the gallery's window is), so
+// elsewhere it can't be found. GitHub's macOS job runs them.
+#[cfg(all(doctest, feature = "gpui", target_os = "macos"))]
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
