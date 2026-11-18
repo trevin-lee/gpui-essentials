@@ -116,6 +116,10 @@ actions!(
         SelectParagraphEnd,
         /// Copies the caret's block, or the selected blocks, right after them (⌘D).
         DuplicateBlocks,
+        /// Selects the caret's block whole, as Notion's Esc does: ↑ and ↓ then move the
+        /// selection from block to block, ⇧↑ and ⇧↓ extend it, and Enter goes back into the
+        /// text. With blocks selected already, Esc is the app's.
+        SelectBlock,
         /// Underlines the selection, or takes the underline off (⌘U).
         ToggleUnderline,
         /// Strikes the selection through, or takes the line off (⌘⇧S).
@@ -266,6 +270,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new(platform_key!("cmd", "alt-up"), TableInsertRowAbove, ctx),
         KeyBinding::new(platform_key!("cmd", "alt-down"), TableInsertRowBelow, ctx),
         KeyBinding::new(platform_key!("cmd", "alt-backspace"), TableDeleteLine, ctx),
+        KeyBinding::new("escape", SelectBlock, ctx),
         KeyBinding::new("escape", CloseTableMenu, Some("BlockEditor && table_menu")),
         KeyBinding::new("shift-enter", SoftBreak, ctx),
         KeyBinding::new(platform_key!("cmd", "enter"), ExitBlock, ctx),
@@ -1355,6 +1360,87 @@ impl BlockEditorState {
     }
 
     /// A whole-block selection collapses to its start or end.
+    /// With blocks selected, ↑ or ↓: the block before or after the selection's head is
+    /// selected instead, or added to it (`extend`). Returns whether the key was the selection's.
+    fn step_blocks(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) -> bool {
+        let BlockSelection::Blocks { anchor, head } = *self.model.selection() else {
+            return false;
+        };
+        let doc = &self.model.doc;
+        let Some((parent, ix)) = doc.index_in_parent(head) else {
+            return false;
+        };
+        let siblings = doc.children(parent);
+        let next = if down {
+            siblings.get(ix + 1)
+        } else {
+            ix.checked_sub(1).and_then(|i| siblings.get(i))
+        };
+        // At the first or last block the head stays (and a plain arrow leaves only it selected).
+        let next = next.copied().unwrap_or(head);
+        let anchor = if extend { anchor } else { next };
+        let _ = self
+            .model
+            .set_selection(BlockSelection::Blocks { anchor, head: next });
+        self.selection_changed(cx);
+        true
+    }
+
+    /// The block Esc selects for `leaf`: the nearest block holding it that sits in the page, a
+    /// list or a column, so a list item is selected as an item and a line in a quote as the
+    /// whole quote.
+    fn selectable_block(&self, leaf: BlockId) -> Option<BlockId> {
+        use super::kind::BlockKindData;
+        let doc = &self.model.doc;
+        let mut block = leaf;
+        loop {
+            let parent = doc.parent(block)?;
+            if parent == doc.root
+                || matches!(
+                    doc.kind(parent),
+                    Some(BlockKindData::List { .. } | BlockKindData::Column { .. })
+                )
+            {
+                return Some(block);
+            }
+            block = parent;
+        }
+    }
+
+    pub(crate) fn on_select_block(
+        &mut self,
+        _: &SelectBlock,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let BlockSelection::Text { head, .. } = *self.model.selection() else {
+            // Blocks or cells selected already: Esc is the app's.
+            cx.propagate();
+            return;
+        };
+        let Some(block) = self.selectable_block(head.block) else {
+            cx.propagate();
+            return;
+        };
+        self.end_composition();
+        let _ = self.model.set_selection(BlockSelection::Blocks {
+            anchor: block,
+            head: block,
+        });
+        self.selection_changed(cx);
+    }
+
+    /// Enter with blocks selected: back into the text, at the end of the selection's head.
+    fn edit_selected_block(&mut self, cx: &mut Context<Self>) -> bool {
+        let BlockSelection::Blocks { head, .. } = *self.model.selection() else {
+            return false;
+        };
+        let at = self.model.doc.last_leaf_in(head);
+        let _ = self.model.set_selection(BlockSelection::caret(at));
+        self.selection_changed(cx);
+        true
+    }
+
     fn collapse_blocks(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
         if !matches!(
             self.model.selection(),
@@ -1567,6 +1653,9 @@ impl BlockEditorState {
     }
 
     fn vertical(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+        if self.step_blocks(down, extend, cx) {
+            return;
+        }
         if self.collapse_blocks(down, cx) {
             return;
         }
@@ -2823,6 +2912,9 @@ impl BlockEditorState {
     }
     fn newline(&mut self, cx: &mut Context<Self>) {
         self.end_composition();
+        if self.edit_selected_block(cx) {
+            return;
+        }
         // "```lang" then Enter: a code block.
         if !self.readonly
             && self.rule_on(RuleKind::CodeFence)

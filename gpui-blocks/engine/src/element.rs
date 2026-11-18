@@ -599,6 +599,7 @@ impl RenderOnce for BlockEditor {
             .on_action(window.listener_for(s, BlockEditorState::on_paste))
             .on_action(window.listener_for(s, BlockEditorState::on_paste_plain))
             .on_action(window.listener_for(s, BlockEditorState::on_duplicate))
+            .on_action(window.listener_for(s, BlockEditorState::on_select_block))
             .children(super::table_ui::render_menu(&self.state, cx))
             .child(EditorRoot {
                 state: self.state.clone(),
