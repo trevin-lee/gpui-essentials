@@ -526,6 +526,8 @@ pub(crate) struct Scene {
     /// The time grid's scroll bar: hidden (None), shown after a scroll (Some(false)), or
     /// shown wider while the pointer is on it or drags it (Some(true)).
     pub scrollbar: Option<bool>,
+    /// The other end of the selected slot, stretched by Shift and the arrows.
+    pub stretch: Option<(NaiveDate, u32)>,
     /// Whether Saturday and Sunday get columns (see [`Geo::weekends`]).
     pub weekends: bool,
 }
@@ -1964,13 +1966,13 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                 let i = (*date - scene.first).num_days() as i32;
                 if (0..days).contains(&i) && geo.shown(i) {
                     let slot = scene.options.slot_minutes.max(1) as f32;
+                    // From the slot to the other end, if it's stretched.
+                    let to = scene.stretch.map_or(*minute, |(_, m)| m) as f32;
+                    let (top, bottom) = ((*minute as f32).min(to), (*minute as f32).max(to) + slot);
                     let x = geo.col_x(i);
                     let rect = Bounds::from_corners(
-                        point(x + px(2.), geo.y_of(*minute as f32) + px(1.)),
-                        point(
-                            x + geo.col_w - px(2.),
-                            geo.y_of(*minute as f32 + slot) - px(1.),
-                        ),
+                        point(x + px(2.), geo.y_of(top) + px(1.)),
+                        point(x + geo.col_w - px(2.), geo.y_of(bottom) - px(1.)),
                     );
                     ink.outlined(rect, ink.u(4.), c.highlight, ink.u(1.5), c.selection);
                 }
@@ -2881,7 +2883,15 @@ fn paint_month(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
             {
                 ink.fill(cell, c.highlight);
             }
-            if matches!(&scene.selection, Some(Selection::Slot { date: d, .. }) if *d == date) {
+            // The selected day, or every day it's stretched over.
+            let selected = match (&scene.selection, scene.stretch) {
+                (Some(Selection::Slot { date: d, .. }), Some((to, _))) => {
+                    date >= (*d).min(to) && date <= (*d).max(to)
+                }
+                (Some(Selection::Slot { date: d, .. }), None) => *d == date,
+                _ => false,
+            };
+            if selected {
                 let inset = Bounds::from_corners(
                     point(cell.left() + px(2.), cell.top() + px(2.)),
                     point(cell.right() - px(1.), cell.bottom() - px(1.)),
