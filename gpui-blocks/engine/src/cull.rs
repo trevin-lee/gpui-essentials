@@ -163,6 +163,9 @@ pub(crate) struct CullState {
     pub(crate) heights: HashMap<BlockId, Pixels>,
     /// Visible span of the editor in editor-local y, from the last prepaint.
     pub(crate) visible: Option<(Pixels, Pixels)>,
+    /// Whether a frame has been drawn: before the first, the cull guesses the shown span from
+    /// the scroll offset rather than laying out every block.
+    pub(crate) drawn_once: bool,
     /// Blocks measured in the current frame: (id, index, top, bottom).
     pub(crate) measured: Vec<(BlockId, usize, Pixels, Pixels)>,
     /// Each unit laid out in the current frame and the bounds it was drawn
@@ -244,6 +247,7 @@ impl CullState {
         let top = (mask.top() - editor.top()).max(px(0.));
         let bottom = (mask.bottom() - editor.top()).min(editor.size.height);
         self.visible = Some((top, bottom.max(top)));
+        self.drawn_once = true;
         match (self.rendered_span, measured.first(), measured.last()) {
             (_, Some(first), Some(last)) => {
                 let span = (first.2 - editor.top(), last.3 - editor.top());

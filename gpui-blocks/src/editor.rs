@@ -57,7 +57,7 @@ const PAGE_BOTTOM: f32 = 240.;
 const GO_TO_MARGIN: f32 = 48.;
 
 /// The frames a block gone to is waited for.
-const GO_TO_TRIES: u8 = 6;
+const GO_TO_TRIES: u8 = 10;
 
 /// Where a place gone to lands on the page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1091,7 +1091,6 @@ impl Editor {
             window.request_animation_frame();
             return;
         };
-        self.go_to_top = None;
         let view = self.scroll.bounds();
         let max = self.scroll.max_offset().y;
         let offset = self.scroll.offset();
@@ -1100,10 +1099,17 @@ impl Editor {
             Place::Middle => view.center().y - line.size.height / 2.,
         };
         let y = (offset.y + to - line.top()).clamp(-max, px(0.));
-        if (y - offset.y).abs() >= px(1.) {
-            self.scroll.set_offset(point(offset.x, y));
-            window.refresh();
+        if (y - offset.y).abs() < px(1.) {
+            // There, and staying: done.
+            self.go_to_top = None;
+            return;
         }
+        self.scroll.set_offset(point(offset.x, y));
+        // The blocks drawn now are measured, which can move it: looked at again, a few frames
+        // more at most.
+        self.go_to_top = frames.checked_sub(1).map(|f| (at, f, place));
+        window.request_animation_frame();
+        window.refresh();
     }
 
     /// Makes the one embed whose block has the lasting id `block` (as [`docs::Embed::block`] and

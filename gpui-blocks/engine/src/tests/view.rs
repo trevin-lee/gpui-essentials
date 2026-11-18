@@ -928,6 +928,32 @@ impl Render for Scrolled {
     }
 }
 
+/// The first frame lays out only the blocks around where the editor is shown, not every block
+/// of a long document: most of the time it took to open one.
+#[gpui::test]
+fn the_first_frame_lays_out_only_what_is_shown(cx: &mut TestAppContext) {
+    cx.update(crate::init_for_tests);
+    let doc: String = (0..2000).map(|i| format!("paragraph {i}\n\n")).collect();
+    let handle = gpui::ScrollHandle::new();
+    let scroll = handle.clone();
+    let (root, cx) = cx.add_window_view(move |window, cx| {
+        let editor = cx.new(|cx| {
+            let mut state = BlockEditorState::new(window, cx).with_source(&doc);
+            state.set_scroll_handle(scroll.clone());
+            state
+        });
+        Scrolled(editor, scroll)
+    });
+    let editor = root.read_with(cx, |root, _| root.0.clone());
+    // Opening the window drew its first frame.
+    let rendered = editor.read_with(cx, |e, _| e.cull.borrow().rendered);
+    assert!(
+        (1..300).contains(&rendered),
+        "laid out {rendered} of 2000 in the first frame"
+    );
+    let _ = handle;
+}
+
 /// With a scroll handle, moving the caret into a culled block scrolls it
 /// into view once the block is laid out.
 #[gpui::test]
