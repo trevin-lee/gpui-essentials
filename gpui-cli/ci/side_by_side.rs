@@ -1,4 +1,4 @@
-//! A copied component next to gpui-core's original, in one app: gpui-core add renamed the
+//! A copied component next to gpui-core's original, in one app: gpui add renamed the
 //! copy's actions (GPUI panics at startup on two actions with one name) and key contexts, and
 //! each one's keys work. ci/check-copies.sh puts this in the crate it copies every component
 //! into.

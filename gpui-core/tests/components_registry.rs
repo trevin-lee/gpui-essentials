@@ -1,4 +1,4 @@
-//! components.toml, which `gpui-core add` trusts, is generated from the source and checked
+//! components.toml, which `gpui add` trusts, is generated from the source and checked
 //! here: every module is base or a component, each component's `needs` are exactly the
 //! components it uses, and it reaches nothing else in the crate but `crate::base`.
 //!
@@ -210,7 +210,7 @@ const HEADER: &str = "\
 # hand (but for `base`). Regenerate it with
 # `GPUI_CORE_WRITE_REGISTRY=1 cargo test -p gpui-core --test components_registry`.
 #
-# The components `gpui-core add` copies into a host's crate. A component reaches the rest of
+# The components `gpui add` copies into a host's crate. A component reaches the rest of
 # gpui-core only through `crate::base::…` (in a copy, `gpui_core::base::…`) and through the
 # components in its `needs` (in a copy, `super::…`). For each:
 #   about     the first line of its module's docs
@@ -418,7 +418,7 @@ fn components_toml_matches_the_source() {
 
     assert!(
         problems.is_empty(),
-        "a component reaches what a copy can't (the `gpui-core add` CLI copies each file \
+        "a component reaches what a copy can't (the `gpui add` CLI copies each file \
          alone):\n  {}",
         problems.join("\n  ")
     );
@@ -471,7 +471,7 @@ fn components_toml_matches_the_source() {
                 )
             });
         panic!(
-            "components.toml is out of date with gpui-core/src (the `gpui-core add` CLI trusts \
+            "components.toml is out of date with gpui-core/src (the `gpui add` CLI trusts \
              it): regenerate it with `GPUI_CORE_WRITE_REGISTRY=1 cargo test -p gpui-core --test \
              components_registry`{first}"
         );

@@ -2,7 +2,7 @@
 # hand (but for `base`). Regenerate it with
 # `GPUI_CORE_WRITE_REGISTRY=1 cargo test -p gpui-core --test components_registry`.
 #
-# The components `gpui-core add` copies into a host's crate. A component reaches the rest of
+# The components `gpui add` copies into a host's crate. A component reaches the rest of
 # gpui-core only through `crate::base::…` (in a copy, `gpui_core::base::…`) and through the
 # components in its `needs` (in a copy, `super::…`). For each:
 #   about     the first line of its module's docs
