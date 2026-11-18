@@ -851,3 +851,39 @@ fn icon_problems_are_reported() {
         [ProblemKind::TooManyGraphemes { limit: 1, found: 2 }]
     );
 }
+
+/// A view's card preview: absent is none and stays absent, none and cover read as themselves,
+/// and a value this version doesn't know is kept as written.
+#[test]
+fn a_views_card_preview_round_trips() {
+    let view = |extra: serde_json::Value| {
+        let mut v =
+            serde_json::json!({"id": "g", "name": "Gallery", "type": "gallery", "order": "a0"});
+        v.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        v
+    };
+    for (json, preview) in [
+        (view(serde_json::json!({})), None),
+        (
+            view(serde_json::json!({"cardPreview": "none"})),
+            Some(CardPreview::None),
+        ),
+        (
+            view(serde_json::json!({"cardPreview": "cover"})),
+            Some(CardPreview::Cover),
+        ),
+        (
+            view(serde_json::json!({"cardPreview": "big"})),
+            Some(CardPreview::Other("big".into())),
+        ),
+    ] {
+        let v: View = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(v.card_preview, preview);
+        assert_eq!(
+            serde_json::to_value(&v).unwrap().get("cardPreview"),
+            json.get("cardPreview")
+        );
+    }
+}

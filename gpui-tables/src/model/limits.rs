@@ -186,6 +186,8 @@ pub enum ProblemKind {
     NotAsset,
     /// A doc's icon is neither a string nor null.
     IconNotString,
+    /// A view's `cardPreview` that isn't `none` or `cover`: the view's id.
+    NotCardPreview(String),
 }
 
 impl fmt::Display for Problem {
@@ -219,6 +221,7 @@ impl fmt::Display for Problem {
             ProblemKind::EmptyIcon => write!(f, "an empty string"),
             ProblemKind::NotAsset => write!(f, "not asset: and 64 lowercase hex characters"),
             ProblemKind::IconNotString => write!(f, "not a string or null"),
+            ProblemKind::NotCardPreview(view) => write!(f, "not none or cover (view {view})"),
         }
     }
 }
@@ -401,6 +404,12 @@ impl Limits {
             if let Some(f) = &v.filter {
                 c.problems
                     .extend(self.check_filter(f, &format!("{}.filter", at())));
+            }
+            if let Some(super::CardPreview::Other(_)) = &v.card_preview {
+                c.push(
+                    format!("{}.cardPreview", at()),
+                    ProblemKind::NotCardPreview(v.id.clone()),
+                );
             }
         }
         c.problems

@@ -113,6 +113,9 @@ pub struct TestHost {
     pub limits: Cell<Limits>,
     /// The views the table said it showed, as a person switched them.
     pub shown: RefCell<Vec<String>>,
+    /// The images the host has, by asset id, and every asset id the table asked for.
+    pub images: RefCell<std::collections::HashMap<String, std::sync::Arc<gpui::Image>>>,
+    pub images_asked: RefCell<Vec<String>>,
 }
 
 impl TestHost {
@@ -129,6 +132,8 @@ impl TestHost {
             databases: RefCell::new(vec![related(&load("companies").0)]),
             limits: Cell::new(Limits::default()),
             shown: RefCell::default(),
+            images: RefCell::default(),
+            images_asked: RefCell::default(),
         })
     }
 
@@ -292,6 +297,11 @@ fn apply(db: &mut Doc, rows: &mut Vec<Doc>, edit: &Edit) {
 }
 
 impl TableHost for TestHost {
+    fn image(&self, asset_id: &str, _: &App) -> Option<std::sync::Arc<gpui::Image>> {
+        self.images_asked.borrow_mut().push(asset_id.to_owned());
+        self.images.borrow().get(asset_id).cloned()
+    }
+
     fn theme(&self, _: &App) -> TableTheme {
         self.draws.set(self.draws.get() + 1);
         self.theme.borrow().clone()
