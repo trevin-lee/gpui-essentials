@@ -30,6 +30,12 @@ pub(crate) const BOOKMARK_NODE: &str = "web-bookmark";
 /// The most characters of a description written.
 pub const MAX_DESCRIPTION: usize = 300;
 
+/// The most characters of a title written.
+pub const MAX_TITLE: usize = 300;
+
+/// The longest address a bookmark can have, in bytes.
+pub const MAX_URL: usize = 2048;
+
 /// What the app's server says about a page, for its bookmark: each part only when the page
 /// has one. `image` is an `asset:<sha256>` the app stored; anything else isn't drawn or
 /// written.
@@ -52,15 +58,32 @@ pub struct Bookmark {
     pub image: Option<String>,
 }
 
-/// Whether `url` can be a bookmark's: an `http` or `https` address with no spaces or control
-/// characters.
+/// Whether `url` can be a bookmark's, as the server takes it: an `http` or `https` address of
+/// at most [`MAX_URL`] bytes, with no spaces, control characters, quotes, angle brackets or
+/// backslashes. Anything else stays a plain link.
 pub fn web_url(url: &str) -> bool {
     let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
     (lower.starts_with("https://") || lower.starts_with("http://"))
-        && url.len() > "http://".len()
-        && !url
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '<' | '>'))
+        && url
+            .split_once("://")
+            .is_some_and(|(_, rest)| !rest.is_empty() && !rest.starts_with('/'))
+        && url.len() <= MAX_URL
+        && !url.chars().any(|c| {
+            c.is_whitespace() || c.is_control() || matches!(c, '<' | '>' | '"' | '\'' | '\\')
+        })
+}
+
+/// `text` on one line, its spaces collapsed, cut to `max` characters: as a title or
+/// description is written.
+fn one_line(text: &str, max: usize) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
 }
 
 /// Whether `image` is a picture a bookmark may have: `asset:` and a SHA-256 in lowercase hex.
@@ -95,7 +118,7 @@ impl Bookmark {
         let title = self
             .title
             .as_deref()
-            .map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
+            .map(|t| one_line(t, MAX_TITLE))
             .filter(|t| !t.is_empty());
         let text = crate::docs::link_text(title.as_deref().unwrap_or(&self.url));
         // Parentheses would end a bare destination early.
@@ -108,14 +131,7 @@ impl Bookmark {
         let description = self
             .description
             .as_deref()
-            .map(|d| {
-                d.split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .chars()
-                    .take(MAX_DESCRIPTION)
-                    .collect::<String>()
-            })
+            .map(|d| one_line(d, MAX_DESCRIPTION))
             .filter(|d| !d.is_empty());
         let image = self.image.as_deref().filter(|i| asset_image(i));
         if description.is_some() || image.is_some() {
@@ -415,6 +431,32 @@ mod tests {
             Some(MAX_DESCRIPTION)
         );
         assert_eq!(back.image, None);
+        let titled = Bookmark {
+            title: Some("t".repeat(400)),
+            ..Bookmark::new("https://example.com")
+        };
+        let back = Bookmark::of_markdown(&titled.markdown()).unwrap();
+        assert_eq!(back.title.map(|t| t.chars().count()), Some(MAX_TITLE));
+        // Addresses the server doesn't take are never bookmarks.
+        for url in [
+            "https://example.com/a b",
+            "https://example.com/\"a\"",
+            "https://example.com/it's",
+            "https://example.com/a\\b",
+            "https://example.com/<a>",
+            "ftp://example.com",
+            "https://",
+        ] {
+            assert!(!web_url(url), "{url}");
+        }
+        assert!(web_url(&format!(
+            "https://example.com/{}",
+            "a".repeat(2000)
+        )));
+        assert!(!web_url(&format!(
+            "https://example.com/{}",
+            "a".repeat(2100)
+        )));
         // Read tolerantly: a longer description stays whole until written.
         let long = format!(
             "[a](https://example.com \"bookmark\") <!-- {{\"description\":\"{}\"}} -->",
@@ -565,6 +607,49 @@ mod tests {
                 .contains("[https://example.com/b](https://example.com/b \"bookmark\")"),
             "{}",
             markdown(&editor, cx)
+        );
+    }
+
+    /// An answer that comes after the reader scrolled away leaves the view where it is.
+    #[gpui::test]
+    fn an_answer_doesnt_scroll_the_page(cx: &mut TestAppContext) {
+        let source: &'static str = Box::leak(
+            (1..=200)
+                .map(|n| format!("Line {n}"))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+                .into_boxed_str(),
+        );
+        let (editor, answers, _, cx) = open(cx, source);
+        editor.update(cx, |e, cx| {
+            assert!(e.insert_bookmark("https://example.com/a", cx))
+        });
+        draw(cx);
+        // Scrolled to the end with the wheel; the caret stays at the top.
+        let end = editor.read_with(cx, |e, _| {
+            let end = -e.scroll.max_offset().y;
+            e.scroll.set_offset(gpui::point(gpui::px(0.), end));
+            end
+        });
+        draw(cx);
+        answer(
+            &answers,
+            Some(Unfurl {
+                title: Some("A page".into()),
+                ..Unfurl::default()
+            }),
+        );
+        draw(cx);
+        draw(cx);
+        assert!(
+            markdown(&editor, cx).contains("[A page]("),
+            "{}",
+            markdown(&editor, cx)
+        );
+        let now = editor.read_with(cx, |e, _| e.scroll.offset().y);
+        assert!(
+            (now - end).abs() < gpui::px(40.),
+            "stayed: {now:?} vs {end:?}"
         );
     }
 

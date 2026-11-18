@@ -64,7 +64,7 @@ stored text is read as a space.
 | `toc` | | |
 | `embed` | `doc`: the document's id; `title`: its title when the embed was made; `view`: how the app shows it (`table`, `board`, `mindmap`, `calendar`, `page`, or another 1 to 64 of `A-Z a-z 0-9 - _`, such as a database view's id); `height`: in points, 80 to 1600 | |
 | `page` | `doc`: the document's id; `title`: its title when the link was written | |
-| `bookmark` | `url`: the page's `http` or `https` address; optional `title`, `description` (at most 300 characters written) and `image` (an `asset:<sha256>`) | |
+| `bookmark` | `url`: the page's `http` or `https` address, at most 2048 bytes, with no spaces, quotes, angle brackets or backslashes; optional `title` and `description` (each at most 300 characters written) and `image` (an `asset:<sha256>` the server stored) | |
 | `widget` | `name`, `meta` (the rest of the info string), `body` | |
 | `columns` | | 2 to 5 `column`s. Only at the top level |
 | `column` | `width`: its share of the row, in (0, 1]; the shares add up to 1 | any blocks but `columns` |
@@ -112,7 +112,10 @@ or picture, a comment holding them as a JSON object, either key optional:
 In the JSON, `<`, `>` and `&` are written as `\u003c`, `\u003e` and `\u0026`, so it can't end the
 comment. A comment that isn't exactly that (another key, a value that isn't a string, not
 JSON) makes the line an ordinary paragraph. Only an `asset:` picture is written or drawn:
-another is dropped. A description is cut to 300 characters when written, and read whole.
+another is dropped, and the editor writes only a picture an unfurl gave it. A title or
+description is cut to 300 characters when written, and read whole. A title that's empty or the
+address itself reads back as none. An address the server wouldn't take is never made a
+bookmark: it stays a plain link.
 
 A `markdown` block is what the editor keeps as is: a link definition, an HTML block, and in
 later versions any type a reader doesn't know.

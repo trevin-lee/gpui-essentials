@@ -552,7 +552,7 @@ pub struct Editor {
     pub(crate) last_paint: Option<crate::format_bar::Paint>,
     /// The code block whose language menu is open (see `code_chrome.rs`).
     pub(crate) code_menu: Option<BlockId>,
-    scroll: ScrollHandle,
+    pub(crate) scroll: ScrollHandle,
     pub(crate) menu_scroll: ScrollHandle,
     /// [`Options::gutter`], [`Options::top`] and [`Options::compact_below`].
     gutter: Pixels,
@@ -1356,6 +1356,8 @@ impl Editor {
                     }
                     if let Some(block) = custom_block(state, &bare) {
                         replace_keeping_id(state, &ids, block, markdown, cx);
+                        // The answer can come after the reader scrolled away: stay there.
+                        state.keep_view();
                     }
                 });
             });
