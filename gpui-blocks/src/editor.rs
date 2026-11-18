@@ -1339,6 +1339,15 @@ impl Editor {
             if markdown == bare {
                 return;
             }
+            // Not while blocks are dragged: an edit would drop the drag.
+            while this
+                .update(cx, |this, cx| this.state.read(cx).is_dragging_block())
+                .unwrap_or(false)
+            {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(100))
+                    .await;
+            }
             let _ = this.update(cx, |this, cx| {
                 let ids = this.ids.clone();
                 this.state.update(cx, |state, cx| {
