@@ -1,7 +1,8 @@
 //! The table view driven as a person drives it: the mouse, the keyboard and a finger, on the
 //! CRM fixtures, checking what it hands the host.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 
@@ -1042,6 +1043,7 @@ fn the_month_is_the_tables_with_its_footer_and_ranges(cx: &mut TestAppContext) {
     );
 }
 
+#[cfg(target_os = "macos")]
 /// The glyphs drawn inside `within`, over the open popover (not the table's under it): where
 /// each is, and its colour.
 fn glyphs(cx: &mut VisualTestContext, within: Bounds<Pixels>) -> Vec<(Bounds<Pixels>, Hsla)> {
@@ -1106,6 +1108,7 @@ fn ring(cx: &mut VisualTestContext, what: &str) -> Option<Hsla> {
     })
 }
 
+#[cfg(target_os = "macos")]
 /// In the open menu's entry `label`: the check's column comes before the label, keeping its
 /// room whether or not the entry is checked, and holds the check only when it is. (GPUI's test
 /// app has no assets, so the icon itself draws nothing: it's seen by the room it takes.)
@@ -1149,7 +1152,8 @@ fn check_leads(cx: &mut VisualTestContext, label: &str, checked: bool) -> Pixels
     start
 }
 
-// Laid out with Core Text, as on screen, so the labels' glyphs are drawn.
+// Laid out with Core Text, as on screen, so the labels' glyphs are drawn (the Mac only).
+#[cfg(target_os = "macos")]
 #[test]
 fn checks_lead_the_labels_in_menus_and_pickers() {
     let mut cx = TestAppContext::build_with_text_system(

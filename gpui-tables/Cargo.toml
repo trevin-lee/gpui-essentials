@@ -40,6 +40,10 @@ default = ["gpui"]
 # The GPUI views (tables, boards and lists). Without it (default-features = false) the crate
 # is the model and engine alone, with no GPUI in the build.
 gpui = ["dep:gpui", "dep:gpui-core", "dep:gpui-dnd", "dep:chrono"]
+# GPUI's test support (a test window, simulated input), for running the view tests where the Mac's
+# dev-dependencies don't switch it on: `cargo test -p gpui-tables --features
+# test-support,gpui/bench-support` on Linux. The tests that lay text out with Core Text stay Mac-only.
+test-support = ["gpui", "gpui/test-support", "gpui-core/test-support"]
 # Pictures of the crm example's window rendered offscreen (`--shot`), for the README.
 shots = ["gpui", "gpui/test-support", "dep:gpui-pre-macos", "dep:image"]
 

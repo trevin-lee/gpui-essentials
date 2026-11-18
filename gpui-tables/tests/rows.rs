@@ -5,7 +5,8 @@
 //! after asking, the keys (Delete emptying a cell but deleting selected rows), a finger's long
 //! press on the handle against a pan, the handle's 44 points on touch, and no frames while idle.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 
@@ -335,7 +336,7 @@ fn a_sorted_table_refuses_to_reorder_and_says_why(cx: &mut TestAppContext) {
     assert!(drawn(cx, "menu-item-Move up"));
     assert!(rect(cx, "menu-note").size.width > px(0.));
     click(cx, "menu-item-Move down");
-    keys(cx, "cmd-shift-down");
+    keys(cx, "secondary-shift-down");
     assert!(host.edits().is_empty(), "{:?}", host.edits());
     keys(cx, "escape");
     let _ = table;
@@ -532,7 +533,7 @@ fn the_rows_menu_opens_from_the_handle_a_right_click_and_keys(cx: &mut TestAppCo
     keys(cx, "escape");
     assert!(!table.read_with(cx, |t, _| t.has_popover()));
     // ⌘/, and ⌥↓ while rows are selected (else it's the column's menu).
-    keys(cx, "cmd-/");
+    keys(cx, "secondary-/");
     assert!(drawn(cx, "menu-item-Duplicate"));
     keys(cx, "escape");
     keys(cx, "alt-down");
@@ -546,7 +547,7 @@ fn the_rows_menu_opens_from_the_handle_a_right_click_and_keys(cx: &mut TestAppCo
     // Several rows: no Open, a heading with their count.
     press_with(cx, ROWAN, Modifiers::command());
     press_with(cx, IMANI, Modifiers::command());
-    keys(cx, "cmd-/");
+    keys(cx, "secondary-/");
     assert!(!drawn(cx, "menu-item-Open"));
     assert!(drawn(cx, "menu-item-Delete"));
 }
@@ -557,7 +558,7 @@ fn move_up_and_down_from_the_menu_and_keys(cx: &mut TestAppContext) {
     let (table, cx) = open(cx, &host, plain(), wide());
     // ⌘⇧↓ on Rowan (a0): past Imani (a1), before Theo (a2).
     table.update(cx, |t, cx| t.focus_cell(ROWAN, ROLE, cx));
-    keys(cx, "cmd-shift-down");
+    keys(cx, "secondary-shift-down");
     let Edit::RowsMoved { row_ids, orders } = host.last_edit() else {
         panic!("{:?}", host.edits())
     };
@@ -586,7 +587,7 @@ fn in_a_grouped_table_rows_move_within_their_group(cx: &mut TestAppContext) {
     let (table, cx) = open(cx, &host, by_stage(|_| {}), wide());
     // Lena is Active's second (Rowan a0, Lena a3, Ana a7): up a place is its top.
     table.update(cx, |t, cx| t.focus_cell(LENA, ROLE, cx));
-    keys(cx, "cmd-shift-up");
+    keys(cx, "secondary-shift-up");
     assert_eq!(
         group(&table, cx, &opt(ACTIVE)),
         ["Lena Varga", "Rowan Pike", "Ana Sofía Durán"]
@@ -597,7 +598,7 @@ fn in_a_grouped_table_rows_move_within_their_group(cx: &mut TestAppContext) {
     assert!(orders[0].as_str() < "a0");
     // At its group's top it goes no further: no edit, not into Warm above.
     host.clear();
-    keys(cx, "cmd-shift-up");
+    keys(cx, "secondary-shift-up");
     assert!(host.edits().is_empty(), "{:?}", host.edits());
     assert_eq!(
         group(&table, cx, &opt(WARM)),
@@ -606,14 +607,14 @@ fn in_a_grouped_table_rows_move_within_their_group(cx: &mut TestAppContext) {
     // Two selected rows of a group move together; rows of two groups don't move.
     press_with(cx, ROWAN, Modifiers::command());
     press_with(cx, LENA, Modifiers::command());
-    keys(cx, "cmd-shift-down");
+    keys(cx, "secondary-shift-down");
     assert_eq!(
         group(&table, cx, &opt(ACTIVE)),
         ["Ana Sofía Durán", "Lena Varga", "Rowan Pike"]
     );
     host.clear();
     press_with(cx, IMANI, Modifiers::command());
-    keys(cx, "cmd-shift-down");
+    keys(cx, "secondary-shift-down");
     assert!(host.edits().is_empty(), "{:?}", host.edits());
 }
 
@@ -714,7 +715,7 @@ fn duplicating_copies_the_row_and_writes_its_relations_back(cx: &mut TestAppCont
     host.clear();
     press_with(cx, THEO, Modifiers::command());
     press_with(cx, SAMI, Modifiers::command());
-    keys(cx, "cmd-d");
+    keys(cx, "secondary-d");
     let b = batches(&host);
     assert_eq!(b.len(), 1);
     let created: Vec<(&str, &str)> = b[0]
@@ -739,7 +740,7 @@ fn duplicating_between_keys_that_cant_be_put_between_renumbers(cx: &mut TestAppC
     rows.iter_mut().find(|r| r.id == THEO).unwrap().order = "a0".into();
     let (table, cx) = open(cx, &host, (db, rows), wide());
     table.update(cx, |t, cx| t.focus_cell(ROWAN, NAME, cx));
-    keys(cx, "cmd-d");
+    keys(cx, "secondary-d");
     let b = batches(&host);
     let [
         Edit::RowsMoved { orders, .. },
@@ -766,7 +767,7 @@ fn one_row_deletes_at_once_and_several_after_asking(cx: &mut TestAppContext) {
     let (table, cx) = open(cx, &host, plain(), wide());
     // ⌘⌫ on a focused row: gone at once, the focus on the row after it.
     table.update(cx, |t, cx| t.focus_cell(IMANI, ROLE, cx));
-    keys(cx, "cmd-backspace");
+    keys(cx, "secondary-backspace");
     assert_eq!(deleted(&host), vec![vec![IMANI.to_owned()]]);
     assert!(!titles(&table, cx).contains(&"Imani Castell".to_owned()));
     assert_eq!(
@@ -789,12 +790,12 @@ fn one_row_deletes_at_once_and_several_after_asking(cx: &mut TestAppContext) {
     assert!(deleted(&host).is_empty());
     assert_eq!(selected(&table, cx), [ROWAN, SAMI]);
     // Escape doesn't delete them either.
-    keys(cx, "cmd-backspace");
+    keys(cx, "secondary-backspace");
     assert!(drawn(cx, "menu-item-Delete 2 rows"));
     keys(cx, "escape");
     assert!(deleted(&host).is_empty());
     // Confirmed from the menu, they go in one rowsDeleted.
-    keys(cx, "cmd-/");
+    keys(cx, "secondary-/");
     click(cx, "menu-item-Delete");
     assert!(deleted(&host).is_empty(), "asked first");
     click(cx, "menu-item-Delete 2 rows");
@@ -847,7 +848,7 @@ fn delete_empties_a_cell_but_deletes_selected_rows(cx: &mut TestAppContext) {
     table.update(cx, |t, cx| t.focus_cell(ROWAN, ROLE, cx));
     keys(cx, "enter");
     assert!(editing(&table, cx).is_some());
-    keys(cx, "backspace delete cmd-backspace");
+    keys(cx, "backspace delete secondary-backspace");
     assert!(editing(&table, cx).is_some());
     assert!(deleted(&host).is_empty());
     keys(cx, "escape");

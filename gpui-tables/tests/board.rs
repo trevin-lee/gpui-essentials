@@ -2,7 +2,8 @@
 //! across columns with the mouse and a finger, multi-select columns, folding, new cards, opening
 //! and the keyboard, checking the edits it hands the host.
 
-#![cfg(all(target_os = "macos", feature = "gpui"))]
+// The Mac's dev-dependencies switch GPUI's test support on; elsewhere, the test-support feature.
+#![cfg(all(feature = "gpui", any(target_os = "macos", feature = "test-support")))]
 
 mod common;
 
