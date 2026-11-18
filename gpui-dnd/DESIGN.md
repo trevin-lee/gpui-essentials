@@ -751,7 +751,7 @@ All of the geometry and time:
 - the recurring question;
 - the crowd list (its rows call `press_at` with the event held by its start);
 - the agenda (no drags);
-- read-only checks (calendar doesn't call `press_at` for them);
+- read-only checks (calendar calls neither `press_at` nor `begin_at` for them);
 - the double-click and the tap-tap creates.
 
 gpui-dnd only owns the drag's life: when it begins, where the pointer is, the keys and the
