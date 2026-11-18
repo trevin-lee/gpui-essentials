@@ -26,6 +26,8 @@ struct List {
     picked: Rc<RefCell<Vec<SharedString>>>,
     clicks: Rc<Cell<usize>>,
     draws: Rc<Cell<usize>>,
+    /// What each row's on_open_change was told, in order.
+    opens: Rc<RefCell<Vec<(usize, bool)>>>,
 }
 
 impl Render for List {
@@ -34,6 +36,7 @@ impl Render for List {
         let rows = self.focus.iter().enumerate().map(|(i, focus)| {
             let clicks = self.clicks.clone();
             let picked = self.picked.clone();
+            let opens = self.opens.clone();
             ContextMenu::new(
                 ("row", i),
                 Press::new(("press", i))
@@ -44,6 +47,7 @@ impl Render for List {
                     .child(format!("Row {i}"))
                     .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
             )
+            .on_open_change(move |open, _| opens.borrow_mut().push((i, open)))
             .menu(move |_, _| {
                 let picked = picked.clone();
                 PopupMenu::new("menu")
@@ -78,6 +82,7 @@ struct Opened<'a> {
     picked: Rc<RefCell<Vec<SharedString>>>,
     clicks: Rc<Cell<usize>>,
     draws: Rc<Cell<usize>>,
+    opens: Rc<RefCell<Vec<(usize, bool)>>>,
     vcx: &'a mut VisualTestContext,
 }
 
@@ -158,7 +163,8 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
     let picked: Rc<RefCell<Vec<SharedString>>> = Rc::default();
     let clicks = Rc::new(Cell::new(0));
     let draws = Rc::new(Cell::new(0));
-    let (p, c, n) = (picked.clone(), clicks.clone(), draws.clone());
+    let opens: Rc<RefCell<Vec<(usize, bool)>>> = Rc::default();
+    let (p, c, n, os) = (picked.clone(), clicks.clone(), draws.clone(), opens.clone());
     let made = Rc::new(RefCell::new(None));
     let m = made.clone();
     let (_, vcx) = cx.add_window_view(move |window, cx| {
@@ -168,6 +174,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
             picked: p,
             clicks: c,
             draws: n,
+            opens: os,
         });
         *m.borrow_mut() = Some(list.clone());
         Root::new(list, window, cx)
@@ -181,6 +188,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
         picked,
         clicks,
         draws,
+        opens,
         vcx,
     }
 }
@@ -382,4 +390,52 @@ fn nothing_redraws_while_idle(cx: &mut TestAppContext) {
     o.wait(Duration::from_secs(5));
     assert_eq!(o.draws.get(), before, "after a tap");
     assert!(o.menu().is_none());
+}
+
+/// A host is told when a menu opens and closes, by every way it does: a right-click and Escape,
+/// a pick, a press outside, the keys, and a right-click on another row (that row's opens after
+/// this one's closes, so a host counting them never sees none open in between).
+#[gpui::test]
+fn the_host_is_told_when_it_opens_and_closes(cx: &mut TestAppContext) {
+    let mut o = open(cx);
+    let told = |o: &Opened| o.opens.borrow().clone();
+    let at = o.row(1).center();
+    o.right_click(at);
+    assert_eq!(told(&o), [(1, true)]);
+    o.key("escape");
+    assert_eq!(told(&o), [(1, true), (1, false)]);
+    o.opens.borrow_mut().clear();
+
+    o.right_click(at);
+    let copy = o.shown("menu-item-copy").unwrap().center();
+    o.click(copy);
+    assert_eq!(told(&o), [(1, true), (1, false)], "a pick");
+    o.opens.borrow_mut().clear();
+
+    o.right_click(at);
+    o.click(point(px(380.), px(290.)));
+    assert_eq!(told(&o), [(1, true), (1, false)], "a press outside");
+    o.opens.borrow_mut().clear();
+
+    o.focus_row(2);
+    o.key("shift-f10");
+    assert_eq!(told(&o), [(2, true)], "the keys");
+    o.key("escape");
+    o.opens.borrow_mut().clear();
+
+    // Open on one row, then on another: told of both, and never told twice of the same.
+    o.right_click(at);
+    let other = o.row(0).center();
+    o.right_click(other);
+    let t = told(&o);
+    assert!(
+        t.contains(&(1, true)) && t.contains(&(1, false)) && t.contains(&(0, true)),
+        "{t:?}"
+    );
+    assert_eq!(t.len(), 3, "{t:?}");
+    assert!(o.menu().is_some());
+    // Nothing more while it stays open.
+    o.vcx.update(|window, cx| window.draw(cx).clear(cx));
+    o.vcx.run_until_parked();
+    assert_eq!(told(&o).len(), 3);
 }
