@@ -660,7 +660,13 @@ pub(crate) enum Tree {
     List(ListTree),
     Table(TableTree),
     Quote(Vec<Tree>),
-    Callout(gpui::SharedString, Vec<Tree>),
+    /// A callout: its kind's name, its own icon and background colour, and its blocks.
+    Callout {
+        name: gpui::SharedString,
+        icon: Option<gpui::SharedString>,
+        color: Option<gpui::SharedString>,
+        children: Vec<Tree>,
+    },
     /// A toggle: its summary, then its body when open.
     Toggle(bool, Vec<Tree>),
     /// Columns side by side: each one's width and blocks.
@@ -742,7 +748,12 @@ pub(crate) fn tree(
                     .collect::<Option<_>>()?,
             }),
             (K::Blockquote, _) => Tree::Quote(children(block)?),
-            (K::Callout { name }, _) => Tree::Callout(name.clone(), children(block)?),
+            (K::Callout { name, icon, color }, _) => Tree::Callout {
+                name: name.clone(),
+                icon: icon.clone(),
+                color: color.clone(),
+                children: children(block)?,
+            },
             (K::Toggle { open }, _) => {
                 let ids = doc.children(block);
                 // A closed toggle draws only its summary.
@@ -995,12 +1006,43 @@ pub(crate) fn draw(
                 .pb(gap)
                 .into_any_element()
         }
-        Tree::Callout(name, children) => {
+        Tree::Callout {
+            name,
+            icon,
+            color: fill,
+            children,
+        } => {
             let body = children_of(children, place.depth, color, d, window, app);
-            let container = super::surfaces::callout_container(name, app);
+            let mut container = super::surfaces::callout_container(name, app);
+            // Its own colour, drawn for the theme: the background's behind, and the bar in the
+            // same colour's text tone, so the kind's bar doesn't clash with it.
+            let named = |palette: &'static [crate::marks::PaletteColor]| {
+                let fill = fill.as_deref()?;
+                palette.iter().find(|c| c.name.eq_ignore_ascii_case(fill))
+            };
+            if let Some(background) = named(&crate::marks::BACKGROUNDS) {
+                container = container.bg(background.fill(d.dark));
+            }
+            if let Some(bar) = named(&crate::marks::TEXT_COLORS) {
+                container = container.border_color(bar.fill(d.dark));
+            }
+            let content = div().flex_1().min_w_0().children(body);
+            let inner = match icon {
+                Some(icon) => div()
+                    .flex()
+                    .gap(d.body_size * 0.6)
+                    .child(
+                        div()
+                            .flex_none()
+                            .line_height(d.body_line)
+                            .child(icon.clone()),
+                    )
+                    .child(content),
+                None => div().child(content),
+            };
             div()
                 .pb(gap)
-                .child(container.w_full().min_w_0().children(body))
+                .child(container.w_full().min_w_0().child(inner))
                 .into_any_element()
         }
         Tree::Columns(columns) => {

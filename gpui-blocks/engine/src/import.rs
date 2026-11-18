@@ -378,18 +378,28 @@ impl<'a> Reader<'a> {
     /// A blockquote, or a callout when its first line is a registered callout's marker alone
     /// (`> [!NOTE]`), as GitHub and Obsidian write it.
     fn quote(&self, quote: &mdast::Blockquote) -> DetachedBlock {
-        if let Some((name, children)) = self.take_callout_marker(quote) {
+        if let Some((name, (icon, color), children)) = self.take_callout_marker(quote) {
             let mut blocks = self.blocks(&children);
             if blocks.is_empty() {
                 blocks.push(DetachedBlock::paragraph(InlineText::new()));
             }
-            return DetachedBlock::container(BlockKindData::Callout { name }, blocks);
+            return DetachedBlock::container(BlockKindData::Callout { name, icon, color }, blocks);
         }
         DetachedBlock::container(BlockKindData::Blockquote, self.blocks(&quote.children))
     }
 
-    /// The callout's name and its children without the marker, when the quote opens with one.
-    fn take_callout_marker(&self, quote: &mdast::Blockquote) -> Option<(SharedString, Vec<Node>)> {
+    /// The callout's name, its look and its children without the marker, when the quote opens
+    /// with one. The look is a comment on the marker's line (`> [!TIP] <!-- icon:💡 -->`); one
+    /// that isn't a valid look, or has more after it, stays as the callout's first paragraph.
+    #[allow(clippy::type_complexity)]
+    fn take_callout_marker(
+        &self,
+        quote: &mdast::Blockquote,
+    ) -> Option<(
+        SharedString,
+        (Option<SharedString>, Option<SharedString>),
+        Vec<Node>,
+    )> {
         let Some(Node::Paragraph(paragraph)) = quote.children.first() else {
             return None;
         };
@@ -406,12 +416,56 @@ impl<'a> Reader<'a> {
         {
             return None;
         }
+        // A comment after the marker: its look, or else its first paragraph.
+        let commented = rest.is_none()
+            && line.ends_with(' ')
+            && matches!(paragraph.children.get(1), Some(Node::Html(html)) if html.value.starts_with("<!--"));
+        let line = if commented { line.trim_end() } else { line };
         let written = line.strip_prefix("[!")?.strip_suffix(']')?;
         if !self.extensions.is_callout(written) {
             return None;
         }
         let name: SharedString = written.to_ascii_lowercase().into();
         let mut first = paragraph.clone();
+        let mut look = (None, None);
+        if commented {
+            let Some(Node::Html(html)) = paragraph.children.get(1) else {
+                return None;
+            };
+            let parsed = crate::callout::read_callout_look(&html.value);
+            match (parsed, first.children.get(2)) {
+                (Some(parsed), None) => {
+                    look = parsed;
+                    first.children.clear();
+                }
+                (Some(parsed), Some(Node::Break(_))) => {
+                    look = parsed;
+                    first.children.drain(..3);
+                }
+                (Some(parsed), Some(Node::Text(next))) if next.value.starts_with('\n') => {
+                    look = parsed;
+                    let after = next.value[1..].to_string();
+                    first.children.drain(..2);
+                    match first.children.first_mut() {
+                        Some(Node::Text(text)) if !after.is_empty() => text.value = after,
+                        _ => {
+                            first.children.remove(0);
+                        }
+                    }
+                }
+                // Not a look, or more after it on the line: the callout's first paragraph.
+                _ => {
+                    first.children.remove(0);
+                }
+            }
+            let mut children: Vec<Node> = quote.children.clone();
+            if first.children.is_empty() {
+                children.remove(0);
+            } else {
+                children[0] = Node::Paragraph(first);
+            }
+            return Some((name, look, children));
+        }
         match rest {
             Some(rest) => {
                 if let Some(Node::Text(text)) = first.children.first_mut() {
@@ -436,7 +490,7 @@ impl<'a> Reader<'a> {
         } else {
             children[0] = Node::Paragraph(first);
         }
-        Some((name, children))
+        Some((name, look, children))
     }
 
     // Inline content.

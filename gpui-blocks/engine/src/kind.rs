@@ -81,6 +81,10 @@ pub(crate) enum BlockKindData {
     Blockquote,
     Callout {
         name: SharedString,
+        /// Its icon, one emoji, valid (see `callout.rs`).
+        icon: Option<SharedString>,
+        /// Its background, one of `CALLOUT_COLORS`.
+        color: Option<SharedString>,
     },
     Toggle {
         open: bool,

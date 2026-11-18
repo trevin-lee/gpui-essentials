@@ -3499,6 +3499,50 @@ mod tests {
         assert_eq!(found(&editor, cx), (0, None));
     }
 
+    /// A callout's block menu sets its icon and colour, and draws with them.
+    #[gpui::test]
+    fn the_block_menu_sets_a_callouts_icon_and_colour(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx, "> [!NOTE]\n> Read me");
+        let callout = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .root()
+                .children()
+                .next()
+                .unwrap()
+                .id()
+        });
+        editor.update(cx, |e, cx| {
+            e.grip_pressed(callout);
+            e.grip_released(cx);
+        });
+        draw(cx);
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(callout, "callout-icon-0", window, cx)
+        });
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(callout, "callout-color-yellow", window, cx)
+        });
+        draw(cx);
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            "> [!NOTE] <!-- icon:💡 color:yellow -->\n> Read me"
+        );
+        // Not one of the menu's: nothing changes.
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(callout, "callout-color-teal", window, cx)
+        });
+        editor.update_in(cx, |e, window, cx| {
+            e.block_menu_pick(callout, "callout-icon-none", window, cx)
+        });
+        assert_eq!(
+            editor.update(cx, |e, cx| e.markdown(cx)),
+            "> [!NOTE] <!-- color:yellow -->\n> Read me"
+        );
+    }
+
     /// A press on a grip that doesn't drag opens the block menu; its entries turn the block into
     /// a heading, duplicate it and delete it.
     #[gpui::test]
