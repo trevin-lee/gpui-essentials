@@ -374,6 +374,13 @@ made.
   content beside the one selected node, at its size on screen whatever the zoom, on any side,
   lined up at its start, middle or end, 10 points off by default (`ToolbarPlace`). It hides
   while nothing or several are selected and during a drag, and presses on it stay its own.
+- **An edit toolbar for fingers** (`FlowOptions::edit_toolbar`, off by default): Copy, Paste,
+  Duplicate and Delete as buttons beside the one selected node, for a phone or an iPad with no
+  keyboard. They're gpui-core buttons at the touch size (the theme's 44-point target each
+  way), named for VoiceOver, and do what ⌘C, ⌘V, ⌘D and delete do, said as they go. Delete
+  shows only when the node may be deleted. They sit in the node toolbar's place, after a host
+  toolbar's content when there's one, above the node otherwise. Paste reads the clipboard only
+  when pressed, so iOS doesn't show its paste notice as the toolbar draws.
 - **Drag handles** (`Node::drag_handle`, saved as React Flow's `dragHandle`): a node that has
   one moves only by the part its renderer wraps in `NodeContext::drag_handle`, with a grab
   cursor; a press elsewhere on it selects it and leaves the rest to the renderer (text to

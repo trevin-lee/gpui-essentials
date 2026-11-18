@@ -205,6 +205,11 @@ pub struct FlowOptions {
     /// While nodes are dragged, they line up with the edges and middles of the nodes near
     /// them, and guides show what with. Off by default, as in React Flow.
     pub alignment_guides: bool,
+    /// Copy, Paste, Duplicate and Delete as buttons beside the one selected node, for a person
+    /// with no keyboard (a phone, an iPad): finger-sized (the theme's touch target, 44 points)
+    /// and named for VoiceOver. They sit in the node toolbar's place (after a host toolbar's
+    /// content, when there's one; above the node otherwise). Off by default.
+    pub edit_toolbar: bool,
     /// How near (in points on screen) a dragged node must come to lining up for it to.
     pub guide_reach: f32,
     /// How far (in points on screen) a pressed node must move before it counts as a drag.
@@ -268,6 +273,7 @@ impl Default for FlowOptions {
             layout: Layout::Free,
             avoid_nodes: false,
             alignment_guides: false,
+            edit_toolbar: false,
             guide_reach: 6.,
             node_drag_threshold: 1.,
             transition: Duration::ZERO,
@@ -1140,18 +1146,41 @@ impl Flow {
         self
     }
 
-    /// The host's toolbar for the one selected node, placed beside it in the pane.
-    fn render_node_toolbar(&self, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
-        let (place, render) = self.node_toolbar.clone()?;
-        if self.drag.is_some() {
+    /// The host's toolbar for the one selected node, and the edit toolbar when it's on
+    /// ([`FlowOptions::edit_toolbar`]), placed beside it in the pane.
+    fn render_node_toolbar(
+        &self,
+        this: &WeakEntity<Flow>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let host = self.node_toolbar.clone();
+        let edit = self.options.edit_toolbar;
+        if (host.is_none() && !edit) || self.drag.is_some() {
             return None;
         }
+        let place = host
+            .as_ref()
+            .map_or_else(ToolbarPlace::default, |(p, _)| *p);
         let mut selected = self.nodes.iter().filter(|n| n.selected && self.shown(n));
         let node = selected.next()?;
         if selected.next().is_some() {
             return None;
         }
-        let content = render(node, self, window, cx)?;
+        let from_host = host.and_then(|(_, render)| render(node, self, window, cx));
+        let buttons = edit.then(|| self.edit_buttons(node, this, self.colors(cx)));
+        let content = match (from_host, buttons) {
+            (None, None) => return None,
+            (Some(h), None) => h,
+            (None, Some(b)) => b,
+            (Some(h), Some(b)) => div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(h)
+                .child(b)
+                .into_any_element(),
+        };
         let r = self.node_rect(&node.id)?;
         let v = self.viewport;
         let (a, b) = (v.to_pane(xy(r.x, r.y)), v.to_pane(xy(r.x + r.w, r.y + r.h)));
@@ -6821,30 +6850,9 @@ impl Render for Flow {
             .track_focus(&self.focus)
             .key_context(CONTEXT)
             .on_action(cx.listener(|flow, _: &DeleteSelected, _, cx| {
-                let before = (flow.nodes.len(), flow.edges.len());
-                if !(flow.options.deletable
-                    && (flow.delete_selected(cx) || flow.delete_focused(cx)))
-                {
+                if !flow.delete_and_say(cx) {
                     cx.propagate();
-                    return;
                 }
-                let gone = (
-                    before.0.saturating_sub(flow.nodes.len()),
-                    before.1.saturating_sub(flow.edges.len()),
-                );
-                let count = |n: usize, one: &str| {
-                    if n == 1 {
-                        format!("1 {one}")
-                    } else {
-                        format!("{n} {one}s")
-                    }
-                };
-                let words = match gone {
-                    (0, e) => format!("Deleted {}", count(e, "edge")),
-                    (n, 0) => format!("Deleted {}", count(n, "node")),
-                    (n, e) => format!("Deleted {} and {}", count(n, "node"), count(e, "edge")),
-                };
-                flow.announce(words, cx);
             }))
             .on_action(cx.listener(|flow, _: &FocusPrevious, _, cx| {
                 if !flow.move_keyboard(false, cx) {
@@ -7050,7 +7058,7 @@ impl Render for Flow {
             .children(ghost)
             .when(self.minimap, |d| d.child(self.render_minimap(colors, cx)))
             .when(self.controls, |d| d.child(self.render_controls(colors, cx)))
-            .children(self.render_node_toolbar(window, cx))
+            .children(self.render_node_toolbar(&this, window, cx))
             .children(panels);
 
         // The pane takes a host's palette items (gpui-dnd's drags): the ghost above follows

@@ -4,10 +4,16 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use gpui::{ClipboardItem, Context};
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+    AnyElement, ClipboardItem, Context, InteractiveElement as _, IntoElement as _,
+    ParentElement as _, Styled as _, WeakEntity, div, px,
+};
+use gpui_core::{Button, ButtonVariants as _, ControlSize, Sizable as _};
 
 use super::{Flow, sanitize_edge, sanitize_node};
 use crate::json::{self, DocLayout, Document};
+use crate::theme::FlowColors;
 use crate::types::*;
 
 /// How far each paste of the same thing, and each duplicate, lands from the last (flow units).
@@ -386,5 +392,68 @@ impl Flow {
         self.selection_changed(cx);
         cx.notify();
         ids
+    }
+
+    /// Delete, as the key does: the selected nodes and edges (or else the one the keyboard is
+    /// on), said as it goes. Says whether anything went.
+    pub(super) fn delete_and_say(&mut self, cx: &mut Context<Self>) -> bool {
+        let before = (self.nodes.len(), self.edges.len());
+        if !(self.options.deletable && (self.delete_selected(cx) || self.delete_focused(cx))) {
+            return false;
+        }
+        let gone = (
+            before.0.saturating_sub(self.nodes.len()),
+            before.1.saturating_sub(self.edges.len()),
+        );
+        let words = match gone {
+            (0, e) => format!("Deleted {}", count(e, "edge")),
+            (n, 0) => format!("Deleted {}", count(n, "node")),
+            (n, e) => format!("Deleted {} and {}", count(n, "node"), count(e, "edge")),
+        };
+        self.announce(words, cx);
+        true
+    }
+
+    /// The edit toolbar's buttons for the selected node ([`FlowOptions::edit_toolbar`]):
+    /// Copy, Paste, Duplicate, and Delete when it may be deleted.
+    pub(super) fn edit_buttons(
+        &self,
+        node: &Node,
+        this: &WeakEntity<Flow>,
+        colors: FlowColors,
+    ) -> AnyElement {
+        let deletable = self.options.deletable && node.deletable.unwrap_or(true);
+        let button = |id: &'static str,
+                      label: &'static str,
+                      act: fn(&mut Flow, &mut Context<Flow>) -> bool| {
+            let this = this.clone();
+            Button::new(id)
+                .label(label)
+                .ghost()
+                .with_size(ControlSize::Touch)
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    let _ = this.update(cx, act);
+                })
+        };
+        div()
+            .debug_selector(|| "flow-edit-toolbar".into())
+            .flex()
+            .items_center()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(colors.panel_border)
+            .bg(colors.panel)
+            .child(button("flow-copy", "Copy", Flow::copy_selected))
+            .child(button("flow-paste", "Paste", Flow::paste))
+            .child(button(
+                "flow-duplicate",
+                "Duplicate",
+                Flow::duplicate_selected,
+            ))
+            .when(deletable, |d| {
+                d.child(button("flow-delete", "Delete", Flow::delete_and_say))
+            })
+            .into_any_element()
     }
 }
