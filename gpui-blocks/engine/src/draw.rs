@@ -626,6 +626,9 @@ pub(crate) struct DrawCx<'a> {
     pub(crate) code: &'a CodeLook,
     /// Tables' corners: the theme's `radius_md`.
     pub(crate) radius: Pixels,
+    /// The width the page's blocks were last laid out in (`None` before the first frame): a
+    /// columns block decides from it whether its columns fit side by side.
+    pub(crate) width: Option<Pixels>,
 }
 
 /// How code blocks look: GPUI Kit's code block, in the editor's theme.
@@ -1001,26 +1004,46 @@ pub(crate) fn draw(
                 .into_any_element()
         }
         Tree::Columns(columns) => {
-            // Each column grows to its share of the row, and is never narrower than
-            // MIN_COLUMN: where the row has no room for them all (a phone), they wrap, so each
-            // takes the whole width, one under another, in order.
-            let columns = columns.iter().map(|(width, children)| {
-                let body = children_of(children, place.depth, color, d, window, app);
-                let mut column = div().flex().flex_col().min_w(px(MIN_COLUMN)).children(body);
-                column.style().flex_basis = Some(gpui::relative(0.).into());
-                column.style().flex_grow = Some(width.max(0.01));
-                column.style().flex_shrink = Some(1.);
-                column.into_any_element()
-            });
-            div()
-                .w_full()
-                .flex()
-                .flex_wrap()
-                .gap_x(d.body_size * 2.)
-                .gap_y(d.paragraph_gap)
-                .pb(gap)
-                .children(columns)
-                .into_any_element()
+            let gap_x = column_gap(d.body_size);
+            let shares: Vec<f32> = columns.iter().map(|(w, _)| w.max(0.01)).collect();
+            if columns_fit(d.width, gap_x, &shares) {
+                // Side by side, each its share of the row: the row shrinks them all alike.
+                let columns = columns.iter().zip(&shares).map(|((_, children), share)| {
+                    let body = children_of(children, place.depth, color, d, window, app);
+                    let mut column = div().flex().flex_col().min_w_0().children(body);
+                    column.style().flex_basis = Some(gpui::relative(0.).into());
+                    column.style().flex_grow = Some(*share);
+                    column.style().flex_shrink = Some(1.);
+                    column.into_any_element()
+                });
+                div()
+                    .w_full()
+                    .flex()
+                    .gap_x(gap_x)
+                    .pb(gap)
+                    .children(columns)
+                    .into_any_element()
+            } else {
+                // No room for them all (a phone): every column across the whole width, one
+                // under another, in order.
+                let columns = columns.iter().map(|(_, children)| {
+                    let body = children_of(children, place.depth, color, d, window, app);
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .children(body)
+                        .into_any_element()
+                });
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap_y(d.paragraph_gap)
+                    .pb(gap)
+                    .children(columns)
+                    .into_any_element()
+            }
         }
         Tree::Toggle(open, children) => {
             let body = children_of(children, place.depth, color, d, window, app);
@@ -1033,8 +1056,34 @@ pub(crate) fn draw(
     }
 }
 
-/// The narrowest a column is drawn: columns wrap, one under another, rather than be narrower.
-const MIN_COLUMN: f32 = 200.;
+/// The narrowest a column is drawn side by side: a row with no room for all its columns this
+/// wide stacks them all, one under another, rather than wrap some.
+pub(crate) const MIN_COLUMN: f32 = 96.;
+
+/// Narrower than this, a page (a phone's) stacks every row's columns.
+pub(crate) const STACK_BELOW: f32 = 480.;
+
+/// The room between two columns of a row.
+pub(crate) fn column_gap(body_size: Pixels) -> Pixels {
+    body_size * 1.5
+}
+
+/// Whether columns of these shares fit side by side in a row `width` wide (`None`: not laid
+/// out yet, so side by side): each gets its share of what the gaps leave, and the narrowest
+/// must be at least [`MIN_COLUMN`].
+pub(crate) fn columns_fit(width: Option<Pixels>, gap: Pixels, shares: &[f32]) -> bool {
+    let Some(width) = width else {
+        return true;
+    };
+    // A phone's page: columns always stack, as they do in Notion's app.
+    if width < px(STACK_BELOW) {
+        return false;
+    }
+    let sum: f32 = shares.iter().sum();
+    let room = f32::from(width) - f32::from(gap) * shares.len().saturating_sub(1) as f32;
+    let narrowest = shares.iter().copied().fold(f32::INFINITY, f32::min);
+    sum > 0. && room * narrowest / sum >= MIN_COLUMN
+}
 
 /// A container's blocks, each placed among the others.
 pub(crate) fn children_of(
@@ -1353,4 +1402,27 @@ fn code_element(
         .relative();
     gpui::Refineable::refine(block.style(), &d.code.refinement);
     block.child(leaf).children(label).into_any_element()
+}
+
+#[cfg(test)]
+mod column_fit_tests {
+    use super::*;
+
+    #[test]
+    fn columns_fit_until_the_narrowest_is_under_the_minimum() {
+        let gap = column_gap(px(16.));
+        // A host app's page column, about 605 pt: three, four and five columns fit.
+        for shares in [vec![0.4, 0.3, 0.3], vec![0.25; 4], vec![0.2; 5]] {
+            assert!(columns_fit(Some(px(605.)), gap, &shares), "{shares:?}");
+        }
+        // A phone's page, about 340 pt: stacked, even two even columns.
+        assert!(!columns_fit(Some(px(340.)), gap, &[0.5, 0.5]));
+        // Room for two at 500, not for five.
+        assert!(columns_fit(Some(px(500.)), gap, &[0.5, 0.5]));
+        assert!(!columns_fit(Some(px(500.)), gap, &[0.2; 5]));
+        // A very lopsided row stacks sooner.
+        assert!(!columns_fit(Some(px(605.)), gap, &[0.9, 0.1]));
+        // Not laid out yet: side by side.
+        assert!(columns_fit(None, gap, &[0.2; 5]));
+    }
 }
