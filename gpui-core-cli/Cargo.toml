@@ -1,0 +1,22 @@
+[package]
+name = "gpui-core-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "`gpui-core add`: copies gpui-core's components into your crate, shadcn's way."
+keywords = ["gpui", "ui", "components", "cli"]
+categories = ["command-line-utilities", "gui"]
+
+[[bin]]
+name = "gpui-core"
+path = "src/main.rs"
+
+[dependencies]
+# Rust's own lexer and parser, to rewrite a copied file's paths, actions and key contexts in
+# its code (not in strings that happen to say `crate::`), and to check the result parses.
+# span-locations: each token's place in the file, so the rewrite edits the text in place and
+# keeps the comments and formatting that a reprint would lose.
+proc-macro2 = { version = "1.0.106", default-features = false, features = ["span-locations"] }
+syn = { version = "2.0.117", default-features = false, features = ["full", "parsing", "printing"] }
