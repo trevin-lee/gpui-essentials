@@ -185,6 +185,9 @@ pub fn init(cx: &mut App) {
         Theme::set(Theme::dark(), cx);
     }
     root::init(cx);
+    // KaTeX's faces, each a family of its own, for typeset math.
+    #[cfg(feature = "math")]
+    let _ = cx.text_system().add_fonts(text::math::fonts());
     accordion::init(cx);
     segmented::init(cx);
     split_view::init(cx);

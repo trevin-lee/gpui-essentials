@@ -374,6 +374,7 @@ fn marks(mark: &TextMark, style: &ParagraphStyle) -> Marks {
                     .filter(|c| c.a > 0.)
                     .map(|c| readable_on(c, style.color))
             }),
+        ..Marks::default()
     }
 }
 

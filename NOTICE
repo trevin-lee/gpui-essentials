@@ -35,6 +35,25 @@ licensed under the ISC License, some derived from Feather
 (https://feathericons.com), Copyright 2013-2026 Cole Bemis, licensed under the
 MIT License. See gpui-core/assets/lucide/LICENSE.
 
+third_party/katex-native
+------------------------
+
+third_party/katex-native is katex-native 0.1.1
+(https://github.com/garlab/katex-native), Copyright 2026 Anthony Garcia,
+licensed under the MIT License (third_party/katex-native/LICENSE, which also
+carries the notice of KaTeX's stylesheet, Copyright Khan Academy and other
+contributors, MIT), changed here: no raster feature, and only the font faces
+gpui-core draws. gpui-core's math feature uses it, with katex-rs 0.3.0
+(https://github.com/katex-rs/katex-rs, MIT) from crates.io.
+
+Its fonts in third_party/katex-native/fonts are KaTeX's
+(https://github.com/KaTeX/KaTeX), Copyright 2009-2010 Design Science, Inc. and
+2014-2018 Khan Academy, licensed under the SIL Open Font License, Version 1.1
+(fonts/OFL.txt), with Reserved Font Names KaTeX_AMS, KaTeX_Caligraphic,
+KaTeX_Main, KaTeX_Math, KaTeX_Size1 to KaTeX_Size4 and others. They are
+modified (renamed per face, by fonts/rename.py) and so are named "GPUI Math …",
+not KaTeX.
+
 gpui-agents
 -----------
 
