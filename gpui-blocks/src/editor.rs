@@ -1946,14 +1946,18 @@ impl Editor {
     }
 
     /// ⌘⇧M: a comment on the selection, as the format bar's Comment asks for one. The key is
-    /// the editor's when it takes comments (the app's own ⌘⇧M doesn't run too).
+    /// the editor's when it takes comments and there's text to anchor to (the app's own ⌘⇧M
+    /// doesn't run too); otherwise it goes on to the app.
     fn comment_by_key(&mut self, cx: &mut Context<Self>) {
         if !self.comments {
             cx.propagate();
             return;
         }
-        if let Some((block, quote)) = self.selection_anchor(cx) {
-            cx.emit(EditorEvent::CommentRequested { block, quote });
+        match self.selection_anchor(cx) {
+            Some((block, quote)) => cx.emit(EditorEvent::CommentRequested { block, quote }),
+            // Whole blocks selected, with no text to anchor to: the app's own ⌘⇧M (a comment
+            // on the page, say) has it.
+            None => cx.propagate(),
         }
     }
 
@@ -3287,6 +3291,105 @@ mod tests {
         cx.update(|window, cx| editor.update(cx, |e, cx| e.focus(window, cx)));
         draw(cx);
         (editor, cx)
+    }
+
+    /// A page around the editor with its own ⌘⇧M, as an app has: it hears the key only when
+    /// the editor passes it on.
+    struct Page {
+        editor: Entity<Editor>,
+        heard: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl gpui::Render for Page {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::{InteractiveElement as _, ParentElement as _, Styled as _};
+            let heard = self.heard.clone();
+            gpui::div()
+                .size_full()
+                .on_key_down(move |e: &gpui::KeyDownEvent, _, cx| {
+                    let m = &e.keystroke.modifiers;
+                    if e.keystroke.key == "m" && m.shift && m.secondary(cx) {
+                        heard.set(heard.get() + 1);
+                    }
+                })
+                .child(self.editor.clone())
+        }
+    }
+
+    /// ⌘⇧M with the caret in text is the editor's (a comment on it); with whole blocks
+    /// selected, which have no text to anchor to, it goes on to the app.
+    #[gpui::test]
+    fn the_comment_key_is_the_editors_only_with_text_to_anchor_to(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_core::init(cx);
+            crate::init(cx);
+        });
+        let heard: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
+        let h = heard.clone();
+        let (page, cx) = cx.add_window_view(move |window, cx| {
+            use gpui::AppContext as _;
+            let editor = cx.new(|cx| {
+                Editor::with_options(
+                    "Ship the beta\n\nWrite the notes",
+                    super::Options::default().comments(),
+                    window,
+                    cx,
+                )
+            });
+            Page { editor, heard: h }
+        });
+        let editor = page.read_with(cx, |p, _| p.editor.clone());
+        let asked: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
+        let a = asked.clone();
+        cx.update(|window, cx| {
+            cx.subscribe(&editor, move |_, e: &super::EditorEvent, _| {
+                if matches!(e, super::EditorEvent::CommentRequested { .. }) {
+                    a.set(a.get() + 1);
+                }
+            })
+            .detach();
+            editor.update(cx, |e, cx| e.focus(window, cx));
+        });
+        draw(cx);
+        let ids = editor.update(cx, |e, cx| {
+            e.state()
+                .read(cx)
+                .model()
+                .document()
+                .leaves()
+                .map(|l| l.id())
+                .collect::<Vec<BlockId>>()
+        });
+        // The caret in the first line: the editor's.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let _ = s.set_selection(BlockSelection::caret(BlockPosition::new(ids[0], 2)), cx);
+            })
+        });
+        draw(cx);
+        cx.simulate_keystrokes("secondary-shift-m");
+        draw(cx);
+        assert_eq!((asked.get(), heard.get()), (1, 0));
+        // Both lines selected as blocks: passed on to the page.
+        editor.update(cx, |e, cx| {
+            e.state().update(cx, |s, cx| {
+                let _ = s.set_selection(
+                    BlockSelection::Blocks {
+                        anchor: ids[0],
+                        head: ids[1],
+                    },
+                    cx,
+                );
+            })
+        });
+        draw(cx);
+        cx.simulate_keystrokes("secondary-shift-m");
+        draw(cx);
+        assert_eq!((asked.get(), heard.get()), (1, 1));
     }
 
     /// What a click does, by keyboard: ⌘/ opens the block menu, ⌘↵ checks a to-do and folds a
