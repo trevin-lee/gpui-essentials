@@ -267,3 +267,43 @@ fn a_long_palette_scrolls_and_keeps_the_highlight_in_view(cx: &mut TestAppContex
         );
     }
 }
+
+/// A palette's field stays put as what's typed shrinks its list: it's anchored at its top, a
+/// fifth of the way down the window, not in the middle.
+#[gpui::test]
+fn the_field_stays_put_as_the_list_shrinks(cx: &mut TestAppContext) {
+    struct Long;
+    impl Render for Long {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(CommandDialog::new("long").open(true).group(
+                    "Pages",
+                    (0..40).map(|i| PopupMenuItem::new(format!("c{i}"), format!("Page {i}"))),
+                ))
+        }
+    }
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let v = cx.new(|_| Long);
+        Root::new(v, window, cx)
+    });
+    vcx.simulate_resize(size(px(800.), px(600.)));
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    let before = vcx.debug_bounds("picker-field").expect("the field");
+    assert!(
+        before.top() <= px(600. * 0.18 + 2.),
+        "near the top, not the middle: {before:?}"
+    );
+    vcx.simulate_input("Page 3");
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    let after = vcx.debug_bounds("picker-field").expect("the field");
+    assert_eq!(
+        after.top(),
+        before.top(),
+        "the field moved as the list shrank"
+    );
+}
