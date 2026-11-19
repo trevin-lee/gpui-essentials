@@ -60,7 +60,9 @@ pub struct CardColors {
     pub popover: Hsla,
     /// A code block's ground and its text colours.
     pub code: CodeColors,
-    /// Chart series, picked from the middle out as OpenUI's default palette is.
+    /// Chart series' colours, taken in order (a pie's slices, a bar chart's series), and round
+    /// again a shade lighter after the last. The default is gpui-core's theme's five chart
+    /// colours, distinct hues each 3:1 or more against the card.
     pub chart: Vec<Hsla>,
     /// A rising metric and a falling one.
     pub up: Hsla,
@@ -197,11 +199,12 @@ fn alpha(c: Hsla, a: f32) -> Hsla {
     Hsla { a, ..c }
 }
 
-/// OpenUI's default chart palette ("ocean"), dark to light.
-const OCEAN: [u32; 11] = [
-    0x0d47a1, 0x1565c0, 0x1976d2, 0x1e88e5, 0x2196f3, 0x42a5f5, 0x64b5f6, 0x90caf9, 0xbbdefb,
-    0xe3f2fd, 0xeff8ff,
-];
+/// A gpui-core theme's chart colours, `chart_1` to `chart_5`: distinct hues for categories,
+/// where OpenUI's own default ("ocean", eleven blues) makes neighbouring slices hard to tell
+/// apart.
+fn chart_colors(t: &gpui_core::Theme) -> Vec<Hsla> {
+    (0..5).map(|i| t.chart(i)).collect()
+}
 
 /// VS Code's Dark+ colours, which OpenUI's code block uses in either theme.
 fn code_colors() -> CodeColors {
@@ -279,7 +282,7 @@ impl CardTheme {
                 overlay: hexa(0x00000099),
                 popover: hex(0x1f1f23),
                 code: code_colors(),
-                chart: OCEAN.iter().map(|c| hex(*c)).collect(),
+                chart: chart_colors(&gpui_core::Theme::dark()),
                 up: hex(0x4ade80),
                 down: hex(0xf87171),
             },
@@ -331,7 +334,7 @@ impl CardTheme {
                 overlay: hexa(0x00000066),
                 popover: hex(0xffffff),
                 code: code_colors(),
-                chart: OCEAN.iter().map(|c| hex(*c)).collect(),
+                chart: chart_colors(&gpui_core::Theme::light()),
                 up: hex(0x16a34a),
                 down: hex(0xdc2626),
             },
@@ -432,30 +435,36 @@ impl CardTheme {
         rems(css / self.rem_base.max(1.))
     }
 
-    /// `n` chart colours: one from the middle, two either side of it, more around it, as
-    /// OpenUI's palette picks them; a theme with no chart colours draws with its text colour.
+    /// `n` chart colours: the palette's in order, then round again, each round a shade nearer
+    /// the card's ground, so a sixth slice beside the first isn't its twin. A theme with no
+    /// chart colours draws with its text colour.
     pub fn series_colors(&self, n: usize) -> Vec<Hsla> {
         let p = &self.colors.chart;
         if p.is_empty() {
             return vec![self.colors.text; n];
         }
-        let len = p.len() as isize;
-        let mid = len / 2;
-        match n {
-            0 => Vec::new(),
-            1 => vec![p[mid as usize]],
-            2 => vec![
-                p[(mid - 1).max(0) as usize],
-                p[(mid + 1).min(len - 1) as usize],
-            ],
-            _ => {
-                let offset = (n as isize) / 2;
-                (0..n as isize)
-                    .map(|i| p[((mid + i - offset) % len + len) as usize % len as usize])
-                    .collect()
-            }
-        }
+        (0..n)
+            .map(|i| {
+                let c = p[i % p.len()];
+                match i / p.len() {
+                    0 => c,
+                    round => mix(c, self.colors.background, (0.3 * round as f32).min(0.6)),
+                }
+            })
+            .collect()
     }
+}
+
+/// `a` taken `by` of the way to `b`, in sRGB.
+fn mix(a: Hsla, b: Hsla, by: f32) -> Hsla {
+    let (a, b) = (gpui::Rgba::from(a), gpui::Rgba::from(b));
+    gpui::Rgba {
+        r: a.r + (b.r - a.r) * by,
+        g: a.g + (b.g - a.g) * by,
+        b: a.b + (b.b - a.b) * by,
+        a: a.a,
+    }
+    .into()
 }
 
 impl Default for CardTheme {
@@ -468,13 +477,34 @@ impl Default for CardTheme {
 mod tests {
     use super::*;
 
+    /// WCAG 2.2's contrast ratio of two opaque colours.
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let lum = |c: Hsla| {
+            let c = gpui::Rgba::from(c);
+            let f = |v: f32| {
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
     #[test]
-    fn series_colors_come_from_the_middle_out() {
+    fn series_colors_are_the_palettes_in_order_then_lighter() {
         let t = CardTheme::dark();
-        assert_eq!(t.series_colors(1), vec![t.colors.chart[5]]);
-        assert_eq!(
-            t.series_colors(2),
-            vec![t.colors.chart[4], t.colors.chart[6]]
+        let p = &t.colors.chart;
+        assert_eq!(t.series_colors(1), vec![p[0]]);
+        assert_eq!(t.series_colors(3), p[..3].to_vec());
+        let six = t.series_colors(6);
+        assert_eq!(six[..5], p[..]);
+        assert_ne!(
+            six[5], p[0],
+            "a sixth slice beside the first isn't its twin"
         );
         assert_eq!(
             t.series_colors(30).len(),
@@ -489,6 +519,33 @@ mod tests {
             ..t.clone()
         };
         assert_eq!(bare.series_colors(2), vec![t.colors.text; 2]);
+    }
+
+    /// The default palette's colours are distinct hues, each 3:1 or more against the card in
+    /// both themes (WCAG 1.4.11 for a chart's marks), and no two neighbours alike.
+    #[test]
+    fn the_default_palette_is_distinct_and_legible_in_both_themes() {
+        for t in [CardTheme::dark(), CardTheme::light()] {
+            let p = &t.colors.chart;
+            assert_eq!(p.len(), 5);
+            for c in p {
+                let ratio = contrast(*c, t.colors.background);
+                assert!(
+                    ratio >= 3.,
+                    "{c:?} on {:?}: {ratio:.2}",
+                    t.colors.background
+                );
+            }
+            for (i, a) in p.iter().enumerate() {
+                for b in &p[i + 1..] {
+                    let dh = (a.h - b.h).abs().min(1. - (a.h - b.h).abs());
+                    assert!(
+                        dh > 0.05 || (a.l - b.l).abs() > 0.2,
+                        "{a:?} and {b:?} too alike"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

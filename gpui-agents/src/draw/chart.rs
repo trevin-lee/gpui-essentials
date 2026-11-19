@@ -710,7 +710,14 @@ impl Draw<'_, '_> {
                 }
                 let line_h = label.size * 1.25;
                 let c = bounds.center();
-                let r = (bounds.size.width.min(bounds.size.height) / 2. - line_h * 2.).max(px(10.));
+                // Small enough that the labels at the sides fit beside it whole.
+                let sides: Vec<(f32, Pixels)> = b
+                    .labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| (spoke(i, n).cos(), label.width(name, window)))
+                    .collect();
+                let r = radar_radius(bounds.size, line_h, &sides);
                 let hi = b
                     .series
                     .iter()
@@ -718,8 +725,7 @@ impl Draw<'_, '_> {
                     .fold(0f64, |a, v| a.max(*v))
                     .max(f64::EPSILON);
                 let at = |i: usize, f: f32| {
-                    let a =
-                        std::f32::consts::TAU * i as f32 / n as f32 - std::f32::consts::FRAC_PI_2;
+                    let a = spoke(i, n);
                     point(c.x + r * f * a.cos(), c.y + r * f * a.sin())
                 };
                 for level in 1..=4 {
@@ -1111,6 +1117,29 @@ impl Draw<'_, '_> {
     }
 }
 
+/// The angle of a radar's `i`th spoke of `n`, from the top, clockwise.
+fn spoke(i: usize, n: usize) -> f32 {
+    std::f32::consts::TAU * i as f32 / n as f32 - std::f32::consts::FRAC_PI_2
+}
+
+/// How far out a radar's outer ring is in a picture of `size`: as far as the picture's height
+/// takes (with a line for the labels above and below), but no further than lets each label at
+/// the side (by its spoke's cosine and its width) sit whole beside the ring, its anchor 1.12 of
+/// the radius out. At least a fifth of the picture, where labels that long are cut short.
+fn radar_radius(size: gpui::Size<Pixels>, line_h: Pixels, labels: &[(f32, Pixels)]) -> Pixels {
+    let gap = px(4.);
+    let mut r = size.width.min(size.height) / 2. - line_h * 2.;
+    for &(cos, w) in labels {
+        let cos = cos.abs();
+        // Top and bottom labels are centred on their spoke.
+        if cos < 0.05 {
+            continue;
+        }
+        r = r.min((size.width / 2. - gap - w) / (1.12 * cos));
+    }
+    r.max(size.width.min(size.height) * 0.2).max(px(10.))
+}
+
 /// A point on a circle, `turn` of the way round from the top, clockwise.
 fn arc(c: Point<Pixels>, r: Pixels, turn: f32) -> Point<Pixels> {
     let a = turn * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
@@ -1119,6 +1148,39 @@ fn arc(c: Point<Pixels>, r: Pixels, turn: f32) -> Point<Pixels> {
 
 #[cfg(test)]
 mod tests {
+    /// A radar at a phone's width (393 points) leaves its side labels room to be whole: the
+    /// ring shrinks for "Mentorship" rather than cutting it to "Mentor…".
+    #[test]
+    fn a_radars_side_labels_fit_beside_its_ring() {
+        use gpui::{px, size};
+        let picture = size(px(330.), px(280.));
+        let line_h = px(15.);
+        // Five spokes, the long label at the right (spoke 1 of 5) and one at the left.
+        let n = 5;
+        let widths = [px(40.), px(84.), px(50.), px(50.), px(70.)];
+        let labels: Vec<(f32, gpui::Pixels)> = widths
+            .iter()
+            .enumerate()
+            .map(|(i, w)| (super::spoke(i, n).cos(), *w))
+            .collect();
+        let r = super::radar_radius(picture, line_h, &labels);
+        for (i, w) in widths.iter().enumerate() {
+            let x = (r * 1.12 * super::spoke(i, n).cos()).abs();
+            if super::spoke(i, n).cos().abs() >= 0.05 {
+                assert!(
+                    x + *w <= picture.width / 2.,
+                    "label {i} ({w:?}) runs past the side: ring {r:?}"
+                );
+            }
+        }
+        // With short labels the ring is as big as the height lets it be.
+        let short: Vec<(f32, gpui::Pixels)> = labels.iter().map(|(c, _)| (*c, px(10.))).collect();
+        assert_eq!(
+            super::radar_radius(picture, line_h, &short),
+            picture.height / 2. - line_h * 2.
+        );
+    }
+
     use super::*;
     // The built-in #[test], not GPUI's, which gpui::* brings in.
     use std::prelude::v1::test;
