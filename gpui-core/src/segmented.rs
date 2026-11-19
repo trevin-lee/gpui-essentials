@@ -69,6 +69,10 @@ struct Segment {
 
 /// Options side by side, one on. Hand it the one that's on with [`selected`](Self::selected)
 /// and change it in [`on_change`](Self::on_change).
+///
+/// It's as wide as its labels, whole, wherever it sits (beside a spacer in a toolbar, say).
+/// Given a width (`w(…)`, `w_full()`) or a share of a row (`flex_1()`), its options split it
+/// equally instead, and a label too long for its share is cut short.
 #[derive(IntoElement)]
 pub struct SegmentedControl {
     id: ElementId,
@@ -230,6 +234,10 @@ impl RenderOnce for SegmentedControl {
         let next = mover(|e, at| step(e, at, 1));
         let first = mover(|e, _| e.iter().position(|x| *x));
         let last = mover(|e, _| e.iter().rposition(|x| *x));
+        // Given a width or a share of a row, the options split it; otherwise each is as wide as
+        // its label.
+        let stretch =
+            self.style.size.width.is_some() || self.style.flex_grow.is_some_and(|g| g > 0.);
         let height = if self.touch {
             theme.touch_target.into()
         } else {
@@ -246,8 +254,8 @@ impl RenderOnce for SegmentedControl {
             .on_action(move |_: &Last, w, cx| last(w, cx))
             .flex()
             .items_center()
-            .min_w_0()
-            .max_w_full()
+            .when(stretch, |d| d.min_w_0().max_w_full())
+            .when(!stretch, |d| d.flex_none())
             .h(height)
             .p(css(3.))
             .gap(css(2.))
@@ -273,8 +281,8 @@ impl RenderOnce for SegmentedControl {
                 move || format!("segment-{id}")
             })
             .flex()
-            .flex_1()
-            .min_w_0()
+            .when(stretch, |p| p.flex_1().min_w_0())
+            .when(!stretch, |p| p.flex_none())
             .h_full()
             .items_center()
             .justify_center()
@@ -299,7 +307,7 @@ impl RenderOnce for SegmentedControl {
             })
             .child(
                 div()
-                    .min_w_0()
+                    .when(stretch, |d| d.min_w_0())
                     .overflow_hidden()
                     .text_ellipsis()
                     .whitespace_nowrap()

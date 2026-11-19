@@ -274,6 +274,7 @@ pub fn components() -> Vec<Component> {
                 view("Default", "default"),
                 demo("With icons", "icons"),
                 demo("Disabled", "disabled"),
+                demo("Its labels' width", "toolbar"),
             ],
         },
         component! {

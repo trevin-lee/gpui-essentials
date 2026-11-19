@@ -41,6 +41,8 @@ impl Render for Host {
                     .debug_selector(|| "box".into())
                     .child(
                         SegmentedControl::new("theme")
+                            // The box's width, split between the options.
+                            .w_full()
                             .accessibility_label("Theme")
                             .segment("system", "System")
                             .segment("light", "Light")
