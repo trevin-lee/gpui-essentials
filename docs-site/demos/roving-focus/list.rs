@@ -34,9 +34,18 @@ impl Render for Example {
                     .px(rems(0.75))
                     .py(rems(0.5))
                     .rounded(theme.radius_md())
-                    .bg(if chosen { theme.accent } else { transparent_black() })
+                    .bg(if chosen {
+                        theme.accent
+                    } else {
+                        transparent_black()
+                    })
                     .child(div().text_sm().font_weight(FontWeight::MEDIUM).child(name))
-                    .child(div().text_xs().text_color(theme.muted_foreground).child(mail))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(mail),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open = id.into();
                         cx.notify();

@@ -51,27 +51,30 @@ impl Render for Example {
             if parent && !open {
                 folded_at = Some(level);
             }
-            let chevron = if open { IconName::ChevronDown } else { IconName::ChevronRight };
-            tree = tree.tree_row(
-                id,
-                name,
-                level,
-                parent.then_some(open),
-                base::Press::new(id)
-                    .flex()
-                    .items_center()
-                    .gap(rems(0.375))
-                    .h(rems(1.875))
-                    .pl(rems(0.5 + 1.25 * (level - 1) as f32))
-                    .rounded(theme.radius_md())
-                    .text_sm()
-                    .child(
-                        div()
-                            .w(rems(1.))
-                            .children(parent.then(|| Icon::new(chevron).color(theme.muted_foreground))),
-                    )
-                    .child(name),
-            );
+            let chevron = if open {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            };
+            tree =
+                tree.tree_row(
+                    id,
+                    name,
+                    level,
+                    parent.then_some(open),
+                    base::Press::new(id)
+                        .flex()
+                        .items_center()
+                        .gap(rems(0.375))
+                        .h(rems(1.875))
+                        .pl(rems(0.5 + 1.25 * (level - 1) as f32))
+                        .rounded(theme.radius_md())
+                        .text_sm()
+                        .child(div().w(rems(1.)).children(
+                            parent.then(|| Icon::new(chevron).color(theme.muted_foreground)),
+                        ))
+                        .child(name),
+                );
         }
         tree
     }
