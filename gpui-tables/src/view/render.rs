@@ -1400,7 +1400,7 @@ impl TableView {
                 foreground: t.colors.text,
                 border: t.colors.popover_border,
             })
-            .max_height(t.px(520.))
+            .max_height(t.px(POPOVER_MAX))
             .on_dismiss(cx.listener(|this, reason: &DismissReason, window, cx| {
                 this.dismiss(*reason, window, cx)
             }));
@@ -2194,10 +2194,15 @@ impl TableView {
     ) -> AnyElement {
         let t = &self.theme;
         let field = FieldColors::of(t);
+        let items: Vec<PopupMenuItem> = items.into_iter().collect();
+        // Every entry at once (the + menu's fifteen types, 420 points), as far as they fit
+        // under the popover's height with the field: on touch, rows of 44 points, ten of them.
+        let fit = ((POPOVER_MAX - NAMING_FIELD) / if t.touch { 44. } else { 28. }).floor() as usize;
         let picker = Picker::new(ElementId::NamedInteger(id.into(), self.menu_serial))
             .filter(false)
             .placeholder(placeholder)
             .max_chars(self.host.limits().name_chars)
+            .visible_rows(items.len().min(fit).max(1))
             .items(items)
             .touch(t.touch)
             .row_height(t.px(28.))
@@ -2224,6 +2229,12 @@ impl TableView {
             .into_any_element()
     }
 }
+
+/// The tallest a cell's or a menu's popover draws, in points.
+pub(crate) const POPOVER_MAX: f32 = 520.;
+/// What a naming picker's field takes of it, with the popover's padding and the field's
+/// margin, on touch too (its 44-point field).
+const NAMING_FIELD: f32 = 60.;
 
 /// Whether a property's cells read through the host: people's names and related rows' titles.
 pub(crate) fn reads_host(kind: &PropertyType) -> bool {
