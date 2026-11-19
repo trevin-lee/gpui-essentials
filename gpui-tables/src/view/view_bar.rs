@@ -468,7 +468,7 @@ impl TableView {
                 foreground: t.colors.text,
                 border: t.colors.popover_border,
             })
-            .max_height(t.px(520.))
+            .max_height(t.px(super::render::POPOVER_MAX))
             .on_dismiss(cx.listener(|this, reason: &DismissReason, window, cx| {
                 this.dismiss(*reason, window, cx)
             }));
