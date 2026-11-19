@@ -224,3 +224,46 @@ fn open_and_idle_it_doesnt_redraw(cx: &mut TestAppContext) {
     }
     assert_eq!(o.draws.get(), before);
 }
+
+/// A palette of many commands: its list is as tall as its visible rows at most, not the
+/// window's, the keys keep the highlighted command in view as they go past them, and its
+/// field is a palette's 48 points tall.
+#[gpui::test]
+fn a_long_palette_scrolls_and_keeps_the_highlight_in_view(cx: &mut TestAppContext) {
+    struct Long;
+    impl Render for Long {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(CommandDialog::new("long").open(true).group(
+                    "Pages",
+                    (0..40).map(|i| PopupMenuItem::new(format!("c{i}"), format!("Page {i}"))),
+                ))
+        }
+    }
+    cx.update(gpui_core::init);
+    let (_, vcx) = cx.add_window_view(|window, cx| {
+        let v = cx.new(|_| Long);
+        Root::new(v, window, cx)
+    });
+    vcx.simulate_resize(size(px(800.), px(600.)));
+    vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    let list = vcx.debug_bounds("picker-rows").expect("the list");
+    assert!(list.size.height <= px(10. * 32. + 1.), "capped: {list:?}");
+    let field = vcx.debug_bounds("picker-field").expect("the field");
+    assert!(field.size.height >= px(47.), "a palette's field: {field:?}");
+    for i in 1..=20 {
+        key(vcx, "down");
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        let name: &'static str = Box::leak(format!("menu-item-c{i}").into_boxed_str());
+        let row = vcx.debug_bounds(name).expect("the row");
+        let list = vcx.debug_bounds("picker-rows").unwrap();
+        assert!(
+            row.top() >= list.top() - px(1.) && row.bottom() <= list.bottom() + px(1.),
+            "Page {i}, highlighted, is in view: {row:?} in {list:?}"
+        );
+    }
+}
