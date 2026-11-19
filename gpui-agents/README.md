@@ -31,6 +31,10 @@ scatter), Form with its controls (Input, TextArea, Select, DatePicker, Slider, C
 RadioGroup, SwitchGroup, Chips, OptionCards), Label, Button, Buttons and IconButton, TagBlock and
 Tag, Icon, EntityList, ListBlock, the five card blocks, Text and BoldText, IconText, ImageText and
 ImageTextLarge, and the metric indicators. A component the model doesn't know draws nothing.
+Charts take their series' colours from `CardColors::chart` in order (the default is gpui-core's
+theme's five chart colours, distinct hues each 3:1 or more against the card, where OpenUI's
+own "ocean" is eleven blues), round again a shade lighter past the last, and a radar's ring
+shrinks so the labels at its sides fit whole beside it.
 A table shows ten rows to a page, with Previous and Next at its right and "1 / 3" between them,
 as react-ui's does. An accordion opens one section at a time, the newest one open until someone
 presses one, as react-ui's does. A step's details are Markdown, as react-ui's are, and so are
