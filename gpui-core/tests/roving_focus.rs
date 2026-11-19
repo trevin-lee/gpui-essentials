@@ -33,6 +33,8 @@ struct Host {
     /// Each row's two actions' focus handles, when it has them: Pin, then Delete (row b's
     /// second is a menu).
     acts: HashMap<&'static str, (FocusHandle, FocusHandle)>,
+    /// A row to give the keyboard to (RovingFocus::focus).
+    focus_req: Option<&'static str>,
     /// A tree's open rows.
     open: HashSet<&'static str>,
     /// A tree's toggles: (row, open).
@@ -113,6 +115,9 @@ impl Render for Host {
         let mut list = RovingFocus::new("list").accessibility_label("Things");
         if let Some(s) = self.selected {
             list = list.selected(s);
+        }
+        if let Some(f) = self.focus_req {
+            list = list.focus(f);
         }
         match self.kind {
             Kind::List | Kind::Row => {
@@ -215,6 +220,7 @@ fn open_with<'a>(
             } else {
                 HashMap::new()
             },
+            focus_req: None,
             open: HashSet::new(),
             toggled: Default::default(),
         });
@@ -564,4 +570,37 @@ fn the_actions_are_named_buttons(cx: &mut TestAppContext) {
             "{label} is a named button"
         );
     }
+}
+
+#[gpui::test]
+fn a_row_can_be_given_the_keyboard_once(cx: &mut TestAppContext) {
+    let (h, vcx) = open(cx, Kind::List, None);
+    watch(&h, vcx);
+    h.update(vcx, |h, cx| {
+        h.focus_req = Some("c");
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    assert_eq!(focused(&h, vcx), "c", "the row asked for has the keyboard");
+    // Drawn again with the same request, the list leaves the keyboard where it is.
+    let before = h.read_with(vcx, |h, _| h.before.clone());
+    vcx.update(|window, cx| window.focus(&before, cx));
+    h.update(vcx, |_, cx| cx.notify());
+    vcx.run_until_parked();
+    assert_eq!(
+        focused(&h, vcx),
+        "before",
+        "the same request took the keyboard again"
+    );
+    // It's the row Tab comes back to.
+    key(vcx, "tab");
+    assert_eq!(focused(&h, vcx), "c");
+    // An id that isn't a row does nothing.
+    h.update(vcx, |h, cx| {
+        h.focus_req = Some("zz");
+        cx.notify();
+    });
+    vcx.update(|window, cx| window.focus(&before, cx));
+    vcx.run_until_parked();
+    assert_eq!(focused(&h, vcx), "before");
 }

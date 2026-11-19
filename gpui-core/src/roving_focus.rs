@@ -188,6 +188,8 @@ pub struct RovingFocus {
     selected: Option<SharedString>,
     entries: Vec<Entry>,
     on_toggle: Option<OnToggle>,
+    /// A row to give the keyboard to, once (see [`focus`](Self::focus)).
+    focus: Option<SharedString>,
     style: StyleRefinement,
 }
 
@@ -201,6 +203,7 @@ impl RovingFocus {
             selected: None,
             entries: Vec::new(),
             on_toggle: None,
+            focus: None,
             style: StyleRefinement::default(),
         }
     }
@@ -245,6 +248,15 @@ impl RovingFocus {
     /// keyboard, and selected to assistive tech in a list box or a tree.
     pub fn selected(mut self, id: impl Into<SharedString>) -> Self {
         self.selected = Some(id.into());
+        self
+    }
+
+    /// Gives row `id` the keyboard, and makes it the Tab stop and the row Tab comes back to: after
+    /// an inline rename ends, say, when the row's field goes. It's done once for a request: drawn
+    /// again with the same id, the list leaves the keyboard where it is; a frame without it, the
+    /// next request counts again. Nothing, for an id that isn't a row.
+    pub fn focus(mut self, id: impl Into<SharedString>) -> Self {
+        self.focus = Some(id.into());
         self
     }
 
@@ -486,6 +498,8 @@ struct State {
     order: Vec<SharedString>,
     /// The row that last had the keyboard: the Tab stop.
     last: Option<SharedString>,
+    /// The focus request last done, so a request drawn again isn't done again.
+    focused_for: Option<SharedString>,
 }
 
 impl RenderOnce for RovingFocus {
@@ -510,6 +524,7 @@ impl RenderOnce for RovingFocus {
             .find(|r| r.actions.iter().any(|a| a.focus.is_focused(window)))
             .map(|r| r.id.clone());
 
+        let request = self.focus.clone();
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State::default());
         let (handles, move_to, last) = state.update(cx, |s, cx| {
             for id in &ids {
@@ -538,6 +553,15 @@ impl RenderOnce for RovingFocus {
                 }
                 s.last = next;
             }
+            // A request to give a row the keyboard: done once, when it's new and the row is here.
+            if let Some(want) = request
+                .as_ref()
+                .filter(|w| ids.contains(w) && s.focused_for.as_ref() != Some(w))
+            {
+                s.last = Some(want.clone());
+                move_to = Some(s.handles[want].clone());
+            }
+            s.focused_for = request.clone();
             s.handles.retain(|k, _| ids.contains(k));
             s.order = ids.clone();
             let handles: Vec<FocusHandle> = ids.iter().map(|id| s.handles[id].clone()).collect();
