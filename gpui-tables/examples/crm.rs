@@ -31,7 +31,8 @@
 //! `search` (People searched from the bar for a company's name, typed without its capital); and
 //! `calculations` (People grouped by stage, a calculation under each column of each group, a
 //! number's footer menu open); and `peek` (Imani's row peeked in the panel at the right) and
-//! `gallery` (Pipeline drawn as a gallery, its rows as cards with their covers).
+//! `gallery` (Pipeline drawn as a gallery, its rows as cards with their covers) and
+//! `gallery-grouped` (the same, grouped by stage as the board is).
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -896,9 +897,11 @@ mod shots {
                             t.peek(IMANI, cx);
                         });
                     }
-                    "gallery" => {
+                    "gallery" | "gallery-grouped" => {
                         // Pipeline drawn as a gallery: the same rows as cards in a grid, each
-                        // with its row's cover (colours here: the example has no images).
+                        // with its row's cover (colours here: the example has no images); with
+                        // `gallery-grouped`, grouped by stage as the board is, else one grid.
+                        let grouped = scene == "gallery-grouped";
                         let t = pick(0, cx);
                         t.update(cx, |t, cx| {
                             let mut db = t.database().clone();
@@ -911,6 +914,9 @@ mod shots {
                                 v.kind = gpui_tables::ViewType::Gallery;
                                 v.name = "Gallery".into();
                                 v.card_preview = Some(gpui_tables::CardPreview::Cover);
+                                if !grouped {
+                                    v.group_by = None;
+                                }
                             }
                             const COVERS: [&str; 5] = [
                                 "#3B4A6BFF",

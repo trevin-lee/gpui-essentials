@@ -862,6 +862,8 @@ How each type behaves:
 
   ![The Pipeline view as a gallery: the people as cards in a grid, three to a line, each with its company, last contact and owner](docs/gallery.png)
 
+  ![The Pipeline view as a gallery grouped by stage: a header with each stage's name and count over its own grid of cards, each card with its cover](docs/gallery-grouped.png)
+
 A new row made in a filtered or grouped view gets the values that keep it in that view (the
 group's option, a checked box the filter wants), as Notion does.
 
