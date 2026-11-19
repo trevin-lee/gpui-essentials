@@ -153,7 +153,33 @@ impl Painter {
     fn width(&self, text: &str, window: &mut Window) -> Pixels {
         self.shape(text, window).width()
     }
+
+    /// `text` as the most of it that fits `max` up to a space, and the rest (None when it fits
+    /// whole, or its first word doesn't).
+    fn split_two(&self, text: &str, max: Pixels, window: &mut Window) -> (String, Option<String>) {
+        if self.width(text, window) <= max {
+            return (text.to_string(), None);
+        }
+        let mut best = None;
+        for (i, _) in text.match_indices(' ') {
+            if self.width(&text[..i], window) <= max {
+                best = Some(i);
+            } else {
+                break;
+            }
+        }
+        match best {
+            Some(i) => (
+                text[..i].to_string(),
+                Some(text[i + 1..].trim_start().to_string()),
+            ),
+            None => (text.to_string(), None),
+        }
+    }
 }
+
+/// A category name longer than this many characters gets a row tall enough for two lines.
+const LONG_NAME: usize = 20;
 
 /// A rectangle filled, with rounded corners where asked.
 fn bar(
@@ -281,7 +307,7 @@ impl Draw<'_, '_> {
         let _ = path;
         match c {
             Chart::Bars(b) if b.kind == ChartKind::Radar => self.radar(b),
-            Chart::Bars(b) if b.kind == ChartKind::HorizontalBar => self.horizontal_bars(b),
+            Chart::Bars(b) if b.kind == ChartKind::HorizontalBar => self.horizontal_bars(b, path),
             Chart::Bars(b) => self.cartesian(b),
             Chart::Slices(s) => self.slices(s),
             Chart::Scatter(s) => self.scatter(s),
@@ -570,11 +596,13 @@ impl Draw<'_, '_> {
     }
 
     /// Bars along rows, a category's name beside each.
-    fn horizontal_bars(&mut self, b: &Bars) -> AnyElement {
+    fn horizontal_bars(&mut self, b: &Bars, path: &str) -> AnyElement {
         let t = self.t;
         let colors = t.series_colors(b.series.len());
         let k = if b.stacked { 1 } else { b.series.len().max(1) };
-        let row = (12. * k as f32 + 12.).max(28.);
+        // A long category name takes two lines beside its bars (a row tall enough for them).
+        let long = b.labels.iter().any(|l| l.chars().count() > LONG_NAME);
+        let row = (12. * k as f32 + 12.).max(if long { 44. } else { 28. });
         let height = row * b.labels.len() as f32 + 24.;
         let b2 = b.clone();
         let (grid, zero) = (t.colors.line, t.colors.line_strong);
@@ -589,12 +617,14 @@ impl Draw<'_, '_> {
                 let (lo, hi) = b.range();
                 let ticks = ticks(lo, hi, 4);
                 let (lo, hi) = (*ticks.first().unwrap_or(&lo), *ticks.last().unwrap_or(&hi));
+                // The names' column: as wide as the widest, up to 45% of the chart (on two lines
+                // where a row has room for them, then cut short).
                 let names_w = b
                     .labels
                     .iter()
                     .map(|l| name.width(l, window))
                     .fold(px(0.), |a, w| a.max(w))
-                    .min(bounds.size.width * 0.35)
+                    .min(bounds.size.width * 0.45)
                     + px(10.);
                 let left = bounds.origin.x + names_w;
                 let right = bounds.origin.x + bounds.size.width - px(14.);
@@ -628,17 +658,27 @@ impl Draw<'_, '_> {
                 let bar_h = px(12.);
                 for (i, l) in b.labels.iter().enumerate() {
                     let y0 = top + row_px * i as f32;
-                    name.paint(
-                        l,
-                        bounds.origin.x,
-                        y0 + row_px / 2. - name.size * 0.625,
-                        Anchor::Start,
-                        names_w - px(10.),
-                        bounds.origin.x,
-                        left - px(6.),
-                        window,
-                        cx,
-                    );
+                    let room = names_w - px(10.);
+                    let name_h = name.size * 1.25;
+                    let lines = match name.split_two(l, room, window) {
+                        (first, Some(rest)) if row_px >= name_h * 2. => vec![first, rest],
+                        _ => vec![l.clone()],
+                    };
+                    let mut y = y0 + row_px / 2. - name_h * lines.len() as f32 / 2.;
+                    for line in &lines {
+                        name.paint(
+                            line,
+                            bounds.origin.x,
+                            y,
+                            Anchor::Start,
+                            room,
+                            bounds.origin.x,
+                            left - px(6.),
+                            window,
+                            cx,
+                        );
+                        y += name_h;
+                    }
                     let block = bar_h * k as f32;
                     let start = y0 + (row_px - block) / 2.;
                     let (mut pos, mut neg) = (0f64, 0f64);
@@ -683,6 +723,35 @@ impl Draw<'_, '_> {
                     .collect::<Vec<_>>(),
             )
         });
+        // The chart's words for assistive technology: each category's whole name and its
+        // values, as a name cut short on screen is still read whole.
+        let words = b
+            .labels
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let values: Vec<String> = b
+                    .series
+                    .iter()
+                    .filter_map(|s| {
+                        let v = s.values.get(i).copied().flatten()?;
+                        Some(if b.series.len() > 1 {
+                            format!("{} {}", s.name, short(v))
+                        } else {
+                            short(v)
+                        })
+                    })
+                    .collect();
+                format!("{l}: {}", values.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        let painting = div()
+            .id(self.id(&format!("{path}.hbar")))
+            .role(Role::Figure)
+            .aria_label(format!("Horizontal bar chart. {words}"))
+            .size_full()
+            .child(painting);
         self.chart_box(
             painting,
             height,
@@ -1148,6 +1217,37 @@ fn arc(c: Point<Pixels>, r: Pixels, turn: f32) -> Point<Pixels> {
 
 #[cfg(test)]
 mod tests {
+    /// A long category name goes on two lines, broken at a space, where one won't hold it.
+    /// (GPUI's test window is the Mac's dev-dependency here, so the macOS job runs it.)
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    fn a_long_name_is_split_at_a_space_into_two_lines(cx: &mut gpui::TestAppContext) {
+        use gpui::px;
+        let window = cx.add_window(|_, _| gpui::Empty);
+        let p = super::Painter {
+            family: "Helvetica".into(),
+            size: px(14.),
+            color: gpui::black(),
+        };
+        window
+            .update(cx, |_, window, _| {
+                let name = "Okafor (robotics and autonomous systems)";
+                let whole = p.width(name, window);
+                // Room for about two thirds of it: the first line ends at a space and fits.
+                let (first, rest) = p.split_two(name, whole * 0.66, window);
+                let rest = rest.expect("two lines");
+                assert!(p.width(&first, window) <= whole * 0.66, "{first}");
+                assert_eq!(format!("{first} {rest}"), name);
+                // A name that fits stays one line; a single long word too (cut short instead).
+                assert_eq!(p.split_two("Patel", whole, window), ("Patel".into(), None));
+                assert_eq!(
+                    p.split_two("Pneumonoultramicroscopic", px(20.), window).1,
+                    None
+                );
+            })
+            .unwrap();
+    }
+
     /// A radar at a phone's width (393 points) leaves its side labels room to be whole: the
     /// ring shrinks for "Mentorship" rather than cutting it to "Mentor…".
     #[test]
