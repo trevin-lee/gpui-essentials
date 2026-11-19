@@ -202,6 +202,8 @@ impl RenderOnce for CommandDialog {
         ))
         .placeholder(self.placeholder)
         .empty_text(self.empty)
+        // shadcn's CommandInput in a dialog: h-12.
+        .field_height(css(48.))
         .touch(self.touch);
         for (heading, commands, found) in self.groups {
             picker = picker.heading(heading);

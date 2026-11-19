@@ -125,6 +125,8 @@ pub struct Picker {
     max_chars: Option<usize>,
     /// Whether the field shows a magnifying glass (while it filters, unless given).
     search_icon: Option<bool>,
+    /// The search field's height at least (a command palette's is 48 points).
+    field_height: Option<gpui::Rems>,
 }
 
 impl Picker {
@@ -149,7 +151,15 @@ impl Picker {
             query: None,
             max_chars: None,
             search_icon: None,
+            field_height: None,
         }
+    }
+
+    /// The search field's height at least: a command palette's 48 points (shadcn's
+    /// CommandDialog), where a picker in a popover keeps its own.
+    pub fn field_height(mut self, height: gpui::Rems) -> Self {
+        self.field_height = Some(height);
+        self
     }
 
     pub fn item(mut self, item: PopupMenuItem) -> Self {
@@ -318,6 +328,9 @@ struct PickerState {
     query: Entity<InputState>,
     /// A long list's scroll, so the keys keep the highlight in view.
     scroll: gpui::UniformListScrollHandle,
+    /// A shorter list's scroll, past its visible rows, and the entry last scrolled into view.
+    list_scroll: gpui::ScrollHandle,
+    kept: Option<usize>,
     /// Whether it has scrolled to where it opens.
     opened: bool,
     /// The query the highlight was set for.
@@ -370,6 +383,8 @@ impl RenderOnce for Picker {
             PickerState {
                 query,
                 scroll: gpui::UniformListScrollHandle::new(),
+                list_scroll: gpui::ScrollHandle::new(),
+                kept: None,
                 opened: false,
                 seen: None,
                 highlighted: None,
@@ -654,10 +669,42 @@ impl RenderOnce for Picker {
             .h(row_px * visible.min(count) as f32)
             .into_any_element()
         } else {
+            // As tall as its visible rows at most (a palette's list doesn't run off the window),
+            // scrolling past them, the highlighted entry kept in view as the keys move it.
+            let rem = window.rem_size();
+            let row_px = self
+                .row
+                .height
+                .map(|h| h.to_pixels(rem))
+                .unwrap_or(rem * (32. / 15.));
+            let row_px = if self.row.touch {
+                row_px.max(theme.touch_target)
+            } else {
+                row_px
+            };
+            let visible = self
+                .visible_rows
+                .unwrap_or(if self.row.touch { 8 } else { 10 });
+            let handle = state.read(cx).list_scroll.clone();
+            // The highlighted entry scrolled into view, once each time it changes, so the
+            // wheel isn't undone.
+            state.update(cx, |s, _| {
+                if let Some(i) = highlighted
+                    && s.kept != Some(i)
+                {
+                    s.kept = Some(i);
+                    handle.scroll_to_item(i);
+                }
+            });
             div()
+                .id("picker-rows")
+                .debug_selector(|| "picker-rows".into())
                 .flex()
                 .flex_col()
                 .min_w_0()
+                .max_h(row_px * visible as f32)
+                .overflow_y_scroll()
+                .track_scroll(&handle)
                 .children(rows(
                     &self.id,
                     shown,
@@ -694,6 +741,7 @@ impl RenderOnce for Picker {
                     .border_color(self.colors.separator.unwrap_or(theme.border))
                     // On touch the field is a full target, as the rows are.
                     .when(self.row.touch, |d| d.min_h(theme.touch_target))
+                    .when_some(self.field_height, |d, h| d.min_h(h))
                     .debug_selector(|| "picker-field".into())
                     .when(self.search_icon.unwrap_or(filter), |d| {
                         d.child(
