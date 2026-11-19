@@ -493,6 +493,18 @@ pub fn components() -> Vec<Component> {
         },
         component! {
             family: Navigation,
+            name: "Roving Focus",
+            slug: "roving-focus",
+            about: "Rows that share one Tab stop, the arrow keys moving between them: a list, tiles or a tree.",
+            docs: "gpui_core/struct.RovingFocus.html",
+            variants: [
+                view("List", "list"),
+                demo("Tiles", "tiles"),
+                view("Tree", "tree"),
+            ],
+        },
+        component! {
+            family: Navigation,
             name: "Breadcrumb",
             slug: "breadcrumb",
             about: "Where a page sits, from the top down, each place a link.",
