@@ -178,7 +178,10 @@ item](docs/gallery.png)
   host's `Press`. It's a list to assistive tech, or a list box with `role(Role::ListBox)` (its
   rows options, the selected one said), or a `tree(toggle)` whose `tree_row`s give their depth
   and whether they're open: Right opens a row or goes to its first child, Left folds it or
-  goes to its parent. A row that goes while it has the keyboard hands it to its neighbour.
+  goes to its parent. `row_actions(id, [RowAction::new(&focus)…])` names a row's own controls
+  (a "⋯", a download), which aren't Tab stops: Right goes into them and through them, Left
+  back, Up and Down to the next rows, Escape to the row, and Shift-F10 opens a `.menu()` one.
+  A row that goes while it has the keyboard hands it to its neighbour.
   Headings and rules between rows are children the keys pass over.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a

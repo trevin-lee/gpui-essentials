@@ -39,6 +39,12 @@
 //! ([`RovingFocus::tree_row`]). Right opens a folded row (through the host's toggle) or goes to
 //! its first child, and Left folds an open row or goes to its parent.
 //!
+//! A row can hold controls of its own (a "⋯", a download), named with
+//! [`RovingFocus::row_actions`]: they aren't Tab stops; Right from the row goes into them and on
+//! through them, Left comes back, Up and Down go to the neighbouring rows, and Escape returns to
+//! the row. Shift-F10 or the context-menu key opens a row's menu. VoiceOver hears how many
+//! actions a row has and the way in.
+//!
 //! A row that goes while it has the keyboard hands it to the row after it (or before it, at the
 //! end), so the keyboard is never lost. The list doesn't scroll a row it moves to into view; a
 //! host whose list scrolls does that.
@@ -69,7 +75,11 @@ actions!(
         /// The first row.
         First,
         /// The last row.
-        Last
+        Last,
+        /// From a row's action, back to its row (Escape).
+        Back,
+        /// Opens the row's menu action, if it has one (Shift-F10, the context-menu key).
+        OpenMenu
     ]
 );
 
@@ -85,6 +95,9 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("right", Right, c),
         KeyBinding::new("home", First, c),
         KeyBinding::new("end", Last, c),
+        KeyBinding::new("escape", Back, c),
+        KeyBinding::new("shift-f10", OpenMenu, c),
+        KeyBinding::new("menu", OpenMenu, c),
     ]);
 }
 
@@ -113,6 +126,44 @@ struct Row {
     level: usize,
     /// In a tree, whether it's open (none for a leaf).
     expanded: Option<bool>,
+    /// Controls inside it (a "⋯", a download) that Right reaches.
+    actions: Vec<RowAction>,
+}
+
+/// A control inside a row (a "⋯", a download) that the keys reach from the row: Right goes
+/// into the row's actions and through them, Left comes back. The host draws it, tracking
+/// [`focus`](Self::new)'s handle with Tab off (`Press::track_focus(&handle).tab_stop(false)`), so Tab
+/// still enters and leaves the list once.
+#[derive(Clone)]
+pub struct RowAction {
+    focus: FocusHandle,
+    menu: bool,
+}
+
+impl RowAction {
+    /// The control that tracks `focus`.
+    pub fn new(focus: &FocusHandle) -> Self {
+        Self {
+            focus: focus.clone(),
+            menu: false,
+        }
+    }
+
+    /// It opens a menu (a DropdownMenu's trigger): Shift-F10 or the context-menu key on the
+    /// row goes to it and opens it, as Down would.
+    pub fn menu(mut self) -> Self {
+        self.menu = true;
+        self
+    }
+}
+
+/// What a row with actions says besides its words: how many, and the way in.
+fn describe(actions: usize) -> Option<SharedString> {
+    match actions {
+        0 => None,
+        1 => Some("1 action, press Right".into()),
+        n => Some(format!("{n} actions, press Right").into()),
+    }
 }
 
 enum Entry {
@@ -211,6 +262,7 @@ impl RovingFocus {
             press,
             level: 1,
             expanded: None,
+            actions: Vec::new(),
         })));
         self
     }
@@ -231,8 +283,183 @@ impl RovingFocus {
             press,
             level: level.max(1),
             expanded,
+            actions: Vec::new(),
         })));
         self
+    }
+}
+
+impl RovingFocus {
+    /// The controls inside row `id` (its "⋯", a download), in order: Right from the row goes
+    /// to the first and on through them, Left back and from the first to the row, Up and Down
+    /// to the neighbouring rows, Escape back to the row. In a tree, Right opens a folded row
+    /// first, as ever, and goes into an open row's or a leaf's actions. Shift-F10 or the
+    /// context-menu key opens the first that's a [`menu`](RowAction::menu). VoiceOver hears
+    /// how many a row has.
+    pub fn row_actions(
+        mut self,
+        id: impl Into<SharedString>,
+        actions: impl IntoIterator<Item = RowAction>,
+    ) -> Self {
+        let id = id.into();
+        if let Some(Entry::Row(r)) = self
+            .entries
+            .iter_mut()
+            .find(|e| matches!(e, Entry::Row(r) if r.id == id))
+        {
+            r.actions = actions.into_iter().collect();
+        }
+        self
+    }
+}
+
+/// The keys' way through the rows and their actions.
+struct Nav {
+    layout: RovingLayout,
+    ids: Vec<SharedString>,
+    handles: Vec<FocusHandle>,
+    actions: Vec<Vec<RowAction>>,
+    levels: Vec<usize>,
+    expanded: Vec<Option<bool>>,
+    toggle: Option<OnToggle>,
+    /// The Tab stop: where the keys start when nothing here has the keyboard.
+    stop: Option<usize>,
+}
+
+impl Nav {
+    /// The row with the keyboard, and which of its actions if one has it; else the Tab stop.
+    fn at(&self, window: &Window) -> Option<(usize, Option<usize>)> {
+        if let Some(i) = self.handles.iter().position(|h| h.is_focused(window)) {
+            return Some((i, None));
+        }
+        for (i, acts) in self.actions.iter().enumerate() {
+            if let Some(k) = acts.iter().position(|a| a.focus.is_focused(window)) {
+                return Some((i, Some(k)));
+            }
+        }
+        self.stop.map(|i| (i, None))
+    }
+
+    fn row(&self, i: usize, window: &mut Window, cx: &mut App) {
+        if let Some(h) = self.handles.get(i) {
+            window.focus(h, cx);
+        }
+    }
+
+    fn action(&self, i: usize, k: usize, window: &mut Window, cx: &mut App) {
+        if let Some(a) = self.actions.get(i).and_then(|a| a.get(k)) {
+            window.focus(&a.focus, cx);
+        }
+    }
+
+    /// Up (-1) or Down (1): the neighbouring row, from a row or one of its actions; from an
+    /// action at the end, its own row.
+    fn up_down(&self, by: isize, window: &mut Window, cx: &mut App) -> bool {
+        if self.layout == RovingLayout::Horizontal {
+            return false;
+        }
+        let Some((i, k)) = self.at(window) else {
+            return true;
+        };
+        let to = i as isize + by;
+        if to >= 0 && (to as usize) < self.handles.len() {
+            self.row(to as usize, window, cx);
+        } else if k.is_some() {
+            self.row(i, window, cx);
+        }
+        true
+    }
+
+    fn left(&self, window: &mut Window, cx: &mut App) -> bool {
+        let Some((i, k)) = self.at(window) else {
+            return true;
+        };
+        match (k, self.layout) {
+            (Some(0), _) => self.row(i, window, cx),
+            (Some(k), _) => self.action(i, k - 1, window, cx),
+            (None, RovingLayout::Vertical) => return false,
+            (None, RovingLayout::Tree) => {
+                // Fold an open row, else go to its parent.
+                if self.expanded[i] == Some(true) {
+                    if let Some(t) = &self.toggle {
+                        t(&self.ids[i], false, window, cx);
+                    }
+                } else if let Some(p) = (0..i).rev().find(|j| self.levels[*j] < self.levels[i]) {
+                    self.row(p, window, cx);
+                }
+            }
+            (None, _) => {
+                if i > 0 {
+                    self.row(i - 1, window, cx);
+                }
+            }
+        }
+        true
+    }
+
+    fn right(&self, window: &mut Window, cx: &mut App) -> bool {
+        let Some((i, k)) = self.at(window) else {
+            return true;
+        };
+        let has_actions = !self.actions[i].is_empty();
+        match (k, self.layout) {
+            (Some(k), _) => {
+                if k + 1 < self.actions[i].len() {
+                    self.action(i, k + 1, window, cx);
+                }
+            }
+            (None, RovingLayout::Vertical) => {
+                if !has_actions {
+                    return false;
+                }
+                self.action(i, 0, window, cx);
+            }
+            (None, RovingLayout::Tree) => match self.expanded[i] {
+                // A folded row opens first.
+                Some(false) => {
+                    if let Some(t) = &self.toggle {
+                        t(&self.ids[i], true, window, cx);
+                    }
+                }
+                _ if has_actions => self.action(i, 0, window, cx),
+                Some(true) if self.levels.get(i + 1).is_some_and(|l| *l > self.levels[i]) => {
+                    self.row(i + 1, window, cx)
+                }
+                _ => {}
+            },
+            (None, _) => {
+                if i + 1 < self.handles.len() {
+                    self.row(i + 1, window, cx);
+                }
+            }
+        }
+        true
+    }
+
+    /// Escape from an action: back to its row.
+    fn back(&self, window: &mut Window, cx: &mut App) -> bool {
+        match self.at(window) {
+            Some((i, Some(_))) => {
+                self.row(i, window, cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Shift-F10: to the row's menu action, opened as Down opens it.
+    fn open_menu(&self, window: &mut Window, cx: &mut App) -> bool {
+        let Some((i, _)) = self.at(window) else {
+            return false;
+        };
+        let Some(menu) = self.actions[i].iter().find(|a| a.menu) else {
+            return false;
+        };
+        window.focus(&menu.focus, cx);
+        if let Ok(down) = gpui::Keystroke::parse("down") {
+            window.dispatch_keystroke(down, cx);
+        }
+        true
     }
 }
 
@@ -274,8 +501,14 @@ impl RenderOnce for RovingFocus {
             })
             .collect();
         let ids: Vec<SharedString> = rows.iter().map(|r| r.id.clone()).collect();
-        let levels: Rc<Vec<usize>> = Rc::new(rows.iter().map(|r| r.level).collect());
-        let expanded: Rc<Vec<Option<bool>>> = Rc::new(rows.iter().map(|r| r.expanded).collect());
+        let levels: Vec<usize> = rows.iter().map(|r| r.level).collect();
+        let expanded: Vec<Option<bool>> = rows.iter().map(|r| r.expanded).collect();
+        let actions: Vec<Vec<RowAction>> = rows.iter().map(|r| r.actions.clone()).collect();
+        // A row whose action has the keyboard is where Tab comes back to.
+        let action_focused: Option<SharedString> = rows
+            .iter()
+            .find(|r| r.actions.iter().any(|a| a.focus.is_focused(window)))
+            .map(|r| r.id.clone());
 
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State::default());
         let (handles, move_to, last) = state.update(cx, |s, cx| {
@@ -287,7 +520,8 @@ impl RenderOnce for RovingFocus {
             let focused = ids
                 .iter()
                 .find(|id| s.handles.get(*id).is_some_and(|h| h.is_focused(window)))
-                .cloned();
+                .cloned()
+                .or(action_focused);
             let mut move_to = None;
             if let Some(f) = focused {
                 s.last = Some(f);
@@ -312,89 +546,25 @@ impl RenderOnce for RovingFocus {
         if let Some(h) = move_to {
             window.defer(cx, move |window, cx| window.focus(&h, cx));
         }
-        let handles = Rc::new(handles);
-        let ids = Rc::new(ids);
-        // The one Tab stop: the row that last had the keyboard, else the chosen one, else the
-        // first.
         let position =
             |id: &Option<SharedString>| id.as_ref().and_then(|id| ids.iter().position(|i| i == id));
+        // The one Tab stop: the row that last had the keyboard, else the chosen one, else the
+        // first.
         let stop = position(&last)
             .or_else(|| position(&self.selected))
             .or(if ids.is_empty() { None } else { Some(0) });
-
-        // The row with the keyboard, else the Tab stop.
-        let at = {
-            let handles = handles.clone();
-            move |window: &Window| handles.iter().position(|h| h.is_focused(window)).or(stop)
-        };
-        let focus = {
-            let handles = handles.clone();
-            move |i: usize, window: &mut Window, cx: &mut App| {
-                if let Some(h) = handles.get(i) {
-                    window.focus(h, cx);
-                }
-            }
-        };
-        let n = handles.len();
-        let step = {
-            let (at, focus) = (at.clone(), focus.clone());
-            move |by: isize, window: &mut Window, cx: &mut App| {
-                if let Some(i) = at(window) {
-                    let to = i as isize + by;
-                    if to >= 0 && (to as usize) < n {
-                        focus(to as usize, window, cx);
-                    }
-                }
-            }
-        };
         let tree = layout == RovingLayout::Tree;
-        let toggle = self.on_toggle.clone();
-        // Left in a tree: fold an open row, else go to its parent.
-        let tree_left = {
-            let (at, focus, levels, expanded, ids, toggle) = (
-                at.clone(),
-                focus.clone(),
-                levels.clone(),
-                expanded.clone(),
-                ids.clone(),
-                toggle.clone(),
-            );
-            move |window: &mut Window, cx: &mut App| {
-                let Some(i) = at(window) else { return };
-                if expanded[i] == Some(true) {
-                    if let Some(t) = &toggle {
-                        t(&ids[i], false, window, cx);
-                    }
-                } else if let Some(p) = (0..i).rev().find(|j| levels[*j] < levels[i]) {
-                    focus(p, window, cx);
-                }
-            }
-        };
-        // Right in a tree: open a folded row, else go to its first child.
-        let tree_right = {
-            let (at, focus, levels, expanded, ids, toggle) = (
-                at.clone(),
-                focus.clone(),
-                levels.clone(),
-                expanded.clone(),
-                ids.clone(),
-                toggle,
-            );
-            move |window: &mut Window, cx: &mut App| {
-                let Some(i) = at(window) else { return };
-                match expanded[i] {
-                    Some(false) => {
-                        if let Some(t) = &toggle {
-                            t(&ids[i], true, window, cx);
-                        }
-                    }
-                    Some(true) if levels.get(i + 1).is_some_and(|l| *l > levels[i]) => {
-                        focus(i + 1, window, cx)
-                    }
-                    _ => {}
-                }
-            }
-        };
+        let n = handles.len();
+        let nav = Rc::new(Nav {
+            layout,
+            ids: ids.clone(),
+            handles: handles.clone(),
+            actions: actions.clone(),
+            levels,
+            expanded,
+            toggle: self.on_toggle.clone(),
+            stop,
+        });
 
         let role = self
             .role
@@ -407,39 +577,42 @@ impl RenderOnce for RovingFocus {
         let says_selected = matches!(role, Role::ListBox | Role::Tree);
         let selected = self.selected.clone();
 
-        let (up, down, left, right) = (step.clone(), step.clone(), step.clone(), step.clone());
-        let (first, last_row) = (focus.clone(), focus.clone());
+        let on = |f: fn(&Nav, &mut Window, &mut App) -> bool| {
+            let nav = nav.clone();
+            move |window: &mut Window, cx: &mut App| {
+                if !f(&nav, window, cx) {
+                    cx.propagate();
+                }
+            }
+        };
+        let (up, down, left, right, back, menu) = (
+            on(|n, w, cx| n.up_down(-1, w, cx)),
+            on(|n, w, cx| n.up_down(1, w, cx)),
+            on(Nav::left),
+            on(Nav::right),
+            on(Nav::back),
+            on(Nav::open_menu),
+        );
+        let (first, last_row) = (nav.clone(), nav.clone());
         let mut list = div()
             .id(self.id.clone())
             .key_context(CONTEXT)
             .role(role)
             .when_some(self.label.clone(), |d, l| d.aria_label(l))
-            .on_action(move |_: &Up, window, cx| match layout {
-                RovingLayout::Horizontal => cx.propagate(),
-                _ => up(-1, window, cx),
-            })
-            .on_action(move |_: &Down, window, cx| match layout {
-                RovingLayout::Horizontal => cx.propagate(),
-                _ => down(1, window, cx),
-            })
-            .on_action(move |_: &Left, window, cx| match layout {
-                RovingLayout::Vertical => cx.propagate(),
-                RovingLayout::Tree => tree_left(window, cx),
-                _ => left(-1, window, cx),
-            })
-            .on_action(move |_: &Right, window, cx| match layout {
-                RovingLayout::Vertical => cx.propagate(),
-                RovingLayout::Tree => tree_right(window, cx),
-                _ => right(1, window, cx),
-            })
+            .on_action(move |_: &Up, window, cx| up(window, cx))
+            .on_action(move |_: &Down, window, cx| down(window, cx))
+            .on_action(move |_: &Left, window, cx| left(window, cx))
+            .on_action(move |_: &Right, window, cx| right(window, cx))
+            .on_action(move |_: &Back, window, cx| back(window, cx))
+            .on_action(move |_: &OpenMenu, window, cx| menu(window, cx))
             .on_action(move |_: &First, window, cx| {
                 if n > 0 {
-                    first(0, window, cx)
+                    first.row(0, window, cx)
                 }
             })
             .on_action(move |_: &Last, window, cx| {
                 if n > 0 {
-                    last_row(n - 1, window, cx)
+                    last_row.row(n - 1, window, cx)
                 }
             })
             .flex()
@@ -466,8 +639,21 @@ impl RenderOnce for RovingFocus {
                     .when(says_selected, |p| p.selected(chosen))
                     .when(tree, |p| p.aria_level(r.level))
                     .when_some(r.expanded, |p, open| p.aria_expanded(open))
+                    .when_some(describe(r.actions.len()), |p, d| p.aria_description(d))
                     .into_any_element()
             }
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_row_with_actions_says_how_many_and_the_way_in() {
+        assert_eq!(describe(0), None);
+        assert_eq!(describe(1).as_deref(), Some("1 action, press Right"));
+        assert_eq!(describe(2).as_deref(), Some("2 actions, press Right"));
     }
 }

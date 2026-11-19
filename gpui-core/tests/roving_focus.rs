@@ -4,7 +4,7 @@
 //! rows tell assistive tech what they are.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui::{
@@ -12,8 +12,8 @@ use gpui::{
     KeyDownEvent, KeyUpEvent, Keystroke, ParentElement as _, Render, Role, SharedString,
     Styled as _, TestAppContext, VisualTestContext, Window, div, px, size,
 };
-use gpui_core::base::Press;
-use gpui_core::{Root, RovingFocus};
+use gpui_core::base::{PopupMenuItem, Press};
+use gpui_core::{DropdownMenu, Root, RovingFocus, RowAction};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -28,8 +28,11 @@ struct Host {
     after: FocusHandle,
     rows: Vec<&'static str>,
     selected: Option<&'static str>,
-    /// Which rows were pressed, in order.
-    pressed: Rc<RefCell<Vec<&'static str>>>,
+    /// Which rows (and actions, "row/action") were pressed, in order.
+    pressed: Rc<RefCell<Vec<String>>>,
+    /// Each row's two actions' focus handles, when it has them: Pin, then Delete (row b's
+    /// second is a menu).
+    acts: HashMap<&'static str, (FocusHandle, FocusHandle)>,
     /// A tree's open rows.
     open: HashSet<&'static str>,
     /// A tree's toggles: (row, open).
@@ -47,13 +50,65 @@ const TREE: [(&str, usize, &[&str]); 5] = [
 
 impl Render for Host {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let press = |id: &'static str, pressed: &Rc<RefCell<Vec<&'static str>>>| {
-            let pressed = pressed.clone();
-            Press::new(id)
+        let acts = self.acts.clone();
+        let pressed = self.pressed.clone();
+        // A row, and its actions when it has them: Pin, and Delete (or, on b, a menu).
+        let press = move |id: &'static str| {
+            let p = pressed.clone();
+            let mut row = Press::new(id)
                 .debug_selector(move || format!("row-{id}"))
                 .h(px(24.))
+                .flex()
                 .child(id)
-                .on_click(move |_, _, _| pressed.borrow_mut().push(id))
+                .on_click(move |_, _, _| p.borrow_mut().push(id.to_string()));
+            let mut actions = Vec::new();
+            if let Some((pin, del)) = acts.get(id) {
+                let p = pressed.clone();
+                row = row.child(
+                    Press::new(format!("{id}-pin"))
+                        .track_focus(pin)
+                        .tab_stop(false)
+                        .accessibility_label(format!("Pin {id}"))
+                        .child("Pin")
+                        .on_click(move |e, _, cx| {
+                            cx.stop_propagation();
+                            let _ = e;
+                            p.borrow_mut().push(format!("{id}/pin"))
+                        }),
+                );
+                let p = pressed.clone();
+                if id == "b" {
+                    row = row.child(
+                        DropdownMenu::new("b-menu")
+                            .trigger(
+                                Press::new("b-more")
+                                    .track_focus(del)
+                                    .tab_stop(false)
+                                    .accessibility_label("More for b")
+                                    .child("More"),
+                            )
+                            .item(PopupMenuItem::new("copy", "Copy"))
+                            .on_select(move |pick, _, _| {
+                                p.borrow_mut().push(format!("b/{}", pick.id))
+                            }),
+                    );
+                    actions = vec![RowAction::new(pin), RowAction::new(del).menu()];
+                } else {
+                    row = row.child(
+                        Press::new(format!("{id}-delete"))
+                            .track_focus(del)
+                            .tab_stop(false)
+                            .accessibility_label(format!("Delete {id}"))
+                            .child("Delete")
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                p.borrow_mut().push(format!("{id}/delete"))
+                            }),
+                    );
+                    actions = vec![RowAction::new(pin), RowAction::new(del)];
+                }
+            }
+            (row, actions)
         };
         let mut list = RovingFocus::new("list").accessibility_label("Things");
         if let Some(s) = self.selected {
@@ -67,7 +122,10 @@ impl Render for Host {
                 // A heading between the rows, which the keys pass over.
                 list = list.child(div().child("Heading"));
                 for id in &self.rows {
-                    list = list.row(*id, format!("Row {id}"), press(id, &self.pressed));
+                    let (row, actions) = press(id);
+                    list = list
+                        .row(*id, format!("Row {id}"), row)
+                        .row_actions(*id, actions);
                 }
             }
             Kind::Tree => {
@@ -101,13 +159,10 @@ impl Render for Host {
                         hidden_under = Some(level);
                     }
                     let expanded = (!children.is_empty()).then_some(open);
-                    list = list.tree_row(
-                        id,
-                        format!("Row {id}"),
-                        level,
-                        expanded,
-                        press(id, &self.pressed),
-                    );
+                    let (row, actions) = press(id);
+                    list = list
+                        .tree_row(id, format!("Row {id}"), level, expanded, row)
+                        .row_actions(id, actions);
                 }
             }
         }
@@ -131,6 +186,16 @@ fn open<'a>(
     kind: Kind,
     selected: Option<&'static str>,
 ) -> (Entity<Host>, &'a mut VisualTestContext) {
+    open_with(cx, kind, selected, false)
+}
+
+/// As `open`, each row with actions when `actions`.
+fn open_with<'a>(
+    cx: &'a mut TestAppContext,
+    kind: Kind,
+    selected: Option<&'static str>,
+    actions: bool,
+) -> (Entity<Host>, &'a mut VisualTestContext) {
     cx.update(gpui_core::init);
     let made = Rc::new(RefCell::new(None));
     let m = made.clone();
@@ -142,6 +207,14 @@ fn open<'a>(
             rows: vec!["a", "b", "c"],
             selected,
             pressed: Default::default(),
+            acts: if actions {
+                ["a", "b", "c", "d", "e"]
+                    .into_iter()
+                    .map(|id| (id, (cx.focus_handle(), cx.focus_handle())))
+                    .collect()
+            } else {
+                HashMap::new()
+            },
             open: HashSet::new(),
             toggled: Default::default(),
         });
@@ -205,7 +278,7 @@ fn which_row(vcx: &mut VisualTestContext) -> String {
 }
 
 thread_local! {
-    static PRESSED: RefCell<Option<Rc<RefCell<Vec<&'static str>>>>> = const { RefCell::new(None) };
+    static PRESSED: RefCell<Option<Rc<RefCell<Vec<String>>>>> = const { RefCell::new(None) };
 }
 
 fn watch(h: &Entity<Host>, vcx: &mut VisualTestContext) {
@@ -366,5 +439,129 @@ fn the_rows_say_what_they_are(cx: &mut TestAppContext) {
                 "a row named by its words"
             );
         }
+    }
+}
+
+#[gpui::test]
+fn right_goes_into_a_rows_actions_and_left_comes_back(cx: &mut TestAppContext) {
+    let (h, vcx) = open_with(cx, Kind::List, None, true);
+    watch(&h, vcx);
+    key(vcx, "tab");
+    key(vcx, "right");
+    assert_eq!(focused(&h, vcx), "a/pin");
+    key(vcx, "right");
+    assert_eq!(focused(&h, vcx), "a/delete");
+    key(vcx, "right");
+    assert_eq!(
+        focused(&h, vcx),
+        "a/delete",
+        "Right stops at the last action"
+    );
+    key(vcx, "left");
+    assert_eq!(focused(&h, vcx), "a/pin");
+    key(vcx, "left");
+    assert_eq!(
+        focused(&h, vcx),
+        "a",
+        "Left from the first action is the row"
+    );
+}
+
+#[gpui::test]
+fn up_and_down_from_an_action_land_on_the_neighbouring_row(cx: &mut TestAppContext) {
+    let (h, vcx) = open_with(cx, Kind::List, None, true);
+    watch(&h, vcx);
+    key(vcx, "tab");
+    key(vcx, "right");
+    key(vcx, "down");
+    assert_eq!(focused(&h, vcx), "b", "the row, not its action");
+    key(vcx, "right");
+    key(vcx, "up");
+    assert_eq!(focused(&h, vcx), "a");
+}
+
+#[gpui::test]
+fn escape_from_an_action_goes_back_to_its_row(cx: &mut TestAppContext) {
+    let (h, vcx) = open_with(cx, Kind::List, None, true);
+    watch(&h, vcx);
+    key(vcx, "tab");
+    key(vcx, "right");
+    key(vcx, "right");
+    key(vcx, "escape");
+    assert_eq!(focused(&h, vcx), "a");
+}
+
+#[gpui::test]
+fn the_actions_arent_tab_stops(cx: &mut TestAppContext) {
+    let (h, vcx) = open_with(cx, Kind::List, None, true);
+    watch(&h, vcx);
+    key(vcx, "tab");
+    assert_eq!(focused(&h, vcx), "a");
+    key(vcx, "tab");
+    assert_eq!(
+        focused(&h, vcx),
+        "after",
+        "Tab leaves the list, past every action"
+    );
+    key(vcx, "shift-tab");
+    assert_eq!(focused(&h, vcx), "a");
+}
+
+#[gpui::test]
+fn shift_f10_opens_the_rows_menu_action(cx: &mut TestAppContext) {
+    let (h, vcx) = open_with(cx, Kind::List, None, true);
+    watch(&h, vcx);
+    key(vcx, "tab");
+    key(vcx, "down");
+    key(vcx, "shift-f10");
+    vcx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(
+        vcx.debug_bounds("menu-item-copy").is_some(),
+        "b's menu is open"
+    );
+    key(vcx, "enter");
+    let pressed = h.read_with(vcx, |h, _| h.pressed.borrow().clone());
+    assert_eq!(
+        pressed.last().map(String::as_str),
+        Some("b/copy"),
+        "the menu's first entry, from the keys"
+    );
+}
+
+#[gpui::test]
+fn in_a_tree_right_opens_first_then_goes_into_the_actions(cx: &mut TestAppContext) {
+    let (h, vcx) = open_with(cx, Kind::Tree, None, true);
+    watch(&h, vcx);
+    key(vcx, "tab");
+    // a is folded: Right opens it, staying on it.
+    key(vcx, "right");
+    assert_eq!(focused(&h, vcx), "a");
+    // Open, with actions: Right goes into them (Down reaches its children).
+    key(vcx, "right");
+    assert_eq!(focused(&h, vcx), "a/pin");
+    key(vcx, "left");
+    assert_eq!(focused(&h, vcx), "a");
+    // A leaf's Right goes into its actions; Left back to the row, Left again to the parent.
+    key(vcx, "down");
+    key(vcx, "right");
+    assert_eq!(focused(&h, vcx), "b/pin");
+    key(vcx, "left");
+    key(vcx, "left");
+    assert_eq!(focused(&h, vcx), "a");
+}
+
+#[gpui::test]
+fn the_actions_are_named_buttons(cx: &mut TestAppContext) {
+    cx.update(gpui_core::init);
+    gpui_core::audit_start();
+    let (_h, vcx) = open_with(cx, Kind::List, None, true);
+    vcx.run_until_parked();
+    let said = gpui_core::audit_take();
+    for label in ["Pin a", "Delete a", "More for b"] {
+        assert!(
+            said.iter()
+                .any(|a| a.role == gpui::Role::Button && a.label.as_deref() == Some(label)),
+            "{label} is a named button"
+        );
     }
 }
