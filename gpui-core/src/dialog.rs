@@ -92,6 +92,8 @@ pub struct Dialog {
     label: Option<SharedString>,
     /// No padding round the content (a command palette's field and list reach the edges).
     bare: bool,
+    /// Its top at a fixed place rather than its middle in the window's.
+    anchor_top: bool,
     style: StyleRefinement,
     children: Vec<AnyElement>,
 }
@@ -118,9 +120,18 @@ impl Dialog {
             touch: false,
             label: None,
             bare: false,
+            anchor_top: false,
             style: StyleRefinement::default(),
             children: Vec::new(),
         }
+    }
+
+    /// Its top at a fixed place, about a fifth of the way down the window (18%, at most 160
+    /// points), where it's otherwise in the middle: a dialog whose height changes as it's used
+    /// (a command palette's list as you type) stays put and grows downward, as Spotlight's does.
+    pub fn anchor_top(mut self, anchor: bool) -> Self {
+        self.anchor_top = anchor;
+        self
     }
 
     pub fn open(mut self, open: bool) -> Self {
@@ -409,6 +420,12 @@ impl Dialog {
             panel = panel.aria_description(description);
         }
 
+        // Anchored at its top: a fifth of the way down, at most 160 points, at least the 16 the
+        // other sides keep.
+        let anchor_top = self.anchor_top;
+        let top = (window.viewport_size().height * 0.18)
+            .min(gpui::px(160.))
+            .max(css(16.).to_pixels(window.rem_size()));
         let on_scrim = self
             .dismiss_on_scrim
             .then(|| self.on_dismiss.clone())
@@ -419,9 +436,15 @@ impl Dialog {
             .key_context(MODAL_CONTEXT)
             .occlude()
             .flex()
-            .items_center()
             .justify_center()
             .p(css(16.))
+            .map(|d| {
+                if anchor_top {
+                    d.items_start().pt(top)
+                } else {
+                    d.items_center()
+                }
+            })
             .bg(self.scrim.unwrap_or_else(|| theme.background.opacity(0.7)))
             .debug_selector(|| "gpui-core-dialog-scrim".into())
             .on_action(move |_: &TrapNext, window, cx| cycle_focus(&next, true, window, cx))

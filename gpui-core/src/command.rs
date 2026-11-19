@@ -189,6 +189,8 @@ impl RenderOnce for CommandDialog {
             .close_button(false)
             .accessibility_label(self.label)
             .max_width(self.max_width)
+            // Its field stays put as the list grows and shrinks with what's typed.
+            .anchor_top(true)
             .bare();
         if let Some(f) = self.on_dismiss {
             dialog = dialog.on_dismiss(move |reason, window, cx| f(reason, window, cx));
