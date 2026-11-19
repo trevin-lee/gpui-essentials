@@ -217,6 +217,8 @@ impl Playground {
                     .child(
                         div().w(rems(10.)).child(
                             SegmentedControl::new("chart-kind")
+                                // The box's width, split between the options.
+                                .w_full()
                                 .accessibility_label("Chart")
                                 .segment("bar", "Bars")
                                 .segment("area", "Areas")

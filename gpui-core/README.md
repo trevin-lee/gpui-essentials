@@ -184,8 +184,9 @@ item](docs/gallery.png)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and
   End move along and turn on what they reach, passing over a disabled option and stopping at
-  the ends. `touch(true)` makes its options 44 points tall; in a narrow space their labels are
-  cut short.
+  the ends. `touch(true)` makes its options 44 points tall. Without a width it's as wide as its
+  labels, whole, even beside a spacer; given one (`w_full()`, `w(…)`, `flex_1()`) its options
+  split it equally, and a label too long for its share is cut short.
 - **Toast.** `Toast::success("Saved.").show(window, cx)` (or `new`, `error`) shows a note at the
   bottom of a window whose root is a `Root`, as the web's are: newest at the bottom, at most
   three, gone by themselves after four seconds (eight for an error or one with an `action`),
