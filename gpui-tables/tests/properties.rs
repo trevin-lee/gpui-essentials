@@ -911,3 +911,34 @@ fn a_column_menu_acts_on_its_property_after_the_columns_shift(cx: &mut TestAppCo
     // Its property gone, the menu closes.
     assert!(!drawn(cx, "menu"));
 }
+
+/// The + menu's types are all in view at once on a Mac (fifteen rows of 28 points fit under the
+/// popover), and on touch as many as fit with the field under its height, so the list scrolls
+/// and the popover doesn't, nor does the list run past it.
+#[gpui::test]
+fn the_add_menus_types_are_all_in_view_or_as_many_as_fit_on_touch(cx: &mut TestAppContext) {
+    for host in [TestHost::new(), TestHost::touch()] {
+        let touch = host.theme.borrow().touch;
+        let (_, cx) = open_people(cx, &host);
+        click(cx, "add-property");
+        let list = rect(cx, "picker-rows".to_string());
+        let shown = PropertyType::ADDABLE
+            .iter()
+            .filter(|k| {
+                let r = rect(cx, item(k.label()));
+                r.top() >= list.top() - px(1.) && r.bottom() <= list.bottom() + px(1.)
+            })
+            .count();
+        let picker = rect(cx, "menu-picker".to_string());
+        assert!(
+            picker.size.height <= px(520.),
+            "touch {touch}: the picker under the popover's height: {picker:?}"
+        );
+        if touch {
+            assert!(shown >= 10, "touch: {shown} types in view");
+        } else {
+            assert_eq!(shown, PropertyType::ADDABLE.len(), "every type in view");
+        }
+        keys(cx, "escape");
+    }
+}
