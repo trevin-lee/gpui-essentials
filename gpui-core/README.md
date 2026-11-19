@@ -170,6 +170,16 @@ item](docs/gallery.png)
   a press on an icon or text addon puts the keyboard in the text, `invalid(true)` gives the
   destructive border and `touch()` makes it 44 points tall. In a narrow space the text gives
   way first, then the text addons are cut short.
+- **RovingFocus.** `RovingFocus::new(id).accessibility_label(…).row(id, label, press)…`: rows
+  that share one Tab stop (WAI-ARIA's roving tabindex). Tab reaches them once, on the row that
+  last had the keyboard (else the `selected` one, else the first), and the next Tab leaves. Up
+  and Down move between rows, Left and Right in a `horizontal()` row, any arrow among
+  `tiles()`, and Home and End go to the ends; Enter or Space presses the row, which is the
+  host's `Press`. It's a list to assistive tech, or a list box with `role(Role::ListBox)` (its
+  rows options, the selected one said), or a `tree(toggle)` whose `tree_row`s give their depth
+  and whether they're open: Right opens a row or goes to its first child, Left folds it or
+  goes to its parent. A row that goes while it has the keyboard hands it to its neighbour.
+  Headings and rules between rows are children the keys pass over.
 - **SegmentedControl.** `SegmentedControl::new(id).segment(id, label)….selected(id)
   .on_change(…)`: a few options side by side, one on (a theme's System, Light and Dark). It's a
   radio group to assistive tech, with one Tab stop (the option that's on); the arrows, Home and

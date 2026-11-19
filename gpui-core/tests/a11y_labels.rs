@@ -73,6 +73,10 @@ fn cases() -> Vec<(&'static str, Make)> {
         case!("Combobox", |w, c| Combobox::new("co")
             .option("a", "Alpha")
             .accessibility_label("Project")),
+        case!("RovingFocus", |w, c| RovingFocus::new("rf")
+            .accessibility_label("People")
+            .row("ana", "Ana Ruiz", base::Press::new("ana").child("Ana Ruiz"))
+            .row("bo", "Bo Lin", base::Press::new("bo").child("Bo Lin"))),
         case!("SegmentedControl", |w, c| SegmentedControl::new("seg")
             .segment("a", "List")
             .segment("b", "Grid")
