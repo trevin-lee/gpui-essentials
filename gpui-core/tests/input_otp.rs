@@ -167,7 +167,12 @@ fn a_paste_fills_every_slot(cx: &mut TestAppContext) {
     press(&h, vcx);
     vcx.simulate_input("9");
     vcx.write_to_clipboard(ClipboardItem::new_string("Your code: 123-456.".into()));
-    vcx.simulate_keystrokes("cmd-v");
+    // The platform's paste: ⌘V on Apple's, Ctrl-V elsewhere (as Input binds it).
+    vcx.simulate_keystrokes(if cfg!(any(target_os = "macos", target_os = "ios")) {
+        "cmd-v"
+    } else {
+        "ctrl-v"
+    });
     vcx.run_until_parked();
     assert_eq!(value(&h, vcx), "123456", "the paste replaced the code");
     assert_eq!(completed(&h, vcx), ["123456"]);
