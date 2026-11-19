@@ -144,7 +144,7 @@ pub use press::{Press, focus_ring, focus_visible, ring_inside, ring_outside};
 pub use progress::Progress;
 pub use radio_group::RadioGroup;
 pub use root::{FocusNext, FocusPrev, Root};
-pub use roving_focus::{RovingFocus, RovingLayout};
+pub use roving_focus::{RovingFocus, RovingLayout, RowAction};
 pub use scroll_area::{ScrollArea, ScrollAreaHandle, ScrollAxes};
 pub use search_list::SearchList;
 pub use segmented::SegmentedControl;

@@ -1,12 +1,17 @@
 // A tree: the host draws the rows in view, each with its depth and whether it's open. Up and
 // Down move, Right opens a row or goes to its first child, Left folds it or goes to its parent.
+// A page's link button is a row action: Right from the page reaches it, Left comes back.
 pub struct Example {
     open: Vec<&'static str>,
+    link: Vec<FocusHandle>,
 }
 
 impl Example {
-    pub fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
-        Self { open: vec!["docs"] }
+    pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self {
+            open: vec!["docs"],
+            link: ROWS.iter().map(|_| cx.focus_handle()).collect(),
+        }
     }
 }
 
@@ -42,7 +47,7 @@ impl Render for Example {
             .w(rems(18.));
         // A folded row's children aren't rows.
         let mut folded_at: Option<usize> = None;
-        for (id, name, level, parent) in ROWS {
+        for (i, (id, name, level, parent)) in ROWS.into_iter().enumerate() {
             if folded_at.is_some_and(|l| level > l) {
                 continue;
             }
@@ -56,8 +61,8 @@ impl Render for Example {
             } else {
                 IconName::ChevronRight
             };
-            tree =
-                tree.tree_row(
+            tree = tree
+                .tree_row(
                     id,
                     name,
                     level,
@@ -73,8 +78,17 @@ impl Render for Example {
                         .child(div().w(rems(1.)).children(
                             parent.then(|| Icon::new(chevron).color(theme.muted_foreground)),
                         ))
-                        .child(name),
-                );
+                        .child(div().flex_1().child(name))
+                        .children((!parent).then(|| {
+                            base::Press::new(format!("link-{id}"))
+                                .track_focus(&self.link[i])
+                                .tab_stop(false)
+                                .accessibility_label(format!("Copy {name}'s link"))
+                                .px(rems(0.375))
+                                .child(Icon::new(IconName::Link).color(theme.muted_foreground))
+                        })),
+                )
+                .row_actions(id, (!parent).then(|| RowAction::new(&self.link[i])));
         }
         tree
     }

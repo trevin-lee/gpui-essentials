@@ -248,7 +248,7 @@ actions = "gpui_core_radio_group"
 [roving_focus]
 about = "Roving focus: a list, a row of tiles or a tree whose rows share one Tab stop, with the arrow keys moving between them (WAI-ARIA's \"roving tabindex\")"
 file = "src/roving_focus.rs"
-exports = ["RovingFocus", "RovingLayout"]
+exports = ["RovingFocus", "RovingLayout", "RowAction"]
 needs = []
 init = "init"
 contexts = ["GpuiCoreRovingFocus"]

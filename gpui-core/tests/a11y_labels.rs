@@ -77,6 +77,23 @@ fn cases() -> Vec<(&'static str, Make)> {
             .accessibility_label("People")
             .row("ana", "Ana Ruiz", base::Press::new("ana").child("Ana Ruiz"))
             .row("bo", "Bo Lin", base::Press::new("bo").child("Bo Lin"))),
+        case!("RovingFocus with row actions", |w, c| {
+            let more = c.focus_handle();
+            RovingFocus::new("rfa")
+                .accessibility_label("People")
+                .row(
+                    "ana",
+                    "Ana Ruiz",
+                    base::Press::new("ana").child("Ana Ruiz").child(
+                        base::Press::new("ana-more")
+                            .track_focus(&more)
+                            .tab_stop(false)
+                            .accessibility_label("More for Ana Ruiz")
+                            .child("⋯"),
+                    ),
+                )
+                .row_actions("ana", [RowAction::new(&more)])
+        }),
         case!("SegmentedControl", |w, c| SegmentedControl::new("seg")
             .segment("a", "List")
             .segment("b", "Grid")
