@@ -227,6 +227,7 @@ pub struct Button {
     selector: Option<SharedString>,
     /// Where it sits in a group, which squares its inner corners.
     joined: Joined,
+    focus_on_press: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -256,6 +257,7 @@ impl Button {
             tooltip: None,
             selector: None,
             joined: Joined::Alone,
+            focus_on_press: true,
         }
     }
 
@@ -306,6 +308,14 @@ impl Button {
     /// Tells assistive tech whether what it opens (a menu) is open.
     pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
+        self
+    }
+
+    /// Whether a pointer press gives it the focus (it does unless told not to). A toolbar's
+    /// button beside a field says no, so typing goes on in the field after a click; Tab and the
+    /// keyboard still reach it.
+    pub fn focus_on_press(mut self, focus: bool) -> Self {
+        self.focus_on_press = focus;
         self
     }
 }
@@ -416,6 +426,7 @@ impl RenderOnce for Button {
             })
             .selected(self.selected)
             .disabled(self.disabled)
+            .focus_on_press(self.focus_on_press)
             .when(self.disabled, |b| b.opacity(0.5));
         if !self.disabled {
             let hover = p.hover;

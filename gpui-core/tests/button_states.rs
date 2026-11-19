@@ -1,6 +1,7 @@
 //! A button's states: a ghost button's hover is the hover token (the foreground at 5% in the
 //! dark), drawn at once; and the one-pixel press is the pointer's alone: it shows while the
-//! button is held down, never for Enter or Space.
+//! button is held down, never for Enter or Space. A button told not to take the focus on a
+//! press leaves it where it was, and Tab and Enter still reach it.
 
 use gpui::{
     AppContext as _, Context, FocusHandle, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
@@ -11,6 +12,8 @@ use gpui_core::{Button, ButtonVariants as _, Press, Root, Theme};
 
 struct Host {
     before: FocusHandle,
+    /// Presses of the button that doesn't take the focus.
+    stays: std::rc::Rc<std::cell::Cell<usize>>,
 }
 
 impl Render for Host {
@@ -27,6 +30,13 @@ impl Render for Host {
             )
             .child(Button::new("ghost").ghost().label("Ghost"))
             .child(Button::new("go").label("Go").on_click(|_, _, _| {}))
+            .child({
+                let stays = self.stays.clone();
+                Button::new("stay")
+                    .label("Stay")
+                    .focus_on_press(false)
+                    .on_click(move |_, _, _| stays.set(stays.get() + 1))
+            })
     }
 }
 
@@ -37,6 +47,7 @@ fn open(cx: &mut TestAppContext) -> (gpui::Entity<Host>, &mut VisualTestContext)
     let (_, vcx) = cx.add_window_view(move |window, cx| {
         let h = cx.new(|cx| Host {
             before: cx.focus_handle(),
+            stays: Default::default(),
         });
         *m.borrow_mut() = Some(h.clone());
         Root::new(h, window, cx)
@@ -129,4 +140,22 @@ fn the_press_nudge_is_the_pointers_alone(cx: &mut TestAppContext) {
         });
         vcx.run_until_parked();
     }
+}
+
+#[gpui::test]
+fn a_button_that_doesnt_take_the_focus_on_a_press_leaves_it_where_it_was(cx: &mut TestAppContext) {
+    let (h, vcx) = open(cx);
+    let (before, stays) = h.read_with(vcx, |h, _| (h.before.clone(), h.stays.clone()));
+    vcx.update(|window, cx| window.focus(&before, cx));
+    let at = vcx.debug_bounds("stay").unwrap().center();
+    vcx.simulate_click(at, Modifiers::none());
+    vcx.run_until_parked();
+    assert_eq!(stays.get(), 1, "the click pressed it");
+    vcx.update(|window, _| assert!(before.is_focused(window), "the click took the focus"));
+    // Tab still reaches it (after Ghost and Go), and Enter presses it.
+    for _ in 0..3 {
+        key(vcx, "tab", true);
+    }
+    key(vcx, "enter", true);
+    assert_eq!(stays.get(), 2, "Tab and Enter pressed it");
 }
