@@ -291,7 +291,7 @@ impl Render for Navigation {
                 div()
                     .text_size(theme.text.sm)
                     .text_color(theme.sidebar_foreground)
-                    .child("trevin@trevinlee.com"),
+                    .child("ada@example.com"),
             )
             .active(self.item.clone())
             .on_select(cx.listener(|this, id: &SharedString, _, cx| {
