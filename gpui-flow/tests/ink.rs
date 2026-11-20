@@ -1,4 +1,4 @@
-//! Ink: strokes stored as the iPad's Notes stores PencilKit's, drawn, moved and pressed.
+//! Ink: strokes stored as PencilKit stroke payloads, drawn, moved and pressed.
 
 mod common;
 
@@ -9,7 +9,7 @@ use gpui_flow::json::Op;
 use gpui_flow::*;
 use serde_json::{Value, json};
 
-/// The first point of the iPad's own example stroke, as its `InkPoints.encode` writes it.
+/// The first point of an example stroke from an iPad, as its PencilKit payload encodes it.
 const IPAD_POINT: &str = "AACQQgAA8EIAAAAAmpkZP83MTD/NzIw/mpkZQA==";
 
 #[test]

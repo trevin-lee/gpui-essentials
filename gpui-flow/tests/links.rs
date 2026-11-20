@@ -1,4 +1,4 @@
-//! Nodes that link to something of the host's (a document, in Docs): the flow shows a button
+//! Nodes that link to something of the host's (a document, say): the flow shows a button
 //! and tells the host, which opens it. The flow never opens anything itself.
 
 mod common;

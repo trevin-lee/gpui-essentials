@@ -1467,8 +1467,8 @@ pub fn drawing_node(node: &Node, ctx: &NodeContext) -> AnyElement {
         .into_any_element()
 }
 
-/// The built-in `ink` kind: a stroke drawn with a pen, stored as the iPad's Notes stores
-/// PencilKit's (see [`crate::ink`]). It's drawn in its box, which is the stroke's bounds; one
+/// The built-in `ink` kind: a stroke drawn with a pen, stored as a PencilKit stroke's payload
+/// (see [`crate::ink`]). It's drawn in its box, which is the stroke's bounds; one
 /// that doesn't read draws nothing.
 pub fn ink_node(node: &Node, ctx: &NodeContext) -> AnyElement {
     let Some(drawn) = ctx.shared.ink(node) else {

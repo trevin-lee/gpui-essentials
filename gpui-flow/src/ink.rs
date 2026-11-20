@@ -1,6 +1,5 @@
-//! Ink: strokes drawn with a pen, stored as the iPad's Notes stores PencilKit strokes, so a
-//! whiteboard drawn with the Pencil on iPad shows the same strokes on the Mac, and the other
-//! way round.
+//! Ink: strokes drawn with a pen, stored as PencilKit stroke payloads, so a whiteboard drawn
+//! with the Pencil on iPad shows the same strokes on the Mac, and the other way round.
 //!
 //! A stroke is a node of type `ink` whose `data.ink` is the stroke:
 //!
@@ -145,7 +144,7 @@ pub fn decode_points(text: &str) -> Option<Vec<InkPoint>> {
     )
 }
 
-/// A colour as `#RRGGBBAA`, uppercase, as the iPad writes it.
+/// A colour as `#RRGGBBAA`, uppercase, as a PencilKit payload writes it.
 pub fn color_hex(rgba: u32) -> String {
     format!("#{rgba:08X}")
 }
