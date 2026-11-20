@@ -26,7 +26,7 @@ use super::ops;
 use super::properties::FieldFor;
 use super::table::{Action, Entry, Popover, Reopen, TableView, type_icon};
 use crate::model::{
-    CardPreview, DateBucket, Edit, PropertyType, View, ViewType, new_id, truncate_chars,
+    CardPreview, CardSize, DateBucket, Edit, PropertyType, View, ViewType, new_id, truncate_chars,
 };
 
 /// The types a view can be made as or changed to.
@@ -134,6 +134,8 @@ pub(crate) enum ViewAction {
     GroupDate(DateBucket),
     /// A gallery's cards show their row's cover (true) or nothing above their title.
     CardPreview(bool),
+    /// A gallery's cards' size.
+    CardSize(CardSize),
     /// Shown on cards or lines, or not.
     ToggleCard(String),
     /// A table's columns: the Properties menu.
@@ -226,6 +228,16 @@ const DATE_GROUPING: &str = "Date grouping";
 /// the row's cover.
 const CARD_PREVIEW: &str = "Card preview";
 const PAGE_COVER: &str = "Page cover";
+const CARD_SIZE: &str = "Card size";
+
+/// A card size as its settings entry names it.
+fn size_label(size: &CardSize) -> &'static str {
+    match size {
+        CardSize::Small => "Small",
+        CardSize::Large => "Large",
+        _ => "Medium",
+    }
+}
 
 /// Why a board can't be made: nothing to group by.
 const NO_GROUP: &str = "A board groups cards by a select, multi-select, checkbox, person or \
@@ -689,6 +701,12 @@ impl TableView {
                     .icon(I::PanelTop)
                     .hint(if cover { PAGE_COVER } else { "None" }),
             );
+            let size = v.card_size.clone().unwrap_or(CardSize::Medium);
+            out.push(
+                Entry::sub(CARD_SIZE, self.card_size_entries(v))
+                    .icon(I::Maximize2)
+                    .hint(size_label(&size)),
+            );
         }
         match v.kind {
             ViewType::Board | ViewType::List | ViewType::Gallery => {
@@ -788,6 +806,21 @@ impl TableView {
                 .icon(icon)
                 .checked(on)
                 .highlighted(on),
+            );
+        }
+        out
+    }
+
+    /// How big a gallery's cards are, the current size checked.
+    fn card_size_entries(&self, v: &View) -> Vec<Entry> {
+        let current = v.card_size.clone().unwrap_or(CardSize::Medium);
+        let mut out = vec![Entry::heading(CARD_SIZE)];
+        for size in [CardSize::Small, CardSize::Medium, CardSize::Large] {
+            let on = size == current;
+            out.push(
+                Entry::act(size_label(&size), Action::View(ViewAction::CardSize(size)))
+                    .checked(on)
+                    .highlighted(on),
             );
         }
         out
@@ -1023,6 +1056,16 @@ impl TableView {
                     return;
                 }
                 v.card_preview = Some(preview);
+                self.emit_views(vec![self.view_changed(v)], None, window, cx);
+            }
+            ViewAction::CardSize(size) => {
+                let Some(mut v) = current else { return };
+                // Medium is the default: written as the field left out.
+                let size = (size != CardSize::Medium).then_some(size);
+                if v.card_size == size {
+                    return;
+                }
+                v.card_size = size;
                 self.emit_views(vec![self.view_changed(v)], None, window, cx);
             }
             ViewAction::ToggleCard(pid) => {

@@ -54,6 +54,16 @@ string_enum! {
 }
 
 string_enum! {
+    /// How big a gallery's cards are (Notion's card size): their width, 172, 252 or 340 points
+    /// (never wider than the view). Absent is medium, today's card.
+    pub enum CardSize {
+        Small = "small",
+        Medium = "medium",
+        Large = "large",
+    }
+}
+
+string_enum! {
     /// A filter condition's operator. Which apply depends on the property's type (see
     /// [`FilterOp::applies_to`]).
     pub enum FilterOp {
@@ -412,6 +422,10 @@ pub struct View {
     /// the JSON when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub card_preview: Option<CardPreview>,
+    /// How big a gallery's cards are. Absent (or null) is medium; left out of the JSON when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_size: Option<CardSize>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -438,6 +452,7 @@ impl View {
             collapsed_groups: Vec::new(),
             calculations: BTreeMap::new(),
             card_preview: None,
+            card_size: None,
             extra: Extra::new(),
         }
     }

@@ -22,8 +22,8 @@ pub use limits::{Limits, Problem, ProblemKind};
 pub use property::{Color, NumberFormat, Property, PropertyConfig, PropertyType, SelectOption};
 pub use value::{DateValue, Value};
 pub use view::{
-    Calculation, CardPreview, Column, Condition, DateBucket, Direction, Filter, FilterOp, Sort,
-    View, ViewType, Within,
+    Calculation, CardPreview, CardSize, Column, Condition, DateBucket, Direction, Filter, FilterOp,
+    Sort, View, ViewType, Within,
 };
 
 /// A fresh id: a lowercase v4 UUID, as the creator of a row, property, view or option makes it.

@@ -25,7 +25,11 @@ use gpui_core::{IconName, Press};
 use super::board::{BoardColumn, BoardMetrics};
 use super::render::{icon, line};
 use super::table::{Item, TableView};
-use crate::model::{CardPreview, Doc};
+use crate::model::{CardPreview, CardSize, Doc};
+
+/// A small card's width and a large one's, in points (a medium one is the board's).
+const CARD_SMALL: f32 = 172.;
+const CARD_LARGE: f32 = 340.;
 
 /// Where the gallery's grid was drawn: its top left (inside its padding), the cards a line, a
 /// card's width and a line's height (a card and the gap under it), the gap between cards, and
@@ -164,11 +168,19 @@ impl TableView {
         self.gallery_lanes()[lane].rows.get(at).copied()
     }
 
-    /// The grid's layout for the view's width now: cards of the board's column width less its
-    /// inset, as many a line as fit (one at least).
+    /// The grid's layout for the view's width now: cards of the view's card size (medium is the
+    /// board's column width less its inset), never wider than the view, as many a line as fit
+    /// (one at least).
     fn gallery_grid(&self, m: &BoardMetrics) -> GalleryGrid {
         let width = self.bounds.get().size.width;
-        let card_width = m.column_width - m.inset * 2.;
+        let p = |points: f32| self.theme.pixels(points, self.rem);
+        let size = self.view().and_then(|v| v.card_size.clone());
+        let card_width = match size {
+            Some(CardSize::Small) => p(CARD_SMALL),
+            Some(CardSize::Large) => p(CARD_LARGE),
+            _ => m.column_width - m.inset * 2.,
+        }
+        .min((width - m.pad * 2.).max(px(1.)));
         let room = (width - m.pad * 2. + m.gap).max(px(0.));
         let per_line = ((room / (card_width + m.gap)).floor() as usize).max(1);
         let band = if self.view().and_then(|v| v.card_preview.as_ref()) == Some(&CardPreview::Cover)
