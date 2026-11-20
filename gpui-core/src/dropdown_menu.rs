@@ -104,6 +104,7 @@ pub struct DropdownMenu {
     menu: PopupMenu,
     on_select: Option<OnSelect>,
     on_open_change: Option<OnOpenChange>,
+    request_open: bool,
     side: PopoverSide,
     align: PopoverAlign,
     touch: bool,
@@ -124,6 +125,7 @@ impl DropdownMenu {
             trigger: None,
             on_select: None,
             on_open_change: None,
+            request_open: false,
             side: PopoverSide::Bottom,
             align: PopoverAlign::Start,
             touch: false,
@@ -138,6 +140,15 @@ impl DropdownMenu {
     /// is up, such as a native view it hides or keys it holds back.
     pub fn on_open_change(mut self, f: impl Fn(bool, &mut App) + 'static) -> Self {
         self.on_open_change = Some(Rc::new(f));
+        self
+    }
+
+    /// Opens it from code (a test, a run that takes pictures): drawn with `true`, it opens, once
+    /// for a request. Drawn again while it's still asked, it stays as the person left it (closed,
+    /// if they closed it); drawn once without, the next request opens it again. A disabled menu
+    /// doesn't open.
+    pub fn request_open(mut self, open: bool) -> Self {
+        self.request_open = open;
         self
     }
 
@@ -230,6 +241,8 @@ struct State {
     open: Option<Opened>,
     /// The host's, as last drawn.
     on_open_change: Option<OnOpenChange>,
+    /// Whether the host asked it open when last drawn.
+    requested: bool,
 }
 
 fn set(state: &Entity<State>, open: Option<Opened>, cx: &mut App) {
@@ -255,8 +268,29 @@ impl RenderOnce for DropdownMenu {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State {
             open: None,
             on_open_change: None,
+            requested: false,
         });
-        state.update(cx, |s, _| s.on_open_change = self.on_open_change.clone());
+        let asked = self.request_open;
+        let newly = state.update(cx, |s, _| {
+            s.on_open_change = self.on_open_change.clone();
+            let newly = asked && !s.requested;
+            s.requested = asked;
+            newly
+        });
+        // Opened from the next frame, so the host isn't told in the middle of a draw.
+        if newly && !self.disabled {
+            let state = state.clone();
+            window.defer(cx, move |_, cx| {
+                set(
+                    &state,
+                    Some(Opened {
+                        keys: false,
+                        touch: false,
+                    }),
+                    cx,
+                )
+            });
+        }
         let open = if self.disabled {
             None
         } else {

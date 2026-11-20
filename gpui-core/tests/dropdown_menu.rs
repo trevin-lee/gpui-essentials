@@ -28,6 +28,8 @@ struct Host {
     picked: Rc<RefCell<Vec<String>>>,
     /// What the account menu's on_open_change was told, in order.
     opens: Rc<RefCell<Vec<bool>>>,
+    /// Whether the host asks the account menu open.
+    request: bool,
     draws: Rc<Cell<usize>>,
     before: FocusHandle,
     trigger: FocusHandle,
@@ -70,7 +72,8 @@ impl Render for Host {
                             .on_select(move |pick, _, _| {
                                 picked.borrow_mut().push(pick.id.to_string())
                             })
-                            .on_open_change(move |open, _| opens.borrow_mut().push(open)),
+                            .on_open_change(move |open, _| opens.borrow_mut().push(open))
+                            .request_open(self.request),
                     ),
                 ),
             )
@@ -110,6 +113,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
             disabled: false,
             picked: Rc::default(),
             opens: Rc::default(),
+            request: false,
             draws: Rc::default(),
             before: cx.focus_handle(),
             trigger: cx.focus_handle(),
@@ -322,6 +326,27 @@ fn on_open_change_hears_each_open_and_close_once(cx: &mut TestAppContext) {
     // Draws in between tell nothing more.
     o.vcx.update(|window, cx| window.draw(cx).clear(cx));
     assert_eq!(opens(&mut o).len(), 8);
+}
+
+#[gpui::test]
+fn a_request_opens_it_once(cx: &mut TestAppContext) {
+    let mut o = open(cx);
+    let opens = |o: &mut Opened| o.host.read_with(o.vcx, |h, _| h.opens.borrow().clone());
+    o.set(|h| h.request = true);
+    o.vcx.run_until_parked();
+    assert!(o.menu().is_some(), "asked open, it opens");
+    assert_eq!(opens(&mut o), [true]);
+    // Closed while it's still asked, it stays closed.
+    o.keys("escape");
+    o.set(|h| h.draws.set(h.draws.get()));
+    o.vcx.run_until_parked();
+    assert!(o.menu().is_none(), "still asked, it stays as it was left");
+    // Not asked for a draw, then asked again: it opens again.
+    o.set(|h| h.request = false);
+    o.set(|h| h.request = true);
+    o.vcx.run_until_parked();
+    assert!(o.menu().is_some(), "a new request opens it again");
+    assert_eq!(opens(&mut o), [true, false, true]);
 }
 
 #[gpui::test]
