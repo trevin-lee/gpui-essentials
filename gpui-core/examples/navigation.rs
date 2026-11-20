@@ -261,7 +261,7 @@ impl Render for Navigation {
                     .p(rems(0.25))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(Icon::new(IconName::Bot))
-                    .child("Open Cloud Agents"),
+                    .child("Agents"),
             )
             .group(
                 SidebarGroup::new("platform")

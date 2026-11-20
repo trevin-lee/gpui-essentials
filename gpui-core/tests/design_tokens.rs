@@ -1,5 +1,5 @@
 //! The dark theme is the apps' reference look: `design/tokens.json`, a copy of
-//! open-cloud-agents' (`design/tokens.source` says which commit; `scripts/sync-tokens.sh`
+//! the agents repo's (`design/tokens.source` says which commit; `scripts/sync-tokens.sh`
 //! copies a newer one). Every colour, radius and text size there must be the theme's, and every
 //! token must be either mapped here or listed as not the theme's, so a new token can't be missed.
 

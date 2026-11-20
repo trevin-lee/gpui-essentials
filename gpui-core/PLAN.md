@@ -12,7 +12,7 @@ GPUI Kit is a facade over four layers: GPUI (`gpui-pre`, re-exported at its root
 (~138k lines), `gpui-component` (~113k lines) and `gpui-kit-assets` (1,830 Lucide icons). The
 crates use only a small part of it. The inventory below comes from `rg` over the four crates,
 gpui-blocks' engine (`gpui-blocks/engine`) and the Mac
-app (`open-cloud-agents/clients/desktop`), on 2026-11-15.
+app (`agents/clients/desktop`), on 2026-11-15.
 
 | Item (kit path) | flow | calendar | agents | blocks (+fork) | Mac app |
 | --- | :-: | :-: | :-: | :-: | :-: |
@@ -70,7 +70,7 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
   `globals.css` token names in snake_case: `background`, `foreground`, `card`, `popover`,
   `primary`, `secondary`, `muted`, `muted_foreground`, `accent`, `border`, `input`, `ring`,
   `destructive`, `sidebar`, and so on. These are the names the Desktop session is writing into
-  `open-cloud-agents/design/tokens.json`, so the Mac app can pass its theme straight through.
+  `agents/design/tokens.json`, so the Mac app can pass its theme straight through.
   When that file lands I'll match the names to it exactly. Other fields: font family and size,
   mono family and size, radii. The built-in default is the Mac app's charcoal dark theme. There
   is no light/dark switching logic in the crate.
@@ -123,7 +123,7 @@ GPUI's `deferred` and `anchored`. gpui-flow draws its own controls and icons. It
      session's work and needs nothing from gpui-core.
    The blocks session will write the fork's needs as tests against the layer's API.
 8. **The Mac app**, last. It needs 1–5 and Switch, and moves in a few small PRs in
-   open-cloud-agents, one area each, that Main merges: see "The Mac app's switch" below.
+   the agents repo, one area each, that Main merges: see "The Mac app's switch" below.
 
 ## After the kit: Popover, Menu, Picker
 
@@ -175,7 +175,7 @@ test and clippy all pass. Each switch is its own PR.
 
 ## The Mac app's switch
 
-Inventory of `open-cloud-agents/clients/desktop/app` at `4d4ca666` (2026-11-16), from `rg` over
+Inventory of `agents/clients/desktop/app` at `4d4ca666` (2026-11-16), from `rg` over
 its sources. It already links gpui-core (pinned by rev) next to GPUI Kit 0.9.1, and draws
 Popover-like and menu-like things itself, so the kit use left is small.
 

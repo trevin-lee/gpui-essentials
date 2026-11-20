@@ -8,7 +8,7 @@ An audit of every foreground and background pair gpui-core's components draw, in
 
 Each pair was read from the component that draws it; the last column says where. Some colours are used only by the apps, not by gpui-core's components (the status colours). They're in their own section, because the apps draw them with these tokens.
 
-The audit found 26 pairs below AA. Every fix it suggested is now applied (the last section says what changed), and `tests/contrast.rs` computes every pair below in both themes and fails on any that drops under its level, so this can't regress. The dark theme's colours come from `design/tokens.json`, the apps' shared design file (open-cloud-agents #796 changed them there).
+The audit found 26 pairs below AA. Every fix it suggested is now applied (the last section says what changed), and `tests/contrast.rs` computes every pair below in both themes and fails on any that drops under its level, so this can't regress. The dark theme's colours come from `design/tokens.json`, the apps' shared design file (agents #796 changed them there).
 
 Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audit confirms it for every one of them.
 
