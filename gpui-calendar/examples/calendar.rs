@@ -70,7 +70,7 @@ fn load_fonts(cx: &mut App) {
     ]);
 }
 
-/// The Mac app's charcoal theme, the one the pictures are drawn in, set in Inter (loaded
+/// The charcoal theme, the one the pictures are drawn in, set in Inter (loaded
 /// first: a family that isn't loaded draws no text), with its hover wash (the foreground at 5%).
 fn apply_theme(cx: &mut App) {
     let mut t = Theme::dark();
@@ -179,7 +179,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
     );
     add(
         "lease",
-        "Main: review the lease draft",
+        "Planner: review the lease draft",
         1,
         hm(16, 0),
         hm(17, 0),
@@ -286,7 +286,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
     );
     add(
         "plan",
-        "Main: plan the week",
+        "Planner: plan the week",
         6,
         hm(19, 0),
         hm(19, 45),
@@ -324,7 +324,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
             Attendee::new("Jordan Alvarez-Whitfield", Response::Declined),
         ];
     }
-    // Links to docs and agents, as the app's Docs section would attach them.
+    // Links to docs and agents, as a host would attach them.
     let mut link = |id: &str, links: Vec<EventLink>| {
         out.iter_mut().find(|e| e.id == id).unwrap().links = links;
     };
@@ -332,7 +332,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         "design",
         vec![EventLink::doc("doc-design", "Design review notes")],
     );
-    link("lease", vec![EventLink::agent("main", "Main")]);
+    link("lease", vec![EventLink::agent("planner", "Planner")]);
     link(
         "one-on-one",
         vec![EventLink::doc("doc-priya", "1:1 with Priya")],
@@ -342,10 +342,10 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         vec![
             EventLink::doc("doc-loop", "Interview loop"),
             EventLink::doc("doc-cv", "Résumé"),
-            EventLink::agent("main", "Main"),
+            EventLink::agent("planner", "Planner"),
         ],
     );
-    link("plan", vec![EventLink::agent("main", "Main")]);
+    link("plan", vec![EventLink::agent("planner", "Planner")]);
     link(
         "section",
         vec![
@@ -412,7 +412,7 @@ const TITLES: [&str; 16] = [
     "Focus time",
     "Lunch",
     "Reading group",
-    "Main: follow up",
+    "Planner: follow up",
     "Interview",
     "Office hours",
     "Errands",
@@ -658,7 +658,7 @@ impl Root {
                 more("vendor", "Vendor call", 14 * 60 + 30, 15 * 60 + 30, "work");
                 more(
                     "checkin",
-                    "Check-in with Main",
+                    "Check-in with Planner",
                     14 * 60 + 45,
                     15 * 60 + 15,
                     "agents",
