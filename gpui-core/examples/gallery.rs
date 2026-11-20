@@ -281,7 +281,7 @@ impl Render for Gallery {
                         div()
                             .id("switch-tip")
                             .tooltip(|window, cx| {
-                                Tooltip::new("Turns the agent's tools on and off").build(window, cx)
+                                Tooltip::new("Turns notifications on and off").build(window, cx)
                             })
                             .child(
                                 Switch::new("tools")

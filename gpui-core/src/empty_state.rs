@@ -5,11 +5,11 @@
 //! ```no_run
 //! # use gpui::*;
 //! # use gpui_core::{Button, EmptyState, IconName};
-//! # fn no_agents() -> impl IntoElement {
+//! # fn no_messages() -> impl IntoElement {
 //! EmptyState::new()
 //!     .icon(IconName::Inbox)
 //!     .title("No messages yet")
-//!     .description("When an agent writes to you, it shows up here.")
+//!     .description("When someone writes to you, it shows up here.")
 //!     .child(Button::new("new").label("Start a chat"))
 //! # }
 //! ```

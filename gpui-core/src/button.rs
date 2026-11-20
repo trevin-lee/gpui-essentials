@@ -1,4 +1,4 @@
-//! Buttons as the web app draws them (its `button.tsx`): primary, outline, secondary, ghost,
+//! Buttons as shadcn/ui draws them (its `button.tsx`): primary, outline, secondary, ghost,
 //! destructive and link variants in five sizes, with a label, an icon or both, and groups of
 //! them joined edge to edge. Anything else it holds (a count, a shortcut) goes in as children,
 //! after the label; restyle it as any element (`.w_full()`, `.flex_row_reverse()`).

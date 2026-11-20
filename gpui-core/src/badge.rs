@@ -1,4 +1,4 @@
-//! A badge, as shadcn draws it (the web app's `badge.tsx`): a small pill of text, perhaps with
+//! A badge, as shadcn draws it (its `badge.tsx`): a small pill of text, perhaps with
 //! an icon before it, in the default, secondary, destructive or outline look. It's text unless
 //! it's given an [`on_click`](Badge::on_click); then it's a button, with the focus ring.
 //!

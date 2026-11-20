@@ -3,8 +3,8 @@
 //! and End, inline boxes (pictures, mention chips) on the baseline, marks that don't move text,
 //! aligned table cells, and nothing that overflows or panics on hostile text.
 //!
-//! Written by the gpui-blocks session against `feat/core-textview` (5aefe4a). The API it uses
-//! beyond that branch is a proposal; rename freely, keep what the tests ask:
+//! Written for gpui-blocks against `feat/core-textview` (5aefe4a). The API it uses beyond that
+//! branch was a proposal; rename freely, keep what the tests ask:
 //!
 //! - `Affinity { Upstream, Downstream }` and `ParagraphLayout::caret(offset, affinity) ->
 //!   Bounds`: at a soft wrap, Upstream is the end of the upper row and Downstream the start of

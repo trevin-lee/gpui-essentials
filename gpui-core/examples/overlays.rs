@@ -76,7 +76,7 @@ impl Render for Overlays {
                     .child(
                         Button::new("open-alert")
                             .destructive()
-                            .label("Delete the agent")
+                            .label("Delete the project")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.alert = true;
                                 cx.notify();
@@ -185,7 +185,7 @@ impl Render for Overlays {
                             .outline()
                             .label("Fail, with Retry")
                             .on_click(|_, window, cx| {
-                                Toast::error("Couldn't reach the agent.")
+                                Toast::error("Couldn't reach the server.")
                                     .action("Retry", |_, _| {})
                                     .show(window, cx)
                             }),
@@ -293,9 +293,9 @@ impl Render for Overlays {
             .child(
                 AlertDialog::new("delete")
                     .open(self.alert)
-                    .title("Delete the agent?")
+                    .title("Delete the project?")
                     .description(
-                        "This can't be undone. Its chats, files and schedules are deleted with it.",
+                        "This can't be undone. Its files and history are deleted with it.",
                     )
                     .on_dismiss(cx.listener(|this, _, _, cx| {
                         this.alert = false;

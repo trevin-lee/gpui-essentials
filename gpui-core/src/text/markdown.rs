@@ -1081,7 +1081,7 @@ mod tests {
             );
             assert!(p.text.contains('$'), "{source}: {}", p.text);
         }
-        // An escaped dollar, as the Mac app writes a price, is a dollar.
+        // An escaped dollar, as a price is often written, is a dollar.
         let b = parse(r"About \$230, then \$53.");
         let Block::Paragraph(p) = &b[0] else {
             panic!("{b:?}")

@@ -6,9 +6,9 @@ An audit of every foreground and background pair gpui-core's components draw, in
 - **Non-text**, meaning the focus ring, the boundaries that show a control and chart series, needs 3:1 (1.4.11, 2.4.13).
 - **Disabled controls** are exempt (1.4.3). They're listed for reference.
 
-Each pair was read from the component that draws it; the last column says where. Some colours are used only by the apps, not by gpui-core's components (the status colours). They're in their own section, because the apps draw them with these tokens.
+Each pair was read from the component that draws it; the last column says where. Some colours are used only by host apps, not by gpui-core's components (the status colours). They're in their own section, because a host draws them with these tokens.
 
-The audit found 26 pairs below AA. Every fix it suggested is now applied (the last section says what changed), and `tests/contrast.rs` computes every pair below in both themes and fails on any that drops under its level, so this can't regress. The dark theme's colours come from `design/tokens.json`, the apps' shared design file (agents #796 changed them there).
+The audit found 26 pairs below AA. Every fix it suggested is now applied (the last section says what changed), and `tests/contrast.rs` computes every pair below in both themes and fails on any that drops under its level, so this can't regress. The dark theme's colours come from `design/tokens.json`, the crate's design file.
 
 Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audit confirms it for every one of them.
 
@@ -45,7 +45,7 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Muted text on a muted fill (muted_foreground on muted) | `#8b8b93` on `#1f1f23` | 4.86:1 | 4.5:1 | pass | kbd.rs:84, tabs.rs (inactive tab), segmented.rs (unselected) |
 | Placeholder in a field on the page (muted_foreground on control at 30% over background) | `#8b8b93` on `#1c1c1f` | 5.03:1 | 4.5:1 | pass | input.rs:2361 (placeholder), input.rs fill |
 | Placeholder in a field on a card (muted_foreground on field_on_card) | `#8b8b93` on `#222226` | 4.69:1 | 4.5:1 | pass | input.rs:2361, tokens field-on-card |
-| Sidebar row time (muted_70, at 86%, on sidebar) | `#797980` on `#0b0b0d` | 4.55:1 | 4.5:1 | pass | tokens muted-70 (the apps' sidebar) |
+| Sidebar row time (muted_70, at 86%, on sidebar) | `#797980` on `#0b0b0d` | 4.55:1 | 4.5:1 | pass | tokens muted-70 (a host's sidebar) |
 
 ### Status text
 
@@ -82,7 +82,7 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Syntax tag on secondary | `#f28b82` on `#1f1f23` | 6.88:1 | 4.5:1 | pass | code blocks |
 | Syntax punctuation on secondary | `#a1a1aa` on `#1f1f23` | 6.41:1 | 4.5:1 | pass | code blocks |
 
-### App status colours (used by the apps, not gpui-core's components)
+### Status colours (used by host apps, not gpui-core's components)
 
 | Pair | Colours (as drawn) | Ratio | Needed | Result | Where |
 | --- | --- | --- | --- | --- | --- |
@@ -160,7 +160,7 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Muted text on a muted fill (muted_foreground on muted) | `#6b6b73` on `#f1f1f3` | 4.68:1 | 4.5:1 | pass | kbd.rs:84, tabs.rs (inactive tab), segmented.rs (unselected) |
 | Placeholder in a field on the page (muted_foreground on control at 30% over background) | `#6b6b73` on `#f0f0f2` | 4.64:1 | 4.5:1 | pass | input.rs:2361 (placeholder), input.rs fill |
 | Placeholder in a field on a card (muted_foreground on field_on_card) | `#6b6b73` on `#f4f4f5` | 4.81:1 | 4.5:1 | pass | input.rs:2361, tokens field-on-card |
-| Sidebar row time (muted_70, which is muted_foreground itself, on sidebar) | `#6b6b73` on `#f1f1f3` | 4.68:1 | 4.5:1 | pass | tokens muted-70 (the apps' sidebar) |
+| Sidebar row time (muted_70, which is muted_foreground itself, on sidebar) | `#6b6b73` on `#f1f1f3` | 4.68:1 | 4.5:1 | pass | tokens muted-70 (a host's sidebar) |
 
 ### Status text
 
@@ -197,7 +197,7 @@ Note: `tokens.json` already promises 4.5:1 for the syntax colours, and this audi
 | Syntax tag on secondary | `#b3261e` on `#f1f1f3` | 5.79:1 | 4.5:1 | pass | code blocks |
 | Syntax punctuation on secondary | `#52525b` on `#f1f1f3` | 6.85:1 | 4.5:1 | pass | code blocks |
 
-### App status colours (used by the apps, not gpui-core's components)
+### Status colours (used by host apps, not gpui-core's components)
 
 | Pair | Colours (as drawn) | Ratio | Needed | Result | Where |
 | --- | --- | --- | --- | --- | --- |

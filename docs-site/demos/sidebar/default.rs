@@ -42,7 +42,7 @@ impl Render for Example {
                     .group(
                         SidebarGroup::new("workspace")
                             .label("Workspace")
-                            .item(SidebarItem::new("agents", "Agents").icon(IconName::Bot))
+                            .item(SidebarItem::new("documents", "Documents").icon(IconName::FileText))
                             .item(SidebarItem::new("team", "Team").icon(IconName::Users))
                             .item(
                                 SidebarItem::new("settings", "Settings").icon(IconName::Settings),
@@ -64,7 +64,7 @@ impl Render for Example {
                                 "inbox" => "Inbox",
                                 "sent" => "Sent",
                                 "archive" => "Archive",
-                                "agents" => "Agents",
+                                "documents" => "Documents",
                                 "team" => "Team",
                                 _ => "Settings",
                             }),

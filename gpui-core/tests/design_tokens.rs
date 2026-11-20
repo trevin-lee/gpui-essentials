@@ -1,6 +1,5 @@
-//! The dark theme is the apps' reference look: `design/tokens.json`, a copy of
-//! the agents repo's (`design/tokens.source` says which commit; `scripts/sync-tokens.sh`
-//! copies a newer one). Every colour, radius and text size there must be the theme's, and every
+//! The dark theme is the look in `design/tokens.json` (`scripts/sync-tokens.sh` copies a newer
+//! tokens file over it). Every colour, radius and text size there must be the theme's, and every
 //! token must be either mapped here or listed as not the theme's, so a new token can't be missed.
 
 use std::collections::BTreeSet;
@@ -92,7 +91,7 @@ fn colours() -> Vec<(&'static str, Vec<Field>)> {
 const NOT_THEME: &[(&str, &str)] = &[
     (
         "font.family",
-        "the apps bundle Inter and Geist Mono and set them; the theme's default stays the \
+        "a host that bundles Inter and Geist Mono sets them; the theme's default stays the \
          system's fonts, which every Mac and iPhone has (a family that isn't loaded draws nothing)",
     ),
     (
@@ -154,7 +153,7 @@ fn tokens(v: &Value, path: &str, out: &mut Vec<(String, Value)>) {
 }
 
 #[test]
-fn the_dark_theme_is_the_apps_reference_look() {
+fn the_dark_theme_is_the_design_tokens_look() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(dir.join("design/tokens.json")).unwrap();
     let json: Value = serde_json::from_str(&text).unwrap();
@@ -162,7 +161,7 @@ fn the_dark_theme_is_the_apps_reference_look() {
     tokens(&json, "", &mut all);
 
     let theme = Theme::dark();
-    // Tokens are CSS pixels: the Mac app's points at its 15 point base.
+    // Tokens are CSS pixels: points at the theme's 15 point base.
     let base = 15.;
     let mut problems = Vec::new();
     let mut checked = BTreeSet::new();
@@ -233,10 +232,7 @@ fn the_dark_theme_is_the_apps_reference_look() {
 
     assert!(
         problems.is_empty(),
-        "the dark theme differs from design/tokens.json ({}):\n  {}",
-        std::fs::read_to_string(dir.join("design/tokens.source"))
-            .unwrap_or_default()
-            .trim(),
+        "the dark theme differs from design/tokens.json:\n  {}",
         problems.join("\n  ")
     );
 }

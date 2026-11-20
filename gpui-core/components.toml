@@ -49,7 +49,7 @@ crates = ["unicode-segmentation"]
 contexts = []
 
 [badge]
-about = "A badge, as shadcn draws it (the web app's `badge.tsx`): a small pill of text, perhaps with an icon before it, in the default, secondary, destructive or outline look"
+about = "A badge, as shadcn draws it (its `badge.tsx`): a small pill of text, perhaps with an icon before it, in the default, secondary, destructive or outline look"
 file = "src/badge.rs"
 exports = ["Badge", "BadgeVariant"]
 needs = []
@@ -63,14 +63,14 @@ needs = []
 contexts = []
 
 [button]
-about = "Buttons as the web app draws them (its `button.tsx`): primary, outline, secondary, ghost, destructive and link variants in five sizes, with a label, an icon or both, and groups of them joined edge to edge"
+about = "Buttons as shadcn/ui draws them (its `button.tsx`): primary, outline, secondary, ghost, destructive and link variants in five sizes, with a label, an icon or both, and groups of them joined edge to edge"
 file = "src/button.rs"
 exports = ["Button", "ButtonGroup", "ButtonVariant", "ButtonVariants"]
 needs = []
 contexts = []
 
 [card]
-about = "A card, as the web app draws it (its `card.tsx`): a raised panel with a header (a title, a description, and an action at the top right), content, and a footer along the bottom"
+about = "A card, as shadcn/ui draws it (its `card.tsx`): a raised panel with a header (a title, a description, and an action at the top right), content, and a footer along the bottom"
 file = "src/card.rs"
 exports = ["Card"]
 needs = []
@@ -289,7 +289,7 @@ contexts = ["GpuiCoreSelect"]
 actions = "gpui_core_select"
 
 [separator]
-about = "A separator, as shadcn draws it (the web app's `separator.tsx`): a one-pixel line in the border colour, across its parent's width or down its height"
+about = "A separator, as shadcn draws it (its `separator.tsx`): a one-pixel line in the border colour, across its parent's width or down its height"
 file = "src/separator.rs"
 exports = ["Separator"]
 needs = []
@@ -342,7 +342,7 @@ contexts = ["GpuiCoreSplitView"]
 actions = "gpui_core_split_view"
 
 [switch]
-about = "An on/off switch, as the web app draws it (its `switch.tsx`): a pill in the primary colour when on and the input colour when off, with a thumb that slides between the two"
+about = "An on/off switch, as shadcn/ui draws it (its `switch.tsx`): a pill in the primary colour when on and the input colour when off, with a thumb that slides between the two"
 file = "src/switch.rs"
 exports = ["Switch"]
 needs = []
@@ -383,7 +383,7 @@ contexts = ["GpuiCoreToggleGroup"]
 actions = "gpui_core_toggle_group"
 
 [tooltip]
-about = "A tooltip, as the web app draws it (its `tooltip.tsx`): small text on the foreground colour, fading in"
+about = "A tooltip, as shadcn/ui draws it (its `tooltip.tsx`): small text on the foreground colour, fading in"
 file = "src/tooltip.rs"
 exports = ["Tooltip"]
 needs = []
