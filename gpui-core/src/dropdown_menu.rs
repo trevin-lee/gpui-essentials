@@ -42,6 +42,9 @@ use crate::button::Button;
 /// Runs with a pick.
 type OnSelect = Rc<dyn Fn(&MenuSelect, &mut Window, &mut App)>;
 
+/// Told whether the menu is open, each time that changes.
+type OnOpenChange = Rc<dyn Fn(bool, &mut App)>;
+
 actions!(
     gpui_core_dropdown_menu,
     [
@@ -100,6 +103,7 @@ pub struct DropdownMenu {
     trigger: Option<DropdownMenuTrigger>,
     menu: PopupMenu,
     on_select: Option<OnSelect>,
+    on_open_change: Option<OnOpenChange>,
     side: PopoverSide,
     align: PopoverAlign,
     touch: bool,
@@ -119,6 +123,7 @@ impl DropdownMenu {
             id,
             trigger: None,
             on_select: None,
+            on_open_change: None,
             side: PopoverSide::Bottom,
             align: PopoverAlign::Start,
             touch: false,
@@ -126,6 +131,14 @@ impl DropdownMenu {
             label: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    /// Told `true` when the menu opens and `false` when it closes, however it does (a pick, a
+    /// second press, Escape, a press outside). For a host that keeps its own state while a menu
+    /// is up, such as a native view it hides or keys it holds back.
+    pub fn on_open_change(mut self, f: impl Fn(bool, &mut App) + 'static) -> Self {
+        self.on_open_change = Some(Rc::new(f));
+        self
     }
 
     /// What opens it: a [`Button`], or a [`Press`] drawn as the host likes.
@@ -215,21 +228,35 @@ struct Opened {
 
 struct State {
     open: Option<Opened>,
+    /// The host's, as last drawn.
+    on_open_change: Option<OnOpenChange>,
 }
 
 fn set(state: &Entity<State>, open: Option<Opened>, cx: &mut App) {
-    state.update(cx, |s, cx| {
-        if s.open != open {
-            s.open = open;
-            cx.notify();
+    let told = state.update(cx, |s, cx| {
+        if s.open == open {
+            return None;
         }
+        let was = s.open.is_some();
+        s.open = open;
+        cx.notify();
+        (was != open.is_some())
+            .then(|| s.on_open_change.clone())
+            .flatten()
     });
+    if let Some(f) = told {
+        f(open.is_some(), cx);
+    }
 }
 
 impl RenderOnce for DropdownMenu {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         crate::base::init_soon(cx);
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State { open: None });
+        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| State {
+            open: None,
+            on_open_change: None,
+        });
+        state.update(cx, |s, _| s.on_open_change = self.on_open_change.clone());
         let open = if self.disabled {
             None
         } else {

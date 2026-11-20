@@ -26,6 +26,8 @@ struct Host {
     touch: bool,
     disabled: bool,
     picked: Rc<RefCell<Vec<String>>>,
+    /// What the account menu's on_open_change was told, in order.
+    opens: Rc<RefCell<Vec<bool>>>,
     draws: Rc<Cell<usize>>,
     before: FocusHandle,
     trigger: FocusHandle,
@@ -36,6 +38,7 @@ impl Render for Host {
         self.draws.set(self.draws.get() + 1);
         let picked = self.picked.clone();
         let picked_too = self.picked.clone();
+        let opens = self.opens.clone();
         div()
             .size_full()
             .flex()
@@ -66,7 +69,8 @@ impl Render for Host {
                             .disabled(self.disabled)
                             .on_select(move |pick, _, _| {
                                 picked.borrow_mut().push(pick.id.to_string())
-                            }),
+                            })
+                            .on_open_change(move |open, _| opens.borrow_mut().push(open)),
                     ),
                 ),
             )
@@ -105,6 +109,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
             touch: false,
             disabled: false,
             picked: Rc::default(),
+            opens: Rc::default(),
             draws: Rc::default(),
             before: cx.focus_handle(),
             trigger: cx.focus_handle(),
@@ -294,6 +299,29 @@ fn a_press_outside_closes_it(cx: &mut TestAppContext) {
     o.click_at(gpui::point(px(5.), px(5.)));
     assert!(o.menu().is_none());
     assert!(o.picked().is_empty());
+}
+
+#[gpui::test]
+fn on_open_change_hears_each_open_and_close_once(cx: &mut TestAppContext) {
+    let mut o = open(cx);
+    let opens = |o: &mut Opened| o.host.read_with(o.vcx, |h, _| h.opens.borrow().clone());
+    assert!(opens(&mut o).is_empty(), "nothing told while it's shut");
+    // A click opens it and a second closes it; a pick, Escape and a press outside close it.
+    o.click("button-box");
+    o.click("button-box");
+    o.click("button-box");
+    o.click("menu-item-billing");
+    o.click("button-box");
+    o.keys("escape");
+    o.click("button-box");
+    o.click_at(gpui::point(px(5.), px(5.)));
+    assert_eq!(
+        opens(&mut o),
+        [true, false, true, false, true, false, true, false]
+    );
+    // Draws in between tell nothing more.
+    o.vcx.update(|window, cx| window.draw(cx).clear(cx));
+    assert_eq!(opens(&mut o).len(), 8);
 }
 
 #[gpui::test]
