@@ -1,4 +1,4 @@
-//! Buttons as the web app draws them (its `button.tsx`): primary, outline, secondary, ghost,
+//! Buttons as shadcn/ui draws them (its `button.tsx`): primary, outline, secondary, ghost,
 //! destructive and link variants in five sizes, with a label, an icon or both, and groups of
 //! them joined edge to edge. Anything else it holds (a count, a shortcut) goes in as children,
 //! after the label; restyle it as any element (`.w_full()`, `.flex_row_reverse()`).
@@ -170,7 +170,7 @@ fn paint(variant: ButtonVariant, selected: bool, theme: &Theme) -> Paint {
             border: none,
             hover: c.secondary.blend(c.foreground.opacity(0.05)),
         },
-        // The apps' hover token (`accent`: the foreground at 5% in the dark), as a sidebar row's.
+        // The tokens' hover colour (`accent`: the foreground at 5% in the dark), as a sidebar row's.
         ButtonVariant::Ghost => Paint {
             fill: none,
             text: c.foreground,

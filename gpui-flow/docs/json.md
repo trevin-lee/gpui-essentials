@@ -193,8 +193,8 @@ open or run anything.
 
 ## Ink
 
-A stroke is a node of type `ink` whose `data.ink` is stored exactly as the iPad's Notes stores
-a PencilKit stroke's payload, so the same strokes show on iPad and Mac:
+A stroke is a node of type `ink` whose `data.ink` is stored exactly as a PencilKit stroke's
+payload, so the same strokes show on iPad and Mac:
 
 ```json
 { "id": "e0000000-0000-4000-8000-000000000001", "type": "ink",
@@ -213,7 +213,7 @@ a PencilKit stroke's payload, so the same strokes show on iPad and Mac:
 
 `x` and `y` are in the coordinates of the node's parent (the flow's, with none). The node's
 `position`, `width` and `height` are the stroke's bounds once transformed, with its width:
-the iPad's `frame`. **A move changes `transform` and `position`, never `points`**, so moving
+PencilKit's `frame`. **A move changes `transform` and `position`, never `points`**, so moving
 a stroke is a small patch. **A stroke drawn on the Mac stores its points from their corner**,
 with the corner in `transform`. That way a stroke drawn anywhere on the board keeps its
 points within the limits' ±20,000, which `transform` doesn't have. Its width is kept above 0
@@ -278,7 +278,7 @@ from its parent.
 
 ## Limits
 
-What Docs stores, checked by `gpui_flow::limits::Limits` on a document (`check`) and on a batch
+What a flow may hold, checked by `gpui_flow::limits::Limits` on a document (`check`) and on a batch
 of edits (`check_batch`). A server applies a batch to a copy of the document and checks the
 copy, refusing the batch if it has a problem the document didn't. `tests/fixtures/limits` has
 the cases a server tests against, with the exact problem each gives.

@@ -1122,9 +1122,10 @@ mod tests {
         assert_eq!(display("so $"), "so");
     }
 
-    /// Career's two replies streamed a few characters at a time: a formula is never typeset
-    /// and then shown as its TeX again, or typeset differently. Each frame's typeset formulas
-    /// are the last frame's and maybe more, ending with every formula of the reply typeset.
+    /// The math example's two replies streamed a few characters at a time: a formula is never
+    /// typeset and then shown as its TeX again, or typeset differently. Each frame's typeset
+    /// formulas are the last frame's and maybe more, ending with every formula of the reply
+    /// typeset.
     #[test]
     fn a_streamed_formula_never_flickers() {
         use gpui_core::text::{MATH_LANGUAGE, parse_markdown};
@@ -1148,7 +1149,7 @@ mod tests {
                 _ => {}
             }
         }
-        let reply = include_str!("../../examples/replies/career-math.md");
+        let reply = include_str!("../../examples/replies/math.md");
         for step in [1, 3, 7] {
             let mut doc = Doc::default();
             let mut before: Vec<String> = Vec::new();
@@ -1178,7 +1179,7 @@ mod tests {
                 );
                 before = now;
             }
-            // Every formula typeset by the end: Career's replies have 4 display equations and
+            // Every formula typeset by the end: the two replies have 4 display equations and
             // 29 inline ones.
             assert_eq!(before.len(), 33, "step {step}: {before:#?}");
             for tex in &before {
@@ -1190,13 +1191,13 @@ mod tests {
         }
     }
 
-    /// Career's two replies, streamed a few characters at a time: what's drawn never shows an
-    /// equation's TeX as words (with its backslashes eaten), never loses the words before it,
-    /// and ends as the whole reply reads.
+    /// The math example's two replies, streamed a few characters at a time: what's drawn never
+    /// shows an equation's TeX as words (with its backslashes eaten), never loses the words
+    /// before it, and ends as the whole reply reads.
     #[test]
     fn a_streamed_reply_with_math_never_shows_its_tex_as_words() {
         use gpui_core::text::{MATH_LANGUAGE, parse_markdown};
-        let reply = include_str!("../../examples/replies/career-math.md");
+        let reply = include_str!("../../examples/replies/math.md");
         // A paragraph's words, with no TeX command in them.
         fn words_only(b: &Block, at: usize) {
             match b {

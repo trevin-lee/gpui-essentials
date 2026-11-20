@@ -1,5 +1,5 @@
 //! Two boards side by side on one page, each with its own drag-and-drop provider and none round
-//! the window (as a Docs page holds two), and the same for two lists. A card dragged to another
+//! the window (as a page can hold two), and the same for two lists. A card dragged to another
 //! column of its board is one batch for that board's host alone; a card dropped on the other
 //! board goes back, nothing emitted by either; a carried card has one picture; and two lists keep
 //! their drags apart the same way.

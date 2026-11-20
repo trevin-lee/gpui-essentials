@@ -1,7 +1,7 @@
 //! Math in a reply, as `StreamingMarkdown` draws it: inline `$…$` as its TeX in the code font,
 //! and each `$$…$$` as a block of its own whose TeX stays on its lines and scrolls sideways when
 //! it's wider than the reply. The cases the renderer is tested on, two real replies
-//! (examples/replies/career-math.md) and one caught mid-equation, at a phone's width (402 points)
+//! (examples/replies/math.md) and one caught mid-equation, at a phone's width (402 points)
 //! and a Mac chat's (720).
 //!
 //! ```sh
@@ -36,7 +36,7 @@ $$f(x) = a_0 + a_1 x + a_2 x^2 + a_3 x^3 + a_4 x^4 + a_5 x^5 + a_6 x^6 + a_7 x^7
 The words after it start below it.
 ";
 
-const CAREER: &str = include_str!("replies/career-math.md");
+const REPLIES: &str = include_str!("replies/math.md");
 
 /// The page's colours: its ground, its text, and a code block's fill and edge.
 #[derive(Clone, Copy)]
@@ -106,10 +106,10 @@ impl Render for Page {
     }
 }
 
-/// The texts drawn, by name: the cases, each of Career's replies, and the second caught inside
+/// The texts drawn, by name: the cases, each of the two replies, and the second caught inside
 /// its matrix (written, not finished).
 fn texts() -> Vec<(&'static str, String, bool)> {
-    let mut replies = CAREER.split("### ").filter(|s| !s.trim().is_empty());
+    let mut replies = REPLIES.split("### ").filter(|s| !s.trim().is_empty());
     let first = replies.next().unwrap_or_default();
     let second = replies.next().unwrap_or_default();
     // Without the header line (when it was sent, and by whom).
@@ -120,9 +120,9 @@ fn texts() -> Vec<(&'static str, String, bool)> {
         .map_or(second.len(), |i| i + r"\sin\theta \\".len());
     vec![
         ("cases", CASES.to_string(), true),
-        ("career-ekf", body(first), true),
-        ("career-jacobian", second.clone(), true),
-        ("career-mid-matrix", second[..cut].to_string(), false),
+        ("reply-ekf", body(first), true),
+        ("reply-jacobian", second.clone(), true),
+        ("reply-mid-matrix", second[..cut].to_string(), false),
     ]
 }
 

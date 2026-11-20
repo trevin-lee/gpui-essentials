@@ -1,6 +1,6 @@
 //! The look every component draws with, given by the host.
 //!
-//! The colour names are the web app's CSS variables (`globals.css`) in snake case, the names
+//! The colour names are shadcn/ui's CSS variables (`globals.css`) in snake case, the names
 //! the design tokens use, so a host passes its tokens straight through. Sizes are in rems: the
 //! window's rem is the theme's [`Theme::font_size`] (see [`crate::Root`]), so changing that one
 //! number zooms everything, as a browser zooms CSS pixels.
@@ -74,7 +74,7 @@ pub struct Colors {
     pub sidebar_accent_foreground: Hsla,
     pub sidebar_border: Hsla,
     pub sidebar_ring: Hsla,
-    /// An agent working.
+    /// Something live or working.
     pub live: Hsla,
     /// Something that needs the owner.
     pub attention: Hsla,
@@ -85,7 +85,7 @@ pub struct Colors {
     pub bubble: Hsla,
     /// The faint pattern behind an empty state.
     pub empty_pattern: Hsla,
-    /// Code's colours, each at least 4.5:1 against the page, a card and `muted`. The web app
+    /// Code's colours, each at least 4.5:1 against the page, a card and `muted`. shadcn/ui
     /// has none of its own; these are gpui-core's, shared through `design/tokens.json`.
     pub syntax_keyword: Hsla,
     pub syntax_string: Hsla,
@@ -145,7 +145,7 @@ pub struct Colors {
     pub overlay_line: Hsla,
     /// Quieter secondary text (a row's time): `muted_foreground` at 86% in the dark, the least
     /// that is 4.5:1 on the sidebar, and `muted_foreground` itself in the light. (The name is
-    /// the apps' token's, from when it was 70%.)
+    /// the design token's, from when it was 70%.)
     pub muted_70: Hsla,
     /// An error's box: `destructive` at 10%.
     pub destructive_fill: Hsla,
@@ -182,7 +182,7 @@ fn over(top: u32, alpha: f32, bottom: u32) -> Hsla {
 }
 
 impl Colors {
-    /// The web app's `.dark` colours: charcoal and near-black.
+    /// The dark colours: charcoal and near-black.
     pub fn dark() -> Self {
         Self {
             background: c(0x0f0f11),
@@ -262,7 +262,7 @@ impl Colors {
         }
     }
 
-    /// The web app's light colours.
+    /// The light colours.
     pub fn light() -> Self {
         Self {
             background: c(0xfafafa),
@@ -418,11 +418,11 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// A host app's look: the web's dark colours on a 15 pixel base. Its fonts are the
+    /// The dark look: charcoal colours on a 15 pixel base. Its fonts are the
     /// system's (San Francisco, and Menlo for code), which every Mac and iPhone has; a host that
-    /// bundles the app's fonts sets `font_family` to "Inter" and `mono_font_family` to
+    /// bundles Inter and Geist Mono sets `font_family` to "Inter" and `mono_font_family` to
     /// "Geist Mono" after loading them. A family that isn't loaded draws no text at all. A
-    /// browser has no system fonts: there the app loads its own (the README's "On the web").
+    /// browser has no system fonts: there the host loads its own (the README's "On the web").
     pub fn dark() -> Self {
         Self {
             mode: ThemeMode::Dark,
@@ -465,7 +465,7 @@ impl Theme {
         rems(self.radius.0 * 1.4)
     }
 
-    /// A chat card's corners (an agent's OpenUI card): 1.6 times the radius.
+    /// A chat card's corners (an OpenUI card): 1.6 times the radius.
     pub fn radius_card(&self) -> Rems {
         rems(self.radius.0 * 1.6)
     }

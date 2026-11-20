@@ -177,7 +177,7 @@ pub(crate) fn bind_keys(cx: &mut App) {
             editor,
         ),
         KeyBinding::new("alt-enter", OpenAtCaret, editor),
-        // A host app binds ⌘⇧M to its comment field too: the editor's handler answers it and
+        // A host may bind ⌘⇧M to its own comment field too: the editor's handler answers it and
         // the key goes no further, so the field opens once.
         KeyBinding::new(
             if mac { "cmd-shift-m" } else { "ctrl-shift-m" },
@@ -4316,7 +4316,7 @@ mod tests {
         );
     }
 
-    /// In a host app's page column (605 wide), rows of three, four and five columns fit side by
+    /// In a desktop page column (605 wide), rows of three, four and five columns fit side by
     /// side, each its share; on a phone every column of a row stacks, each the whole width.
     #[gpui::test]
     fn columns_shrink_to_fit_and_stack_whole_on_a_phone(cx: &mut TestAppContext) {

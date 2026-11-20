@@ -8,9 +8,9 @@ a doc too: a page your app opens with its own editor. The crate reads the docs a
 what each view shows (filter, sort, group), and hands every change back to your app as an edit.
 It never stores anything, fetches anything or navigates.
 
-It's being built for a personal CRM in a Notion-like docs app: People, Companies and Interactions
-databases related to each other, an agent or two logging calls and follow-ups, and every person
-and company a page of notes.
+The examples and tests use a small made-up CRM: People, Companies and Interactions databases
+related to each other, an agent or two logging calls and follow-ups, and every person and company
+a page of notes.
 
 **Status: the model, the engine, and the table, board and list views.** The JSON model, the
 engine that filters, sorts and groups, fractional-index ordering and the limits on what a
@@ -128,7 +128,7 @@ change back as a `TableEvent`:
 ```rust,ignore
 use gpui_tables::view::{TableHost, TableTheme, TableView};
 
-struct Host; // the app's store, its server, its names for people
+struct Host; // your app's store, its server, its names for people
 
 impl TableHost for Host {
     fn theme(&self, cx: &App) -> TableTheme {
@@ -687,7 +687,7 @@ Everything is a doc in the host's tree, the same shape for pages, databases and 
 | `parentObjectId` | For an inline database, the block in its parent page that embeds it. |
 | `cover`, `favorite`, `agents` | The host's; carried, never read. |
 | `icon` | Optional, on every kind of doc: a string or null, written last-write-wins like the other fields, never in `values` ([Icons](#icons)). |
-| `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`. A row's `createdBy` and `editedBy` properties show them. An older doc may have no `updatedBy`. |
+| `author`, `updatedBy` | Who created and last changed it: `{"kind": "owner"}` or `{"kind": "agent", "agentId": "concierge"}`. A row's `createdBy` and `editedBy` properties show them. An older doc may have no `updatedBy`. |
 | `created`, `updated` | Milliseconds since the Unix epoch. |
 | `rev`, `seq` | The host's revision and sequence numbers; carried, never read. |
 | `deleted` | A tombstone: the time it was deleted, in milliseconds since the Unix epoch, or null while it isn't. Views leave deleted rows out. The crate reads it as `Option<i64>` (`Doc::is_deleted` says whether it's set) and writes the number or null. For older data it also reads `false` as null and `true` as 0 (deleted at an unknown time). |
@@ -786,14 +786,15 @@ every person (and agent) sees the same ones.
 - **`cardPreview`** is what a gallery's cards show above their title: `none`, or `cover` for each
   row doc's `cover` (an addition to the first proposal). Absent or null is none, and it's left
   out of the JSON when absent. A value the crate doesn't know draws nothing and is kept as
-  written, but `Limits` refuses it (`not none or cover (view <id>)`), as the server does, and the
+  written, but `Limits` refuses it (`not none or cover (view <id>)`), as a host that stores views should, and the
   view's settings only ever write `none` or `cover`.
 - **`cardSize`** is how big a gallery's cards are (Notion's card size): `small`, `medium` or
   `large`, 172, 252 or 340 points wide and never wider than the view, so at a 736-point view three,
   two and two cards a line, and at a phone's 393 two, one and one. Absent or null is medium
   (today's card), and it's left out of the JSON when absent; the view's settings write it left
   out for medium. A value the crate doesn't know draws medium and is kept as written, but
-  `Limits` refuses it (`not small, medium or large (view <id>)`), as the server does.
+  `Limits` refuses it (`not small, medium or large (view <id>)`), as a host that stores views
+  should.
 - **`calculations`** are a table's footer: `{propertyId: calculation}`, at most one per
   property, left out when there are none (an addition to the first proposal). A calculation is
   one of `countAll`, `countValues`, `countUnique`, `countEmpty`, `countNotEmpty`,
@@ -931,9 +932,9 @@ The crate never changes the host's data. Everything a person does in a view come
 | `viewCreated`, `viewChanged` | `databaseId`, `view` | writes the whole view |
 | `viewDeleted` | `databaseId`, `viewId` | removes it |
 
-How the host writes them to the server:
+How a host writes them to its store, here one that takes batches of `put` and `patch` ops:
 
-- **Row values and titles are patched, never put.** The server writes a doc's `values` only when
+- **Row values and titles are patched, never put.** The store writes a doc's `values` only when
   the doc is created, and by `patch`. A `put` on an existing doc leaves its `values` alone.
   `patch` is the batch op `{op: "patch", type: "doc", id, title?, values?: {propertyId: value |
   null}}`, merged key by key, with the last write to each key winning. So:
@@ -1038,13 +1039,12 @@ a key between two neighbours, `order::n_between` makes several for a multi-row d
 The scheme is rocicorp's `fractional-indexing` (as Figma's before it): an integer part whose first
 character gives its length (`a0` … `az`, `b00` …), then a base-62 fraction that never ends in `0`.
 Keys are at most 256 characters. Appends step the integer part, so 10,000 appends make
-four-character keys. The app's Swift and Go code is moving to the same scheme, and keys will
-mix with the app's once it adopts it. Until then, and for any key that's malformed or too long (an
-older scheme's, or an agent's), `between` returns an error rather than guessing, and the host
-renumbers the list. A key that would grow past 256 characters is an error too (`tooLong`), and the host
-renumbers.
+four-character keys. Keys from other code that uses the same scheme mix with these. For any key
+that's malformed or too long (an older scheme's, or an agent's), `between` returns an error
+rather than guessing, and the host renumbers the list. A key that would grow past 256
+characters is an error too (`tooLong`), and the host renumbers.
 
-`tests/fixtures/order-vectors.json` holds the cases every client tests against: `between`
+`tests/fixtures/order-vectors.json` holds the cases another implementation can test against: `between`
 (`{a, b, expected}` or `{a, b, error}`, with a or b null for the ends), `n_between` (`{a, b, n,
 expected: [...]}`) and `spread` (`{n, expected: [...]}`). They cover a fresh list, appends,
 prepends, adjacent keys, keys at and over the 256 cap, and invalid keys. The expected keys come
@@ -1053,8 +1053,8 @@ alphabet is invalid here, where that library accepts some.
 
 ## Limits
 
-Agents write rows too, so `Limits` caps what a database and its rows may hold. The server checks
-writes against the same numbers, the crate stops typing at them and cuts what people paste and
+Agents write rows too, so `Limits` caps what a database and its rows may hold. A host's server can
+check writes against the same numbers, the crate stops typing at them and cuts what people paste and
 commit (`Limits::clamp_value`), and the engine ignores what's over (a filter too deep, a sort too
 many) and reports it. Nothing over a limit panics. Strings count Unicode characters (scalar
 values, as gpui-core's `InputState::max_chars` does).
@@ -1063,8 +1063,8 @@ values, as gpui-core's `InputState::max_chars` does).
 like `database.properties[3].config.options: 201 is more than 200` or `values.<phone>: 65
 characters is more than 64` (`check_database`, `check_row` and `check_value` check the parts).
 `tests/fixtures/limits` holds valid docs and invalid ones with the exact problems each must give,
-one or more for every limit and check below. The crate's tests run them all, and the server runs
-the same files. Its README gives the format and every message.
+one or more for every limit and check below. The crate's tests run them all, and a server can
+run the same files. Its README gives the format and every message.
 
 | Limit | Default |
 |---|---|
@@ -1110,7 +1110,7 @@ The host is the app around the views. It:
   they emit (to its store and its server), and hands back the changed docs. The views redraw only
   when it does. It deletes a row by setting its `deleted` to the time (`rowsDeleted`); the views
   leave out every doc whose `deleted` is set.
-- **Opens rows.** On `openRow` it shows the row's page, with gpui-blocks in the docs app. The crate
+- **Opens rows.** On `openRow` it shows the row's page, with its own editor (gpui-blocks, say). The crate
   never navigates and knows nothing of page content.
 - **Knows people and agents.** Through a host trait it gives the names of the owner and agents,
   the titles of related rows, the list of people and agents for the person picker, and rows of a
@@ -1259,7 +1259,7 @@ tests fail on any control without them.
 - **Rollups.** A rollup aggregates a property across related rows, so it needs the related
   databases loaded together and recomputes whenever any related row changes. That's worth doing
   once relations have been used for a while.
-- **Templates.** A template is a page with content, which belongs to the docs app and its editor;
+- **Templates.** A template is a page with content, which belongs to the host and its editor;
   the crate would only pass a template id through `rowCreated`. Prefilled values for a new row in a
   view are in v1.
 - **Also later:** a gallery's card sizes, files, a status type, unique ids, and linked views of a

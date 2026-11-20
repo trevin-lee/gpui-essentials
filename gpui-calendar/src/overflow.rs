@@ -36,8 +36,8 @@ fn worst_week() -> Vec<Event> {
                 "Q4 planning notes and the decisions we made",
             ))
             .link(EventLink::agent(
-                "main",
-                "Main, the agent that keeps the plan",
+                "organizer",
+                "Organizer, the agent that keeps the plan",
             )),
         Event::timed("b", long, at(day(0), 9, 30), at(day(0), 10, 0))
             .link(EventLink::doc("d2", "Agenda")),

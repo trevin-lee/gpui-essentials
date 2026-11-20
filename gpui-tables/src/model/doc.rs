@@ -30,7 +30,7 @@ string_enum! {
 }
 
 /// Who wrote something, or who a `person` value names: the owner or one of their agents.
-/// Written as `{"kind": "owner"}` or `{"kind": "agent", "agentId": "career-planning"}`.
+/// Written as `{"kind": "owner"}` or `{"kind": "agent", "agentId": "concierge"}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Person {
     Owner,

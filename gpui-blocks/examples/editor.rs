@@ -398,7 +398,7 @@ fn main() {
             // An iPhone's size for the phone scene; the editor goes compact below 600 wide.
             let window_size = match args.scene.as_str() {
                 "phone" => size(px(402.), px(874.)),
-                // The smallest phone the apps run on (an iPhone SE).
+                // The smallest current iPhone (an iPhone SE).
                 "sheet" => size(px(375.), px(667.)),
                 _ => size(px(1280.), px(820.)),
             };

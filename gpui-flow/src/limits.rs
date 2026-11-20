@@ -11,7 +11,7 @@ use crate::ink;
 use crate::json::{Document, MAX_ID, Op, valid_id};
 use crate::types::{Edge, Node};
 
-/// The limits, the defaults being what Docs stores.
+/// The limits, with defaults sized for a large board with room to spare.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Limits {

@@ -1,7 +1,7 @@
 root = Stack([a, b, c, d, e, f, g, h, i])
 a = ImageBlock("//evil.test/api/files/content?path=x.png")
 b = ImageBlock("https://evil.test/api/files/content?path=x.png")
-c = ImageBlock("/api/files/content/../agents?path=x")
+c = ImageBlock("/api/files/content/../users?path=x")
 d = ImageBlock("/api/files/content?path=")
 e = ImageBlock("/api/files/content?other=1")
 f = ImageBlock("https://someone@controller.invalid/api/files/content?path=x.png")

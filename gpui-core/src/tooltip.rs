@@ -1,8 +1,8 @@
-//! A tooltip, as the web app draws it (its `tooltip.tsx`): small text on the foreground colour,
+//! A tooltip, as shadcn/ui draws it (its `tooltip.tsx`): small text on the foreground colour,
 //! fading in. Give it to GPUI's `.tooltip()`, which shows it after the pointer rests:
 //!
 //! ```ignore
-//! div().id("stop").tooltip(|window, cx| Tooltip::new("Stop the agent").build(window, cx))
+//! div().id("stop").tooltip(|window, cx| Tooltip::new("Stop the build").build(window, cx))
 //! ```
 //!
 //! A tooltip only shows under a pointer, so it must never be the only place something is said:

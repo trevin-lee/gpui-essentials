@@ -1454,7 +1454,7 @@ mod column_fit_tests {
     #[test]
     fn columns_fit_until_the_narrowest_is_under_the_minimum() {
         let gap = column_gap(px(16.));
-        // A host app's page column, about 605 pt: three, four and five columns fit.
+        // A desktop page column, about 605 pt: three, four and five columns fit.
         for shares in [vec![0.4, 0.3, 0.3], vec![0.25; 4], vec![0.2; 5]] {
             assert!(columns_fit(Some(px(605.)), gap, &shares), "{shares:?}");
         }

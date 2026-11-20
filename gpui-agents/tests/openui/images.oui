@@ -5,5 +5,5 @@ gallery = ImageGallery([{src: "/api/files/content?path=photos/1.jpg", alt: "Firs
 foreign = ImageBlock("https://evil.test/track.png", "Tracker")
 data = Image("Inline", "data:image/svg+xml,<svg onload=alert(1)>")
 js = ImageBlock("javascript:alert(1)")
-rel = ImageBlock("/api/agents/abc/chat", "Not a file")
+rel = ImageBlock("/api/users/abc", "Not a file")
 noSrc = Image("No source at all")

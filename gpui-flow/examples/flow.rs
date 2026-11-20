@@ -65,7 +65,7 @@ fn args() -> Args {
     out
 }
 
-/// A host app's charcoal theme, with its hover wash (the foreground at 5%).
+/// The charcoal theme, with its hover wash (the foreground at 5%).
 fn apply_theme(cx: &mut App) {
     let mut t = Theme::dark();
     t.accent = rgba(0xededef0d).into();
@@ -81,7 +81,7 @@ fn sample_nodes() -> Vec<Node> {
         Node::new("in", xy(260., 0.)).kind("input").label("Email arrives"),
         Node::new("triage", xy(235., 110.))
             .kind("agent")
-            .data(json!({ "name": "Main", "role": "Sorts what came in", "mark": "🧭" })),
+            .data(json!({ "name": "Triage", "role": "Sorts what came in", "mark": "🧭" })),
         Node::new("finances", xy(560., 40.))
             .kind("agent")
             .data(json!({ "name": "Finances", "role": "Bills and receipts", "mark": "💳" })),
@@ -450,7 +450,7 @@ struct Bench {
     base: Viewport,
     /// The time between one frame's start and the next's.
     intervals: Vec<(usize, f32)>,
-    /// The time from a frame's start to the end of its painting: the app's own work.
+    /// The time from a frame's start to the end of its painting: the example's own work.
     work: Rc<RefCell<Vec<(usize, f32)>>>,
     started: Rc<Cell<(usize, Option<Instant>)>>,
 }

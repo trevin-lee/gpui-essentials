@@ -1,5 +1,5 @@
-//! The fractional-index vectors in tests/fixtures/order-vectors.json, which other clients (Swift,
-//! Go) test against too: every `between`, `n_between` and `spread` case gives the expected keys
+//! The fractional-index vectors in tests/fixtures/order-vectors.json, which other
+//! implementations can test against too: every `between`, `n_between` and `spread` case gives the expected keys
 //! or the expected error.
 
 use gpui_tables::order;

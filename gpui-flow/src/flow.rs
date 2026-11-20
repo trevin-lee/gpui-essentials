@@ -2527,7 +2527,7 @@ impl Flow {
         }
     }
 
-    /// Strokes moved here (dragged, nudged, framed) move by their transform too, as the iPad
+    /// Strokes moved here (dragged, nudged, framed) move by their transform too, as PencilKit
     /// moves them, so their points never change. One whose transform changed as well (an undo,
     /// someone else's edit) is left as it is.
     fn follow_ink(&mut self) {

@@ -1,4 +1,4 @@
-//! A separator, as shadcn draws it (the web app's `separator.tsx`): a one-pixel line in the
+//! A separator, as shadcn draws it (its `separator.tsx`): a one-pixel line in the
 //! border colour, across its parent's width or down its height.
 //!
 //! It's decorative unless told otherwise: drawn, and nothing to assistive technology. One that

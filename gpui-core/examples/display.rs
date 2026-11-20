@@ -258,7 +258,7 @@ impl Render for Display {
                             .icon(IconName::Inbox)
                             .title("No messages yet")
                             .description(
-                                "When an agent writes to you, its message shows up here, \
+                                "When someone writes to you, their message shows up here, \
                                  newest first.",
                             )
                             .child(

@@ -56,8 +56,8 @@ pub(crate) fn is_sha256(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// The caps, with defaults sized for a personal CRM with room to spare. Strings count Unicode
-/// characters (scalar values), not bytes.
+/// The caps, with defaults sized for a personal database (a CRM, say) with room to spare.
+/// Strings count Unicode characters (scalar values), not bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Properties per database.

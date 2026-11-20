@@ -1,4 +1,4 @@
-//! An on/off switch, as the web app draws it (its `switch.tsx`): a pill in the primary colour
+//! An on/off switch, as shadcn/ui draws it (its `switch.tsx`): a pill in the primary colour
 //! when on and the input colour when off, with a thumb that slides between the two.
 
 use std::rc::Rc;

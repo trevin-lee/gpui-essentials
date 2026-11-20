@@ -140,7 +140,7 @@ impl Render for Navigation {
                     Breadcrumb::new("narrow-path")
                         .item(BreadcrumbItem::new("home", "Home"))
                         .item(BreadcrumbItem::new("projects", "Projects"))
-                        .item(BreadcrumbItem::new("agents", "Agents"))
+                        .item(BreadcrumbItem::new("reports", "Reports"))
                         .item(BreadcrumbItem::new("models", "Models and their keys"))
                         .on_navigate(cx.listener(|this, id: &SharedString, _, cx| {
                             this.went = id.clone();
@@ -260,8 +260,8 @@ impl Render for Navigation {
                     .gap(rems(0.5))
                     .p(rems(0.25))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(Icon::new(IconName::Bot))
-                    .child("the host app"),
+                    .child(Icon::new(IconName::Command))
+                    .child("Acme"),
             )
             .group(
                 SidebarGroup::new("platform")
@@ -272,9 +272,9 @@ impl Render for Navigation {
                             .badge("12"),
                     )
                     .item(
-                        SidebarItem::new("agents", "Agents")
-                            .icon(IconName::Bot)
-                            .action(IconName::Plus, "New agent", |_, _, _| {}),
+                        SidebarItem::new("documents", "Documents")
+                            .icon(IconName::FileText)
+                            .action(IconName::Plus, "New document", |_, _, _| {}),
                     )
                     .item(SidebarItem::new("calendar", "Calendar").icon(IconName::Calendar))
                     .item(SidebarItem::new("search", "Search").icon(IconName::Search)),

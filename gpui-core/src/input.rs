@@ -1779,7 +1779,7 @@ fn css(v: f32) -> gpui::Rems {
     rems(v / 15.)
 }
 
-/// Draws an [`InputState`]: a field with the web app's look (`input.tsx`, `textarea.tsx`), or
+/// Draws an [`InputState`]: a field with shadcn/ui's look (`input.tsx`, `textarea.tsx`), or
 /// with no look at all ([`appearance(false)`](Input::appearance): no border, no fill and no
 /// padding, for a host that draws its own).
 #[derive(IntoElement)]

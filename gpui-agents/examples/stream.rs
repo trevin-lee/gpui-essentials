@@ -109,7 +109,7 @@ impl CardHost for Host {
     }
 }
 
-/// A message in the chat: the owner's, or the agent's reply (a draft, its finished Markdown,
+/// A message in the chat: the person's, or the agent's reply (a draft, its finished Markdown,
 /// or a card).
 enum Message {
     Owner(&'static str),

@@ -1,5 +1,5 @@
-//! The limit vectors in tests/fixtures/limits (see its README), which the server tests against
-//! too: every valid case has no problems, and every invalid case has exactly the problems it
+//! The limit vectors in tests/fixtures/limits (see its README), which a host's server can test
+//! against too: every valid case has no problems, and every invalid case has exactly the problems it
 //! lists, written as `Problem`'s Display writes them, in any order.
 
 use gpui_flow::json::{Document, Op};

@@ -2,13 +2,13 @@
 
 Components for [GPUI](https://www.gpui.rs) apps on macOS and iOS, drawn in the host's theme.
 It replaced GPUI Kit in this workspace's crates, covering what they use. See
-[PLAN.md](PLAN.md) for the inventory and the build order.
+[PLAN.md](PLAN.md) for how the crate is shaped.
 
 ![gpui-core's gallery in the dark theme: buttons in four sizes and five variants, a segmented
 control, toggles, a slider and an open menu with a check, a submenu, a shortcut and a disabled
 item](docs/gallery.png)
 
-- **Theme.** `Theme` holds the colours, fonts and sizes. Its colour names are the web app's
+- **Theme.** `Theme` holds the colours, fonts and sizes. Its colour names are shadcn/ui's
   CSS variables in snake case (`background`, `muted_foreground`, `ring`, …). The host sets it
   with `Theme::set`, and components read it with `cx.theme()`.
 - **Italics that stay italic.** GPUI draws italic upright, silently, when the family has no

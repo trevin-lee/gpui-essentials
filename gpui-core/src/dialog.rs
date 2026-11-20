@@ -15,7 +15,7 @@
 //!     div().size_full().child(
 //!         Dialog::new("rename")
 //!             .open(self.open)
-//!             .title("Rename the agent")
+//!             .title("Rename the project")
 //!             .description("Its new name shows everywhere it does.")
 //!             .on_dismiss(cx.listener(|this, _, _, cx| {
 //!                 this.open = false;
@@ -477,8 +477,8 @@ impl Dialog {
 ///     div().size_full().child(
 ///         AlertDialog::new("delete")
 ///             .open(self.open)
-///             .title("Delete the agent?")
-///             .description("Its chats and files go with it. This can't be undone.")
+///             .title("Delete the project?")
+///             .description("Its files go with it. This can't be undone.")
 ///             .on_dismiss(cx.listener(|this, _, _, cx| {
 ///                 this.open = false;
 ///                 cx.notify();

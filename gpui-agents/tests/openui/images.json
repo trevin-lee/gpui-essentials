@@ -68,7 +68,7 @@
      "type": "element",
      "typeName": "ImageBlock",
      "props": {
-      "src": "/api/agents/abc/chat",
+      "src": "/api/users/abc",
       "alt": "Not a file"
      }
     },

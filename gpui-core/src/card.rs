@@ -1,4 +1,4 @@
-//! A card, as the web app draws it (its `card.tsx`): a raised panel with a header (a title, a
+//! A card, as shadcn/ui draws it (its `card.tsx`): a raised panel with a header (a title, a
 //! description, and an action at the top right), content, and a footer along the bottom.
 //!
 //! ```no_run

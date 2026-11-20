@@ -23,7 +23,7 @@
      "type": "element",
      "typeName": "ImageBlock",
      "props": {
-      "src": "/api/files/content/../agents?path=x"
+      "src": "/api/files/content/../users?path=x"
      }
     },
     {

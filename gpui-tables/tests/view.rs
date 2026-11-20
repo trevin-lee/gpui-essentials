@@ -535,12 +535,12 @@ fn every_editable_type_edits(cx: &mut TestAppContext) {
     // A person toggles people the property allows.
     table.update(cx, |t, cx| t.focus_cell(ANA, OWNER, cx));
     keys(cx, "enter");
-    click(cx, "menu-item-Career Planning");
+    click(cx, "menu-item-Concierge");
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     assert_eq!(
         v.and_then(Value::as_people).unwrap(),
-        [Person::Owner, Person::agent("career-planning")]
+        [Person::Owner, Person::agent("concierge")]
     );
     keys(cx, "escape");
 
@@ -877,14 +877,14 @@ fn options_are_pills_and_pickers_search(cx: &mut TestAppContext) {
     // People are searched the same way, and their picker stays open on a pick.
     table.update(cx, |t, cx| t.focus_cell(ANA, OWNER, cx));
     keys(cx, "enter");
-    type_text(cx, "career");
-    assert!(drawn(cx, "menu-item-Career Planning"));
+    type_text(cx, "conc");
+    assert!(drawn(cx, "menu-item-Concierge"));
     keys(cx, "enter");
     let last = host.last_edit();
     let (_, _, v) = value_edit(&last);
     assert_eq!(
         v.and_then(Value::as_people).unwrap(),
-        [Person::Owner, Person::agent("career-planning")]
+        [Person::Owner, Person::agent("concierge")]
     );
     assert!(drawn(cx, "menu"));
 }
@@ -1217,8 +1217,8 @@ fn checks_lead_the_labels_in_menus_and_pickers() {
     // A person's.
     table.update(cx, |t, cx| t.focus_cell(ANA, OWNER, cx));
     keys(cx, "enter");
-    click(cx, "menu-item-Career Planning");
-    check_leads(cx, "Career Planning", true);
+    click(cx, "menu-item-Concierge");
+    check_leads(cx, "Concierge", true);
     keys(cx, "escape");
     // A relation's.
     table.update(cx, |t, cx| t.focus_cell(ANA, COMPANY, cx));
@@ -1441,8 +1441,8 @@ fn created_by_and_edited_by_show_who_and_never_edit(cx: &mut TestAppContext) {
     // Drawn by the host's names, as a person cell is.
     assert_eq!(words(&table, cx, JONAH, BY), "inbox-triage");
     assert_eq!(words(&table, cx, JONAH, EDITOR), "Avery Lin");
-    assert_eq!(words(&table, cx, THEO, BY), "Career Planning");
-    assert_eq!(words(&table, cx, THEO, EDITOR), "Career Planning");
+    assert_eq!(words(&table, cx, THEO, BY), "Concierge");
+    assert_eq!(words(&table, cx, THEO, EDITOR), "Concierge");
 
     // Pressing, Enter and Delete do nothing to them: no picker, no field, no edit.
     host.clear();
@@ -1497,7 +1497,7 @@ fn created_by_and_edited_by_show_who_and_never_edit(cx: &mut TestAppContext) {
     table.update(cx, |t, cx| t.set_docs(db, rows, cx));
     draw(cx);
     assert!(drawn(cx, "group:owner"));
-    assert!(drawn(cx, "group:agent:career-planning"));
+    assert!(drawn(cx, "group:agent:concierge"));
     assert!(drawn(cx, "group:agent:inbox-triage"));
     click(cx, "new:agent:inbox-triage");
     let Edit::RowCreated { values, .. } = host.last_edit() else {

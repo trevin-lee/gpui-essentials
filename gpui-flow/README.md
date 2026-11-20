@@ -101,9 +101,9 @@ made.
   kept. Nothing selected is stored, and `Flow::set_document()` keeps the selection. New ids are
   random, so two editors adding at once don't clash. [docs/json.md](docs/json.md) has every
   field.
-- **Ink.** A stroke drawn with a pen or the Pencil is an `ink` node holding the iPad's Notes
-  payload as is (`tool`, `#RRGGBBAA` colour, width, base64 points with pressure and tilt, and
-  a transform), so the same strokes show on iPad and Mac (`ink::InkStroke`, `Node::ink`).
+- **Ink.** A stroke drawn with a pen or the Pencil is an `ink` node holding a PencilKit
+  stroke's payload as is (`tool`, `#RRGGBBAA` colour, width, base64 points with pressure and
+  tilt, and a transform), so the same strokes show on iPad and Mac (`ink::InkStroke`, `Node::ink`).
   Strokes are drawn with their width at each point, smoothed, take a press only on their ink,
   and move by their transform, never their points.
 - **A pen and an eraser** on the Mac (`Flow::set_tool`: `Tool::Pen(Pen)`, `Tool::Eraser`).
@@ -112,7 +112,7 @@ made.
   other PencilKit tools; the stroke is one edit. The eraser rubs out every stroke it passes
   over, as one edit, and escape puts back what it took. The example's toolbar has them, and
   `--scene draw` takes a picture of them in use.
-- **Limits.** `limits::Limits` checks a document or a batch against what Docs stores (10,000
+- **Limits.** `limits::Limits` checks a document or a batch against its defaults (10,000
   nodes, 20,000 edges, 10,000-character texts, frames 16 deep, …), and
   `tests/fixtures/limits` has the cases a server tests against too, with the exact problem
   each gives.
@@ -204,7 +204,7 @@ made.
   - **Topics.** The built-in `topic` kind is a label without handles, larger for a root.
   - The example has one: `--mindmap`.
 - **Links.** A node can link to something of the host's by id (`Node::link`, saved as
-  `"link"`), such as a document in Docs. The built-in kinds then show a small ↗ button
+  `"link"`), such as a document. The built-in kinds then show a small ↗ button
   after their label, and `NodeContext::link_button()` puts the same button into a kind of
   your own. Pressing it, or ⌘↩ with the node selected, sends `FlowEvent::OpenLink`. The
   host decides what the id means and opens it; the flow never opens or follows anything
@@ -309,7 +309,7 @@ made.
   grid of 0, a parent chain that loops, two nodes with one id: each is put right or ignored,
   never a panic or a hang, and each has a test.
 - **What a frame costs.** Measured by `--bench` in the example (a release build, 1280×820 at
-  2×, 120 Hz), as the app's own work from the start of a frame to the end of its painting:
+  2×, 120 Hz), as the example's own work from the start of a frame to the end of its painting:
   0.5 ms panning the sample and 1.2 ms zooming it, so both hold 120 frames a second; 2.3 ms
   with 500 nodes and 4 ms with 1000, zoomed out to fit, where they're drawn as boxes. What got
   it there, each found with a profiler:

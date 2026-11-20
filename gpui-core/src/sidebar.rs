@@ -17,7 +17,7 @@
 //!             SidebarGroup::new("main")
 //!                 .label("Platform")
 //!                 .item(SidebarItem::new("inbox", "Inbox").icon(IconName::Inbox).badge("4"))
-//!                 .item(SidebarItem::new("agents", "Agents").icon(IconName::Bot)),
+//!                 .item(SidebarItem::new("documents", "Documents").icon(IconName::FileText)),
 //!         )
 //!         .active(self.page.clone())
 //!         .on_select(cx.listener(|this, id: &SharedString, _, cx| {

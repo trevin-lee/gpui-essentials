@@ -2,8 +2,8 @@
 
 Cases for checking stored flows against gpui-flow's `Limits` (the defaults, as
 [docs/json.md](../../../docs/json.md#limits) lists them). The crate's `tests/limits.rs` runs every
-case, and the server runs the same files against its own checks. Both must give exactly the
-listed problems.
+case, and a server that runs the same files against its own checks must give exactly the
+listed problems too.
 
 - `valid.json`: documents with no problems, including every text, address and id at its limit,
   a node 16 frames deep, and the cases a reader must tolerate (a loop of parents, an edge to a
