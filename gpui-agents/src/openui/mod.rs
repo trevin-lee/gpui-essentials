@@ -78,7 +78,7 @@ pub(crate) const MAX_EVAL_TEXT: usize = 100_000;
 /// The most issues kept about one card.
 pub(crate) const MAX_ISSUES: usize = 200;
 
-/// Why a card can't be shown. The app shows "This card couldn't be shown" (or the message's
+/// Why a card can't be shown. A host shows "This card couldn't be shown" (or the message's
 /// text) in its place; the reason is for logs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CardError {

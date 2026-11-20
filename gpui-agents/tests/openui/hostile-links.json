@@ -74,7 +74,7 @@
        "steps": [
         {
          "type": "open_url",
-         "url": "/api/agents"
+         "url": "/api/users"
         }
        ]
       }

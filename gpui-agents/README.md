@@ -292,8 +292,8 @@ pressed Stop) is simply a view the host stops drawing.
 
 ### Wiring it to a chat's events
 
-For a server that sends a reply's words as `delta` events with a draft id, as the owner's chat
-server does (`{id, text}`, `{id, text, whole: true}`, `{id, end: "message" | "drop"}`, then the
+For a server that sends a reply's words as `delta` events with a draft id, as a chat
+server might (`{id, text}`, `{id, text, whole: true}`, `{id, end: "message" | "drop"}`, then the
 message with `stream: id`):
 
 | Event | The host |

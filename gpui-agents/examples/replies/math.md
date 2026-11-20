@@ -1,4 +1,4 @@
-### 2026-11-18 15:50 UTC · Career
+### 2026-11-18 15:50 UTC · Assistant
 
 Both are Kalman filters adapted for **nonlinear** systems.
 
@@ -20,7 +20,7 @@ Real vehicles aren't linear. A Pacejka tyre force, for example, is a curved func
 
 **One-line version for an interview:** "The EKF linearizes the model with Jacobians at each step. The UKF pushes a few sample points through the true nonlinear model instead, so it needs no derivatives and handles strong nonlinearity better at similar cost."
 
-### 2026-11-18 15:51 UTC · Career
+### 2026-11-18 15:51 UTC · Assistant
 
 A **Jacobian** is the matrix of all first partial derivatives of a function with several inputs and several outputs. It's the multi-variable version of "the slope".
 

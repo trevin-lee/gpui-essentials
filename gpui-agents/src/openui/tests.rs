@@ -10,7 +10,7 @@ use super::*;
 use serde_json::{Value as J, json};
 use std::path::PathBuf;
 
-const ORIGIN: &str = "https://agents.example.com";
+const ORIGIN: &str = "https://app.example.com";
 
 fn dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/openui")
@@ -792,7 +792,7 @@ fn image_sources_are_data_for_the_host_to_judge() {
         Some("/api/files/content?path=school/supply-demand.png")
     );
     assert_eq!(
-        ok("https://agents.example.com/api/files/content?path=a%20b.png").as_deref(),
+        ok("https://app.example.com/api/files/content?path=a%20b.png").as_deref(),
         Some("/api/files/content?path=a%20b.png")
     );
     assert_eq!(
@@ -802,14 +802,14 @@ fn image_sources_are_data_for_the_host_to_judge() {
     for bad in [
         "https://evil.test/api/files/content?path=x.png",
         "//evil.test/api/files/content?path=x.png",
-        "http://agents.example.com/api/files/content?path=x.png",
-        "https://someone@agents.example.com/api/files/content?path=x.png",
-        "/api/files/content/../agents?path=x",
+        "http://app.example.com/api/files/content?path=x.png",
+        "https://someone@app.example.com/api/files/content?path=x.png",
+        "/api/files/content/../users?path=x",
         "/api/files/content?path=",
         "/api/files/content",
-        "/api/agents/abc/chat",
+        "/api/users/abc",
         "data:image/png;base64,iVBORw0KGgo=",
-        "blob:https://agents.example.com/123",
+        "blob:https://app.example.com/123",
         "javascript:alert(1)",
         "",
     ] {
