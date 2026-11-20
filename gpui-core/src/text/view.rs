@@ -1258,12 +1258,22 @@ fn lay_table(
                 Some(Align::Right) => TextAlign::Right,
                 _ => TextAlign::Left,
             };
+            // A cell's inline math typeset, as a paragraph's is (the same each time for the
+            // same cell and style, so a kept layout is of this paragraph).
+            let (tp, maths) = with_maths(&p, &cs);
+            // Only a cell with math is a new paragraph; any other is `p` itself, moved below
+            // rather than cloned each draw.
+            let typeset = match tp {
+                std::borrow::Cow::Owned(tp) => Some(tp),
+                std::borrow::Cow::Borrowed(_) => None,
+            };
             let l = match kept.as_ref().and_then(|k| k.laid.get(c)) {
                 Some(l) => l.clone(),
                 None => {
                     #[cfg(test)]
                     tests::CELLS_LAID.with(|k| k.set(k.get() + 1));
-                    Rc::new(ParagraphLayout::new(&p, &cs, inner, window))
+                    let tp = typeset.as_ref().unwrap_or(&p);
+                    Rc::new(ParagraphLayout::new(tp, &cs, inner, window))
                 }
             };
             let h = l.height;
@@ -1273,9 +1283,9 @@ fn lay_table(
             out.leaves.push(Leaf {
                 origin: point(cx0, row_top + pad),
                 layout: l,
-                paragraph: Rc::new(p),
+                paragraph: Rc::new(typeset.unwrap_or(p)),
                 separator: sep,
-                maths: Rc::default(),
+                maths: Rc::new(maths),
             });
             row_bottom = row_bottom.max(row_top + pad * 2. + h);
         }
@@ -2967,6 +2977,41 @@ mod tests {
         assert!(
             fraction != source,
             "typeset, not its TeX: {fraction:?} {source:?}"
+        );
+    }
+
+    /// Inline math in a table's cell is typeset as in a paragraph: its formula an inline box
+    /// in the cell, copied as its TeX between dollars.
+    #[cfg(feature = "math")]
+    #[gpui::test]
+    fn inline_math_in_a_table_cell_is_typeset(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        struct Doc;
+        impl Render for Doc {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(402.)).child(
+                    TextView::markdown(
+                        "cells",
+                        "| Rate | Formula |\n|---|---|\n| Decay | $e^{-kt}$ |",
+                    )
+                    .selectable(true),
+                )
+            }
+        }
+        let (_, vcx) = cx.add_window_view(|window, cx| {
+            let v = cx.new(|_| Doc);
+            Root::new(v, window, cx)
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| window.draw(cx).clear(cx));
+        vcx.simulate_click(gpui::point(px(4.), px(6.)), gpui::Modifiers::none());
+        vcx.dispatch_action(super::SelectAllText);
+        vcx.dispatch_action(super::CopySelection);
+        let copied = vcx.update(|_, cx| cx.read_from_clipboard().and_then(|c| c.text()));
+        let copied = copied.unwrap_or_default();
+        assert!(
+            copied.contains("$e^{-kt}$"),
+            "typeset, copied as its TeX: {copied:?}"
         );
     }
 
