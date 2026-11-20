@@ -105,7 +105,7 @@ jobs:
   ios:
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.own == 'true'
-    # The crate must build for iOS too (the shared editors may run in the iPhone and iPad apps).
+    # The crate must build for iOS too (a host may run its components on iPhone and iPad).
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

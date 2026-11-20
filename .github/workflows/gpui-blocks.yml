@@ -120,7 +120,7 @@ jobs:
   ios:
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.own == 'true' && inputs.shots == ''
-    # The editor is the page editor in the iPhone and iPad apps too, so it must build for iOS.
+    # Hosts on iPhone and iPad run the editor through GPUI's iOS backend, so it must build for iOS.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
