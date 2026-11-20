@@ -455,3 +455,92 @@ fn the_keyboard_crosses_groups(cx: &mut TestAppContext) {
         host.last_edit()
     );
 }
+
+/// People's All people view as a gallery of `size` cards, `width` points wide.
+fn open_sized<'a>(
+    cx: &'a mut TestAppContext,
+    host: &std::rc::Rc<TestHost>,
+    size: Option<CardSize>,
+    width: f32,
+) -> (Entity<TableView>, &'a mut VisualTestContext) {
+    let (mut db, rows) = load("people");
+    let v = db
+        .database
+        .as_mut()
+        .unwrap()
+        .views
+        .iter_mut()
+        .find(|v| v.id == ALL_PEOPLE)
+        .unwrap();
+    v.kind = ViewType::Gallery;
+    v.sort.clear();
+    v.card_size = size;
+    open_with(
+        cx,
+        host,
+        db,
+        rows,
+        Some(ALL_PEOPLE),
+        gpui::size(px(width), px(900.)),
+    )
+}
+
+/// How many cards the first line holds, and the first card's width.
+fn first_line(table: &Entity<TableView>, cx: &mut VisualTestContext) -> (usize, Pixels) {
+    let ids = order(table, cx);
+    let first = rect(cx, card(&ids[0]));
+    let n = ids
+        .iter()
+        .take_while(|id| drawn(cx, card(id)) && rect(cx, card(id)).top() == first.top())
+        .count();
+    (n, first.size.width)
+}
+
+/// A gallery's card size: small, medium (also the default) and large cards, three, two and two
+/// to a line at 736 points, and two, one and one at a phone's 393, never wider than the view.
+#[gpui::test]
+fn the_card_size_sets_how_many_cards_a_line_holds(cx: &mut TestAppContext) {
+    for (size, width, per_line) in [
+        (Some(CardSize::Small), 736., 3),
+        (Some(CardSize::Medium), 736., 2),
+        (None, 736., 2),
+        (Some(CardSize::Large), 736., 2),
+        (Some(CardSize::Small), 393., 2),
+        (Some(CardSize::Medium), 393., 1),
+        (Some(CardSize::Large), 393., 1),
+    ] {
+        let host = TestHost::new();
+        let (table, vcx) = open_sized(cx, &host, size.clone(), width);
+        let (n, w) = first_line(&table, vcx);
+        assert_eq!(n, per_line, "{size:?} at {width}: {n} a line");
+        assert!(w <= px(width), "{size:?} at {width}: a card {w:?} wide");
+    }
+}
+
+/// The gallery's settings set its card size, writing small and large and leaving medium out.
+#[gpui::test]
+fn the_settings_set_the_card_size(cx: &mut TestAppContext) {
+    let host = TestHost::new();
+    let (table, cx) = open_sized(cx, &host, None, 1400.);
+    table.update(cx, |t, cx| t.set_view_bar(true, cx));
+    draw(cx);
+    let written = |host: &TestHost| {
+        edits(host).into_iter().rev().find_map(|e| match e {
+            Edit::ViewChanged { view, .. } => Some(
+                serde_json::to_value(&view)
+                    .unwrap()
+                    .get("cardSize")
+                    .cloned(),
+            ),
+            _ => None,
+        })
+    };
+    click(cx, "view-settings");
+    click(cx, "menu-item-Card size");
+    click(cx, "menu-item-Large");
+    assert_eq!(written(&host), Some(Some(serde_json::json!("large"))));
+    click(cx, "menu-item-Small");
+    assert_eq!(written(&host), Some(Some(serde_json::json!("small"))));
+    click(cx, "menu-item-Medium");
+    assert_eq!(written(&host), Some(None), "medium is the field left out");
+}

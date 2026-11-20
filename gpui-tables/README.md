@@ -771,7 +771,7 @@ by, so renaming a property changes no row. The value's JSON depends on the type:
 ## Views
 
 A database has several saved views, each `{id, name, type, order, sort, filter, groupBy,
-columns, cardProperties, collapsedGroups, calculations, cardPreview}`. They're tabs above the database, in `order`, and
+columns, cardProperties, collapsedGroups, calculations, cardPreview, cardSize}`. They're tabs above the database, in `order`, and
 every person (and agent) sees the same ones.
 
 - **`sort`** is a list of `{propertyId, direction}` (`ascending` or `descending`), applied in
@@ -788,6 +788,12 @@ every person (and agent) sees the same ones.
   out of the JSON when absent. A value the crate doesn't know draws nothing and is kept as
   written, but `Limits` refuses it (`not none or cover (view <id>)`), as the server does, and the
   view's settings only ever write `none` or `cover`.
+- **`cardSize`** is how big a gallery's cards are (Notion's card size): `small`, `medium` or
+  `large`, 172, 252 or 340 points wide and never wider than the view, so at a 736-point view three,
+  two and two cards a line, and at a phone's 393 two, one and one. Absent or null is medium
+  (today's card), and it's left out of the JSON when absent; the view's settings write it left
+  out for medium. A value the crate doesn't know draws medium and is kept as written, but
+  `Limits` refuses it (`not small, medium or large (view <id>)`), as the server does.
 - **`calculations`** are a table's footer: `{propertyId: calculation}`, at most one per
   property, left out when there are none (an addition to the first proposal). A calculation is
   one of `countAll`, `countValues`, `countUnique`, `countEmpty`, `countNotEmpty`,
