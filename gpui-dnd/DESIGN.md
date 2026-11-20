@@ -588,7 +588,7 @@ pub struct SortableDrag<K> { pub list: ElementId, pub key: K, pub from: usize, p
 
 ## Drags a host starts itself (for gpui-calendar)
 
-Agreed with the lead and the gpui-calendar agent (#362); step 1 is built (see the order at the
+Agreed for gpui-calendar in #362; step 1 is built (see the order at the
 end). gpui-calendar draws a whole view on one canvas and decides
 itself what a press means (`paint::target_at`): empty time creates, an event moves, an event's
 bottom (or an all-day span's right edge) resizes, a "+N" list's row moves its event, and only
@@ -789,7 +789,7 @@ touch while it's on, how it ends, the cursor, and timed scrolling.
 
 ## Proposal: gpui-blocks' block drags on gpui-dnd
 
-Not built. Reviewed by the gpui-blocks agent (#393), as #362 was by gpui-calendar's; building
+Not built. Reviewed for gpui-blocks in #393, as #362 was for gpui-calendar; building
 waits for a quiet period in blocks' drag code. From a read of `engine/src/reorder.rs`,
 `engine/src/side_drop.rs`, the block-drag half of `engine/src/state.rs` (`BlockDrag`,
 `begin_block_drag` to `finish_block_drag`, `touch_pressed`, `touch_moved`, `lift_block`,
@@ -973,8 +973,8 @@ Nothing else: the rest is `press_at`, `begin_at`, `cancel`, `catch_outside`, `au
 
 ### Order, once agreed and once blocks' drag code is quiet
 
-Agreed with the gpui-blocks agent (#393). Building starts after blocks' bookmarks and Page
-Up/Down PRs merge, when the lead says.
+Agreed for gpui-blocks in #393. Building started after blocks' bookmarks and Page Up/Down
+changes merged.
 
 
 1. **Built.** gpui-dnd: `SortableState` (`src/sortable_state.rs`, from `reorder.rs` at #397,
