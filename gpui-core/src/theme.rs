@@ -145,7 +145,7 @@ pub struct Colors {
     pub overlay_line: Hsla,
     /// Quieter secondary text (a row's time): `muted_foreground` at 86% in the dark, the least
     /// that is 4.5:1 on the sidebar, and `muted_foreground` itself in the light. (The name is
-    /// the apps' token's, from when it was 70%.)
+    /// the design token's, from when it was 70%.)
     pub muted_70: Hsla,
     /// An error's box: `destructive` at 10%.
     pub destructive_fill: Hsla,
