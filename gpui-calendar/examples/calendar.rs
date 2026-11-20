@@ -179,7 +179,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
     );
     add(
         "lease",
-        "Planner: review the lease draft",
+        "Organizer: review the lease draft",
         1,
         hm(16, 0),
         hm(17, 0),
@@ -286,7 +286,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
     );
     add(
         "plan",
-        "Planner: plan the week",
+        "Organizer: plan the week",
         6,
         hm(19, 0),
         hm(19, 45),
@@ -332,7 +332,7 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         "design",
         vec![EventLink::doc("doc-design", "Design review notes")],
     );
-    link("lease", vec![EventLink::agent("planner", "Planner")]);
+    link("lease", vec![EventLink::agent("organizer", "Organizer")]);
     link(
         "one-on-one",
         vec![EventLink::doc("doc-priya", "1:1 with Priya")],
@@ -342,10 +342,10 @@ fn sample_week(monday: NaiveDate) -> Vec<Event> {
         vec![
             EventLink::doc("doc-loop", "Interview loop"),
             EventLink::doc("doc-cv", "Résumé"),
-            EventLink::agent("planner", "Planner"),
+            EventLink::agent("organizer", "Organizer"),
         ],
     );
-    link("plan", vec![EventLink::agent("planner", "Planner")]);
+    link("plan", vec![EventLink::agent("organizer", "Organizer")]);
     link(
         "section",
         vec![
@@ -412,7 +412,7 @@ const TITLES: [&str; 16] = [
     "Focus time",
     "Lunch",
     "Reading group",
-    "Planner: follow up",
+    "Organizer: follow up",
     "Interview",
     "Office hours",
     "Errands",
@@ -658,7 +658,7 @@ impl Root {
                 more("vendor", "Vendor call", 14 * 60 + 30, 15 * 60 + 30, "work");
                 more(
                     "checkin",
-                    "Check-in with Planner",
+                    "Check-in with Organizer",
                     14 * 60 + 45,
                     15 * 60 + 15,
                     "agents",

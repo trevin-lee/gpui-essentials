@@ -31,7 +31,7 @@ fn events() -> Vec<Event> {
         Event::timed("notes", "Review", at(day(4), 13, 0), at(day(4), 15, 0))
             .calendar("work")
             .link(EventLink::doc("doc-review", "Review notes"))
-            .link(EventLink::agent("planner", "Planner")),
+            .link(EventLink::agent("organizer", "Organizer")),
         Event::timed("many", "Sync", at(day(5), 13, 0), at(day(5), 13, 45))
             .calendar("work")
             .link(EventLink::doc("x", "X"))
@@ -792,7 +792,7 @@ fn a_click_on_a_listed_link_asks_the_host_to_open_it(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(
         opened_links(&seen),
-        vec![("notes".into(), EventLink::agent("planner", "Planner"))]
+        vec![("notes".into(), EventLink::agent("organizer", "Organizer"))]
     );
     assert!(has(&seen, &CalendarEvent::Select(Some("notes".into()))));
     unchanged(&c, cx);
@@ -912,7 +912,7 @@ fn the_agenda_opens_links_and_moves_nothing(cx: &mut TestAppContext) {
     draw(cx);
     assert_eq!(
         opened_links(&seen),
-        vec![("notes".into(), EventLink::agent("planner", "Planner"))]
+        vec![("notes".into(), EventLink::agent("organizer", "Organizer"))]
     );
     unchanged(&c, cx);
 }
