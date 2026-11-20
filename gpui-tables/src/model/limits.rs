@@ -188,6 +188,8 @@ pub enum ProblemKind {
     IconNotString,
     /// A view's `cardPreview` that isn't `none` or `cover`: the view's id.
     NotCardPreview(String),
+    /// A view's `cardSize` that isn't `small`, `medium` or `large`: the view's id.
+    NotCardSize(String),
 }
 
 impl fmt::Display for Problem {
@@ -222,6 +224,9 @@ impl fmt::Display for Problem {
             ProblemKind::NotAsset => write!(f, "not asset: and 64 lowercase hex characters"),
             ProblemKind::IconNotString => write!(f, "not a string or null"),
             ProblemKind::NotCardPreview(view) => write!(f, "not none or cover (view {view})"),
+            ProblemKind::NotCardSize(view) => {
+                write!(f, "not small, medium or large (view {view})")
+            }
         }
     }
 }
@@ -409,6 +414,12 @@ impl Limits {
                 c.push(
                     format!("{}.cardPreview", at()),
                     ProblemKind::NotCardPreview(v.id.clone()),
+                );
+            }
+            if let Some(super::CardSize::Other(_)) = &v.card_size {
+                c.push(
+                    format!("{}.cardSize", at()),
+                    ProblemKind::NotCardSize(v.id.clone()),
                 );
             }
         }

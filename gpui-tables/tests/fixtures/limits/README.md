@@ -52,6 +52,7 @@ and UTF-8 bytes.
 | `a kind of person this property doesn't allow` | A person not in the property's `kinds`, or of a kind the crate doesn't know |
 | `ends before it starts` | A date range whose `end` is before its `start` |
 | `not none or cover (view <id>)` | A view's `cardPreview` that's a string other than `none` or `cover` (absent or null is none), at the path `database.views[i].cardPreview` |
+| `not small, medium or large (view <id>)` | A view's `cardSize` that's a string other than `small`, `medium` or `large` (absent or null is medium), at the path `database.views[i].cardSize` |
 | `derived, never stored` | A value stored for a created time, edited time, created-by or edited-by (any value but null) |
 | `N graphemes is more than 1` | An `icon` (not starting with `asset:`) of more than one grapheme cluster |
 | `N bytes is more than 16` | An `icon` (not starting with `asset:`) over 16 bytes in UTF-8 |
