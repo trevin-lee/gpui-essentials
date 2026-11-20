@@ -96,7 +96,7 @@ fn typing_in_the_bar_narrows_the_table_by_what_its_cells_show(cx: &mut TestAppCo
     search(&table, cx, Some(&DORMANT[..8]));
     assert!(titles(&table, cx).is_empty(), "never by an option's id");
     // A person by their name; a hidden column (Phone) isn't searched.
-    search(&table, cx, Some("career planning"));
+    search(&table, cx, Some("concierge"));
     assert_eq!(titles(&table, cx), ["Imani Castell", "Theo Brandt"]);
     search(&table, cx, Some("555 0101"));
     assert!(titles(&table, cx).is_empty(), "the phone column is hidden");

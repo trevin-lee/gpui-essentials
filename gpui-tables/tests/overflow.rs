@@ -106,7 +106,7 @@ fn hostile() -> (Doc, Vec<Doc>) {
                 PropertyType::Person => Value::People(vec![
                     Person::Owner,
                     Person::agent(format!("agent-{WORD}")),
-                    Person::agent("career-planning"),
+                    Person::agent("concierge"),
                 ]),
                 PropertyType::Relation => Value::ids([KESTREL, BLUEFIN, "a-missing-row"]),
                 PropertyType::Date => Value::Date(DateValue {

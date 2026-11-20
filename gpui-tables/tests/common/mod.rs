@@ -330,7 +330,7 @@ impl TableHost for TestHost {
     fn person_name(&self, person: &Person) -> Option<String> {
         Some(match person {
             Person::Owner => "Avery Lin".into(),
-            Person::Agent(id) if id == "career-planning" => "Career Planning".into(),
+            Person::Agent(id) if id == "concierge" => "Concierge".into(),
             Person::Agent(id) => id.clone(),
             Person::Other(_) => return None,
         })
@@ -346,7 +346,7 @@ impl TableHost for TestHost {
     fn people(&self, _: &Property) -> Vec<Person> {
         vec![
             Person::Owner,
-            Person::agent("career-planning"),
+            Person::agent("concierge"),
             Person::agent("inbox-triage"),
         ]
     }

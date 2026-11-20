@@ -1,5 +1,5 @@
 //! Two tables side by side on one page, each with its own drag-and-drop provider and none round
-//! the window (as a Docs page holds two). A row dragged within one table is one `rowsMoved`, heard
+//! the window (as a page can hold two). A row dragged within one table is one `rowsMoved`, heard
 //! by that table's host alone; a row dropped on the other table goes back, nothing emitted by
 //! either; and the other table can then drag its own rows.
 

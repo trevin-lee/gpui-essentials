@@ -1,8 +1,8 @@
 # Limit vectors
 
 Cases for checking docs against gpui-tables' `Limits` (the defaults, as the crate's README lists
-them). The crate's `tests/limits.rs` runs every case through `Limits::check_doc`, and the server
-runs the same files against its own checks. Both must give exactly the listed problems.
+them). The crate's `tests/limits.rs` runs every case through `Limits::check_doc`, and a server that
+runs the same files against its own checks must give exactly the listed problems too.
 
 - `valid.json`: docs with no problems, including a database and a row at every limit, none
   over.

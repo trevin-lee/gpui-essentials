@@ -127,7 +127,7 @@ fn values_read_as_their_types() {
             .unwrap()
             .as_people()
             .unwrap(),
-        [Person::Owner, Person::agent("career-planning")]
+        [Person::Owner, Person::agent("concierge")]
     );
     assert_eq!(
         imani.value(&prop(db, "Email").id).unwrap().as_str(),
@@ -296,7 +296,7 @@ fn created_by_and_edited_by_come_from_the_doc_and_round_trip() {
          "parentDocId": db.id, "author": {"kind": "owner"},
          "updatedBy": {"kind": "agent", "agentId": "inbox-triage"}, "values": {}},
         {"id": "r2", "kind": "page", "title": "Notes on Lanterns", "order": "a1",
-         "parentDocId": db.id, "author": {"kind": "agent", "agentId": "career-planning"},
+         "parentDocId": db.id, "author": {"kind": "agent", "agentId": "concierge"},
          "values": {}},
         {"id": "r3", "kind": "page", "title": "Untold Harbors", "order": "a2",
          "parentDocId": db.id, "values": {}}
@@ -305,7 +305,7 @@ fn created_by_and_edited_by_come_from_the_doc_and_round_trip() {
     assert_eq!(rows[0].created_by(), Some(&Person::Owner));
     assert_eq!(rows[0].edited_by(), Some(&Person::agent("inbox-triage")));
     // An older doc without updatedBy: its editor is its author.
-    assert_eq!(rows[1].edited_by(), Some(&Person::agent("career-planning")));
+    assert_eq!(rows[1].edited_by(), Some(&Person::agent("concierge")));
     assert_eq!(rows[1].edited_by(), rows[1].created_by());
     assert_eq!((rows[2].created_by(), rows[2].edited_by()), (None, None));
     for r in &rows {

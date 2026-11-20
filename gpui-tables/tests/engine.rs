@@ -319,7 +319,7 @@ fn small() -> Fixture {
     // author; r3 has neither.
     for (r, author, editor) in [
         (0, Some(Person::Owner), Some(Person::agent("inbox-triage"))),
-        (1, Some(Person::agent("career-planning")), None),
+        (1, Some(Person::agent("concierge")), None),
         (2, Some(Person::Owner), Some(Person::Owner)),
     ] {
         rows[r].author = author;
@@ -480,7 +480,7 @@ fn created_by_and_edited_by_operators() {
         f.pass(
             "by",
             O::Is,
-            json!({"kind": "agent", "agentId": "career-planning"})
+            json!({"kind": "agent", "agentId": "concierge"})
         ),
         ["r1"]
     );
@@ -497,7 +497,7 @@ fn created_by_and_edited_by_operators() {
     assert_eq!(f.pass("editor", O::Is, json!("owner")), ["r2"]);
     // r1 has no updatedBy: its editor is its author.
     assert_eq!(
-        f.pass("editor", O::Is, json!("agent:career-planning")),
+        f.pass("editor", O::Is, json!("agent:concierge")),
         ["r1"]
     );
     assert_eq!(
@@ -877,7 +877,7 @@ impl Lookup for Crew {
     fn person_name(&self, p: &Person) -> Option<String> {
         Some(match p {
             Person::Owner => "Avery Lin".into(),
-            Person::Agent(id) if id == "career-planning" => "Scout".into(),
+            Person::Agent(id) if id == "concierge" => "Scout".into(),
             _ => return None,
         })
     }
@@ -886,7 +886,7 @@ impl Lookup for Crew {
 #[test]
 fn created_by_and_edited_by_sort_by_the_hosts_names() {
     let f = small();
-    // Without names: "career-planning" < "owner"; ties keep the manual order; no author last.
+    // Without names: "concierge" < "owner"; ties keep the manual order; no author last.
     assert_eq!(
         sorted(&f, vec![Sort::ascending("by")]),
         ["r1", "r0", "r2", "r3"]
@@ -985,7 +985,7 @@ fn grouping_by_created_by_and_edited_by() {
         g(&[
             ("empty", &["r3"]),
             ("owner", &["r0", "r2"]),
-            ("agent:career-planning", &["r1"])
+            ("agent:concierge", &["r1"])
         ])
     );
     assert_eq!(
@@ -993,7 +993,7 @@ fn grouping_by_created_by_and_edited_by() {
         g(&[
             ("empty", &["r3"]),
             ("owner", &["r2"]),
-            ("agent:career-planning", &["r1"]),
+            ("agent:concierge", &["r1"]),
             ("agent:inbox-triage", &["r0"])
         ])
     );
@@ -1009,7 +1009,7 @@ fn grouping_by_created_by_and_edited_by() {
             "empty",
             "owner",
             "agent:inbox-triage",
-            "agent:career-planning"
+            "agent:concierge"
         ]
     );
 }

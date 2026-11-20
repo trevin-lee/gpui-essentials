@@ -115,7 +115,7 @@ fn worst_row(db: &Db) -> Doc {
             PropertyType::Checkbox => Value::Bool(true),
             PropertyType::Person => Value::People(vec![
                 Person::Owner,
-                Person::agent("career-planning"),
+                Person::agent("concierge"),
                 Person::agent("inbox-triage"),
             ]),
             PropertyType::Relation => Value::ids([
@@ -328,7 +328,7 @@ impl TableHost for Host {
     fn person_name(&self, person: &Person) -> Option<String> {
         Some(match person {
             Person::Owner => "Avery Lin".into(),
-            Person::Agent(id) if id == "career-planning" => "Career Planning".into(),
+            Person::Agent(id) if id == "concierge" => "Concierge".into(),
             Person::Agent(id) if id == "inbox-triage" => "Inbox Triage".into(),
             Person::Agent(id) => id.clone(),
             Person::Other(_) => return None,
@@ -347,7 +347,7 @@ impl TableHost for Host {
     fn people(&self, _: &Property) -> Vec<Person> {
         vec![
             Person::Owner,
-            Person::agent("career-planning"),
+            Person::agent("concierge"),
             Person::agent("inbox-triage"),
         ]
     }
