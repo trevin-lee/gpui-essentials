@@ -294,9 +294,7 @@ impl Render for Overlays {
                 AlertDialog::new("delete")
                     .open(self.alert)
                     .title("Delete the project?")
-                    .description(
-                        "This can't be undone. Its files and history are deleted with it.",
-                    )
+                    .description("This can't be undone. Its files and history are deleted with it.")
                     .on_dismiss(cx.listener(|this, _, _, cx| {
                         this.alert = false;
                         this.set("alert dismissed", cx);

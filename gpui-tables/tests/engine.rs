@@ -496,10 +496,7 @@ fn created_by_and_edited_by_operators() {
     assert_eq!(f.pass("editor", O::Is, json!("agent:inbox-triage")), ["r0"]);
     assert_eq!(f.pass("editor", O::Is, json!("owner")), ["r2"]);
     // r1 has no updatedBy: its editor is its author.
-    assert_eq!(
-        f.pass("editor", O::Is, json!("agent:concierge")),
-        ["r1"]
-    );
+    assert_eq!(f.pass("editor", O::Is, json!("agent:concierge")), ["r1"]);
     assert_eq!(
         f.pass("editor", O::IsNot, json!("owner")),
         ["r0", "r1", "r3"]
@@ -1005,12 +1002,7 @@ fn grouping_by_created_by_and_edited_by() {
         .collect();
     assert_eq!(
         keys,
-        [
-            "empty",
-            "owner",
-            "agent:inbox-triage",
-            "agent:concierge"
-        ]
+        ["empty", "owner", "agent:inbox-triage", "agent:concierge"]
     );
 }
 
