@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike as _, Duration, NaiveDate, Utc};
 use gpui::{Bounds, Pixels, TestAppContext, TestDispatcher, point, px, size};
 use gpui_core::Theme;
 
@@ -1109,4 +1109,131 @@ fn narrow_titles_wrap_only_between_words() {
         1,
         "the long word stays one line"
     );
+}
+
+/// The days' names sit over their dates, centred, in every column at every width, as in Google
+/// Calendar's week: no column says "Fri 27" on a line while its neighbours stack, and no column
+/// cuts its name to a letter while another keeps it whole. Widths step finely, so a threshold
+/// between two columns' widths can't hide between them.
+#[test]
+fn every_column_stacks_its_name_over_its_date() {
+    let mut cx = context();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(day(2))
+            .with_events(worst_week())
+    });
+    let mut found = Vec::new();
+    for (view, weekends) in [
+        (CalendarView::Week, true),
+        (CalendarView::Week, false),
+        (CalendarView::Days(3), true),
+    ] {
+        calendar.update(vcx, |c, cx| {
+            c.set_options(|o| o.show_weekends = weekends, cx);
+            c.set_view(view, cx);
+        });
+        let mut w = 320.;
+        while w <= 2200. {
+            vcx.simulate_resize(size(px(w), px(820.)));
+            vcx.run_until_parked();
+            drawn::record();
+            vcx.update(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx);
+            });
+            let texts = drawn::take();
+            let geo = calendar
+                .read_with(vcx, |c, _| c.shared.geo.get())
+                .expect("drawn");
+            let at = format!("{view:?}, weekends {weekends}, {w}px");
+            let mut forms = Vec::new();
+            for i in (0..geo.days as i32).filter(|&i| geo.shown(i)) {
+                let date = geo.date(i);
+                let (left, right) = (geo.col_x(i), geo.col_x(i) + geo.col_w);
+                let center = left + geo.col_w / 2.;
+                let head: Vec<_> = texts
+                    .iter()
+                    .filter(|t| {
+                        t.bounds.bottom() <= geo.head_bottom
+                            && t.bounds.center().x >= left
+                            && t.bounds.center().x < right
+                    })
+                    .collect();
+                let full = time::weekday_name(date.weekday(), true);
+                let name = head.iter().find(|t| full.starts_with(t.text.as_str()));
+                let number = head.iter().find(|t| t.text == date.day().to_string());
+                let (Some(name), Some(number)) = (name, number) else {
+                    found.push(format!("{at}: {date} has no name or number: {head:?}"));
+                    continue;
+                };
+                forms.push(name.text.chars().count());
+                if name.bounds.bottom() > number.bounds.top() + px(0.5) {
+                    found.push(format!(
+                        "{at}: {date}'s name isn't over its number: {:?} and {:?}",
+                        name.bounds, number.bounds
+                    ));
+                }
+                for t in [name, number] {
+                    if (t.bounds.center().x - center).abs() > px(1.) {
+                        found.push(format!(
+                            "{at}: {:?} isn't centred in its column: {:?}, the column's middle {center:?}",
+                            t.text, t.bounds
+                        ));
+                    }
+                }
+            }
+            if forms.windows(2).any(|f| f[0] != f[1]) {
+                found.push(format!("{at}: names of different lengths: {forms:?}"));
+            }
+            w += 7.;
+        }
+    }
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}
+
+/// A day the clocks change says how long it is right of its date where its column has room,
+/// and doesn't run out of the column where it hasn't.
+#[test]
+fn a_clock_change_says_its_length_beside_the_date() {
+    let mut cx = context();
+    // Sunday 1 November 2026: Los Angeles goes back an hour.
+    let change = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+    let (calendar, vcx) = cx.add_window_view(|_, cx| {
+        Calendar::new(cx)
+            .with_options(|o| o.time_zone = TZ)
+            .with_header(false)
+            .with_now(at(day(2), 10, 40))
+            .with_date(change)
+            .with_view(CalendarView::Days(3))
+    });
+    for w in [1600., 390.] {
+        vcx.simulate_resize(size(px(w), px(820.)));
+        vcx.run_until_parked();
+        drawn::record();
+        vcx.update(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+        });
+        let texts = drawn::take();
+        let geo = calendar
+            .read_with(vcx, |c, _| c.shared.geo.get())
+            .expect("drawn");
+        let i = (change - geo.first).num_days() as i32;
+        let note = texts.iter().find(|t| t.text == "25 hours");
+        if w > 1000. {
+            let note = note.unwrap_or_else(|| panic!("{w}: no \"25 hours\""));
+            let number = texts.iter().find(|t| t.text == "1").expect("the date");
+            assert!(note.bounds.left() > number.bounds.right(), "{w}: {note:?}");
+            assert!(
+                note.bounds.right() <= geo.col_x(i) + geo.col_w,
+                "{w}: {note:?}"
+            );
+        }
+        let found = problems(&texts, geo.bounds);
+        assert!(found.is_empty(), "{w}: {}", found.join("\n"));
+    }
 }

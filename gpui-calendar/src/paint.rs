@@ -2169,7 +2169,31 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         }
     }
 
-    // The head: each day's name and date.
+    // The head: each day's name and date. Days side by side say it as Google Calendar's week
+    // does, the name over the number, centred, in every column at every width, so no column
+    // lays it out differently from its neighbours. The day view's one column says it on a line
+    // ("Wednesday 18") where there's room.
+    let stacked = days > 1 || {
+        let date = geo.date(0);
+        let name_w = ink.measure(
+            time::weekday_name(date.weekday(), false),
+            LABEL,
+            FontWeight::NORMAL,
+        );
+        let nw = ink.measure(&date.day().to_string(), LABEL, FontWeight::SEMIBOLD);
+        let badge = if date == scene.today {
+            ink.u(24.).max(nw + ink.u(10.))
+        } else {
+            nw
+        };
+        name_w + ink.u(6.) + badge > geo.col_w - ink.u(14.)
+    };
+    // Every column's name in full, or every one as its first letter where the widest doesn't
+    // fit: never "W" beside "Fri".
+    let full = (0..days).filter(|&i| geo.shown(i)).all(|i| {
+        let name = time::weekday_name(geo.date(i).weekday(), days > 1);
+        ink.measure(name, SMALL, FontWeight::MEDIUM) <= geo.col_w - ink.u(4.)
+    });
     for i in 0..days {
         if !geo.shown(i) {
             continue;
@@ -2180,19 +2204,29 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
         let name = time::weekday_name(date.weekday(), days > 1);
         let number = date.day().to_string();
         let today = date == scene.today;
-        let room = geo.col_w - ink.u(14.);
-        let name_w = ink.measure(name, LABEL, FontWeight::NORMAL);
-        let nw = ink.measure(&number, LABEL, FontWeight::SEMIBOLD);
-        let badge = if today {
-            ink.u(24.).max(nw + ink.u(10.))
+        // A day the clocks change says how long it is.
+        let length = time::day_length(date, scene.options.time_zone).num_hours();
+        let note = (length != 24).then(|| format!("{length} hours"));
+        if stacked {
+            paint_stacked_head(
+                ink,
+                scene,
+                geo,
+                i,
+                name,
+                full,
+                &number,
+                today,
+                note.as_deref(),
+            );
         } else {
-            nw
-        };
-        if name_w + ink.u(6.) + badge > room {
-            // Too narrow for "Mon 16" on a line: the name over the number, centred, as a
-            // phone's week does; the name's first letter where even that's too wide.
-            paint_stacked_head(ink, scene, geo, i, name, &number, today);
-        } else {
+            let room = geo.col_w - ink.u(14.);
+            let nw = ink.measure(&number, LABEL, FontWeight::SEMIBOLD);
+            let badge = if today {
+                ink.u(24.).max(nw + ink.u(10.))
+            } else {
+                nw
+            };
             let w = ink.text(
                 name,
                 LABEL,
@@ -2228,12 +2262,10 @@ fn paint_grid(ink: &mut Ink, scene: &Scene, geo: &Geo, shared: &Shared) {
                     Some(nw + px(1.)),
                 )
             };
-            // A day the clocks change says how long it is.
-            let length = time::day_length(date, scene.options.time_zone).num_hours();
-            if length != 24 {
+            if let Some(note) = &note {
                 let note_x = number_right + ink.u(8.);
                 ink.text(
-                    &format!("{length} hours"),
+                    note,
                     SMALL,
                     18.,
                     FontWeight::MEDIUM,
@@ -2374,25 +2406,29 @@ fn paint_crowds(
     }
 }
 
-/// A day's name over its number, centred in its column, for narrow columns.
+/// A day's name over its number, centred in its column: the name in full, or its first letter
+/// where `full` says the columns are too narrow for every name. A day the clocks change has its
+/// `note` ("23 hours") right of the number, where the column has room for it.
+#[allow(clippy::too_many_arguments)]
 fn paint_stacked_head(
     ink: &mut Ink,
     scene: &Scene,
     geo: &Geo,
     i: i32,
     name: &str,
+    full: bool,
     number: &str,
     today: bool,
+    note: Option<&str>,
 ) {
     let c = &scene.colors;
     let top = geo.bounds.top();
     let center = geo.col_x(i) + geo.col_w / 2.;
     let room = geo.col_w - ink.u(4.);
-    let first_letter: String = name.chars().take(1).collect();
-    let name = if ink.measure(name, SMALL, FontWeight::MEDIUM) <= room {
+    let name: String = if full {
         name.to_string()
     } else {
-        first_letter
+        name.chars().take(1).collect()
     };
     let w = ink.measure(&name, SMALL, FontWeight::MEDIUM);
     ink.text(
@@ -2406,10 +2442,12 @@ fn paint_stacked_head(
     );
     let nw = ink.measure(number, TITLE, FontWeight::SEMIBOLD);
     let y = top + ink.u(18.);
+    let mut right = center + nw / 2.;
     if today {
         let d = ink.u(20.).max(nw + ink.u(8.)).min(room);
         let pill = Bounds::new(point(center - d / 2., y), size(d, ink.u(20.)));
         ink.rounded(pill, ink.u(10.), c.now);
+        right = pill.right();
         ink.text(
             number,
             TITLE,
@@ -2429,6 +2467,21 @@ fn paint_stacked_head(
             point(center - nw / 2., y),
             Some(room),
         );
+    }
+    if let Some(note) = note {
+        let x = right + ink.u(6.);
+        let end = geo.col_x(i) + geo.col_w - ink.u(4.);
+        if x + ink.measure(note, SMALL, FontWeight::MEDIUM) <= end {
+            ink.text(
+                note,
+                SMALL,
+                20.,
+                FontWeight::MEDIUM,
+                c.now,
+                point(x, y),
+                Some(end - x),
+            );
+        }
     }
 }
 
