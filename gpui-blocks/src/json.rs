@@ -31,9 +31,13 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(not(target_family = "wasm"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use markdown_editor::{BlockEditorModel, BlockId, BlockKind, BlockRef, ColumnAlign};
 use serde::{Deserialize, Serialize};
+#[cfg(target_family = "wasm")]
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::docs;
 
@@ -615,8 +619,8 @@ fn new_id() -> String {
     let mut hasher = std::hash::RandomState::new().build_hasher();
     hasher.write_u64(COUNTER.fetch_add(1, Ordering::Relaxed));
     hasher.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or_default(),
     );

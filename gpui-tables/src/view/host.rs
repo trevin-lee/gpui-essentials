@@ -178,8 +178,12 @@ pub trait TableHost {
     /// The time now, in milliseconds since the epoch: for date groups and filters relative to
     /// today. Read when the rows are worked out again, never on a timer.
     fn now(&self) -> i64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        #[cfg(not(target_family = "wasm"))]
+        use std::time::{SystemTime, UNIX_EPOCH};
+        #[cfg(target_family = "wasm")]
+        use web_time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64)
     }
 

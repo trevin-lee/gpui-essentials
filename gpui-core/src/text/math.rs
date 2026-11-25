@@ -10,13 +10,17 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
 
 use gpui::{
     App, Bounds, Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, PathBuilder,
     Pixels, Point, SharedString, TextAlign, TextRun, Window, fill, point, px, size,
 };
 use katex_native::{Item, Layout, PathCommand, katex};
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 /// The most TeX a formula is typeset from, in bytes: past it, its TeX shows.
 pub const MAX_TEX: usize = 4 * 1024;

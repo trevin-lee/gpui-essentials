@@ -105,3 +105,6 @@ gpui-pre-macos = { workspace = true, features = ["runtime_shaders"] }
 # clock uses, so the lock doesn't grow.
 [target.'cfg(target_family = "wasm")'.dependencies]
 web-time = "1.1.0"
+# DatePicker's today in a browser: chrono reads the clock and the time zone from JavaScript's
+# Date there, since wasm32's std::time panics.
+chrono = { version = "0.4.45", default-features = false, features = ["wasmbind"] }
