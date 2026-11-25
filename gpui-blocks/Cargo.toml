@@ -33,6 +33,11 @@ gpui-pre = { workspace = true, features = ["test-support"], optional = true }
 gpui-pre-macos = { workspace = true, features = ["test-support"], optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
+# The time in a new block's id in a browser, where wasm32's std::time panics: the version GPUI's
+# own clock uses, so the lock doesn't grow.
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1.1.0"
+
 [features]
 # Pictures of the example's window rendered offscreen (`--shot`).
 shots = ["dep:gpui-pre", "dep:gpui-pre-macos", "dep:image"]

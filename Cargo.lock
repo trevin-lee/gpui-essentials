@@ -1918,6 +1918,7 @@ dependencies = [
  "markdown",
  "serde",
  "serde_json",
+ "web-time",
 ]
 
 [[package]]
@@ -2488,6 +2489,7 @@ dependencies = [
  "serde_json",
  "unicode-segmentation",
  "uuid",
+ "web-time",
 ]
 
 [[package]]

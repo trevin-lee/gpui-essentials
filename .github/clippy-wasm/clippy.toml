@@ -1,0 +1,9 @@
+# Clippy's settings for the wasm jobs (CLIPPY_CONF_DIR): std's clock panics on
+# wasm32-unknown-unknown ("time not implemented on this platform"), so code a browser runs reads
+# it through web-time (or chrono's wasmbind) instead.
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "panics on wasm32: use web_time::SystemTime there" },
+    { path = "std::time::SystemTime::elapsed", reason = "panics on wasm32: use web_time::SystemTime there" },
+    { path = "std::time::Instant::now", reason = "panics on wasm32: use web_time::Instant there" },
+    { path = "std::time::Instant::elapsed", reason = "panics on wasm32: use web_time::Instant there" },
+]

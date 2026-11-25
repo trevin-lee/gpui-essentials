@@ -145,6 +145,10 @@ jobs:
   wasm:
     # gpui-core must build for the browser too: the docs site's live demos run it as wasm.
     runs-on: ubuntu-latest
+    # std's clock panics in a browser: clippy here refuses std::time's now and elapsed
+    # (.github/clippy-wasm/clippy.toml), so the code reads web-time's clock instead.
+    env:
+      CLIPPY_CONF_DIR: ${{ github.workspace }}/.github/clippy-wasm
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       # Caches the registry and the build, keyed on Cargo.lock and the toolchain; only main
