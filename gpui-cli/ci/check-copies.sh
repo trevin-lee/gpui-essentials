@@ -14,7 +14,8 @@ mkdir -p "$host/src" "$host/tests"
 
 # GPUI as gpui-core takes it, and gpui-core's other dependencies the copies use, at its versions.
 gpui=$(grep -E '^gpui = ' "$repo/Cargo.toml" | sed 's/^gpui = //')
-dep() { grep -E "^$1 = " "$repo/gpui-core/Cargo.toml"; }
+# The first: [dependencies] comes before the per-target tables (wasm adds chrono's wasmbind).
+dep() { grep -m1 -E "^$1 = " "$repo/gpui-core/Cargo.toml"; }
 cat > "$host/Cargo.toml" <<TOML
 [package]
 name = "copies"
