@@ -18,7 +18,7 @@ use gpui::{
 use gpui_core::Theme;
 use image::RgbaImage;
 
-use crate::site::{Act, Demo};
+use docs_site_registry::{Act, Demo};
 
 /// The stage's width in points: every picture is this wide, at the screen's scale.
 pub const STAGE_WIDTH: f32 = 720.;

@@ -1,5 +1,6 @@
-# The docs site's live page: gpui-core's components running in the browser, built for
-# wasm32-unknown-unknown. See ../README.md ("The live page").
+# The docs sites' live code: gpui-core's components running in the browser, built for
+# wasm32-unknown-unknown: the Pages site's live page and the Next.js site's live previews. See
+# ../README.md ("The live page").
 [package]
 name = "docs-site-live"
 version = "0.0.0"
@@ -16,6 +17,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 gpui-core = { path = "../../gpui-core" }
+# Every demo on the site, for the Next.js site's live previews.
+docs-site-registry = { path = "../registry" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 # GPUI's platforms; in a browser, its web platform. Without `multithreaded` (on by default),
 # GPUI runs on the page's one thread, so the page needs no cross-origin isolation headers,
@@ -24,6 +27,8 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", default-fe
 # Exactly the version of the wasm-bindgen CLI that the pages workflow installs: the two must
 # match.
 wasm-bindgen = "=0.2.130"
+# The page's callback when the window is open.
+js-sys = "0.3"
 
 # Small rather than fast: the page downloads it. wasm-opt (build.sh) shrinks it further.
 [profile.release]

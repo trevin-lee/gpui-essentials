@@ -10,8 +10,11 @@ publish = false
 
 # Its own workspace, with its own Cargo.lock, so the site's build never touches the crates'
 # workspace (../../Cargo.toml). The crates it shows come in by path; their `workspace = true`
-# settings still resolve in their own workspace.
+# settings still resolve in their own workspace. The registry it draws from is in it too, and
+# checked with it: `cargo clippy` and `cargo fmt` here cover both.
 [workspace]
+members = ["../registry"]
+default-members = [".", "../registry"]
 
 [[bin]]
 name = "render"
@@ -20,6 +23,8 @@ path = "src/main.rs"
 [dependencies]
 # The components shown, with `shots`: GPUI's offscreen rendering of a hidden window.
 gpui-core = { path = "../../gpui-core", features = ["shots"] }
+# The components, their variants and their demos.
+docs-site-registry = { path = "../registry" }
 # GPUI, at the version the crates pin in their workspace, under the name their macros use.
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 # GPUI's platform for macOS. Without font-kit, macOS draws no text.
@@ -33,6 +38,8 @@ color_quant = "1.1"
 png = "0.18"
 # gpui-core's components.toml, for each page's Installation section (MIT or Apache-2.0).
 toml = "0.9"
+# The registry as JSON (`--json`), for the Next.js site (MIT or Apache-2.0).
+serde_json = "1"
 
 # Quantising and encoding the pictures is slow unoptimised; the rest builds as usual.
 [profile.dev.package.color_quant]

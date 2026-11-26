@@ -1242,16 +1242,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "docs-site-registry"
+version = "0.0.0"
+dependencies = [
+ "gpui-core",
+ "gpui-pre",
+]
+
+[[package]]
 name = "docs-site-render"
 version = "0.0.0"
 dependencies = [
  "anyhow",
  "color_quant",
+ "docs-site-registry",
  "gpui-core",
  "gpui-pre",
  "gpui-pre-platform",
  "image",
  "png 0.18.1",
+ "serde_json",
  "toml 0.9.12+spec-1.1.0",
 ]
 

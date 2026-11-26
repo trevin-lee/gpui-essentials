@@ -1,0 +1,18 @@
+# Every component the docs site shows, its variants and their demos (../demos), as one
+# registry: the renderer draws their pictures from it and the live bundle runs them in a
+# browser from it, so a new demo needs one line in src/registry.rs and nothing else. See
+# ../README.md.
+[package]
+name = "docs-site-registry"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.100"
+license = "Apache-2.0"
+publish = false
+# In the renderer's workspace, so the renderer's lint and format checks cover it too. The live
+# bundle takes it by path as well.
+workspace = "../render"
+
+[dependencies]
+gpui-core = { path = "../../gpui-core" }
+gpui = { package = "gpui-pre", version = "=0.3.12" }

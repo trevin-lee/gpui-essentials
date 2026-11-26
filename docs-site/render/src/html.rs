@@ -9,7 +9,7 @@ use anyhow::{Context as _, Result};
 
 use crate::install::Installs;
 use crate::shot::STAGE_WIDTH;
-use crate::site::{Component, Crate, Family};
+use docs_site_registry::{Component, Crate, Family};
 
 const STYLE: &str = include_str!("../../static/style.css");
 const REPO: &str = "https://github.com/trevin-lee/gpui-essentials";

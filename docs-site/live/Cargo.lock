@@ -1032,10 +1032,20 @@ dependencies = [
 name = "docs-site-live"
 version = "0.0.0"
 dependencies = [
+ "docs-site-registry",
  "gpui-core",
  "gpui-pre",
  "gpui-pre-platform",
+ "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "docs-site-registry"
+version = "0.0.0"
+dependencies = [
+ "gpui-core",
+ "gpui-pre",
 ]
 
 [[package]]
