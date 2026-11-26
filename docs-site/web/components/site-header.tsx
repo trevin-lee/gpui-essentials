@@ -21,6 +21,9 @@ export function SiteHeader() {
           <Link href="/docs/components/" className="hover:text-foreground">
             Components
           </Link>
+          <Link href="/docs/crates/" className="hover:text-foreground">
+            Crates
+          </Link>
           <a
             href="https://trevin-lee.github.io/gpui-essentials/api/gpui_core/"
             className="hover:text-foreground"
