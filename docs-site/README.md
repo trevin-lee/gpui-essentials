@@ -184,4 +184,3 @@ can't open a second window or reopen one. So the site starts the app once (`stag
 `live/src/stage.rs`), moves that canvas into whichever preview is live, and has the window
 draw that preview's demo (`mount`); the others show their pictures. Every demo in the registry
 is compiled into the bundle, so a new demo needs no wiring to run live.
-
