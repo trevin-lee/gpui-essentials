@@ -9,16 +9,16 @@ use std::path::Path;
 
 use anyhow::{Context as _, Result};
 
-const REPO: &str = "https://github.com/trevin-lee/gpui-essentials";
+pub const REPO: &str = "https://github.com/trevin-lee/gpui-essentials";
 
 /// What `gpui add` does for one component.
 pub struct Copy {
     /// Its name to the CLI, hyphenated: `date-picker`.
-    name: String,
+    pub name: String,
     /// The components copied with it, by their CLI names.
-    needs: Vec<String>,
+    pub needs: Vec<String>,
     /// gpui-core's dependencies it uses, which the host adds.
-    crates: Vec<String>,
+    pub crates: Vec<String>,
 }
 
 /// Every copyable component, under each name gpui-core's root exports from it (`Button`,
@@ -68,17 +68,22 @@ impl Installs {
         Ok(Self(by_export))
     }
 
-    /// The Installation section for the component whose rustdoc page is `docs`
-    /// (`gpui_core/struct.DatePicker.html`).
-    pub fn section(&self, docs: &str) -> String {
+    /// What `gpui add` copies for the component whose rustdoc page is `docs`
+    /// (`gpui_core/struct.DatePicker.html`), or `None` for one that stays in gpui-core.
+    pub fn copy(&self, docs: &str) -> Option<&Copy> {
         let export = docs
             .rsplit('/')
             .next()
             .and_then(|page| page.split('.').nth(1))
             .unwrap_or_default();
+        self.0.get(export).map(|copy| &**copy)
+    }
+
+    /// The Installation section for the component whose rustdoc page is `docs`.
+    pub fn section(&self, docs: &str) -> String {
         let dependency = format!("[dependencies]\ngpui-core = {{ git = \"{REPO}\" }}");
         let mut html = String::from(r#"<section id="installation"><h2>Installation</h2>"#);
-        match self.0.get(export) {
+        match self.copy(docs) {
             Some(copy) => {
                 let _ = write!(
                     html,

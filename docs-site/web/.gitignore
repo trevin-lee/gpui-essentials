@@ -1,0 +1,13 @@
+# Dependencies and build output.
+/node_modules/
+/.next/
+/out/
+/next-env.d.ts
+*.tsbuildinfo
+# Made by the Rust side, never committed (see README.md): the registry as JSON, the pictures
+# and the live bundle.
+/data/
+/public/img/
+/public/live/
+# The Vercel CLI's link and its build output.
+/.vercel/

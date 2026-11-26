@@ -1,16 +1,23 @@
 # The documentation site
 
 A static site with a page per component: every variant drawn in the light and the dark theme,
-the code that drew it, and a link to its API docs. It will be published at
-<https://trevin-lee.github.io/gpui-essentials>.
+the code that drew it, and a link to its API docs. It is published at
+<https://trevin-lee.github.io/gpui-essentials>. A second site, in the manner of ui.shadcn.com,
+runs the components live in the browser: see [The Next.js site](#the-nextjs-site).
 
+- `demos/<component>/<variant>.rs` are the demos: each file is compiled into the renderer and
+  the live bundle, and shown on the page, so the code on the page is always the code that drew
+  the picture and that runs live.
+- `registry/` lists the components and their variants (`registry/src/registry.rs`), with the
+  demos compiled in: a library the renderer and the live bundle share.
 - `render/` is a Rust program that draws each demo in a hidden window (gpui-core's `shots`
   feature, macOS only), saves the pictures and writes the HTML. It is its own Cargo workspace,
-  with its own `Cargo.lock`, so it never changes the crates' workspace.
-- `demos/<component>/<variant>.rs` are the demos: each file is both compiled into the renderer
-  and shown on the page, so the code on the page is always the code that drew the picture.
-- `render/src/registry.rs` lists the components and their variants.
-- `static/style.css` is the site's one stylesheet.
+  with its own `Cargo.lock` (the registry is in it too), so it never changes the crates'
+  workspace.
+- `live/` is the live code, built for the browser: the Pages site's live page, and every demo
+  for the Next.js site's previews.
+- `web/` is the Next.js site.
+- `static/style.css` is the Pages site's one stylesheet.
 
 ## Render it
 
@@ -75,7 +82,7 @@ adds beside the pages.
    `cx: &mut App`. Several pieces go in a `div()` (`.flex().gap(rems(0.5))…`). Start the file
    with a comment saying what the variant is for; it shows on the page.
 
-2. Add a line to its component's `variants` in `render/src/registry.rs`:
+2. Add a line to its component's `variants` in `registry/src/registry.rs`:
 
    ```rust
    demo("Secondary", "secondary"),
@@ -93,7 +100,7 @@ data: names like Alex and Sam, addresses at example.com.
 
 ## Add a component
 
-Add a `component!` block to `components()` in `render/src/registry.rs`, and its demos under
+Add a `component!` block to `components()` in `registry/src/registry.rs`, and its demos under
 `demos/<slug>/`:
 
 ```rust
@@ -125,7 +132,7 @@ Then render it with `--only <slug>` and look at both pictures.
 
 A crate's page shows pictures already in its `docs/` folder (the ones its README shows), with
 links to its API docs and its README. Add a `Crate { … }` to `crates()` in
-`render/src/registry.rs`: its name, a slug for the page, its folder, its library's name, a
+`registry/src/registry.rs`: its name, a slug for the page, its folder, its library's name, a
 line about it and its pictures, each with what it shows (its README's alt text). The renderer
 scales them to 1600 pixels wide at most and saves them in 256 colours, as it does the rest.
 
@@ -141,3 +148,39 @@ renderer warns when a demo reaches the stage's edge, where it would be cut.
 
 Popovers, menus and dialogs are drawn where they open, so a demo of one opens it (`open(true)`)
 and leaves room for it.
+
+## The Next.js site
+
+`web/` is a Next.js site (App Router, Tailwind, a static export) in the manner of
+ui.shadcn.com: a sidebar of families and components, and a page per component with a Preview
+and a Code tab for each variant, its installation and a light and dark theme. It's hosted on
+Vercel.
+
+Its content comes from the registry, never copied by hand. It reads three things the Rust side
+makes, none of them committed:
+
+- `web/data/registry.json`: the registry as JSON (every component's name, family, line, API
+  page, installation, and its variants' code), written by the renderer without drawing
+  anything, so on any platform:
+
+  ```sh
+  cargo run --manifest-path docs-site/render/Cargo.toml -- --json docs-site/web/data/registry.json
+  ```
+
+- `web/public/img/`: the pictures, the renderer's `img/` folder (`--out`, macOS).
+- `web/public/live/`: the live bundle, `live/build.sh docs-site/web/public/live`.
+
+Then, in `web/`, `npm ci` and `npm run build` write the site to `web/out/`
+(`npm run dev` serves it while you work).
+
+### Live previews
+
+The previews of the components in `LIVE_COMPONENTS` (`web/lib/live.ts`) have a Run live
+button: it downloads the live bundle, once a visit, and runs that variant's demo in GPUI, in
+place of its picture. After that, each page's first preview goes live by itself.
+
+GPUI's web platform draws one window per page, in one canvas it adds to the page's body, and
+can't open a second window or reopen one. So the site starts the app once (`stage` in
+`live/src/stage.rs`), moves that canvas into whichever preview is live, and has the window
+draw that preview's demo (`mount`); the others show their pictures. Every demo in the registry
+is compiled into the bundle, so a new demo needs no wiring to run live.

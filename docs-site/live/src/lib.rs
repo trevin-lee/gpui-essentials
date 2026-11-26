@@ -1,8 +1,14 @@
-//! The docs site's live page: a small app built from gpui-core's components, running in the
-//! browser on GPUI's web platform (WebGPU, or WebGL2 where there's none). Everything on the
-//! page is drawn by GPUI into one canvas, as on the Mac.
+//! The docs site's live code: gpui-core's components running in the browser on GPUI's web
+//! platform (WebGPU, or WebGL2 where there's none). Everything is drawn by GPUI into one
+//! canvas, as on the Mac.
 //!
-//! The page calls [`start`] with whether to draw in the dark theme.
+//! - The GitHub Pages site's live page calls [`start`] with whether to draw in the dark theme,
+//!   for a small app of a few components.
+//! - The Next.js site (docs-site/web) calls [`stage::stage`], then [`stage::mount`] for each
+//!   demo in the registry it shows live: one at a time, since GPUI's web platform draws one
+//!   window, in one canvas, per page.
+
+mod stage;
 
 use std::borrow::Cow;
 
@@ -12,57 +18,12 @@ use wasm_bindgen::prelude::*;
 
 /// Inter (SIL Open Font License, fonts/OFL.txt), cut down to Latin: a browser gives GPUI no
 /// system fonts, so the page brings its own, in the weights the components use.
-const FONTS: [&[u8]; 4] = [
+pub(crate) const FONTS: [&[u8]; 4] = [
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-Medium.ttf"),
     include_bytes!("../fonts/Inter-SemiBold.ttf"),
     include_bytes!("../fonts/Inter-Bold.ttf"),
 ];
-
-/// The icons the page's components draw, served at the paths gpui-core's `Icons` uses
-/// (`icons/<name>.svg`): just these, since `Icons` holds all 2,000 of Lucide's, about a
-/// megabyte more for the page to download.
-macro_rules! icons {
-    ($($name:literal),* $(,)?) => {
-        &[$(($name, include_bytes!(concat!("../../../gpui-core/assets/lucide/", $name, ".svg")))),*]
-    };
-}
-const ICONS: &[(&str, &[u8])] = icons![
-    "calendar",
-    "check",
-    "chevron-down",
-    "chevron-left",
-    "chevron-right",
-    "chevrons-up-down",
-    "circle-check",
-    "circle-exclamation-point",
-    "circle-x",
-    "copy",
-    "grip-vertical",
-    "info",
-    "minus",
-    "plus",
-    "search",
-    "x",
-];
-
-struct PageIcons;
-
-impl AssetSource for PageIcons {
-    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        let name = path
-            .strip_prefix("icons/")
-            .and_then(|p| p.strip_suffix(".svg"));
-        Ok(ICONS
-            .iter()
-            .find(|(icon, _)| Some(*icon) == name)
-            .map(|(_, svg)| Cow::Borrowed(*svg)))
-    }
-
-    fn list(&self, _: &str) -> Result<Vec<SharedString>> {
-        Ok(Vec::new())
-    }
-}
 
 const MONTHS: [&str; 6] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
 const DESKTOP: [f64; 6] = [186., 305., 237., 73., 209., 214.];
@@ -281,22 +242,33 @@ impl Render for Playground {
     }
 }
 
+/// Sets the app up for a page: its fonts, gpui-core, and the light or the dark theme.
+pub(crate) fn setup(cx: &mut App, dark: bool) {
+    cx.text_system()
+        .add_fonts(FONTS.iter().map(|font| Cow::Borrowed(*font)).collect())
+        .expect("the bundled fonts load");
+    gpui_core::init(cx);
+    Theme::set(theme(dark), cx);
+}
+
+/// The light or the dark theme, in the page's font.
+pub(crate) fn theme(dark: bool) -> Theme {
+    let mut theme = if dark { Theme::dark() } else { Theme::light() };
+    theme.font_family = "Inter".into();
+    // Menlo, the default, isn't in a browser, and the page brings no monospaced font.
+    theme.mono_font_family = "Inter".into();
+    theme
+}
+
 /// Starts the app in the page's canvas, in the dark theme or the light one.
 #[wasm_bindgen]
 pub fn start(dark: bool) {
     gpui_platform::web_init();
+    // Every Lucide icon, so any demo's icons draw: about 85 KB more, gzipped.
     gpui_platform::single_threaded_web()
-        .with_assets(PageIcons)
+        .with_assets(Icons)
         .run(move |cx| {
-            cx.text_system()
-                .add_fonts(FONTS.iter().map(|font| Cow::Borrowed(*font)).collect())
-                .expect("the bundled fonts load");
-            gpui_core::init(cx);
-            let mut theme = if dark { Theme::dark() } else { Theme::light() };
-            theme.font_family = "Inter".into();
-            // Nothing on the page is monospaced; Menlo, the default, isn't in a browser.
-            theme.mono_font_family = "Inter".into();
-            Theme::set(theme, cx);
+            setup(cx, dark);
             open_window(WindowOptions::default(), cx, |window, cx| {
                 cx.new(|cx| Playground::new(window, cx))
             })
