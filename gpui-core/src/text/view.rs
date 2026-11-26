@@ -2185,10 +2185,11 @@ impl RenderOnce for TextView {
     }
 }
 
-/// A draw's layout, and the hitboxes its cursors go on.
+/// A draw's layout, and its hitboxes: the whole view's (its presses, and the I-beam while it's
+/// selectable) and its links' (the pointing hand).
 struct Prepainted {
     layout: Rc<Assembled>,
-    body: Option<gpui::Hitbox>,
+    body: gpui::Hitbox,
     links: Vec<gpui::Hitbox>,
     overlays: Vec<AnyElement>,
 }
@@ -2431,10 +2432,9 @@ impl Element for ViewElement {
             s.layout = Some(l.clone());
             s.bounds = bounds;
         });
-        // The text takes an I-beam; links, above it, a pointing hand: those in view.
-        let body = self
-            .selectable
-            .then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
+        // The whole view: a press counts where it's hit, so not on something drawn over it (a
+        // popover, a sheet) nor on a part scrolled out of its clip. Links go above it.
+        let body = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let seen = window.content_mask().bounds;
         // What's in view, from the view's top: only that is looked at.
         let (top, bottom) = (seen.top() - bounds.top(), seen.bottom() - bounds.top());
@@ -2640,8 +2640,8 @@ impl Element for ViewElement {
             }
         }
 
-        if let Some(hb) = &prepainted.body {
-            window.set_cursor_style(CursorStyle::IBeam, hb);
+        if self.selectable {
+            window.set_cursor_style(CursorStyle::IBeam, &prepainted.body);
         }
         for hb in &prepainted.links {
             window.set_cursor_style(CursorStyle::PointingHand, hb);
@@ -2654,10 +2654,11 @@ impl Element for ViewElement {
         window.on_mouse_event({
             let layout = layout.clone();
             let state = state.clone();
+            let body = prepainted.body.clone();
             move |e: &MouseDownEvent, phase, window, cx| {
                 if phase != DispatchPhase::Bubble
                     || e.button != MouseButton::Left
-                    || !bounds.contains(&e.position)
+                    || !body.is_hovered(window)
                 {
                     return;
                 }
@@ -3474,5 +3475,141 @@ mod tests {
         });
         let painted = PAINTED.with(|n| n.get());
         assert!(painted > 0 && painted < 20, "{painted} of 200 painted");
+    }
+
+    /// A press counts where the view is what's hit: one on something drawn over it (a popover, a
+    /// sheet) or on a part of it scrolled out of its clip isn't the view's, while one anywhere
+    /// it shows, out to its last point, is.
+    struct Pressed {
+        before: gpui::FocusHandle,
+        source: String,
+        opened: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+    }
+
+    impl Render for Pressed {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let opened = self.opened.clone();
+            div()
+                .size_full()
+                .relative()
+                .child(div().track_focus(&self.before).h(px(20.)).w(px(300.)))
+                .child(div().debug_selector(|| "covered".into()).w(px(300.)).child(
+                    TextView::markdown("covered", "One.\n\nTwo.\n\nThree.").selectable(true),
+                ))
+                .child(
+                    div()
+                        .id("clip")
+                        .debug_selector(|| "clip".into())
+                        .h(px(120.))
+                        .w(px(300.))
+                        .overflow_y_scroll()
+                        .child(
+                            TextView::markdown("clipped", self.source.clone())
+                                .selectable(true)
+                                .on_link_click(move |url, _, _, _| {
+                                    opened.borrow_mut().push(url.to_string())
+                                }),
+                        ),
+                )
+                // Over the first view's top, as a popover would be.
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(20.))
+                        .left(px(0.))
+                        .w(px(300.))
+                        .h(px(16.))
+                        .occlude(),
+                )
+        }
+    }
+
+    /// A window with the views, the focus on the element before them, and the links opened.
+    fn pressed(
+        cx: &mut TestAppContext,
+    ) -> (
+        gpui::FocusHandle,
+        std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        gpui::VisualTestContext,
+    ) {
+        cx.update(crate::init);
+        let before = cx.update(|cx| cx.focus_handle());
+        let opened = std::rc::Rc::<std::cell::RefCell<Vec<String>>>::default();
+        let (b, o) = (before.clone(), opened.clone());
+        // Every paragraph a link, so a press that counts on one opens it.
+        let source = (0..60)
+            .map(|i| format!("[Paragraph number {i}](https://x.test/{i})"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let v = cx.new(|_| Pressed {
+                before: b,
+                source,
+                opened: o,
+            });
+            Root::new(v, window, cx)
+        });
+        vcx.update(|window, _| window.activate_window());
+        vcx.run_until_parked();
+        let window = gpui::VisualContext::window_handle(vcx);
+        let mut vcx = gpui::VisualTestContext::from_window(window, cx);
+        vcx.update(|window, cx| window.focus(&before, cx));
+        vcx.run_until_parked();
+        (before, opened, vcx)
+    }
+
+    /// Whether a press at `at` took the keyboard from the element before the views.
+    fn takes_focus(at: gpui::Point<gpui::Pixels>, cx: &mut TestAppContext) -> bool {
+        let (before, _, mut vcx) = pressed(cx);
+        vcx.simulate_click(at, gpui::Modifiers::none());
+        vcx.run_until_parked();
+        !vcx.update(|window, _| before.is_focused(window))
+    }
+
+    /// The links a press at `at` opened.
+    fn opens(at: gpui::Point<gpui::Pixels>, cx: &mut TestAppContext) -> Vec<String> {
+        let (_, opened, mut vcx) = pressed(cx);
+        vcx.simulate_mouse_down(at, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.simulate_mouse_up(at, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.run_until_parked();
+        opened.take()
+    }
+
+    #[gpui::test]
+    fn a_press_on_what_is_drawn_over_the_view_is_not_the_views(cx: &mut TestAppContext) {
+        let covered = {
+            let (_, _, mut vcx) = pressed(cx);
+            vcx.debug_bounds("covered").expect("the covered view")
+        };
+        assert!(covered.size.height > px(36.), "{covered:?}");
+        // Under the cover: the cover's.
+        assert!(!takes_focus(
+            gpui::point(px(10.), covered.top() + px(8.)),
+            cx
+        ));
+        // Below it, on the view's last point: the view's.
+        assert!(takes_focus(
+            gpui::point(covered.right() - px(1.), covered.bottom() - px(1.)),
+            cx
+        ));
+    }
+
+    #[gpui::test]
+    fn a_press_on_a_part_scrolled_out_of_view_is_not_the_views(cx: &mut TestAppContext) {
+        let clip = {
+            let (_, _, mut vcx) = pressed(cx);
+            vcx.debug_bounds("clip").expect("the clip")
+        };
+        // On a link in the clip: the view's, and it opens.
+        assert_eq!(
+            opens(gpui::point(px(10.), clip.top() + px(4.)), cx).len(),
+            1
+        );
+        // Below the clip, over the rest of the view's links, hidden: nothing's.
+        assert_eq!(
+            opens(gpui::point(px(10.), clip.bottom() + px(60.)), cx),
+            Vec::<String>::new()
+        );
     }
 }
