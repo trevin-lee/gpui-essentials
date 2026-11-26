@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { CodeBlock } from "@/components/code-block";
 import { ComponentPreview } from "@/components/component-preview";
 import { Installation } from "@/components/installation";
-import { LIVE_COMPONENTS } from "@/lib/live";
+import { canRunLive } from "@/lib/live";
 import {
   API_DOCS,
   component as find,
@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ComponentPage({ params }: Props) {
   const c = find((await params).slug);
   if (!c) notFound();
-  const live = LIVE_COMPONENTS.has(c.slug);
+  const live = canRunLive(c.slug);
   const size = live ? liveSize() : undefined;
   const [first, ...rest] = c.variants;
 

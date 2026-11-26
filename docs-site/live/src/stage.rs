@@ -16,6 +16,11 @@ use wasm_bindgen::prelude::*;
 /// The window's view: one demo, or nothing.
 struct Stage {
     demo: Option<Staged>,
+    /// Where the demo's picture is in the window, from the top, and its height, in pixels:
+    /// the demo is drawn in the middle of that band, where its picture was, and what it opens
+    /// (a menu, a popover) has the rest of the window below. Without them, the middle of the
+    /// window.
+    band: Option<(f32, f32)>,
 }
 
 enum Staged {
@@ -33,16 +38,24 @@ impl Render for Stage {
             Some(Staged::View(view)) => Some(view.clone().into_any_element()),
             None => None,
         };
-        div()
+        let page = div()
             .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .p(rems(2.))
+            .relative()
             .bg(theme.background)
-            .text_color(theme.foreground)
-            .children(demo)
+            .text_color(theme.foreground);
+        let middle = div().flex().flex_col().items_center().justify_center();
+        match self.band {
+            Some((top, height)) => page.child(
+                middle
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .top(px(top))
+                    .h(px(height))
+                    .children(demo),
+            ),
+            None => page.child(middle.size_full().p(rems(2.)).children(demo)),
+        }
     }
 }
 
@@ -69,7 +82,10 @@ pub fn stage(dark: bool, ready: js_sys::Function) {
         .run(move |cx| {
             crate::setup(cx, dark);
             let opened = open_window(WindowOptions::default(), cx, |_, cx| {
-                cx.new(|_| Stage { demo: None })
+                cx.new(|_| Stage {
+                    demo: None,
+                    band: None,
+                })
             });
             let error = match opened {
                 Ok((window, stage)) => {
@@ -96,10 +112,11 @@ fn with_live<R>(f: impl FnOnce(&Live, &mut App) -> R) -> Option<R> {
     })
 }
 
-/// Has the stage draw `variant` of `component` (their slugs), with fresh state. Returns
-/// whether the registry has it and the stage is open.
+/// Has the stage draw `variant` of `component` (their slugs), with fresh state, in the middle of
+/// the band `top` pixels from the window's top and `height` tall (where its picture was), or
+/// of the window if `height` is 0. Returns whether the registry has it and the stage is open.
 #[wasm_bindgen]
-pub fn mount(component: &str, variant: &str) -> bool {
+pub fn mount(component: &str, variant: &str, top: f32, height: f32) -> bool {
     let Some(demo) = docs_site_registry::components()
         .into_iter()
         .find(|c| c.slug == component)
@@ -112,6 +129,7 @@ pub fn mount(component: &str, variant: &str) -> bool {
         live.window
             .update(cx, |_, window, cx| {
                 live.stage.update(cx, |stage, cx| {
+                    stage.band = (height > 0.).then_some((top, height));
                     stage.demo = Some(match demo {
                         Demo::Element(render) => Staged::Element(render),
                         Demo::View(build) => Staged::View(build(window, cx)),

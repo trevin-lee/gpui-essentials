@@ -24,8 +24,11 @@ function cssSize(p: Picture) {
   return { width: p.width / scale, height: p.height / scale };
 }
 
-/** The least height of a preview, so a menu or a popover has room to open when it's live. */
+/** The least height of a preview's picture area. */
 const MIN_HEIGHT = 280;
+/** Room added below the picture's area while it's live, for a menu, a popover or a calendar
+ *  the demo opens. */
+const ROOM = 200;
 
 /**
  * One variant: its picture or, when live, the demo running in GPUI; and its code. Like
@@ -56,6 +59,7 @@ export function ComponentPreview({
   const id = `${component}/${variant}`;
   const [tab, setTab] = useState<"preview" | "code">("preview");
   const stage = useRef<HTMLDivElement>(null);
+  const area = useRef<HTMLDivElement>(null);
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
   useSyncExternalStore(subscribe, snapshot, snapshot);
@@ -63,13 +67,19 @@ export function ComponentPreview({
   const loading = isLive && liveLoading();
   const failure = liveFailure();
 
-  const start = () => {
-    if (stage.current) void attach(id, stage.current, component, variant, dark);
+  // Where the picture is drawn in the preview: the live demo is drawn there too.
+  const band = () => {
+    const shown = [...(area.current?.querySelectorAll("img") ?? [])].find((i) => i.offsetHeight > 0);
+    return shown ? { top: shown.offsetTop, height: shown.offsetHeight } : { top: 0, height: 0 };
+  };
+
+  const start = (isDark = dark) => {
+    if (stage.current) void attach(id, stage.current, component, variant, isDark, band());
   };
 
   useEffect(() => {
     if (live && autoStart && startedThisVisit() && !liveOwner() && stage.current) {
-      void attach(id, stage.current, component, variant, document.documentElement.classList.contains("dark"));
+      start(document.documentElement.classList.contains("dark"));
     }
     return () => detach(id);
   }, [id, component, variant, live, autoStart]);
@@ -104,10 +114,12 @@ export function ComponentPreview({
       </div>
 
       <div className={tab === "preview" ? "mt-4" : "hidden"}>
-        <div
-          className="relative flex items-center justify-center overflow-hidden rounded-lg border bg-stage"
-          style={{ minHeight: Math.max(MIN_HEIGHT, size?.height ?? 0) }}
-        >
+        <div className="relative overflow-hidden rounded-lg border bg-stage">
+          <div
+            ref={area}
+            className="relative flex items-center justify-center"
+            style={{ minHeight: Math.max(MIN_HEIGHT, size?.height ?? 0) }}
+          >
           {picture && size ? (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -132,6 +144,8 @@ export function ComponentPreview({
           ) : (
             <p className="text-sm text-muted-foreground">No picture yet.</p>
           )}
+          </div>
+          {isLive && <div style={{ height: ROOM }} />}
           <div
             ref={stage}
             className={`absolute inset-0 ${isLive && !loading ? "" : "pointer-events-none"}`}

@@ -182,9 +182,10 @@ stops.
 
 ### Live previews
 
-The previews of the components in `LIVE_COMPONENTS` (`web/lib/live.ts`) have a Run live
-button: it downloads the live bundle, once a visit, and runs that variant's demo in GPUI, in
-place of its picture. After that, each page's first preview goes live by itself.
+Every preview has a Run live button (but those of the components in `PICTURES_ONLY`,
+`web/lib/live.ts`, with the reason): it downloads the live bundle, once a visit, and runs that
+variant's demo in GPUI, in place of its picture and where the picture was, with room below for
+what it opens. After that, each page's first preview goes live by itself.
 
 GPUI's web platform draws one window per page, in one canvas it adds to the page's body, and
 can't open a second window or reopen one. So the site starts the app once (`stage` in

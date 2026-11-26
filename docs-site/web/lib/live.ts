@@ -6,15 +6,21 @@
 // whichever preview is live; the window then draws that preview's demo. The other previews
 // show their pictures.
 
-/** The components whose previews can go live. The rest show their pictures until they're
- *  checked in a browser. */
-export const LIVE_COMPONENTS = new Set(["button", "input", "select", "dialog", "tabs"]);
+/** The components whose previews stay pictures, and why. Every other component's previews can
+ *  go live: each was mounted, clicked and tabbed through in headless Chromium. */
+const PICTURES_ONLY = new Map([
+  // Italic Markdown asks gpui-core for the system UI font's italic, which GPUI's web platform
+  // hasn't got, and GPUI panics; until gpui-core skips that in a browser.
+  ["text-view", "its italics need a system font"],
+]);
+
+export const canRunLive = (component: string) => !PICTURES_ONLY.has(component);
 
 /** What live/build.sh's wasm-bindgen glue exports (docs-site/live/src/stage.rs). */
 type Bundle = {
   default: (init?: { module_or_path?: string }) => Promise<unknown>;
   stage(dark: boolean, ready: (error?: string) => void): void;
-  mount(component: string, variant: string): boolean;
+  mount(component: string, variant: string, top: number, height: number): boolean;
   unmount(): void;
   theme(dark: boolean): void;
 };
@@ -100,13 +106,15 @@ function load(dark: boolean): Promise<void> {
   return loading;
 }
 
-/** Makes the preview `id` live in `stage`, drawing `variant` of `component`. */
+/** Makes the preview `id` live in `stage`, drawing `variant` of `component` in the middle of
+ *  `band` (where its picture is in the stage, in CSS pixels; 0 tall for the stage's middle). */
 export async function attach(
   id: string,
   stage: HTMLElement,
   component: string,
   variant: string,
   dark: boolean,
+  band: { top: number; height: number },
 ) {
   if (failure) return;
   owner = id;
@@ -117,7 +125,7 @@ export async function attach(
   try {
     bundle.theme(dark);
     stage.append(canvas);
-    if (!bundle.mount(component, variant)) {
+    if (!bundle.mount(component, variant, band.top, band.height)) {
       throw new Error(`the live bundle has no ${component}/${variant}`);
     }
   } catch (error) {
