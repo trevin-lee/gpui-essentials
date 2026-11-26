@@ -8,10 +8,8 @@
 
 /** The components whose previews stay pictures, and why. Every other component's previews can
  *  go live: each was mounted, clicked and tabbed through in headless Chromium. */
-const PICTURES_ONLY = new Map([
-  // Italic Markdown asks gpui-core for the system UI font's italic, which GPUI's web platform
-  // hasn't got, and GPUI panics; until gpui-core skips that in a browser.
-  ["text-view", "its italics need a system font"],
+const PICTURES_ONLY = new Map<string, string>([
+  // ["<component slug>", "why it can't run in a browser yet"],
 ]);
 
 export const canRunLive = (component: string) => !PICTURES_ONLY.has(component);
