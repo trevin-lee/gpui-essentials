@@ -4,6 +4,9 @@
 //! UI font's italic at the same weight instead, when that has one: a different face, but still
 //! visibly italic. GPUI can't slant glyphs (no synthetic oblique), so a host that wants its own
 //! family's italics bundles them.
+//!
+//! In a browser there's no system font to stand in: GPUI's web platform has only the fonts the
+//! page gives it, and it panics on a family it can't find. There, such a run stays upright.
 
 use gpui::{Font, FontStyle, TextRun, TextSystem};
 
@@ -20,7 +23,7 @@ fn has_italic(font: &Font, ts: &TextSystem) -> bool {
 /// `font`, or the fallback family's italic at its weight when `font` asks for italic its family
 /// doesn't have. Anything not italic is returned as it is.
 pub fn italic_font(font: Font, ts: &TextSystem) -> Font {
-    if font.style != FontStyle::Italic || has_italic(&font, ts) {
+    if font.style != FontStyle::Italic || cfg!(target_family = "wasm") || has_italic(&font, ts) {
         return font;
     }
     let mut fallback = font.clone();
