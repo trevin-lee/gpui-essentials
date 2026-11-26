@@ -65,6 +65,10 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features =
         <Link href="/docs/components/" className="font-medium underline underline-offset-4">
           Browse the components
         </Link>
+        , see the{" "}
+        <Link href="/docs/crates/" className="font-medium underline underline-offset-4">
+          crates built on them
+        </Link>
         , or read the{" "}
         <a href={repo} className="font-medium underline underline-offset-4">
           source on GitHub

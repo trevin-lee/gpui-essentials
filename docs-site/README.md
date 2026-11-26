@@ -154,7 +154,9 @@ and leaves room for it.
 
 `web/` is a Next.js site (App Router, Tailwind, a static export) in the manner of
 ui.shadcn.com: a sidebar of families and components, and a page per component with a Preview
-and a Code tab for each variant, its installation and a light and dark theme. It's hosted on
+and a Code tab for each variant, its installation and a light and dark theme. The crates built
+on gpui-core (the registry's `crates()`) each have a page too, with their pictures, their
+installation and links to their README and API docs. It's hosted on
 Vercel.
 
 Its content comes from the registry, never copied by hand. It reads three things the Rust side
