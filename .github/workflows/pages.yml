@@ -1,10 +1,17 @@
 name: pages
 
-# The documentation site (docs-site/): its renderer linted, every component drawn light and
-# dark, and the crates' API docs beside it as /api. On main (nightly, or by hand) it's
-# published to GitHub Pages; anywhere else the site is uploaded as an artifact to look at.
+# The documentation sites (docs-site/): the renderer linted, every component drawn light and
+# dark, and the crates' API docs beside it as /api, for GitHub Pages; and the Next.js site
+# (docs-site/web) with the live previews, for Vercel. On main (on a push to docs-site/, nightly,
+# or by hand) both are published; a pull request uploads the Pages site as an artifact and
+# deploys a Vercel preview.
 on:
   pull_request:
+    paths:
+      - "docs-site/**"
+      - ".github/workflows/pages.yml"
+  push:
+    branches: [main]
     paths:
       - "docs-site/**"
       - ".github/workflows/pages.yml"
@@ -80,6 +87,17 @@ jobs:
       - run: rustfmt --edition 2024 --check $(grep -l 'pub struct Example' docs-site/demos/*/*.rs)
       - run: cargo clippy --manifest-path docs-site/render/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo run --manifest-path docs-site/render/Cargo.toml --locked -- --out "$RUNNER_TEMP/site"
+      # The Next.js site's content: the registry as JSON, and the pictures just drawn.
+      - name: The Next.js site's content
+        run: |
+          mkdir -p "$RUNNER_TEMP/web"
+          cargo run --manifest-path docs-site/render/Cargo.toml --locked -- --json "$RUNNER_TEMP/web/registry.json"
+          cp -R "$RUNNER_TEMP/site/img" "$RUNNER_TEMP/web/img"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-content
+          path: ${{ runner.temp }}/web
+          retention-days: 1
       # The live page's app, beside live.html.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -104,6 +122,56 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: ${{ runner.temp }}/site
+
+  # The Next.js site: built from the registry, the pictures and the live bundle, and deployed to
+  # Vercel as it is (`vercel deploy --prebuilt`): a preview for a pull request, production on
+  # main. Needs the repository's secrets VERCEL_TOKEN, VERCEL_ORG_ID and VERCEL_PROJECT_ID;
+  # without them (a fork's pull request) it builds and stops there.
+  web:
+    needs: render
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      # Whether there's a token, without handing it to every step (npm's packages run here).
+      DEPLOYS: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_PROJECT_ID != '' }}
+      VERCEL_TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: docs-site/web
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/web/package-lock.json
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-content
+          path: ${{ runner.temp }}/web
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: live
+          path: docs-site/web/public/live
+      - name: Content
+        run: |
+          mkdir -p data
+          mv "$RUNNER_TEMP/web/registry.json" data/registry.json
+          mv "$RUNNER_TEMP/web/img" public/img
+      - run: npm ci
+      - run: npm run build
+      - run: scripts/vercel-output.sh
+      - name: Deploy
+        if: env.DEPLOYS == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PROD: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+        run: |
+          prod=
+          if [ "$PROD" = true ]; then prod=--prod; fi
+          url=$(npx --yes vercel@58.1.0 deploy --prebuilt $prod --token "$VERCEL_TOKEN")
+          echo "Deployed: $url" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Publishes main's site. Pages must be on, with GitHub Actions as its source (Settings,
   # Pages).

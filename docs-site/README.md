@@ -54,9 +54,10 @@ the version `live/Cargo.toml` pins, and binaryen's wasm-opt) into `live/` beside
 
 ## Publishing
 
-Every night, and when run by hand on main, the `pages` workflow renders the site, adds every
-crate's rustdoc (`cargo doc --workspace --no-deps`) as `api/`, and publishes it to GitHub Pages.
-Pages has to be on, with GitHub Actions as its source (Settings, Pages).
+On a push to main that changes docs-site/, every night, and when run by hand on main, the
+`pages` workflow renders the site, adds every crate's rustdoc (`cargo doc --workspace
+--no-deps`) as `api/`, and publishes it to GitHub Pages. Pages has to be on, with GitHub Actions
+as its source (Settings, Pages).
 
 ## Preview it
 
@@ -172,6 +173,12 @@ makes, none of them committed:
 
 Then, in `web/`, `npm ci` and `npm run build` write the site to `web/out/`
 (`npm run dev` serves it while you work).
+
+The `pages` workflow's `web` job does all of this on Linux, with the pictures from the macOS
+render, and deploys it with `vercel deploy --prebuilt` (after `web/scripts/vercel-output.sh`):
+a preview for a pull request, production on main. It needs the repository's secrets
+`VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID`; without them it builds the site and
+stops.
 
 ### Live previews
 
