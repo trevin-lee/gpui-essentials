@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { LIVE_COMPONENTS } from "@/lib/live";
 import { byFamily, pictures } from "@/lib/registry";
 
 /** Every component by family, a card each with its first variant's picture. */
@@ -32,11 +31,6 @@ export function ComponentGrid() {
                   <div className="p-4">
                     <div className="flex items-center gap-2 font-medium">
                       {c.name}
-                      {LIVE_COMPONENTS.has(c.slug) && (
-                        <span className="rounded-full bg-emerald-500/15 px-1.5 py-px text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-                          Live
-                        </span>
-                      )}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{c.about}</p>
                   </div>

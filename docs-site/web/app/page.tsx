@@ -13,7 +13,7 @@ export default function Home() {
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-muted-foreground">
           {components.length} components for Rust apps on GPUI: in your theme, and yours to copy.
-          Each one here is drawn by GPUI, and the ones marked Live run in your browser.
+          Each one here is drawn by GPUI, and you can run them live in your browser.
         </p>
         <div className="mt-8 flex gap-3">
           <Link
