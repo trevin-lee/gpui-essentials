@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::Disableable as _;
+use gpui_core::{Disableable as _, ScrollExt as _};
 
 use super::content::Glyph;
 use super::{Draw, pressable};
@@ -697,7 +697,7 @@ impl Draw<'_, '_> {
             .max_w(viewport.width * 0.92)
             .max_h(viewport.height * 0.9)
             .min_w_0()
-            .overflow_y_scroll()
+            .scroll_y()
             .flex()
             .flex_col()
             .gap(self.px(t.space.m))

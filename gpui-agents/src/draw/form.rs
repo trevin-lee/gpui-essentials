@@ -8,8 +8,8 @@ use std::rc::Rc;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_core::{
-    DatePicker, DatePickerColors, Disableable as _, InputState, PopoverColors, Selectable as _,
-    Slider, Tooltip,
+    DatePicker, DatePickerColors, Disableable as _, InputState, PopoverColors, ScrollExt as _,
+    Selectable as _, Slider, Tooltip,
 };
 use serde_json::{Value as Json, json};
 
@@ -808,7 +808,7 @@ impl Draw<'_, '_> {
                 .occlude()
                 .w_full()
                 .max_h(self.px(240.))
-                .overflow_y_scroll()
+                .scroll_y()
                 .mt(self.px(4.))
                 .p(self.px(4.))
                 .flex()

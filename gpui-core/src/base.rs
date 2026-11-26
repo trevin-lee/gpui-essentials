@@ -1,5 +1,5 @@
 //! What a component is built on: the theme, sizes, [`Press`], icons, the overlays' layers and
-//! focus, menus and fields, and the window's [`Root`].
+//! focus, menus and fields, scrolling boxes ([`Scroller`]), and the window's [`Root`].
 //!
 //! It exists for components copied into a host's own crate (shadcn's way: the host owns the
 //! component's source and changes it as it likes). A copied component reaches gpui-core only
@@ -36,6 +36,7 @@ pub use crate::popover::{
 };
 pub use crate::press::{Press, focus_ring, focus_visible, ring_inside, ring_outside};
 pub use crate::root::Root;
+pub use crate::scroller::{ScrollAxes, ScrollExt, Scroller, scroll_delta};
 pub use crate::size::{ControlSize, Disableable, Selectable, Sizable};
 pub use crate::theme::{ActiveTheme, Theme};
 

@@ -15,7 +15,7 @@
 #   actions   its action namespace, which the CLI renames (to `ui`); absent if none
 
 # The modules that stay in gpui-core, behind gpui_core::base. Edit this by hand.
-base = ["a11y", "base", "chart", "highlight", "icon", "input", "menu", "modal", "picker", "popover", "press", "root", "size", "text", "theme"]
+base = ["a11y", "base", "chart", "highlight", "icon", "input", "menu", "modal", "picker", "popover", "press", "root", "scroller", "size", "text", "theme"]
 
 [accordion]
 about = "An accordion, as shadcn/ui draws one: items stacked with a rule between them, each a header that shows or hides its content"
@@ -257,7 +257,7 @@ actions = "gpui_core_roving_focus"
 [scroll_area]
 about = "A scroll area: content that scrolls inside a box, with thin scrollbars laid over its edges (shadcn's ScrollArea)"
 file = "src/scroll_area.rs"
-exports = ["ScrollArea", "ScrollAreaHandle", "ScrollAxes"]
+exports = ["ScrollArea", "ScrollAreaHandle"]
 needs = []
 contexts = []
 

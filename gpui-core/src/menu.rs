@@ -54,11 +54,12 @@ use gpui::{
     ElementId, Entity, FocusHandle, GlobalElementId, HitboxBehavior, Hsla, InspectorElementId,
     InteractiveElement as _, IntoElement, KeyBinding, LayoutId, LongPressEvent, Modifiers,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
-    Rems, RenderOnce, Role, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _,
+    Rems, RenderOnce, Role, ScrollHandle, SharedString, StatefulInteractiveElement as _,
     Styled as _, TouchPhase, Window, actions, canvas, div, point, prelude::FluentBuilder as _, px,
     rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::icon::{Icon, IconName};
 use crate::popover::ClaimArea;
 use crate::press::Press;
@@ -1871,7 +1872,7 @@ fn rows_with(
                             .flex()
                             .flex_col()
                             .min_w(css(160.))
-                            .overflow_y_scroll()
+                            .scroll_y()
                             .p(css(4.))
                             .rounded(theme.radius_md())
                             .border_1()
@@ -1949,7 +1950,7 @@ struct SubmenuElement {
     /// The panel's colours, which a submenu inside it takes.
     colors: crate::PopoverColors,
     row: AnyElement,
-    panel: Option<Stateful<gpui::Div>>,
+    panel: Option<crate::base::Scroller>,
 }
 
 impl IntoElement for SubmenuElement {

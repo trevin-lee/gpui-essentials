@@ -8,10 +8,10 @@ use gpui::Refineable as _;
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, Div, Element, ElementId, FocusHandle, GlobalElementId,
     HitboxBehavior, InspectorElementId, InteractiveElement, Interactivity, IntoElement, LayoutId,
-    MouseButton, ParentElement, Pixels, SharedString, Stateful, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, div, quad, transparent_black,
+    MouseButton, ParentElement, Pixels, ScrollHandle, SharedString, Stateful,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, quad, transparent_black,
 };
-use gpui_core::ActiveTheme as _;
+use gpui_core::{ActiveTheme as _, ScrollAxes, ScrollExt as _};
 
 use crate::monitor::{DragMonitor, Over};
 use crate::source::{DragSource, SharedSource, SourceSpec};
@@ -46,6 +46,7 @@ pub fn dnd(id: impl Into<ElementId>) -> Dnd {
         can_drop_style: None,
         indicator: true,
         label: None,
+        scroll: None,
     }
 }
 
@@ -66,6 +67,7 @@ pub struct Dnd {
     can_drop_style: Option<Box<StyleRefinement>>,
     indicator: bool,
     label: Option<SharedString>,
+    scroll: Option<(ScrollAxes, ScrollHandle)>,
 }
 
 impl Dnd {
@@ -118,6 +120,15 @@ impl Dnd {
     /// Its accessible name: the element's, and the item's in announcements.
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// Scrolls its content along `axes` through `handle`, as gpui-core's
+    /// [`Scroller`](gpui_core::Scroller): it takes only scrolls along them, and what's left at
+    /// its ends goes on to the box around it. In place of GPUI's `overflow_*_scroll` and
+    /// `track_scroll`.
+    pub fn scroll(mut self, axes: ScrollAxes, handle: &ScrollHandle) -> Self {
+        self.scroll = Some((axes, handle.clone()));
         self
     }
 }
@@ -228,8 +239,15 @@ impl Dnd {
                 }
             }
         }
+        let child = match &self.scroll {
+            Some((axes, handle)) => base
+                .scroll_axes(*axes)
+                .track_scroll(handle)
+                .into_any_element(),
+            None => base.into_any_element(),
+        };
         Laid {
-            child: base.into_any_element(),
+            child,
             source,
             key,
             focus,

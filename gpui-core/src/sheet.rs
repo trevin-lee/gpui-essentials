@@ -28,6 +28,7 @@ use gpui::{
     Style, StyleRefinement, Styled, Window, div, hsla, relative, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::base::{
     ActiveTheme as _, Dismiss, DismissReason, InLayer, POPOVER_CONTEXT, PopoverColors,
     overlay_focus, overlay_layer,
@@ -163,7 +164,7 @@ impl Sheet {
             .flex_col()
             .min_h_0()
             .min_w_0()
-            .overflow_y_scroll()
+            .scroll_y()
             .px(rems(12. / 15.))
             .pb(rems(20. / 15.));
         gpui::Refineable::refine(content.style(), &self.style);

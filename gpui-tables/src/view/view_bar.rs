@@ -11,7 +11,7 @@ use gpui::{
 };
 use gpui_core::{
     DismissReason, IconName, MenuSelect, Popover as CorePopover, PopoverColors, PopupMenuItem,
-    Press, Selectable as _,
+    Press, ScrollExt as _, Selectable as _,
 };
 
 use super::a11y::Control;
@@ -274,7 +274,7 @@ impl TableView {
             })
             .collect();
 
-        let mut scroller = div()
+        let scroller = div()
             .id("gpui-tables-view-tabs")
             .debug_selector(|| "view-tabs".into())
             .flex_shrink_1()
@@ -283,10 +283,10 @@ impl TableView {
             .flex()
             .items_center()
             .gap(t.px(2.))
-            .overflow_x_scroll()
-            .track_scroll(&self.bar.scroll)
-            .children(tabs);
-        scroller.interactivity().base_style.restrict_scroll_to_axis = Some(true);
+            .children(tabs)
+            // Up and down go on to the page: a box that scrolls sideways takes only sideways.
+            .scroll_x()
+            .track_scroll(&self.bar.scroll);
 
         let square = |id: &'static str, label: &'static str, name: IconName| {
             Press::new(id)

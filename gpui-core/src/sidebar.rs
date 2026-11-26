@@ -43,6 +43,7 @@ use gpui::{
     actions, anchored, deferred, div, hsla, point, prelude::FluentBuilder as _, px, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::base::{
     ActiveTheme as _, Current, Disableable as _, Dismiss, Icon, IconName, OVERLAY_PRIORITY,
     POPOVER_CONTEXT as OVERLAY_CONTEXT, Press, Theme, overlay_focus,
@@ -781,7 +782,7 @@ impl RenderOnce for Sidebar {
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .overflow_y_scroll()
+                    .scroll_y()
                     .children(groups),
             )
             .when_some(self.footer.filter(|_| !rail), |d, f| {

@@ -19,6 +19,7 @@ use gpui::prelude::FluentBuilder as _;
 
 use super::markdown::{Align, Block, MATH_LANGUAGE, MATH_SOURCE_LANGUAGE, parse_with};
 use super::paragraph::{Affinity, CodeStyle, Marks, Paragraph, ParagraphLayout, ParagraphStyle};
+use crate::base::ScrollExt as _;
 use crate::theme::{ActiveTheme as _, Theme};
 
 actions!(
@@ -1532,8 +1533,7 @@ fn math_overlay(code: &CodeBlock, m: &MathLook, beside: Option<AnyElement>) -> A
         .min_w_0()
         .h_full()
         .flex()
-        .overflow_x_scroll()
-        .restrict_scroll_to_axis()
+        .scroll_x()
         .font(m.font.clone())
         .text_size(m.size)
         .line_height(m.line_height)

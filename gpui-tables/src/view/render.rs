@@ -253,14 +253,17 @@ impl TableView {
             }))
             .on_action(cx.listener(|this, _: &super::PageUp, _, cx| this.on_page(-1, cx)))
             .on_action(cx.listener(|this, _: &super::PageDown, _, cx| this.on_page(1, cx)))
+            // Sideways along the way a gesture started in (gpui-core's, as its scrollers do),
+            // and what moved it isn't the page's too.
             .on_scroll(cx.listener(|this, e: &ScrollEvent, window, cx| {
-                let d = e.delta.pixel_delta(window.line_height());
-                if d.x == px(0.) || d.y.abs() > d.x.abs() {
+                let d = gpui_core::scroll_delta(e, window.line_height(), cx);
+                if d.x == px(0.) {
                     return;
                 }
                 let before = this.scroll_x;
                 this.scroll_x = (this.scroll_x - d.x).clamp(px(0.), this.max_scroll_x());
                 if this.scroll_x != before {
+                    cx.stop_propagation();
                     cx.notify();
                 }
             }))

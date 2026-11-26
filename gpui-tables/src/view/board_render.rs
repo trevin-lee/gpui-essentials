@@ -8,10 +8,10 @@ use std::ops::Range;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, BoxShadow, ClickEvent, Context, ElementId, FontWeight, InteractiveElement,
-    IntoElement, ListSizingBehavior, ParentElement, Pixels, Render, Role, SharedString,
-    StatefulInteractiveElement, Styled, Window, canvas, div, point, px, uniform_list,
+    IntoElement, ListSizingBehavior, ParentElement, Pixels, Render, Role, SharedString, Styled,
+    Window, canvas, div, point, px, uniform_list,
 };
-use gpui_core::{IconName, Press, Selectable as _};
+use gpui_core::{IconName, Press, ScrollExt as _, Selectable as _};
 use gpui_dnd::dnd;
 
 use super::a11y::Control;
@@ -81,19 +81,18 @@ impl TableView {
             .left_0()
             .size_full();
 
-        let mut scroller = div()
+        // Up and down belong to the columns; the board takes only sideways scrolls and pans.
+        let scroller = div()
             .id("gpui-tables-board-scroll")
             .debug_selector(|| "board-scroll".into())
             .size_full()
-            .overflow_x_scroll()
-            .track_scroll(&self.board.scroll)
             .flex()
             .items_start()
             .gap(m.gap)
             .p(m.pad)
-            .children(lanes);
-        // Up and down belong to the columns; the board takes only sideways scrolls and pans.
-        scroller.interactivity().base_style.restrict_scroll_to_axis = Some(true);
+            .children(lanes)
+            .scroll_x()
+            .track_scroll(&self.board.scroll);
 
         let root = div()
             .id("gpui-tables")
@@ -422,7 +421,7 @@ impl TableView {
                     .id("board-collapsed-list")
                     .flex_shrink(1.)
                     .min_h_0()
-                    .overflow_y_scroll()
+                    .scroll_y()
                     .px(m.inset)
                     .pb(m.inset)
                     .flex()

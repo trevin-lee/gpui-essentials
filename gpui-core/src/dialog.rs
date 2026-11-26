@@ -40,6 +40,7 @@ use gpui::{
     prelude::FluentBuilder as _, relative, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::base::{
     ActiveTheme as _, Dismiss, DismissReason, Icon, IconName, MODAL_CONTEXT, ModalElement,
     POPOVER_CONTEXT, PopoverColors, Sizable as _, TrapNext, TrapPrev, cycle_focus, focus_first_in,
@@ -355,7 +356,7 @@ impl Dialog {
             .flex_col()
             .min_h_0()
             .min_w_0()
-            .overflow_y_scroll()
+            .scroll_y()
             .when(!self.bare, |s| s.p(css(16.)).gap(css(16.)))
             .children(header)
             .children(body)

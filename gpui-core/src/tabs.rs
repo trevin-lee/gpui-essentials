@@ -32,6 +32,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::base::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Press, Selectable as _, Theme,
 };
@@ -538,10 +539,12 @@ impl RenderOnce for Tabs {
             .on_action(move |_: &First, w, cx| first(w, cx))
             .on_action(move |_: &Last, w, cx| last(w, cx))
             .when(self.stretch, |d| d.w_full())
-            .when(self.overflow == TabsOverflow::Scroll, |d| {
-                d.overflow_x_scroll().track_scroll(&scroll)
-            })
             .children(triggers);
+        let list = if self.overflow == TabsOverflow::Scroll {
+            list.scroll_x().track_scroll(&scroll).into_any_element()
+        } else {
+            list.into_any_element()
+        };
 
         let mut root = div()
             .flex()

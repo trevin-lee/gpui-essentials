@@ -24,7 +24,7 @@ use gpui::{
     ParentElement as _, Pixels, Point, Rems, RenderOnce, Role, ScrollHandle, SharedString, Size,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point, px, rems,
 };
-use gpui_core::ActiveTheme as _;
+use gpui_core::{ActiveTheme as _, ScrollAxes};
 
 use crate::autoscroll::{AutoScroll, AutoScrollExt as _};
 use crate::element::{Dnd, dnd};
@@ -892,11 +892,15 @@ impl<K: Clone + Eq + Hash + 'static> RenderOnce for Sortable<K> {
         let bounds_cell = state.read(cx).bounds.clone();
         let element = match &self.scroll {
             Some(handle) => {
-                let list = match axis {
-                    Axis::Vertical => list.overflow_y_scroll(),
-                    Axis::Horizontal => list.overflow_x_scroll(),
-                }
-                .track_scroll(handle);
+                // gpui-core's scroller: a list takes only scrolls along it, and what's left
+                // at its ends goes on to the page.
+                let list = list.scroll(
+                    match axis {
+                        Axis::Vertical => ScrollAxes::Vertical,
+                        Axis::Horizontal => ScrollAxes::Horizontal,
+                    },
+                    handle,
+                );
                 let options = match axis {
                     Axis::Vertical => AutoScroll::vertical(),
                     Axis::Horizontal => AutoScroll::horizontal(),

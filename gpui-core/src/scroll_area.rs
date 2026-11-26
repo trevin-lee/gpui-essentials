@@ -1,7 +1,7 @@
 //! A scroll area: content that scrolls inside a box, with thin scrollbars laid over its edges
 //! (shadcn's ScrollArea). The bars show while it scrolls or the pointer is over it, then fade;
 //! a thumb can be dragged and a press on a bar's track pages. Wheels, trackpads and touch scroll
-//! it as any GPUI scrolling box, and with the focus the arrows, Page Up and Page Down, Space,
+//! it as a browser's scrolling box does (a [`Scroller`](crate::base::Scroller)), and with the focus the arrows, Page Up and Page Down, Space,
 //! Home and End do.
 
 use std::time::Duration;
@@ -19,7 +19,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, rems,
 };
 
-use crate::base::{ActiveTheme as _, focus_ring};
+use crate::base::{ActiveTheme as _, ScrollAxes, ScrollExt as _, focus_ring};
 
 /// How long the bars stay after the last scroll, or after the pointer leaves (Radix's
 /// `scrollHideDelay`).
@@ -35,25 +35,6 @@ const MIN_THUMB: f32 = 18.;
 /// browser's).
 const LINE: f32 = 40.;
 const PAGE: f32 = 0.875;
-
-/// Which ways a [`ScrollArea`] scrolls.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ScrollAxes {
-    #[default]
-    Vertical,
-    Horizontal,
-    Both,
-}
-
-impl ScrollAxes {
-    fn vertical(self) -> bool {
-        self != Self::Horizontal
-    }
-
-    fn horizontal(self) -> bool {
-        self != Self::Vertical
-    }
-}
 
 /// A [`ScrollArea`]'s scroll, for the host to read and set. Give it with
 /// [`ScrollArea::track_scroll`]. Setting it draws nothing by itself: notify the view after.
@@ -463,13 +444,12 @@ impl RenderOnce for ScrollArea {
             .flex_auto()
             .min_h_0()
             .min_w_0()
-            .when(axes.vertical(), |d| d.overflow_y_scroll())
-            .when(axes.horizontal(), |d| d.overflow_x_scroll())
             .map(|d| match axes {
                 ScrollAxes::Vertical => d.flex().flex_col(),
                 ScrollAxes::Horizontal => d.flex().flex_row().items_start(),
                 ScrollAxes::Both => d.flex().flex_col().items_start(),
             })
+            .scroll_axes(axes)
             .track_scroll(&handle.0)
             .on_scroll({
                 let state = state.clone();

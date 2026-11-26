@@ -8,6 +8,7 @@ use gpui::{
     Styled as _, Window, actions, div, prelude::FluentBuilder as _, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::icon::{Icon, IconName};
 use crate::input::{Input, InputState};
 use crate::menu::{
@@ -703,7 +704,7 @@ impl RenderOnce for Picker {
                 .flex_col()
                 .min_w_0()
                 .max_h(row_px * visible as f32)
-                .overflow_y_scroll()
+                .scroll_y()
                 .track_scroll(&handle)
                 .children(rows(
                     &self.id,
