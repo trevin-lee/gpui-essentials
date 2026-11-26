@@ -43,6 +43,7 @@ use gpui::{
     Styled, Window, canvas, div, prelude::FluentBuilder as _, px, relative, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::base::{
     ActiveTheme as _, Dismiss, DismissReason, MODAL_CONTEXT, ModalElement, POPOVER_CONTEXT,
     PopoverColors, TrapNext, TrapPrev, cycle_focus, focus_first_in, just_opened, overlay_focus,
@@ -348,7 +349,7 @@ impl Drawer {
             .flex_1()
             .min_h_0()
             .min_w_0()
-            .overflow_y_scroll()
+            .scroll_y()
             .when(grip.is_none(), |s| s.pt(css(16.)))
             .child(body)
             .children(footer);

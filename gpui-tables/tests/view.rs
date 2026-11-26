@@ -1609,10 +1609,12 @@ fn swipes_scroll_both_ways_and_the_title_stays(cx: &mut TestAppContext) {
         !drawn(cx, cell(ROWAN, NAME)) || rect(cx, cell(ROWAN, NAME)).top() < title.top() - px(100.)
     );
     assert_eq!(table.update(cx, |t, _| t.scroll_x()), sx);
-    // A trackpad's sideways scroll moves the columns too, within their width.
+    // A trackpad's sideways scroll (a gesture of its own) moves the columns too, within their
+    // width.
     cx.simulate_event(ScrollEvent {
         position: point(px(500.), px(300.)),
         delta: ScrollDelta::Pixels(point(px(-100000.), px(0.))),
+        touch_phase: TouchPhase::Started,
         ..Default::default()
     });
     draw(cx);

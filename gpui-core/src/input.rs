@@ -1394,7 +1394,9 @@ impl InputState {
     }
 
     fn scroll_wheel(&mut self, e: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
-        let delta = e.delta.pixel_delta(self.layout.line_height);
+        // One way at a time, as a browser's text area: a swipe down over a code editor
+        // doesn't slide it sideways, and what it can't take goes on to the page.
+        let delta = crate::base::scroll_delta(e, self.layout.line_height, cx);
         let visible = self.layout.bounds.size.height;
         let max = (self.content_height() - visible).max(px(0.));
         let mut moved = false;

@@ -138,7 +138,12 @@ item](docs/gallery.png)
   for a finger, which scrolls with GPUI's momentum); a thumb drags and a press on a track pages.
   With the focus, the arrows, Page Up and Page Down, Space, Home and End scroll it.
   `track_scroll(&ScrollAreaHandle)` lets the host read the position and scroll to an offset, a
-  child (`scroll_to_child`) or an end.
+  child (`scroll_to_child`) or an end. It scrolls as a `Scroller` does.
+- **Scroller.** `div().id(id).children(…).scroll_x()` (or `scroll_y()`, `scroll_both()`, with
+  `ScrollExt`) in place of GPUI's `overflow_x_scroll()`: a scrolling box that takes a wheel, a
+  trackpad and a finger as Safari and Chrome do, so a wide row inside a list that scrolls down
+  doesn't slide sideways when the list is scrolled over it. See
+  [Boxes that scroll one way](#boxes-that-scroll-one-way).
 - **Carousel.** `Carousel::new(id).w(…).children(slides).on_slide(…)` shows slides in a row,
   one in view or `slides_per_view(n)`, with previous and next buttons outside its sides
   (disabled at the ends unless `looping(true)`) and optional `dots(true)` below. Left and Right
@@ -477,6 +482,51 @@ fn run(cx: &mut App) {
 
 Components draw Lucide icons from gpui-core's assets, so the app serves them:
 `gpui_platform::application().with_assets(gpui_core::Icons)`.
+
+## Boxes that scroll one way
+
+GPUI's own scrolling box (`div().overflow_x_scroll()`) gives every scroll to each scrolling box
+under the pointer, and one that scrolls one way only takes the other way's scroll as its own.
+A wide table that scrolls sideways inside a chat that scrolls down so slides sideways while the
+chat scrolls down under a wheel, and a trackpad's swipe moves both a little at once.
+
+gpui-core's `Scroller` takes a scroll as a browser does:
+
+- only along a way it scrolls: a scroll down over a box that scrolls sideways goes on, whole, to
+  the box around it;
+- a trackpad's or a finger's gesture keeps to the way it started in (whichever it moved more)
+  until it and its glide end, so a swipe down never moves anything sideways;
+- at its end, the rest goes on to the box around it, the same way only;
+- a mouse's wheel scrolls down, and sideways with Shift.
+
+Every component that scrolls in gpui-core (and in gpui-agents, gpui-tables and gpui-dnd) is
+one. A host's own boxes become one by ending the `div` with `scroll_x()`, `scroll_y()` or
+`scroll_both()` in place of `overflow_x_scroll()`, `overflow_y_scroll()` or
+`overflow_scroll()`. Do it for the box around too (a chat that scrolls down): GPUI's would
+still turn a sideways swipe past the row's end into a scroll down. A `ScrollHandle` goes on
+the scroller (`.scroll_x().track_scroll(&handle)`), not on the `div` before it.
+
+```rust
+use gpui::*;
+use gpui_core::ScrollExt as _;
+
+fn chat(handle: &ScrollHandle, rows: Vec<AnyElement>, cells: Vec<AnyElement>) -> impl IntoElement {
+    div()
+        .id("chat")
+        .flex()
+        .flex_col()
+        .size_full()
+        .children(rows)
+        // A row wider than the chat: it scrolls sideways only.
+        .child(div().id("row").flex().w_full().children(cells).scroll_x())
+        .scroll_y()
+        .track_scroll(handle)
+}
+```
+
+A box that scrolls by its own code (a canvas, a list GPUI scrolls some other way) asks
+`gpui_core::scroll_delta(event, window.line_height(), cx)` for the part of a scroll it should
+take (one way only, a gesture's way kept), and calls `cx.stop_propagation()` when it moved.
 
 ## On the web
 

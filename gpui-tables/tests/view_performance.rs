@@ -229,12 +229,18 @@ fn ten_thousand_rows_draw_and_scroll_without_dropping_frames() {
             });
             scrolls.push(start.elapsed());
         }
-        // And sideways.
-        for _ in 0..5 {
+        // And sideways: a new trackpad gesture, so it starts as one (a gesture keeps
+        // to the way it started in).
+        for i in 0..5 {
             let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(600.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(-120.), px(0.))),
+                touch_phase: if i == 0 {
+                    TouchPhase::Started
+                } else {
+                    TouchPhase::Moved
+                },
                 ..Default::default()
             });
             scrolls.push(start.elapsed());
@@ -333,12 +339,18 @@ fn ten_thousand_cards_draw_and_scroll_without_dropping_frames() {
             });
             scrolls.push(start.elapsed());
         }
-        // And the board sideways.
-        for _ in 0..5 {
+        // And the board sideways: a new trackpad gesture, so it starts as one (a gesture keeps
+        // to the way it started in).
+        for i in 0..5 {
             let start = Instant::now();
             cx.simulate_event(ScrollEvent {
                 position: point(px(600.), px(400.)),
                 delta: ScrollDelta::Pixels(point(px(-120.), px(0.))),
+                touch_phase: if i == 0 {
+                    TouchPhase::Started
+                } else {
+                    TouchPhase::Moved
+                },
                 ..Default::default()
             });
             scrolls.push(start.elapsed());

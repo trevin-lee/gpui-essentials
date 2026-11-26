@@ -41,6 +41,7 @@ use gpui::{
     div, point, px, rems,
 };
 
+use crate::base::ScrollExt as _;
 use crate::theme::{ActiveTheme as _, Theme};
 
 actions!(
@@ -546,7 +547,7 @@ impl Popover {
             .flex_col()
             .min_h_0()
             .min_w_0()
-            .overflow_y_scroll();
+            .scroll_y();
         if let Some(handle) = &self.scroll {
             scroll = scroll.track_scroll(handle);
         }

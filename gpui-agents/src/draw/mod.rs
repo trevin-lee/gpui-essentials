@@ -16,7 +16,7 @@ mod table;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use gpui_core::Press;
+use gpui_core::{Press, ScrollExt as _, Scroller};
 
 use crate::openui::{Action, ButtonVariant, Card, Cell, Component, Gap, Size, Tone};
 use crate::theme::{CardTheme, ToneColors};
@@ -366,14 +366,15 @@ impl Draw<'_, '_> {
     }
 
     /// A region that scrolls sideways (`id` under the card's prefix), marked for the host's
-    /// overflow test as `what`. For touch it moves only with a sideways pan, so an up-and-down
-    /// one scrolls the chat instead of sliding the region along; [`Draw::keep_sideways`] on
-    /// something around it keeps the sideways pans it scrolls with.
-    pub fn scroll_x(&mut self, id: &str, what: &str) -> (Stateful<Div>, Option<ScrollHandle>) {
-        let el = div().id(self.id(id)).w_full().min_w_0().overflow_x_scroll();
+    /// overflow test as `what`. It's gpui-core's [`Scroller`]: it takes only sideways scrolls,
+    /// and a wheel, swipe or pan down over it scrolls the chat instead of sliding the region
+    /// along. For touch, [`Draw::keep_sideways`] on something around it keeps the sideways
+    /// pans it scrolls with, even at its ends.
+    pub fn scroll_x(&mut self, id: &str, what: &str) -> (Scroller, Option<ScrollHandle>) {
+        let el = div().id(self.id(id)).w_full().min_w_0();
         let el = self.sideways(el, what);
         if !self.t.touch {
-            return (el, None);
+            return (el.scroll_x(), None);
         }
         let handle = self
             .window
@@ -382,10 +383,7 @@ impl Draw<'_, '_> {
             })
             .read(self.cx)
             .clone();
-        (
-            el.restrict_scroll_to_axis().track_scroll(&handle),
-            Some(handle),
-        )
+        (el.scroll_x().track_scroll(&handle), Some(handle))
     }
 
     /// Keeps a finger's sideways pans over `el` from going further (to a carousel turning its
