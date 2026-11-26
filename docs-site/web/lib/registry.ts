@@ -77,6 +77,10 @@ export function byFamily(): { family: string; components: Component[] }[] {
     .filter((group) => group.components.length > 0);
 }
 
+export function crate(slug: string): Crate | undefined {
+  return registry().crates.find((c) => c.slug === slug);
+}
+
 export function component(slug: string): Component | undefined {
   return registry().components.find((c) => c.slug === slug);
 }

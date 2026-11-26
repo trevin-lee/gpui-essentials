@@ -1,10 +1,11 @@
 import "server-only";
 
-import { byFamily } from "@/lib/registry";
+import { byFamily, registry } from "@/lib/registry";
 
 export type NavGroup = { title: string; items: { title: string; href: string }[] };
 
-/** The sidebar: getting started, then the components by family. */
+/** The sidebar: getting started, the crates built on gpui-core, then the components by
+ *  family. */
 export function nav(): NavGroup[] {
   return [
     {
@@ -12,7 +13,12 @@ export function nav(): NavGroup[] {
       items: [
         { title: "Introduction", href: "/docs/" },
         { title: "Components", href: "/docs/components/" },
+        { title: "Crates", href: "/docs/crates/" },
       ],
+    },
+    {
+      title: "Crates",
+      items: registry().crates.map((c) => ({ title: c.name, href: `/docs/crates/${c.slug}/` })),
     },
     ...byFamily().map(({ family, components }) => ({
       title: family,
