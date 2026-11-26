@@ -235,8 +235,8 @@ impl RenderOnce for InputGroup {
             // A press on an addon's icon or text (or the padding) puts the keyboard in the text;
             // a button's own press stops before it gets here.
             .on_click({
-                let focus = focus.clone();
-                move |_, window, cx| window.focus(&focus, cx)
+                let state = self.state.clone();
+                move |_, window, cx| state.update(cx, |s, cx| s.focus_with_keyboard(window, cx))
             });
         gpui::Refineable::refine(group.style(), &self.style);
         group.children(leading).child(input).children(trailing)

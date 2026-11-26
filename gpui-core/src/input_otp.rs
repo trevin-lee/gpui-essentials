@@ -275,12 +275,12 @@ impl RenderOnce for InputOtp {
             let s = self.state.read(cx);
             (s.input.clone(), s.length)
         };
-        let (code, caret, focused, focus) = {
+        let (code, caret, focused) = {
             let i = input.read(cx);
             let text = i.value();
             let at = i.selection().start.min(text.len());
             let caret = text[..at].chars().count();
-            (text, caret, i.is_focused(window), i.focus_handle(cx))
+            (text, caret, i.is_focused(window))
         };
         let chars: Vec<char> = code.chars().collect();
         // The slot the next character goes in: the caret's, or the last when they're full.
@@ -426,8 +426,8 @@ impl RenderOnce for InputOtp {
                     .occlude()
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         cx.stop_propagation();
-                        window.focus(&focus, cx);
                         input.update(cx, |i, cx| {
+                            i.focus_with_keyboard(window, cx);
                             let end = i.value().len();
                             i.select(end..end, cx);
                         });
