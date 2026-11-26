@@ -21,7 +21,12 @@ their look.
   grid. It has a row of day names with today marked, an all-day row (three rows of spans, then
   "+N more", which opens the row; open or not, it never takes more than 40% of the calendar
   under the day names, so a crowded day can't push the hours away), hour lines, and a line at the current time with the time in the
-  gutter. The grid opens with the current time a third of the way down. The month shows spans for
+  gutter. An hour is `hour_height` tall (48 CSS pixels, as Google Calendar's) whatever the
+  window's height, and all 24 hours scroll, from 12 AM to the end of the day. As Google Calendar
+  does, the grid opens (and Today and a switch to the day, week or N days place it again) with the
+  current time a third of the way down, or higher when an event on the days shown starts above
+  that, so it's in view; on days without today, at the first event, or at `scroll_time` (8 AM).
+  Previous, next and a picked date keep the hours where they are. The month shows spans for
   all-day and multi-day events, a dot, time and title for the rest, and "+N more", which lists
   all that day's events in a popover beside it (a sheet on touch), as Google Calendar does; a
   click on one opens it. `open_more(date)` opens it from your app. A span is one bar across a week's days; where it goes on past the week (into the

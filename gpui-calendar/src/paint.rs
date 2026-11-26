@@ -141,8 +141,14 @@ pub(crate) struct LinkHit {
 #[derive(Default)]
 pub(crate) struct Shared {
     pub geo: Cell<Option<Geo>>,
-    /// The minute at the top of the time grid; none until the first frame places it.
+    /// The minute at the top of the time grid; none until a frame places it where the grid
+    /// opens (see [`opening_minute`]).
     pub scroll: Cell<Option<f32>>,
+    /// While nobody has moved the hours since they opened: the grid's height in minutes and
+    /// the first event's start they were placed for. A frame with another height (a window
+    /// still opening, a pane laid out before its size settles) or another first event (the
+    /// host's events arriving) places them again, so the opening never rests on a stale frame.
+    pub opened: Cell<Option<(f32, Option<f32>)>>,
     pub hits: RefCell<Vec<Hit>>,
     pub links: RefCell<Vec<LinkHit>>,
     pub mores: RefCell<Vec<(Bounds<Pixels>, NaiveDate)>>,
@@ -165,6 +171,15 @@ pub(crate) struct Shared {
     pub agenda_reveal: RefCell<Option<EventId>>,
     /// Where the agenda's line at the current time was drawn in the last frame, if it was.
     pub agenda_now: Cell<Option<Pixels>>,
+}
+
+impl Shared {
+    /// Puts this minute at the top of the time grid, where it stays (but for the day's ends)
+    /// until something else moves it: the grid no longer opens on its own.
+    pub fn scroll_to(&self, minute: f32) {
+        self.scroll.set(Some(minute));
+        self.opened.set(None);
+    }
 }
 
 /// A frame's geometry.
@@ -265,6 +280,11 @@ impl Geo {
 
     pub fn visible_minutes(&self) -> f32 {
         f32::from(self.grid_bottom - self.grid_top) / f32::from(self.hour_h) * 60.
+    }
+
+    /// The farthest the hours scroll: the end of the day at the grid's bottom.
+    pub fn max_scroll(&self) -> f32 {
+        (time::DAY_MINUTES - self.visible_minutes()).max(0.)
     }
 
     /// Whether a column is drawn: every day's is, but Saturday's and Sunday's when weekends
@@ -646,18 +666,13 @@ fn geometry(
                 week_start: scene.options.week_start,
                 weekends: scene.weekends,
             };
-            let shown = geo.visible_minutes();
-            let max = (time::DAY_MINUTES - shown).max(0.);
-            let scroll = match shared.scroll.get() {
-                Some(at) => at,
-                // It opens with the current time a third of the way down, or at the host's
-                // chosen time when today isn't on screen.
-                None if scene.today_col().is_some() => scene.now_minute - shown / 3.,
-                None => time::minutes_of(scene.options.scroll_time),
-            }
-            .clamp(0., max);
-            shared.scroll.set(Some(scroll));
-            geo.scroll = scroll;
+            // Every hour of the day scrolls, from 12 AM at the top to the day's end at the
+            // bottom; the hour's height is the host's, whatever the window's.
+            geo.scroll = shared
+                .scroll
+                .get()
+                .unwrap_or(0.)
+                .clamp(0., geo.max_scroll());
             geo
         }
         Kind::Month => {
@@ -709,6 +724,57 @@ fn geometry(
             week_start: scene.options.week_start,
             weekends: true,
         },
+    }
+}
+
+/// How far above the first event the grid opens, in minutes, so its hour's label shows too.
+const OPENING_LEAD: f32 = 30.;
+
+/// Where the hours rest this frame: where they were left, or where the grid opens while
+/// nobody has moved them since (worked out again when the grid's height or the first event
+/// changes). Only the period on screen does this; the one a swipe brings in follows it.
+fn place_scroll(scene: &Scene, geo: &mut Geo, shared: &Shared) {
+    let shown = geo.visible_minutes();
+    let first = first_event_minute(scene);
+    let key = Some((shown, first));
+    let at = match shared.scroll.get() {
+        Some(at) if shared.opened.get().is_none_or(|k| Some(k) == key) => at,
+        _ => {
+            shared.opened.set(key);
+            opening_minute(scene, shown, first)
+        }
+    }
+    .clamp(0., geo.max_scroll());
+    shared.scroll.set(Some(at));
+    geo.scroll = at;
+}
+
+/// The earliest wall-clock minute a timed event starts at on the days shown, if one does.
+/// An event that began the day before doesn't count: it's that day's.
+fn first_event_minute(scene: &Scene) -> Option<f32> {
+    scene
+        .laid
+        .timed
+        .iter()
+        .filter(|p| {
+            p.starts && day_shown(scene.weekends, scene.first + Duration::days(p.col as i64))
+        })
+        .map(|p| p.top)
+        .min_by(f32::total_cmp)
+}
+
+/// Where the time grid opens, as Google Calendar's day and week views do: with today on
+/// screen, the current time about a third of the way down, or higher when an event on the
+/// days shown starts above that, so it's in view; on other days at the first event, or at the
+/// host's `scroll_time` (8 AM) when there's none. `shown` is how many minutes fit.
+fn opening_minute(scene: &Scene, shown: f32, first: Option<f32>) -> f32 {
+    let event = first.map(|m| m - OPENING_LEAD);
+    match scene.today_col() {
+        Some(_) => {
+            let now = scene.now_minute - shown / 3.;
+            event.map_or(now, |e| e.min(now))
+        }
+        None => event.unwrap_or_else(|| time::minutes_of(scene.options.scroll_time)),
     }
 }
 
@@ -885,13 +951,16 @@ pub(crate) fn body(
     let prepaint_this = this.clone();
     canvas(
         move |bounds, window, cx| {
-            let geo = geometry(
+            let mut geo = geometry(
                 &scene,
                 bounds,
                 px(scene.swipe),
                 window.rem_size(),
                 &prepaint_shared,
             );
+            if geo.kind == Kind::Grid {
+                place_scroll(&scene, &mut geo, &prepaint_shared);
+            }
             prepaint_shared.geo.set(Some(geo));
             let narrow = bounds.size.width < px(NARROW * f32::from(window.rem_size()) / 15.);
             if scene.header_narrow.is_some_and(|n| n != narrow) {
