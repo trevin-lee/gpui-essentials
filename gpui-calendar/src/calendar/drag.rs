@@ -504,7 +504,7 @@ impl Scrollable for Hours {
         };
         let minute =
             (-f32::from(offset.y) / f32::from(self.hour_h) * 60.).clamp(0., self.max_minutes);
-        shared.scroll.set(Some(minute));
+        shared.scroll_to(minute);
         self.view.update(cx, |_, cx| cx.notify()).ok();
     }
 }

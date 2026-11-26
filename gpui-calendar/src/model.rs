@@ -485,9 +485,13 @@ pub struct CalendarOptions {
     /// How long an event made by a double click or Enter on a slot lasts.
     pub default_duration: Duration,
     /// The height of an hour on the time grid, in CSS pixels (it scales with the window's rem).
+    /// 48 by default, as Google Calendar's; it never stretches or squashes to fit the window,
+    /// which scrolls the hours instead.
     pub hour_height: f32,
-    /// Where the time grid opens when today isn't on screen. With today on screen it opens
-    /// with the current time about a third of the way down.
+    /// Where the time grid opens when today isn't on screen and the days shown have no timed
+    /// event (8 AM by default). With today on screen it opens with the current time about a
+    /// third of the way down; either way, a timed event that starts higher is brought into
+    /// view instead.
     pub scroll_time: NaiveTime,
     /// The calendar new events are proposed in. Without one, or if it's hidden or can't be
     /// edited, it's the first visible calendar that can be.

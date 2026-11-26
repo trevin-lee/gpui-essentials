@@ -102,8 +102,7 @@ impl Calendar {
                 let travel = f32::from(track.size.height - thumb.size.height).max(1.);
                 let moved = f32::from(event.position.y - from_y) / travel * room;
                 self.shared
-                    .scroll
-                    .set(Some((from_minute + moved).clamp(0., room.max(0.))));
+                    .scroll_to((from_minute + moved).clamp(0., room.max(0.)));
                 cx.notify();
             }
             return true;

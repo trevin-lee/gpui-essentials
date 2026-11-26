@@ -317,6 +317,8 @@ pub(crate) struct TimedPiece {
     pub place: Column,
     /// Whether the event ends on this piece (and so can be resized from it).
     pub ends: bool,
+    /// Whether the event starts on this piece's day, rather than going on from the day before.
+    pub starts: bool,
 }
 
 /// An event drawn across days: in the grid's all-day row, or on a week of the month (where a
@@ -1068,16 +1070,31 @@ impl Calendar {
                 self.anchor = date;
             }
         }
-        self.view = view;
+        self.switch_view(view);
         self.range_changed(cx);
     }
 
-    /// Shows the period around `date`.
+    /// Changes the view. Into a day, week or N days from another view, the hours open afresh
+    /// (see [`Calendar::go_to_today`]).
+    fn switch_view(&mut self, view: CalendarView) {
+        if view != self.view && view.is_time_grid() {
+            self.scroll_to_now();
+        }
+        self.view = view;
+    }
+
+    /// Shows the period around `date`. The hours stay scrolled where they are, as previous and
+    /// next leave them.
     pub fn go_to(&mut self, date: NaiveDate, cx: &mut Context<Self>) {
         self.anchor = date;
+        self.shared.opened.set(None);
         self.range_changed(cx);
     }
 
+    /// Shows today, with the hours where the grid opens: the current time about a third of
+    /// the way down, or higher when an event on the days shown starts above that, so it's in
+    /// view. On a period without today, the grid opens at its first event, or at
+    /// [`CalendarOptions::scroll_time`] when it has none.
     pub fn go_to_today(&mut self, cx: &mut Context<Self>) {
         self.go_to(self.today(), cx);
         self.scroll_to_now();
@@ -1117,9 +1134,10 @@ impl Calendar {
         }
     }
 
-    /// Scrolls the time grid so this wall-clock time is at the top.
+    /// Scrolls the time grid so this wall-clock time is at the top (or as near as the day's
+    /// ends allow).
     pub fn scroll_to_minute(&mut self, minute: f32) {
-        self.shared.scroll.set(Some(minute));
+        self.shared.scroll_to(minute);
     }
 
     /// The minute at the top of the time grid.
@@ -1130,6 +1148,7 @@ impl Calendar {
     fn scroll_to_now(&mut self) {
         // Done at the next layout, once the grid's height is known.
         self.shared.scroll.set(None);
+        self.shared.opened.set(None);
     }
 
     // The selection.
@@ -1457,6 +1476,7 @@ impl Calendar {
                             columns: 1,
                         },
                         ends: c == c1,
+                        starts: c == c0,
                     });
                 }
             }
@@ -1648,13 +1668,13 @@ impl Calendar {
             }
             Target::Date(date) => {
                 let date = *date;
-                self.view = CalendarView::Day;
+                self.switch_view(CalendarView::Day);
                 self.go_to(date, cx);
                 return;
             }
             Target::Month(date) => {
                 let date = *date;
-                self.view = CalendarView::Month;
+                self.switch_view(CalendarView::Month);
                 self.go_to(date, cx);
                 return;
             }
@@ -1948,9 +1968,8 @@ impl Calendar {
     }
 
     fn scroll_by(&mut self, minutes: f32, geo: &Geo) {
-        let max = (time::DAY_MINUTES - geo.visible_minutes()).max(0.);
-        let at = (self.scroll_minute() + minutes).clamp(0., max);
-        self.shared.scroll.set(Some(at));
+        let at = (self.scroll_minute() + minutes).clamp(0., geo.max_scroll());
+        self.shared.scroll_to(at);
     }
 
     fn scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
