@@ -105,6 +105,16 @@ const IN_CODE: &str = "GpuiCoreInput && code";
 /// What Tab puts in a code editor, and Shift-Tab takes out.
 const INDENT: &str = "  ";
 
+/// Asks for the on-screen keyboard, on every press in a field whether it has the focus or not.
+/// A platform raises its keyboard when a field takes the focus, so a tap on the field that
+/// already has it, after the keyboard was swiped away, would otherwise raise nothing. Where
+/// there's no on-screen keyboard (a desktop, a pointer on the web), the platform does nothing.
+fn request_keyboard(window: &Window) {
+    #[cfg(test)]
+    tests::KEYBOARD_REQUESTS.with(|n| n.set(n.get() + 1));
+    window.request_virtual_keyboard();
+}
+
 pub(crate) fn init(cx: &mut App) {
     let c = Some(CONTEXT);
     // The platform's command key: ⌘ on macOS and iOS (a hardware keyboard), Ctrl elsewhere;
@@ -531,6 +541,15 @@ impl InputState {
     /// Gives it the focus.
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         window.focus(&self.focus, cx);
+    }
+
+    /// Gives it the focus and asks for the on-screen keyboard, as a press on it does: for a
+    /// press of the host's own that stands for one on the field (an addon beside it, a cover
+    /// over it). It asks even when the field already has the focus, as a keyboard swiped away
+    /// comes back only when asked for.
+    pub fn focus_with_keyboard(&self, window: &mut Window, cx: &mut App) {
+        window.focus(&self.focus, cx);
+        request_keyboard(window);
     }
 
     pub fn is_focused(&self, window: &Window) -> bool {
@@ -1336,7 +1355,7 @@ impl InputState {
     // ---- The pointer.
 
     fn mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.focus, cx);
+        self.focus_with_keyboard(window, cx);
         let Some(at) = self.index_for_screen(e.position) else {
             return;
         };
@@ -2645,5 +2664,122 @@ impl Element for TextBox {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use gpui::{
+        AppContext as _, Bounds, Context, Entity, InteractiveElement as _, IntoElement, Modifiers,
+        ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext, VisualTestContext,
+        Window, div, point, px,
+    };
+
+    use crate::{Input, InputGroup, InputOtp, InputOtpState, InputState, Root};
+
+    thread_local! {
+        /// How many times a press has asked for the on-screen keyboard.
+        pub(crate) static KEYBOARD_REQUESTS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// A field, a group with a text addon, and a one-time code, one under another.
+    struct Form {
+        field: Entity<InputState>,
+        site: Entity<InputState>,
+        code: Entity<InputOtpState>,
+    }
+
+    impl Render for Form {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .p(px(10.))
+                .flex()
+                .flex_col()
+                .gap(px(10.))
+                .child(
+                    div()
+                        .w(px(240.))
+                        .debug_selector(|| "field".into())
+                        .child(Input::new(&self.field)),
+                )
+                .child(
+                    div()
+                        .w(px(240.))
+                        .child(InputGroup::new(&self.site).leading_text("https://")),
+                )
+                .child(div().w(px(320.)).child(InputOtp::new(&self.code)))
+        }
+    }
+
+    fn open(cx: &mut TestAppContext) -> (Entity<Form>, VisualTestContext) {
+        cx.update(crate::init);
+        let made = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let m = made.clone();
+        let (_, vcx) = cx.add_window_view(move |window, cx| {
+            let form = cx.new(|cx| Form {
+                field: cx.new(|cx| InputState::new(window, cx)),
+                site: cx.new(|cx| InputState::new(window, cx)),
+                code: cx.new(|cx| InputOtpState::new(window, cx)),
+            });
+            *m.borrow_mut() = Some(form.clone());
+            Root::new(form, window, cx)
+        });
+        vcx.update(|window, _| window.activate_window());
+        vcx.run_until_parked();
+        let window = gpui::VisualContext::window_handle(vcx);
+        let form = made.borrow().clone().unwrap();
+        KEYBOARD_REQUESTS.with(|n| n.set(0));
+        (form, VisualTestContext::from_window(window, cx))
+    }
+
+    fn bounds(vcx: &mut VisualTestContext, name: String) -> Bounds<Pixels> {
+        let name: &'static str = Box::leak(name.into_boxed_str());
+        vcx.debug_bounds(name)
+            .unwrap_or_else(|| panic!("{name} drawn"))
+    }
+
+    /// Taps at `at`: how many times that asked for the keyboard.
+    fn tap(vcx: &mut VisualTestContext, at: Point<Pixels>) -> usize {
+        let before = KEYBOARD_REQUESTS.with(|n| n.get());
+        vcx.simulate_click(at, Modifiers::none());
+        vcx.run_until_parked();
+        KEYBOARD_REQUESTS.with(|n| n.get()) - before
+    }
+
+    #[gpui::test]
+    fn every_tap_on_a_field_asks_for_the_keyboard_focused_or_not(cx: &mut TestAppContext) {
+        let (form, mut vcx) = open(cx);
+        let field = form.read_with(&vcx, |f, _| f.field.clone());
+        let b = bounds(&mut vcx, "field".into());
+        // The first tap focuses it and asks.
+        assert_eq!(tap(&mut vcx, b.center()), 1);
+        assert!(vcx.update(|window, cx| field.read(cx).is_focused(window)));
+        // Tapped again with the focus kept (the keyboard swiped away meanwhile): it asks again,
+        // as taking the focus anew, which raises a keyboard, doesn't happen.
+        assert_eq!(tap(&mut vcx, b.center()), 1);
+        // On its padding, by its edge.
+        assert_eq!(tap(&mut vcx, point(b.left() + px(2.), b.center().y)), 1);
+        // Away from every field: no.
+        assert_eq!(tap(&mut vcx, point(px(400.), px(2.))), 0);
+    }
+
+    #[gpui::test]
+    fn a_tap_on_a_groups_addon_asks_for_the_keyboard(cx: &mut TestAppContext) {
+        let (form, mut vcx) = open(cx);
+        let id = form.read_with(&vcx, |f, _| f.site.entity_id().as_u64());
+        let at = bounds(&mut vcx, format!("input-group-leading-{id}")).center();
+        assert_eq!(tap(&mut vcx, at), 1);
+        assert_eq!(tap(&mut vcx, at), 1, "not asked again with the focus kept");
+    }
+
+    #[gpui::test]
+    fn every_tap_on_a_one_time_code_asks_for_the_keyboard(cx: &mut TestAppContext) {
+        let (form, mut vcx) = open(cx);
+        let id = form.read_with(&vcx, |f, _| f.code.entity_id().as_u64());
+        let at = bounds(&mut vcx, format!("otp-slot-{id}-2")).center();
+        assert_eq!(tap(&mut vcx, at), 1);
+        assert_eq!(tap(&mut vcx, at), 1, "not asked again with the focus kept");
     }
 }
