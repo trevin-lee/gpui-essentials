@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ComponentGrid } from "@/components/component-grid";
+import { CrateGrid } from "@/components/crate-grid";
 import { registry } from "@/lib/registry";
 
 export default function Home() {
@@ -28,9 +29,23 @@ export default function Home() {
           >
             Browse components
           </Link>
+          <Link
+            href="/docs/crates/"
+            className="inline-flex h-9 items-center rounded-md border px-4 text-sm font-medium hover:bg-accent"
+          >
+            Crates
+          </Link>
         </div>
       </section>
       <ComponentGrid />
+      <section className="mt-16">
+        <h2 className="text-lg font-semibold tracking-tight">Crates</h2>
+        <p className="mt-1 mb-4 text-sm text-muted-foreground">
+          Bigger pieces built on these components: an editor, a calendar, drag and drop, a canvas,
+          databases and an agent&apos;s cards.
+        </p>
+        <CrateGrid columns="sm:grid-cols-2 lg:grid-cols-3" />
+      </section>
     </main>
   );
 }
