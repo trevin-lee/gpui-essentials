@@ -757,7 +757,13 @@ pub(crate) fn display(tail: &str) -> String {
     let start = s.rfind('\n').map_or(0, |i| i + 1);
     // Inline math open on the last line: its TeX as inline code, what's open before it closed
     // after it, until it's closed and typeset. A `$` with nothing after it yet isn't shown.
-    if let Some((i, len)) = open_inline_math(&s[start..]) {
+    let (open, shown) = open_inline_math(&s[start..], s.len() == tail.len());
+    if start + shown < s.len() {
+        s.truncate(start + shown);
+        let t = s.trim_end().len();
+        s.truncate(t);
+    }
+    if let Some((i, len)) = open {
         let at = start + i;
         let tex = s[at + len..].trim().to_string();
         let before = s[start..at].to_string();
@@ -808,14 +814,25 @@ fn longest_run(s: &str, c: char) -> usize {
     best
 }
 
-/// Where inline math the line ends inside starts (its `$` or `\\(`), and its opener's length,
-/// if it does: a `$` outside code spans and escapes, not part of a `$$`, and not a price's (one
-/// before a digit or a space, which pulldown-cmark doesn't open math with either), not closed by
-/// a `$` after it; or a `\\(` with no `\\)` after it.
-fn open_inline_math(line: &str) -> Option<(usize, usize)> {
+/// Where inline math the line ends inside starts (its `$` or `\\(`) and its opener's length,
+/// if it does, and how much of the line to show. `$`s are read as gpui-core's Markdown reads
+/// them (Pandoc's rule), outside code spans and escapes, a `$$` never inline: a `$` with a
+/// non-space character after it opens, and the next `$` closes it if it has a non-space
+/// character before it and no digit after it; if not, the first is a dollar and the next may
+/// open itself. A `\\(` opens to its `\\)`.
+///
+/// With `more` (the line is the text's end, and more may come right after it), a `$` that's
+/// the last character waits, not shown: what comes after it decides what it is, as a digit
+/// after a closing `$` makes the math a price's words. So a formula isn't typeset and then
+/// shown as words again. One that opens with a digit isn't told (a price, as often as not):
+/// it shows as words until it's closed.
+fn open_inline_math(line: &str, more: bool) -> (Option<(usize, usize)>, usize) {
     let (code, _) = code_spans(line);
     let b = line.as_bytes();
-    let mut open = None;
+    let told = |open: Option<(usize, usize)>| {
+        open.filter(|&(o, n)| n != 1 || !b.get(o + 1).is_some_and(u8::is_ascii_digit))
+    };
+    let mut open: Option<(usize, usize)> = None;
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'\\' {
@@ -827,28 +844,42 @@ fn open_inline_math(line: &str) -> Option<(usize, usize)> {
             i += 2;
             continue;
         }
-        if code[i] || b[i] != b'$' {
+        if code[i] || b[i] != b'$' || open.is_some_and(|(_, n)| n == 2) {
             i += 1;
             continue;
         }
-        if b.get(i + 1) == Some(&b'$') {
-            i += 2;
+        let run = b[i..].iter().take_while(|c| **c == b'$').count();
+        if more && run == 1 && i + 1 == b.len() {
+            return (told(open), i);
+        }
+        if run > 1 {
+            // A `$$`: never inline, and an open `$`'s next `$` can't close it.
+            open = None;
+            i += run;
             continue;
         }
-        open = match open {
-            Some((_, 1)) => None,
-            Some(o) => Some(o),
-            None if b
-                .get(i + 1)
-                .is_some_and(|c| c.is_ascii_digit() || c.is_ascii_whitespace()) =>
-            {
-                None
+        if open.is_some() {
+            let before = line[..i]
+                .chars()
+                .next_back()
+                .is_some_and(|c| !c.is_whitespace());
+            let digit = b.get(i + 1).is_some_and(u8::is_ascii_digit);
+            open = None;
+            if before && !digit {
+                i += 1;
+                continue;
             }
-            None => Some((i, 1)),
-        };
+        }
+        if line[i + 1..]
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace())
+        {
+            open = Some((i, 1));
+        }
         i += 1;
     }
-    open
+    (told(open), b.len())
 }
 
 /// Holds back a last line that would start a table until its delimiter row comes.
@@ -1120,6 +1151,74 @@ mod tests {
             "an $m \\times n$ matrix"
         );
         assert_eq!(display("so $"), "so");
+    }
+
+    /// `$`s are read as gpui-core reads them (Pandoc's rule): dollar amounts are words while
+    /// they're written, and a formula's closing `$` waits for what comes after it (a digit
+    /// would make it a price's) before it's typeset.
+    #[test]
+    fn dollars_stream_by_the_rule_core_reads_them_with() {
+        use gpui_core::text::parse_markdown;
+        // What's drawn: the inline math typeset, and the code (an open formula's TeX).
+        fn drawn(source: &str) -> (Vec<String>, Vec<String>) {
+            let (mut math, mut code) = (Vec::new(), Vec::new());
+            for b in parse_markdown(source) {
+                let Block::Paragraph(p) = b else { continue };
+                for (r, m) in &p.spans {
+                    let t = p.text[r.clone()].to_string();
+                    if m.math {
+                        math.push(t);
+                    } else if m.code {
+                        code.push(t);
+                    }
+                }
+            }
+            (math, code)
+        }
+        // Words at every step: no math, nothing shown as code.
+        for reply in [
+            "the gap is about $10.5k, not the $15k I've been quoting",
+            "$700 in Apr (my guess). Tormach ≈ +$8k",
+            "It costs $5 and $10, or $3–$4.",
+            "about $5 + x$5 more",
+        ] {
+            let ends: Vec<usize> = reply
+                .char_indices()
+                .map(|(i, _)| i)
+                .skip(1)
+                .chain([reply.len()])
+                .collect();
+            for end in ends {
+                let shown = display(&reply[..end]);
+                assert_eq!(
+                    drawn(&shown),
+                    (vec![], vec![]),
+                    "{:?} shows {shown:?}",
+                    &reply[..end]
+                );
+            }
+        }
+        // A closing `$` at the end waits: the formula stays its TeX until the next character.
+        assert_eq!(display("an $m$"), "an `m`");
+        assert_eq!(display("an $m$ "), "an $m$");
+        assert_eq!(display("an $m$."), "an $m$.");
+        assert_eq!(display("costs $5 + x$"), "costs $5 + x");
+        // An opener's next `$` that can't close it: the first is a dollar, the next may open.
+        assert_eq!(display("so $a $b_{k"), "so $a `b_{k`");
+        assert_eq!(display("so $5 and $x_1"), "so $5 and `x_1`");
+        // A formula's typeset once its closing `$` is followed, and stays so.
+        let reply = "Here $x^2 + y$. Then $a$b and ($c$).";
+        let mut before: Vec<String> = Vec::new();
+        for end in (1..=reply.len()).filter(|&e| reply.is_char_boundary(e)) {
+            let (math, _) = drawn(&display(&reply[..end]));
+            assert!(
+                math.starts_with(&before),
+                "{:?}: {before:?} then {math:?}",
+                &reply[..end]
+            );
+            before = math;
+        }
+        assert_eq!(before, ["x^2 + y", "a", "c"]);
     }
 
     /// The math example's two replies streamed a few characters at a time: a formula is never

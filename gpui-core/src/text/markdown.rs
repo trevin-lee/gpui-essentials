@@ -1,7 +1,9 @@
 //! Markdown (GitHub's flavour) to the blocks TextView draws. Nothing in it is ever run or
 //! fetched: raw HTML shows as its text, and an image shows as its description.
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{
+    Alignment, CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd,
+};
 
 use super::paragraph::{Marks, Paragraph};
 
@@ -66,7 +68,10 @@ pub fn parse_with(source: &str, before: &str, after: &str) -> Parsed {
     while !source.is_char_boundary(end) {
         end -= 1;
     }
-    let source = tex_delimiters(&source[..end]);
+    let source = &source[..end];
+    let source = std::panic::catch_unwind(|| dollar_math(source))
+        .unwrap_or(std::borrow::Cow::Borrowed(source));
+    let source = tex_delimiters(&source);
     let source = source.as_ref();
     // What fits of the others' definitions, within the limit.
     let cut = |text: &str, room: usize| -> usize {
@@ -152,7 +157,8 @@ pub const MATH_LANGUAGE: &str = "math";
 pub const MATH_SOURCE_LANGUAGE: &str = "math-source";
 
 /// GitHub's flavour: tables, task lists, strikethrough, footnotes and math (`$…$` inline,
-/// `$$…$$` on a block of its own, the TeX in both kept as written).
+/// `$$…$$` on a block of its own, the TeX in both kept as written). Which `$`s are math is
+/// [`dollar_math`]'s say: the parser sees only those.
 fn options() -> Options {
     Options::ENABLE_TABLES
         | Options::ENABLE_MATH
@@ -553,6 +559,132 @@ impl Builder {
     }
 }
 
+/// `source` with every `$` that isn't math by Pandoc's `tex_math_dollars` rule escaped (`\$`), so
+/// the parser, whose own rule is looser, reads math only where Pandoc does. A dollar amount
+/// is a dollar amount: in "about $10.5k, not the $15k" or "$700, then +$8k" nothing is math.
+///
+/// - Inline: a `$` with a non-space character right after it, to the next `$`, which has a
+///   non-space character right before it and no digit right after it. When that next `$`
+///   can't close, the first is a dollar, and the next may open math itself.
+/// - Display: `$$` to the next `$$`, with no `$` between.
+/// - `\$` is a dollar, and a `$` in code (a span, a block, raw HTML or an autolink) is never
+///   math: which `$`s count is the parser's own reading, with math off.
+/// - Math never runs past its block (a paragraph, a heading, a list item, a table's cell).
+fn dollar_math(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source.contains('$') {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let b = source.as_bytes();
+    // The `$`s that could be math, a block's at a time, and those that aren't.
+    let mut run: Vec<usize> = Vec::new();
+    let mut words: Vec<usize> = Vec::new();
+    let mut autolink = 0usize;
+    let mut code_block = false;
+    let inline = |t: &Tag| {
+        matches!(
+            t,
+            Tag::Emphasis
+                | Tag::Strong
+                | Tag::Strikethrough
+                | Tag::Superscript
+                | Tag::Subscript
+                | Tag::Link { .. }
+                | Tag::Image { .. }
+        )
+    };
+    let inline_end = |t: &TagEnd| {
+        matches!(
+            t,
+            TagEnd::Emphasis
+                | TagEnd::Strong
+                | TagEnd::Strikethrough
+                | TagEnd::Superscript
+                | TagEnd::Subscript
+                | TagEnd::Link
+                | TagEnd::Image
+        )
+    };
+    let parser = Parser::new_ext(source, options().difference(Options::ENABLE_MATH));
+    for (e, at) in parser.into_offset_iter() {
+        match e {
+            Event::Text(_) if autolink == 0 && !code_block => {
+                for i in at.filter(|&i| b[i] == b'$') {
+                    let slashes = b[..i].iter().rev().take_while(|c| **c == b'\\').count();
+                    if slashes % 2 == 0 {
+                        run.push(i);
+                    }
+                }
+            }
+            Event::Start(Tag::Link {
+                link_type: LinkType::Autolink | LinkType::Email,
+                ..
+            }) => autolink += 1,
+            Event::End(TagEnd::Link) if autolink > 0 => autolink -= 1,
+            Event::Start(Tag::CodeBlock(_)) => code_block = true,
+            Event::End(TagEnd::CodeBlock) => code_block = false,
+            Event::Start(t) if !inline(&t) => not_math(source, &mut run, &mut words),
+            Event::End(t) if !inline_end(&t) => not_math(source, &mut run, &mut words),
+            _ => {}
+        }
+    }
+    not_math(source, &mut run, &mut words);
+    if words.is_empty() {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    words.sort_unstable();
+    let mut out = String::with_capacity(source.len() + words.len());
+    let mut copied = 0;
+    for i in words {
+        out.push_str(&source[copied..i]);
+        out.push('\\');
+        copied = i;
+    }
+    out.push_str(&source[copied..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// Of one block's `$`s that could be math (`run`, emptied), those that aren't, by
+/// [`dollar_math`]'s rule, put in `words`.
+fn not_math(source: &str, run: &mut Vec<usize>, words: &mut Vec<usize>) {
+    run.sort_unstable();
+    run.dedup();
+    let p = std::mem::take(run);
+    // Whether the `$` at `k` and the one after it are a `$$`.
+    let double = |k: usize| p.get(k + 1).is_some_and(|&n| n == p[k] + 1);
+    let single = |k: usize| !double(k) && (k == 0 || p[k - 1] + 1 != p[k]);
+    let opens = |i: usize| {
+        source[i + 1..]
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace())
+    };
+    let closes = |i: usize| {
+        source[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|c| !c.is_whitespace())
+            && !source.as_bytes().get(i + 1).is_some_and(u8::is_ascii_digit)
+    };
+    let mut k = 0;
+    while k < p.len() {
+        if double(k) {
+            if k + 2 < p.len() && double(k + 2) {
+                k += 4;
+            } else {
+                words.extend([p[k], p[k + 1]]);
+                k += 2;
+            }
+            continue;
+        }
+        if single(k) && opens(p[k]) && k + 1 < p.len() && single(k + 1) && closes(p[k + 1]) {
+            k += 2;
+            continue;
+        }
+        words.push(p[k]);
+        k += 1;
+    }
+}
+
 /// `\(…\)` as `$…$` and `\[…\]` as `$$…$$`, LaTeX's own delimiters, which models and Pandoc
 /// write, outside code: a pair in one paragraph (a `\[` to its `\]` across its lines). One
 /// whose backslash is escaped (`\\(`) is words, as is one with no partner.
@@ -691,7 +823,8 @@ fn trim_end(p: &mut Paragraph) {
 
 /// Reads `source`'s blocks (`depth` deep in re-readings of HTML blocks' text).
 fn convert(source: &str, depth: usize) -> Vec<Block> {
-    convert_events(Parser::new_ext(source, options()), depth, None).0
+    let source = dollar_math(source);
+    convert_events(Parser::new_ext(&source, options()), depth, None).0
 }
 
 /// The blocks the parser's events make, and the labels of the footnotes defined. With `own`, a
@@ -1087,6 +1220,126 @@ mod tests {
             panic!("{b:?}")
         };
         assert_eq!(p.text, "About $230, then $53.");
+    }
+
+    /// A paragraph's inline math, as its TeX.
+    fn maths(p: &Paragraph) -> Vec<&str> {
+        p.spans
+            .iter()
+            .filter(|(_, m)| m.math)
+            .map(|(r, _)| &p.text[r.clone()])
+            .collect()
+    }
+
+    #[test]
+    fn dollars_are_math_by_pandocs_rule() {
+        // Words: the text as written, no math, no backslash added.
+        for (source, text) in [
+            ("$5 and $10", "$5 and $10"),
+            (
+                "the gap is about $10.5k, not the $15k I've been quoting",
+                "the gap is about $10.5k, not the $15k I've been quoting",
+            ),
+            ("costs $3–$4", "costs $3–$4"),
+            (
+                "$700 in Apr (my guess). Tormach ≈ +$8k",
+                "$700 in Apr (my guess). Tormach ≈ +$8k",
+            ),
+            ("$3–$4 or $5–$6 or $7–$8", "$3–$4 or $5–$6 or $7–$8"),
+            // A space pulldown-cmark doesn't count as one (a no-break one) is one.
+            ("about $10.5k, not\u{a0}$15k", "about $10.5k, not\u{a0}$15k"),
+            (
+                "about $10.5k, not\u{202f}$15k",
+                "about $10.5k, not\u{202f}$15k",
+            ),
+            ("$ x$ and $y $", "$ x$ and $y $"),
+            ("$x$5", "$x$5"),
+            (r"\$x$", "$x$"),
+            ("$$x", "$$x"),
+            ("[$5 off](https://x.test) for $1", "$5 off for $1"),
+        ] {
+            let b = parse(source);
+            let [Block::Paragraph(p)] = b.as_slice() else {
+                panic!("{source}: {b:?}")
+            };
+            assert_eq!(p.text, text, "{source}");
+            assert!(maths(p).is_empty(), "{source}: {:?}", p.spans);
+        }
+        // Math: the TeX between its dollars.
+        for (source, tex) in [
+            ("$x$", vec!["x"]),
+            ("$x^2 + y$.", vec!["x^2 + y"]),
+            ("($a$)", vec!["a"]),
+            ("$a$b", vec!["a"]),
+            ("$5 and $x$", vec!["x"]),
+            ("$a $b$", vec!["b"]),
+            ("$2n+1$ points", vec!["2n+1"]),
+            ("$10.5k, not $x$ but $y$", vec!["x", "y"]),
+            (r"$a\$b$", vec![r"a\$b"]),
+            ("Run `echo $HOME` and $x$", vec!["x"]),
+        ] {
+            let b = parse(source);
+            let [Block::Paragraph(p)] = b.as_slice() else {
+                panic!("{source}: {b:?}")
+            };
+            assert_eq!(maths(p), tex, "{source}: {}", p.text);
+        }
+        assert_eq!(parse(r"$$\int f$$"), [math(r"\int f")]);
+        assert_eq!(parse("$$\n\\int f\n$$"), [math(r"\int f")]);
+        // In code, a `$` is a `$`: never math, never escaped.
+        let b = parse("`$5` and `$x$`, `a$b` $c");
+        assert_eq!(code_spans(&b[0]), ["$5", "$x$", "a$b"]);
+        let Block::Paragraph(p) = &b[0] else {
+            unreachable!()
+        };
+        assert!(maths(p).is_empty());
+        assert!(p.text.ends_with(" $c"), "{}", p.text);
+        assert_eq!(
+            parse("```sh\necho $x$ costs $5\n```"),
+            [Block::Code {
+                lang: Some("sh".into()),
+                text: "echo $x$ costs $5".into()
+            }]
+        );
+        let b = parse("Go to <https://x.test/$5$x> now.");
+        let [Block::Paragraph(p)] = b.as_slice() else {
+            panic!("{b:?}")
+        };
+        assert!(p.text.contains("https://x.test/$5$x"), "{}", p.text);
+        // In a table's cells, each its own.
+        let b = parse(
+            "| a | b |\n|---|---|\n| $5 | $x^2$ |\n| `$y$` | $10.5k, not the $15k |\n| $a | b$ |",
+        );
+        let [Block::Table { rows, .. }] = b.as_slice() else {
+            panic!("{b:?}")
+        };
+        let cell = |r: usize, c: usize| &rows[r][c];
+        assert_eq!(cell(1, 0).text, "$5");
+        assert!(maths(cell(1, 0)).is_empty());
+        assert_eq!(maths(cell(1, 1)), ["x^2"]);
+        assert!(maths(cell(2, 0)).is_empty());
+        assert!(cell(2, 0).spans.iter().any(|(_, m)| m.code));
+        assert_eq!(cell(2, 1).text, "$10.5k, not the $15k");
+        assert!(maths(cell(2, 1)).is_empty());
+        assert_eq!(
+            (cell(3, 0).text.as_str(), cell(3, 1).text.as_str()),
+            ("$a", "b$")
+        );
+        assert!(maths(cell(3, 0)).is_empty() && maths(cell(3, 1)).is_empty());
+        // Not across a block: a list's items, a heading and its paragraph.
+        for source in ["- $a\n- b$", "# $a\nb$"] {
+            for b in parse(source) {
+                let p = match &b {
+                    Block::Heading(_, p) | Block::Paragraph(p) => p,
+                    Block::List { items, .. } => match &items[1].blocks[0] {
+                        Block::Paragraph(p) => p,
+                        b => panic!("{b:?}"),
+                    },
+                    b => panic!("{b:?}"),
+                };
+                assert!(maths(p).is_empty(), "{source}: {p:?}");
+            }
+        }
     }
 
     #[test]
